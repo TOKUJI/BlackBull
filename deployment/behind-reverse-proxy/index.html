@@ -1507,10 +1507,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#when-fronting-http2-is-the-right-call" class="md-nav__link">
+  <a href="#choosing-the-upstream-protocol" class="md-nav__link">
     <span class="md-ellipsis">
       
-        When fronting HTTP/2 is the right call
+        Choosing the upstream protocol
       
     </span>
   </a>
@@ -5727,10 +5727,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#when-fronting-http2-is-the-right-call" class="md-nav__link">
+  <a href="#choosing-the-upstream-protocol" class="md-nav__link">
     <span class="md-ellipsis">
       
-        When fronting HTTP/2 is the right call
+        Choosing the upstream protocol
       
     </span>
   </a>
@@ -6015,17 +6015,10 @@ backend blackbull
 <p>With a Unix socket there is no meaningful IP to trust, so <code>TrustedProxy</code> needs
 the peer that the socket presents rather than a network range — verify what
 <code>conn.client</code> reports before assuming a value.</p>
-<h2 id="when-fronting-http2-is-the-right-call">When fronting HTTP/2 is the right call<a class="headerlink" href="#when-fronting-http2-is-the-right-call" title="Permanent link">&para;</a></h2>
-<p>HTTP/2 costs more per request than HTTP/1.1 in <em>every</em> implementation — each
-stream carries state, framing, and flow control that HTTP/1.1 does not. That
-is the protocol, not a BlackBull property, but it has a deployment
-consequence worth naming: if a workload needs maximum throughput on a single
-HTTP/2 connection at high multiplex, the usual production shape is a fronting
-HTTP/2 terminator with BlackBull on HTTP/1.1 behind it.</p>
-<p>BlackBull's own HTTP/2 is conformant (<code>h2spec</code>, RFC 9113). How its per-stream
-cost compares to other servers is <strong>not measured</strong>: the
-<code>bench/CHARACTERIZATION.md</code> A-lane (h2load at n=1/10/50) is specified but has
-no recorded results, so no comparative claim is made in either direction.</p>
+<h2 id="choosing-the-upstream-protocol">Choosing the upstream protocol<a class="headerlink" href="#choosing-the-upstream-protocol" title="Permanent link">&para;</a></h2>
+<p>A proxy can terminate TLS and HTTP/2 and use HTTP/1.1 upstream. Choose an
+upstream protocol that preserves the application's required features:
+gRPC and multiplexed streams require HTTP/2 support along their path.</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../workers/">Workers</a> — multi-worker is a natural fit behind a proxy; each

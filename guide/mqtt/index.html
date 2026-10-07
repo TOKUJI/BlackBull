@@ -5705,9 +5705,6 @@
 <a href="../raw-protocols/">Non-ASGI bridge</a>. One process can serve HTTP/1.1, HTTP/2, and
 WebSocket <em>and</em> speak MQTT on the standard <code>1883</code> port — no separate broker, no C
 extension, no extra dependency.</p>
-<p>It is the first real consumer of the bridge: where a raw <code>raw_handler</code> owns a
-single socket, the MQTT broker layers a full protocol on top — packet codec,
-per-connection actor, and process-wide message routing between clients.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.mqtt</span><span class="w"> </span><span class="kn">import</span> <span class="n">MQTTExtension</span><span class="p">,</span> <span class="n">Message</span>
 
@@ -5761,8 +5758,7 @@ delivery or the broker. The <code>TapActor</code>'s inbox is bounded; if taps fa
 the newest messages are dropped (best-effort observability) and a running
 dropped-count is logged. Taps are therefore <em>not</em> a reliable delivery path — use
 a real MQTT subscription for that. (<code>MQTTExtension(tap_mode='inline')</code> runs taps
-inline on the receiving connection instead — the original behaviour, kept
-mainly so the <code>bench/mqtt/tap_throughput.py</code> comparison stays reproducible.)</p>
+inline on the receiving connection instead, so slow taps delay that reader.)</p>
 <p>The broker also runs without any handler at all: <code>on_message</code> is just how an
 application observes traffic. <code>app.add_extension(MQTTExtension())</code> on its own
 gives you a fully functional broker with no tap.</p>
@@ -5807,9 +5803,7 @@ next command. Client DISCONNECT and transport failures use the FIFO <code>Detach
 boundary: commands ordered before it were admitted while the connection was
 active; commands after it cannot mutate broker state. Will and session-expiry
 processing belong to that retirement, not to a delayed second teardown.</p>
-<p>Admission history uses weak references tied to connection-actor lifetime, not
-a permanent table of past clients. Client identifiers alone are not admission
-credentials. This protocol sequencing is not application authentication or
+<p>Client identifiers alone are not admission credentials. This protocol sequencing is not application authentication or
 topic authorization.</p>
 <h2 id="what-the-broker-implements">What the broker implements<a class="headerlink" href="#what-the-broker-implements" title="Permanent link">&para;</a></h2>
 <p>The broker targets the MQTT 5.0 OASIS feature set exercised by BlackBull's
@@ -5888,17 +5882,6 @@ conformance matrix:</p>
 </tr>
 </tbody>
 </table>
-<p>The wire codec lives in <code>blackbull.mqtt.messages</code> (the 15 control-packet
-dataclasses, <code>encode_packet</code> / <code>decode_packet</code>, the property system, reason
-codes, and <code>topic_matches_filter</code>).  <code>decode_packet</code> raises two classes:
-<code>IncompletePacket</code> means the buffer is short — the packet is not whole
-yet, and <code>PacketFramer</code> keeps the partial bytes buffered for the next
-<code>feed</code> — while <code>MQTTDecodeError</code> means the bytes are invalid.  Inside an
-already-whole packet the first is converted to the second at exactly two
-places: the property context (<code>_decode_vbi_at</code>, where "incomplete" can
-only mean a value crossing the declared Property Length) and
-<code>decode_packet</code>'s inner wrap (a body inconsistent with its Remaining
-Length).  Nothing else converts.</p>
 <p>Variable Byte Integers accept <strong>non-minimal encodings</strong>: a value whose
 encoding carries a redundant continuation octet (0 in two octets, 300 in
 three) decodes normally.  A non-minimal encoding violates [MQTT-1.5.5-1]
@@ -5906,16 +5889,6 @@ three) decodes normally.  A non-minimal encoding violates [MQTT-1.5.5-1]
 packet is a Malformed Packet (Terminology; §4.13.1).  This runtime does
 not enforce that.  The tolerance is pinned in
 <code>tests/unit/test_mqtt_codec_lengths.py</code>.</p>
-<p>The broker is an actor model split across a
-few small modules: <code>blackbull.mqtt.broker</code> holds the <code>BrokerActor</code>, which owns
-all routing state (subscriptions, sessions, retained messages) and, processing
-its inbox serially, needs no locks; <code>blackbull.mqtt.connection</code> holds the
-<code>MQTT5Actor</code> (one per connection — the sole writer to its socket,
-forwarding decoded control packets to the broker) and <code>serve_connection</code>, which
-wires the two; <code>blackbull.mqtt.tap</code> holds the <code>TapActor</code> and the <code>Message</code>
-read-model; and <code>blackbull.mqtt.extension</code> holds <code>MQTTExtension</code> and
-<code>MQTTProtocolDetector</code>, which recognises the MQTT CONNECT first byte (<code>0x10</code>) for
-shared-port sniffing.</p>
 <h2 id="shared-subscriptions">Shared subscriptions<a class="headerlink" href="#shared-subscriptions" title="Permanent link">&para;</a></h2>
 <p>Subscribers that name the same <code>$share/{ShareName}/{filter}</code> pair form a
 <em>share group</em> (MQTT 5 §4.8.2). Each application message matching the filter is
@@ -6038,36 +6011,18 @@ candidate and its framer buffer. The server's connection limit bounds the
 number of readers and per-connection inboxes. These budgets do not include
 session pending QoS state, held QoS messages, retained storage or the tap inbox.
 Those retain their own count/packet-size limits and expiry or shutdown owners.</p>
-<p>Input backpressure stops further decoding rather than creating background
-admission tasks. Output never waits for a slow socket from inside the broker:
-doing so could block unrelated clients and form a cycle with that socket's
-reader. If output admission fails, a cap hit is logged and the connection ends;
-queued QoS 0 is not guaranteed delivery. Pending QoS state follows the existing
-session expiry/reconnect rules. A stalled writer cannot reliably transmit a
-DISCONNECT reason, so output overload does not promise one on the wire.
-<code>Close</code> needs no queue slot; <code>Detach</code> remains FIFO and waits for broker admission,
-and expiry notifications are coalesced. ACK traffic can progress as the broker
-consumes its bounded inbox; inability to queue an outbound ACK ends that
-connection instead of parking the broker. Active writes and clean-close flushing
-use <code>BB_WRITE_TIMEOUT</code> (zero explicitly disables this time bound).
-Graceful cleanup waits for the sole writer after the broker's <code>Detach</code> barrier:
-that barrier acknowledges routing work, not completion of socket writes.
-Normal broker and connection mailbox shutdowns emit DEBUG lifecycle logs under
-<code>blackbull.mqtt.broker</code> and <code>blackbull.mqtt.connection</code>.</p>
+<p>A slow output socket does not stall broker routing for other clients. Output
+admission failure logs a cap hit and ends that connection; it cannot promise
+a DISCONNECT reason on the wire. Queued QoS 0 is best-effort. Active writes
+and close flushing use BB_WRITE_TIMEOUT, which zero disables.</p>
 <p><strong>The packet limit includes the fixed header</strong> and is checked as soon as the
 header is complete; zero disables it. Packet decoding errors or oversized
 declarations end the connection without forwarding trailing packets. Malformed
 input closes silently before CONNECT admission; afterward it receives DISCONNECT
 (<code>0x81</code>). Keep Alive bounds receive idleness after CONNECT, not total
 packet-assembly time; zero disables that idle check.</p>
-<p><strong>The backlog exists because flow control is not a licence to forget.</strong> When a
-client's <code>Receive Maximum</code> window is full, matching messages are held rather
-than dropped: the client asked the broker to slow down, not to lose its
-messages. But "hold everything" is how a subscriber that never acknowledges
-turns a subscription into a leak, so the queue is bounded too. At the bound the
-<strong>newest</strong> message is refused and the oldest kept — a subscriber is owed what it
-was promised first, and has no way to detect a message silently dropped from the
-middle.</p>
+<p>The QoS backlog keeps older promised messages and refuses the newest when
+full. It is separate from writer mailboxes and retained storage.</p>
 <p><strong>Retained messages are capped by topic count, and correction is always
 allowed.</strong> At the cap, a retained publish to a <em>new</em> topic is refused, but
 updating or deleting an already-retained topic still works. A client locked out
@@ -6188,25 +6143,13 @@ must be present when the spec route is hit, or the request raises
 </ul>
 <h2 id="tls-mqtts">TLS (<code>mqtts://</code>)<a class="headerlink" href="#tls-mqtts" title="Permanent link">&para;</a></h2>
 <p><code>MQTTExtension(port=8883, tls=True)</code> serves the broker port over TLS using the
-same certificate the HTTPS listener uses — pass <code>certfile</code>/<code>keyfile</code> (or an
-<code>ssl_context</code>) to <code>app.run()</code> as usual. The server refuses to start if
+configured server certificate — pass <code>certfile</code>/<code>keyfile</code> to <code>app.run()</code>. The server refuses to start if
 <code>tls=True</code> is set with no certificate configured. Cleartext remains the
 default (<code>tls=False</code>), so existing deployments are unchanged.</p>
 <h2 id="why-the-broker-has-a-single-owner">Why the broker has a single owner<a class="headerlink" href="#why-the-broker-has-a-single-owner" title="Permanent link">&para;</a></h2>
 <p>The broker runs on <strong>worker 0</strong> only, while HTTP scales across all workers.
-That is a protocol requirement, not an implementation shortcut.</p>
-<p>MQTT 5.0 (OASIS Committee Specification 02, March 2019) defines semantics
-that depend on broker-side state visible to <em>every</em> connection:
-publish-subscribe matching (§3.3), retained messages (§3.3.2.3), session
-state across <code>Clean Start = 0</code> reconnects (§3.1.2.11), Will messages
-(§3.1.2.5), and QoS 1/2 delivery tracking (§4.3).  All five break if that
-state is split across worker processes with no shared store.</p>
-<p>This matches industry practice: the Eclipse Mosquitto reference
-implementation (<a href="https://mosquitto.org/">mosquitto.org</a>) is single-threaded
-by architecture for the same reason, and EMQX clusters via Erlang
-distributed message passing rather than splitting state across local
-workers.  (Confirmed 2026-06-25 against the OASIS MQTT 5.0 specification and
-Mosquitto's project documentation.)</p>
+Its subscriptions, sessions, retained messages and QoS state must remain
+consistent across connections; this broker has no shared or persistent store.</p>
 <p>See <a href="../../deployment/workers/">Workers</a> for how the single-owner binding
 interacts with <code>--reload</code> and <code>SO_REUSEPORT</code>.</p>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
@@ -6221,9 +6164,7 @@ interacts with <code>--reload</code> and <code>SO_REUSEPORT</code>.</p>
   pins <code>workers=1</code> when a broker is registered.)</li>
 <li><strong>In-memory sessions.</strong> Session state lives in the broker process and does
   not survive a restart. A session with a finite Session Expiry Interval is
-  removed once the interval elapses (§3.1.2.11.2), by a one-shot timer armed at
-  the earliest pending deadline — so a broker with nothing pending holds no
-  timer at all. <code>0xFFFFFFFF</code> means <em>does not expire</em>, and BlackBull honours it:
+  removed once the interval elapses (§3.1.2.11.2). <code>0xFFFFFFFF</code> means <em>does not expire</em>, and BlackBull honours it:
   such a session is bounded by <code>BB_MQTT_MAX_SESSIONS</code>, not by the clock.</li>
 </ul>
 

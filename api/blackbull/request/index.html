@@ -5653,32 +5653,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>Request body and cookie helpers.</p>
-<p>Provides:</p>
-<ul>
-<li><code>read_body</code>: buffers all ASGI <code>http.request</code> chunks into a single <code>bytes</code> object.</li>
-<li><code>read_json</code>: buffers the body and parses it as JSON (<code>None</code> on empty/invalid).</li>
-<li><code>read_text</code>: buffers the body and decodes it as text.</li>
-<li><code>cookies_from_headers</code>: parses the <code>Cookie</code> header(s) into a <code>dict[str, str]</code>
-  straight from a headers object — the native core (what <code>Connection.cookies</code> uses).</li>
-<li><code>parse_cookies</code>: the ASGI-scope-shaped wrapper of the above, for external
-  callers that hold a scope dict.</li>
-</ul>
-<p>The opt-in HTTP context object is <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="../connection/#blackbull.connection.Connection"><code>blackbull.connection.Connection</code></a>;
-<code>Request</code> is a <strong>deprecated</strong> alias of it, resolved through
-<code>blackbull.__getattr__</code>, and will be removed no earlier than 2027-08-01.
-This module holds only the transport-agnostic free functions, which
-<a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="../connection/#blackbull.connection.Connection"><code>Connection</code></a> builds on.</p>
+        <p>Request-body and cookie helpers.</p>
+<p>read_body buffers; use streaming for bodies that should not accumulate.
+read_json returns None for an empty or invalid body. Request is a deprecated
+Connection alias, not an independent request model.</p>
 
 
 

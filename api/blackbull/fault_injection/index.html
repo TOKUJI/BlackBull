@@ -7473,34 +7473,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>BlackBull's deliberate-misbehaviour toolkit.</p>
-<p>A single namespace for the two directions of protocol fault injection:</p>
-<ul>
-<li>
-<p><strong>Client-side, HTTP/1.1</strong> — <a class="autorefs autorefs-internal" href="scenario_h1/#blackbull.fault_injection.scenario_h1"><code>blackbull.fault_injection.scenario_h1</code></a>
-  ships a programmable client (driven through
-  <a class="autorefs autorefs-internal" title="execute_scenario(scenario)
-
-  
-      async
-  " href="../client/#blackbull.client.HTTP1Client.execute_scenario"><code>blackbull.client.HTTP1Client.execute_scenario</code></a>) that emits
-  deliberately bad HTTP/1.1 against a target <em>server</em>: trickled bytes,
-  partial headers, mid-request idle, abrupt RST.
-  <a class="autorefs autorefs-internal" href="oracle_h1/#blackbull.fault_injection.oracle_h1"><code>blackbull.fault_injection.oracle_h1</code></a> adds a differential oracle
-  for comparing two HTTP/1.1 implementations under the same scenario.</p>
-</li>
-<li>
-<p><strong>Server-side, HTTP/2</strong> — <a class="autorefs autorefs-internal" href="h2_server/#blackbull.fault_injection.h2_server"><code>blackbull.fault_injection.h2_server</code></a>
-  ships a programmable server that emits deliberately bad HTTP/2 toward
-  a target <em>client</em>: half-closed streams, exhausted windows, illegal
-  SETTINGS, weird frame sequences.  A canned-misbehaviour catalogue
-  lives at <a class="autorefs autorefs-internal" href="catalogue/#blackbull.fault_injection.catalogue"><code>blackbull.fault_injection.catalogue</code></a>.</p>
-</li>
-</ul>
-<p>This module is an opt-in testing instrument.  Both fault servers refuse to
-start when <code>BLACKBULL_ENV=production</code> or <code>BB_PRODUCTION</code> is set, and
-refuse a non-loopback bind without <code>allow_remote=True</code>.</p>
-<p>See <code>docs/guide/fault_injection.md</code> for a tutorial.</p>
+        <p>Deliberately malformed peers and scenario helpers.</p>
+<p>Choose the scenario vocabulary by protocol and by whether the target is a
+client or server. Fault servers refuse production mode and remote binds
+without allow_remote=True; see docs/guide/fault_injection.md.</p>
 
 
 
@@ -7704,19 +7680,7 @@ or the highest accepted stream ID otherwise.</p>
 
 
 
-        <p>Read one inbound frame and record whether it matched.</p>
-<p>A guard, not a filter: nothing is skipped and the executor moves on
-either way.  It answers a different question from
-<a class="autorefs autorefs-internal" title="WaitForClientFrame
-
-
-  
-      dataclass
-  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a> — <em>is the client under test behaving as
-this scenario assumes?</em> — and a scenario whose premise silently failed
-would otherwise look like a pass.</p>
-<p>The HTTP/1.1 half has the same pair for the same reason
-(<code>ExpectRequest</code>); the names differ only where the unit does.</p>
+        <p>Consume exactly one frame and record whether it matched; never filter.</p>
 
 
 
@@ -8538,10 +8502,7 @@ extension; <code>terminator</code> can be replaced to stage a bad CRLF.</p>
 
 
 
-        <p>Emit one header line.</p>
-<p><code>fold</code> writes it as an obs-fold continuation (RFC 9112 §5.2, which
-deprecates the form and requires a recipient to reject or normalise
-it) — expressible before only as a hand-built byte string.</p>
+        <p>Emit a header; fold=True emits obs-fold (RFC 9112 §5.2).</p>
 
 
 
@@ -8646,11 +8607,7 @@ way.</p>
 
 
 
-        <p>Emit a status line, field by field.</p>
-<p>Nothing validates: a status line with no reason phrase, an impossible
-version, or a three-digit code that is not a status are all faults
-worth staging.  What it buys over raw bytes is that the <em>shape</em> is
-legible — a reader sees which field the scenario is bending.</p>
+        <p>Emit status-line fields without validation; malformed values are intentional.</p>
 
 
 
@@ -9231,21 +9188,7 @@ with that delay.</p>
 
 
 
-        <p>Read frames until one satisfies <code>match</code>, or the timeout wins.</p>
-<p>A <strong>filter</strong>: non-matching frames are read, counted in
-<code>wait_skipped</code>, and passed over.  Twin of
-<a class="autorefs autorefs-internal" title="WaitForClientFrame
-
-
-  
-      dataclass
-  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a>.</p>
-<p>This is what makes an HTTP/2 client scenario able to observe a
-<em>verdict</em>.  A single <code>ReadResponse</code> cannot: the first frame any
-correct server sends is its handshake SETTINGS, so a GOAWAY or
-RST_STREAM is always further down the stream, at a depth that varies
-by peer.  A scenario that had to guess that depth was a scenario
-written against one server.</p>
+        <p>Filter frames until match or timeout; count and consume nonmatches in wait_skipped.</p>
 
 
 
@@ -9553,19 +9496,7 @@ or the highest accepted stream ID otherwise.</p>
 
 
 
-        <p>Read one inbound frame and record whether it matched.</p>
-<p>A guard, not a filter: nothing is skipped and the executor moves on
-either way.  It answers a different question from
-<a class="autorefs autorefs-internal" title="WaitForClientFrame
-
-
-  
-      dataclass
-  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a> — <em>is the client under test behaving as
-this scenario assumes?</em> — and a scenario whose premise silently failed
-would otherwise look like a pass.</p>
-<p>The HTTP/1.1 half has the same pair for the same reason
-(<code>ExpectRequest</code>); the names differ only where the unit does.</p>
+        <p>Consume exactly one frame and record whether it matched; never filter.</p>
 
 
 
@@ -9668,19 +9599,8 @@ and leaving nothing to read.</p>
 
 
 
-        <p>Emit one parsed frame onto the connection.</p>
-<p>Routed through <a class="autorefs autorefs-internal" href="../protocol/frame/#blackbull.protocol.frame.FrameFactory"><code>FrameFactory</code></a> so
-the on-wire serialisation matches the framework's normal output.
-Use <a class="autorefs autorefs-internal" title="SendRawBytes
-
-
-  
-      dataclass
-  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a> for frames the factory cannot construct.</p>
-<p><code>declared_length</code> overrides the header's length field without
-changing the bytes actually written — "the peer lied about how much is
-coming", which a serialiser that computes the length cannot say.
-Leave it <code>None</code> (the default) and nothing changes.</p>
+        <p>Emit a typed frame; use SendRawBytes for unsupported or malformed encodings.</p>
+<p>A declared_length override changes only the header, not the emitted payload.</p>
 
 
 
@@ -9841,18 +9761,8 @@ is expected to enforce a preface-completion timeout.</p>
 
 
 
-        <p>Block until an inbound frame matches <code>match</code>.</p>
-<p>Declarative grammar — see module docstring for the supported
-keys.  Frames the client sends that do <em>not</em> match are still
-consumed (the executor remains responsive to the wire) but do
-not advance this step.</p>
-<p>On <code>timeout</code> expiry the executor records the miss on
-<a class="autorefs autorefs-internal" title="ScenarioH2Result
-
-
-  
-      dataclass
-  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2Result"><code>ScenarioH2Result</code></a> and proceeds to the next step.</p>
+        <p>Consume until a frame matches, skipping nonmatches.</p>
+<p>Timeout records a miss and proceeds to the next step.</p>
 
 
 
@@ -10102,40 +10012,9 @@ whether to treat that as a transport-fail or normal outcome.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Decode arbitrary bytes into a scenario.</p>
-<p>Total function: <em>every</em> byte string yields a valid scenario,
-including the empty string (→ empty scenario).  Designed so
-atheris's coverage-guided byte mutations always produce
-runnable input — the fuzzer never spends cycles on parser
-errors.</p>
-<p>Encoding:</p>
-<ul>
-<li>The decoder walks <code>raw</code> left-to-right.  At each
-    position the next byte selects an opcode via <code>% 4</code>
-    (every byte value is therefore a legal opcode tag).</li>
-<li>Each opcode then consumes a small payload from the
-    following bytes.  If the payload is short (end of input),
-    decoding stops cleanly and the partial scenario is
-    returned.</li>
-</ul>
-<p>Opcode layout::</p>
-<pre><code>byte % 4 == 0  → SEND
-    next 2 bytes (big-endian uint16) = length;
-    next ``length`` bytes = data;
-    next 1 byte (% len(_BYTE_INTERVAL_TABLE))
-      → byte_interval.
-byte % 4 == 1  → SLEEP
-    next 1 byte (% len(_SLEEP_TABLE)) → duration.
-byte % 4 == 2  → READ
-    next 1 byte (% len(_TIMEOUT_TABLE)) → timeout.
-byte % 4 == 3  → ABORT
-    no payload.  Remaining bytes are discarded — an
-    Abort short-circuits execution anyway, so it's the
-    natural terminator.
-</code></pre>
-<p>Bounded payload sizes (uint16 length) keep individual
-scenarios well under 64 KiB, which is what we want for
-per-iteration fuzz throughput.</p>
+        <p>Decode every byte string into a runnable fuzz scenario, including empty input.</p>
+<p>Truncated input returns the completed steps. Abort discards remaining bytes;
+SEND payload lengths are uint16. This decoder must not raise on arbitrary input.</p>
 
 
     </div>
@@ -10184,15 +10063,7 @@ a file without one parses to an unnamed scenario.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serialise to JSON Lines: one <code>{"op": ..., ...}</code> per line.</p>
-<p>Bytes payloads are base64-encoded so the result round-trips
-through stdout / git / json.loads without escape ambiguity.
-Round-tripped by <code>from_json</code>.</p>
-<p>The scenario's name rides the first line under the op <code>HEADER</code>,
-the convention the other three vocabularies use, so the file stays
-one line-oriented stream with no out-of-band metadata.  Without it
-a round trip silently dropped the name, and a catalogue case that
-came back anonymous cannot say which case it is.</p>
+        <p>Serialize JSON Lines with base64 byte payloads and a first HEADER carrying name.</p>
 
 
     </div>
@@ -10601,11 +10472,8 @@ protocols.</p>
 
 
 
-        <p>Outcome of one <code>HTTP1Client.execute_scenario</code> call.</p>
-<p>Exactly one of <code>response</code> / <code>exception</code> / <code>timed_out</code> /
-<code>aborted</code> is the meaningful field; the others are <code>None</code> /
-<code>False</code>.  The executor never raises, so a caller categorises on this
-object rather than on an exception.</p>
+        <p>Collect scenario outcomes; fields are not mutually exclusive.</p>
+<p>A timeout may precede a later response; response is newest, received holds all.</p>
 
 
 
@@ -10655,19 +10523,8 @@ object rather than on an exception.</p>
 
 
 
-        <p>Emit one parsed frame onto the connection.</p>
-<p>Routed through <a class="autorefs autorefs-internal" href="../protocol/frame/#blackbull.protocol.frame.FrameFactory"><code>FrameFactory</code></a> so
-the on-wire serialisation matches the framework's normal output.
-Use <a class="autorefs autorefs-internal" title="SendRawBytes
-
-
-  
-      dataclass
-  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a> for frames the factory cannot construct.</p>
-<p><code>declared_length</code> overrides the header's length field without
-changing the bytes actually written — "the peer lied about how much is
-coming", which a serialiser that computes the length cannot say.
-Leave it <code>None</code> (the default) and nothing changes.</p>
+        <p>Emit a typed frame; use SendRawBytes for unsupported or malformed encodings.</p>
+<p>A declared_length override changes only the header, not the emitted payload.</p>
 
 
 
@@ -11077,18 +10934,8 @@ drop straight into JSON without a custom encoder.</p>
 
 
 
-        <p>Block until an inbound frame matches <code>match</code>.</p>
-<p>Declarative grammar — see module docstring for the supported
-keys.  Frames the client sends that do <em>not</em> match are still
-consumed (the executor remains responsive to the wire) but do
-not advance this step.</p>
-<p>On <code>timeout</code> expiry the executor records the miss on
-<a class="autorefs autorefs-internal" title="ScenarioH2Result
-
-
-  
-      dataclass
-  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2Result"><code>ScenarioH2Result</code></a> and proceeds to the next step.</p>
+        <p>Consume until a frame matches, skipping nonmatches.</p>
+<p>Timeout records a miss and proceeds to the next step.</p>
 
 
 
@@ -11265,21 +11112,7 @@ response further along than it thinks.</p>
 
 
 
-        <p>Read frames until one satisfies <code>match</code>, or the timeout wins.</p>
-<p>A <strong>filter</strong>: non-matching frames are read, counted in
-<code>wait_skipped</code>, and passed over.  Twin of
-<a class="autorefs autorefs-internal" title="WaitForClientFrame
-
-
-  
-      dataclass
-  " href="scenario_h2/#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a>.</p>
-<p>This is what makes an HTTP/2 client scenario able to observe a
-<em>verdict</em>.  A single <code>ReadResponse</code> cannot: the first frame any
-correct server sends is its handshake SETTINGS, so a GOAWAY or
-RST_STREAM is always further down the stream, at a depth that varies
-by peer.  A scenario that had to guess that depth was a scenario
-written against one server.</p>
+        <p>Filter frames until match or timeout; count and consume nonmatches in wait_skipped.</p>
 
 
 
@@ -11322,8 +11155,7 @@ written against one server.</p>
 
     <div class="doc doc-contents ">
 
-        <p>PEP 562 — a deprecated spelling is resolved only when a caller names it,
-so the warning reaches that caller and <code>import *</code> stays silent.</p>
+        <p>Resolve deprecated spellings with a caller-attributed warning.</p>
 
 
     </div>
@@ -11622,10 +11454,7 @@ not valid UTF-8 and are read against a packet capture by eye.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serialise <em>scenario</em> to JSON Lines (one step per line).</p>
-<p>Header lines (<code>send_preface</code> flag, <code>initial_settings</code>) sit on
-the first line under the op <code>HEADER</code> so the file is one
-line-oriented stream with no out-of-band metadata.</p>
+        <p>Serialize JSON Lines; the first HEADER carries send_preface and initial_settings.</p>
 
 
     </div>

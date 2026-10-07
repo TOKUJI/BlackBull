@@ -5679,23 +5679,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>permessage-deflate (RFC 7692) negotiation and per-message codec.</p>
-<p>This module is small on purpose.  It does two things:</p>
-<ol>
-<li>
-<p><strong>Handshake</strong>: parse a peer's <code>Sec-WebSocket-Extensions</code> offer, decide
-   whether to accept <code>permessage-deflate</code>, and produce the response-side
-   <code>Sec-WebSocket-Extensions</code> header value.</p>
-</li>
-<li>
-<p><strong>Per-connection state</strong>: hold the streaming inflate/deflate state plus
-   the <code>*_no_context_takeover</code> flags so <code>WebSocketRecipient</code> can
-   decompress inbound messages and <code>WebSocketSender</code> can compress
-   outbound ones.</p>
-</li>
-</ol>
-<p>The actual wire-level use of RSV1 happens in <a class="autorefs autorefs-internal" title="blackbull.server.ws_codec" href="../ws_codec/#blackbull.server.ws_codec"><code>ws_codec</code></a> and
-<a class="autorefs autorefs-internal" title="blackbull.server.recipient" href="../recipient/#blackbull.server.recipient"><code>recipient</code></a>; this module just owns the policy + state.</p>
+        <p>WebSocket compression negotiation and per-connection codec state.</p>
+<p>Keep RSV1 framing in the WebSocket codec and recipient; negotiated context
+takeover governs reuse across messages.</p>
 
 
 

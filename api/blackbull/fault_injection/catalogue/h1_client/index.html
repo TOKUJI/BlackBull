@@ -5811,22 +5811,8 @@
 
     <div class="doc doc-contents first">
 
-        <p>Named HTTP/1.1 client-side misbehaviour cases.</p>
-<p>The last of the grid's four catalogues.  Cells B, C and D shipped named
-sets (9, 4 and 11 cases); this cell had <strong>none</strong> — it was reachable only
-through the atheris and Hypothesis harnesses, which generate inputs rather
-than name them.  That is a real difference in kind: a generated input
-tells you <em>that</em> something broke, a named case tells you <em>which known
-mistake</em> you are testing against, and only the second can be cited in a
-bug report or parametrized over by a downstream user.</p>
-<p>Every case is raw bytes, because on this side the fault <em>is</em> the bytes.
-A typed <code>SendRequest</code> step would be built from the same encoder the
-production client uses, and could not emit a fault that encoder has —
-the same reasoning that keeps the two fault <em>servers</em> off the production
-send path.</p>
-<p>The cases are drawn from RFC 9112's framing rules and the request-
-smuggling literature, so the names line up with what a reader is likely
-to be defending against.</p>
+        <p>HTTP/1.1 client faults assembled as raw bytes. Do not reuse the
+production request encoder: it cannot expose its own defects.</p>
 
 
 

@@ -5731,17 +5731,8 @@
 
     <div class="doc doc-contents first">
 
-        <p>HTTP and WebSocket response objects.</p>
-<p>Provides:</p>
-<ul>
-<li><code>Response</code>: plain HTTP response (HTML / plain text / binary).</li>
-<li><code>JSONResponse</code>: convenience subclass that serialises a Python object to JSON.</li>
-<li><code>RedirectResponse</code>: convenience subclass that sets a <code>Location</code> header + 3xx status.</li>
-<li><code>StreamingResponse</code>: pushes an async iterator to the client without buffering.</li>
-<li><code>EventSourceResponse</code>: WHATWG Server-Sent Events on top of StreamingResponse.</li>
-<li><code>WebSocketResponse</code>: wraps text, bytes, or dict data as a WebSocket send event.</li>
-<li><code>cookie_header</code>: builds a <code>(b'set-cookie', ...)</code> header tuple with secure defaults.</li>
-</ul>
+        <p>HTTP and WebSocket response objects. See docs/guide/requests-and-responses.md
+for send and streaming contracts.</p>
 
 
 
@@ -5779,27 +5770,9 @@
 
 
 
-        <p>Stream a Server-Sent Events response from an async iterator.</p>
-<p>Yields are formatted per WHATWG §9.2.6 (the EventSource spec).  Each
-item produced by <em>content</em> may be a <code>str</code> (bare data), <code>bytes</code>
-(bare data, UTF-8), or a <code>Mapping</code> with optional <code>data</code> /
-<code>event</code> / <code>id</code> / <code>retry</code> keys.</p>
-<p>CR, LF, and CRLF in data become equivalent logical line breaks.  Metadata
-remains one field: CR/LF in <code>event</code> or <code>id</code>, and NUL in <code>id</code>, raise
-<code>ValueError</code> when that item is encoded.</p>
-<p>The content-type is forced to <code>text/event-stream</code> and
-<code>Cache-Control: no-cache</code> is auto-emitted; both are overridable
-via the <em>headers</em> argument if a deployment knows what it's doing.</p>
-<p>Usage::</p>
-<pre><code>async def tokens():
-    yield {'event': 'token', 'data': 'hello'}
-    yield {'event': 'token', 'data': 'world'}
-    yield {'event': 'done',  'data': ''}
-
-@app.route(path='/sse')
-async def stream():
-    return EventSourceResponse(tokens())
-</code></pre>
+        <p>Format str, UTF-8 bytes or data/event/id/retry mappings as SSE.</p>
+<p>Data line endings are normalized. Reject CR/LF in event/id and NUL in id.
+Defaults to text/event-stream and Cache-Control: no-cache; headers may override.</p>
 
 
 
@@ -5847,11 +5820,7 @@ async def stream():
 
 
 
-        <p>HTTP response with JSON-serialised body and <code>application/json</code> content-type.</p>
-<p>Pass directly to the ASGI <code>send</code> callable when using BlackBull::</p>
-<pre><code>await send(JSONResponse({'ok': True}))
-await send(JSONResponse({'error': 'Not found'}, status=HTTPStatus.NOT_FOUND))
-</code></pre>
+        <p>JSON response; return from a handler or pass to BlackBull send.</p>
 
 
 
@@ -5899,17 +5868,8 @@ await send(JSONResponse({'error': 'Not found'}, status=HTTPStatus.NOT_FOUND))
 
 
 
-        <p>HTTP redirect response carrying a <code>Location</code> header.</p>
-<p>Completes the <code>Response</code> convenience family alongside <code>JSONResponse</code>.
-The body is empty; <em>url</em> becomes the <code>Location</code> header value and <em>status</em>
-a 3xx redirect code (default <code>302 Found</code> — the safer general-purpose
-default, since it does not force the client to preserve the request method).</p>
-<p>Pass directly to the ASGI <code>send</code> callable, or return it from a handler::</p>
-<pre><code>await send(RedirectResponse('/new-url'))
-return RedirectResponse('/permanent', status=HTTPStatus.MOVED_PERMANENTLY)
-</code></pre>
-<p><em>url</em> must be ASCII (RFC 9110 §10.2.2 — the Location field value is a
-URI-reference); percent-encode non-ASCII URLs before passing them in.</p>
+        <p>Redirect with an empty body and Location; default status is 302.</p>
+<p>url must be ASCII; percent-encode non-ASCII characters first.</p>
 
 
 
@@ -5955,11 +5915,8 @@ URI-reference); percent-encode non-ASCII URLs before passing them in.</p>
 
 
 
-        <p>HTTP response object carrying body, status, and headers.</p>
-<p>Pass directly to the ASGI <code>send</code> callable when using BlackBull::</p>
-<pre><code>await send(Response('&lt;h1&gt;Hello&lt;/h1&gt;'))
-await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
-</code></pre>
+        <p>HTTP body, status and headers; return from a handler or pass to BlackBull send.</p>
+<p>An arbitrary ASGI host's raw send does not accept Response objects.</p>
 
 
 
@@ -5997,13 +5954,8 @@ await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
 
     <div class="doc doc-contents ">
 
-        <p>Drive this response as an ASGI app: emit <code>start</code> then <code>body</code>.</p>
-<p>Mirrors <a class="autorefs autorefs-internal" href="#blackbull.response.StreamingResponse"><code>StreamingResponse</code></a> so every BlackBull response type
-shares one protocol — <code>await response(conn, receive, send)</code> —
-whether returned from a simplified handler, invoked explicitly by a
-full-form handler, or normalised by <code>_wrap_send_native</code>.  Keeping the
-start/body serialisation here means there is a single source of truth
-for turning a Response into ASGI events.</p>
+        <p>Send a complete native response when invoked directly.</p>
+<p>Normalized Response sends use to_native and bypass this method.</p>
 
 
     </div>
@@ -6056,17 +6008,8 @@ response types drive themselves and are not converted here.</p>
 
 
 
-        <p>Stream a response body from an async generator.</p>
-<p>Usage::</p>
-<pre><code>async def lines():
-    for i in range(10):
-        yield f'line {i}\n'.encode()
-        await asyncio.sleep(0.1)
-
-@app.route(path='/stream')
-async def handler(conn, receive, send):
-    await StreamingResponse(lines())(conn, receive, send)
-</code></pre>
+        <p>Stream from an async iterator; finalize the generator on completion or cancellation.</p>
+<p>Return from a handler, pass to BlackBull send, or invoke as (conn, receive, send).</p>
 
 
 

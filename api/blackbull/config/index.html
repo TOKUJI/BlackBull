@@ -5565,19 +5565,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Declarative application configuration -- <a class="autorefs autorefs-internal" title="AppConfig
-
-
-  
-      dataclass
-  " href="#blackbull.config.AppConfig"><code>AppConfig</code></a>.</p>
-<p>A small, typed, immutable holder for the server-facing settings that
-<a class="autorefs autorefs-internal" title="run(certfile=None, keyfile=None, port=None, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=None, reload_paths=None)" href="../#blackbull.BlackBull.run"><code>blackbull.BlackBull.run</code></a> and
-<a class="autorefs autorefs-internal" title="serve(app, *, certfile=None, keyfile=None, port=0, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=False, reload_paths=None)" href="../#blackbull.serve"><code>blackbull.serve</code></a> accept as keyword arguments, so an
-application can declare them once instead of threading flags through.</p>
-<p>An explicit argument still wins over the config, and an environment variable
-wins over both; the Configuration guide gives the order in full and shows
-what each source looks like.</p>
+        <p>Immutable startup configuration. Explicit run() arguments take precedence
+over BLACKBULL_<em> environment values, .env entries, AppConfig and defaults.
+See docs/guide/configuration.md for sentinel values and BB_</em> tuning.</p>
 
 
 
@@ -5665,18 +5655,7 @@ explicit <code>run(...)</code> argument overrides them.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Log one INFO line per deploy setting that was configured non-trivially.</p>
-<p>Only the <code>BLACKBULL_*</code>-resolvable deploy settings whose value came from
-an environment variable, <code>.env</code>, or an <a class="autorefs autorefs-internal" title="AppConfig
-
-
-  
-      dataclass
-  " href="#blackbull.config.AppConfig"><code>AppConfig</code></a> are reported —
-explicit call-site arguments (the author already knows them) and plain
-defaults are left silent to keep startup quiet.  Paths are logged; secrets
-are not (a <code>keyfile</code> path is configuration, its contents never touch the
-log).</p>
+        <p>Log non-default deployment settings from env, .env or AppConfig; omit explicit call arguments.</p>
 
 
     </div>

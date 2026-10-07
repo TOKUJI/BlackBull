@@ -5679,38 +5679,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>WebSocket-over-HTTP/2 client (RFC 8441).</p>
-<p>Mirrors the HTTP/1.1 <a class="autorefs autorefs-internal" title="WebSocketClient" href="../#blackbull.client.WebSocketClient"><code>blackbull.client.WebSocketClient</code></a> /
-<a class="autorefs autorefs-internal" title="WebSocketSession" href="../#blackbull.client.WebSocketSession"><code>blackbull.client.WebSocketSession</code></a> pair: the <em>Client</em> owns the
-TLS + HTTP/2 transport and runs the Extended CONNECT handshake; the
-<em>Session</em> owns the post-handshake WebSocket frame loop on one H2 stream.</p>
-<p>Flow control: outgoing WS frames are dispatched as
-<code>http.response.body</code> events through the per-stream
-<a class="autorefs autorefs-internal" title="HTTP2Sender" href="../../server/sender/#blackbull.server.sender.HTTP2Sender"><code>blackbull.server.sender.HTTP2Sender</code></a>, which splits payloads
-across multiple DATA frames at <code>max_frame_size</code> and respects send
-windows.  Incoming DATA payloads are tracked per stream + at the
-connection level; <code>WINDOW_UPDATE</code> frames are emitted when received
-bytes accumulate past <code>_WINDOW_UPDATE_THRESHOLD</code>.</p>
-<p>Example::</p>
-<pre><code>import ssl
-from blackbull.client import WebSocketH2Client
-
-ctx = ssl.create_default_context()
-ctx.check_hostname = False
-ctx.verify_mode = ssl.CERT_NONE
-ctx.set_alpn_protocols(['h2'])
-
-async with WebSocketH2Client('localhost', 8443, ssl=ctx) as c:
-    ws = await c.connect('/ws')
-    await ws.send_bytes(b'hello')
-    opcode, payload = await ws.receive()
-    await ws.close()
-</code></pre>
-<p>The peer server must advertise <code>SETTINGS_ENABLE_CONNECT_PROTOCOL=1</code>;
-BlackBull's own server does so when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.</p>
-<p>RFC 8441 is an experimental surface in BlackBull — both the server
-gate and this client may change shape until the feature is declared
-default-on.</p>
+        <p>RFC 8441 WebSocket client over one HTTP/2 stream.</p>
+<p>The peer must advertise ENABLE_CONNECT_PROTOCOL. Reuse the connection
+factory and flow control; a second HPACK context corrupts sibling streams.</p>
 
 
 
@@ -5819,15 +5790,8 @@ if <a class="autorefs autorefs-internal" title="connect(path='/', *, response_ti
 
     <div class="doc doc-contents ">
 
-        <p>The connection's HPACK context — the <code>HTTP2Client</code>'s own.</p>
-<p>Extended CONNECT rides an ordinary HTTP/2 connection that may already
-be carrying <code>request()</code> traffic, and RFC 9113 §4.3 gives that
-connection one dynamic table in each direction.  Reading the context
-from the connection is what keeps the CONNECT's header block and
-every other block on the wire encoded against the same table the
-peer's single decoder is building.</p>
-<p>Raises <code>RuntimeError</code> before <code>__aenter__</code>: the context comes
-into being with the connection, so there is none to hand out yet.</p>
+        <p>Reuse the HTTP2Client connection's HPACK context.</p>
+<p>Raise RuntimeError before entering the connection context.</p>
 
     </div>
 

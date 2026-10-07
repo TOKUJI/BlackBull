@@ -5711,15 +5711,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>ASGI bridge that serves gRPC calls over BlackBull's HTTP/2 layer.</p>
-<p>gRPC is HTTP/2 with a fixed request shape (<code>POST /package.Service/Method</code>,
-<code>content-type: application/grpc</code>) and a Length-Prefixed-Message body, where
-the call result is reported in <code>grpc-status</code> / <code>grpc-message</code> <em>trailers</em>.
-All four RPC kinds — unary, server-, client-, and bidirectional-streaming —
-ride the existing (scope, receive, send) bridge; no new protocol Actor.</p>
-<p><code>serve_grpc</code> is dispatched when the request content-type is
-<code>application/grpc</code> and a registry was installed via
-<code>app.enable_grpc(...)</code>.</p>
+        <p>gRPC call semantics over the existing HTTP/2 receive/send bridge.</p>
+<p>Status is reported in trailers; reuse stream isolation and flow control
+rather than introducing another protocol actor.</p>
 
 
 
@@ -5755,21 +5749,7 @@ ride the existing (scope, receive, send) bridge; no new protocol Actor.</p>
 
 
 
-        <p>Per-call context handed to a gRPC handler.</p>
-<p>Exposes request metadata (the HTTP/2 headers), the call deadline and peer,
-and lets the handler set the outgoing status, a human-readable message,
-leading/trailing metadata, or abort the call outright — the subset of
-grpcio's <code>ServicerContext</code> that a raw-bytes transport can honour.</p>
-<p><a class="autorefs autorefs-internal" title="send_initial_metadata(metadata)
-
-  
-      async
-  " href="#blackbull.grpc.asgi.GrpcContext.send_initial_metadata"><code>send_initial_metadata</code></a> is the only door to the response-start
-machinery <a class="autorefs autorefs-internal" title="serve_grpc(registry, conn, receive, send)
-
-  
-      async
-  " href="#blackbull.grpc.asgi.serve_grpc"><code>serve_grpc</code></a> binds before the handler runs.</p>
+        <p>Per-call metadata, peer, deadline and response status/metadata controls for raw-byte handlers.</p>
 
 
 
@@ -5962,9 +5942,8 @@ with what the handler already set instead of clobbering it.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serve a single gRPC call (unary or server-streaming) through the ASGI
-(scope, receive, send) bridge.  Never raises for handler/protocol errors:
-every failure path is reported as a gRPC status.</p>
+        <p>Serve any of the four gRPC call shapes through Connection/receive/send.</p>
+<p>Report handler and protocol failures as gRPC status.</p>
 
 
     </div>

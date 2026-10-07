@@ -5711,19 +5711,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Server-side responders: what an incoming HTTP/2 control frame makes happen.</p>
-<p>One <code>Responder</code> subclass per frame type, each declaring its <code>FRAME_TYPE</code>.
-<code>__init_subclass__</code> registers it, so
-<a class="autorefs autorefs-internal" href="#blackbull.server.response.ResponderFactory"><code>ResponderFactory</code></a> dispatches by
-dict lookup, and <code>respond(handler)</code> reaches back into the owning
-<code>HTTP2Actor</code> for state rather than keeping any of its own.</p>
-<p>Only the connection-management half of RFC 9113 arrives here — PING, SETTINGS,
-WINDOW_UPDATE, PRIORITY, PRIORITY_UPDATE and RST_STREAM.  HEADERS,
-CONTINUATION, DATA and GOAWAY drive the request lifecycle and stay in the
-actor's own frame loop; <code>docs/about/rfc9113-implementation.md</code> says where
-each frame type is dispatched.</p>
-<p>A responder also owns the validation its frame type owes, because a malformed
-control frame is a connection or stream error before it is anything else.</p>
+        <p>HTTP/2 control-frame responders.</p>
+<p>State remains on the owning HTTP2Actor. Validate a control frame before
+acting; preserve required connection-versus-stream error scope.</p>
 
 
 
@@ -5811,18 +5801,9 @@ dropped; a PING on any stream but 0 is a connection PROTOCOL_ERROR.</p>
 
 
 
-        <p>RFC 9113 §6.3 — validate the frame, then discard the signal.</p>
-<p>§5.3 deprecated the stream-dependency scheme and this server does not
-implement it: scheduling reads RFC 9218 extensible priorities
-(<code>Stream.priority_hint</code>), never the dependency tree.  Recording
-<code>weight</code> and <code>parent</code> therefore built state that nothing read —
-and, because §6.3 permits PRIORITY on an <em>idle</em> stream, state a peer
-could grow one node per 14-byte frame for the life of the connection,
-with no rate meter covering the frame type.  The exclusive branch made
-it worse than linear: it walked every child of root to rewrite that
-same unread field.</p>
-<p>What must not be discarded is the validation.  §5.3.1 makes a stream
-depending on itself a stream error, and h2spec asserts it.</p>
+        <p>Validate and discard legacy dependency priorities (RFC 9113 §6.3).</p>
+<p>Reject self-dependency; do not create nodes for idle streams. Scheduling
+uses RFC 9218 priority hints rather than this deprecated dependency tree.</p>
 
 
 
@@ -5916,8 +5897,7 @@ depending on itself a stream error, and h2spec asserts it.</p>
 
 
 
-        <p>Abstract base class of responsing classes. You can find every subclass
-(i.e. responsing classes) by accessing <strong>subclasses</strong>().</p>
+        <p>Base for HTTP/2 frame responders.</p>
 
 
 
@@ -6015,12 +5995,9 @@ client-side factory of the same name, which drops what it does not handle.</p>
 
 
 
-        <p>Tears down the stream a RST_STREAM names, and frees what it held.</p>
-<p>Cancels the handler task, drops the stream's sender and recipient, and
-replays to the connection window the inbound credit the cancelled handler
-never consumed, so later streams are not starved by it.  The identifier is
-recorded as closed-via-RST, so a frame arriving on it afterwards meets the
-§5.1 closed-stream rules rather than opening a new stream.</p>
+        <p>Retire the reset stream and return unconsumed connection credit.</p>
+<p>Cancel its handler and record closed-via-RST so later frames follow
+RFC 9113 §5.1 closed-stream rules.</p>
 
 
 

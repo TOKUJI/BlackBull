@@ -6077,14 +6077,7 @@
 
     <div class="doc doc-contents first">
 
-        <p>HTTP/1.1 client (RFC 7230).</p>
-<p>Provides <code>HTTP1Client</code> plus the lower-level <code>HTTP1RequestSender</code> /
-<code>HTTP1ResponseRecipient</code> helpers that frame and unframe HTTP/1.1 messages
-on the wire.</p>
-<p>Symmetric with the server-side <code>HTTP1Sender</code> / <code>HTTP1Recipient</code> in
-<a class="autorefs autorefs-internal" href="../../server/sender/#blackbull.server.sender"><code>blackbull.server.sender</code></a> and <a class="autorefs autorefs-internal" href="../../server/recipient/#blackbull.server.recipient"><code>blackbull.server.recipient</code></a>,
-but reversed: the client <em>writes</em> request lines + request headers + request
-body, and <em>reads</em> status lines + response headers + response body.</p>
+        <p>HTTP/1.1 request framing and response reading (RFC 9110, RFC 9112).</p>
 
 
 
@@ -6236,56 +6229,9 @@ returned <a class="autorefs autorefs-internal" href="#blackbull.client.http1.HTT
 
     <div class="doc doc-contents ">
 
-        <p>Walk <code>scenario.steps</code> against the connected socket.</p>
-<p>Never raises.  Every outcome (response, timeout, transport
-failure, hard-abort) is folded into the returned
-<a class="autorefs autorefs-internal" title="ScenarioResult
+        <p>Run connected-socket scenario steps and collect outcomes in ScenarioResult.</p>
+<p>Record peer responses, timeouts and transport failures; Abort stops further steps.</p>
 
-
-  
-      dataclass
-  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a> so callers can categorise without
-try/except boilerplate per scenario.</p>
-
-
-<details class="step-dispatch" open>
-  <summary>Step dispatch</summary>
-  <ul>
-<li><a class="autorefs autorefs-internal" title="SendRawBytes
-
-
-  
-      dataclass
-  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.SendRawBytes"><code>SendRawBytes</code></a> → <a class="autorefs autorefs-internal" title="send_raw(data, *, byte_interval=0.0)
-
-  
-      async
-  " href="#blackbull.client.http1.HTTP1Client.send_raw"><code>send_raw</code></a></li>
-<li><a class="autorefs autorefs-internal" title="Sleep
-
-
-  
-      dataclass
-  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Sleep"><code>Sleep</code></a>       → <code>asyncio.sleep</code></li>
-<li><a class="autorefs autorefs-internal" title="ReadResponse
-
-
-  
-      dataclass
-  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.ReadResponse"><code>ReadResponse</code></a> → <a class="autorefs autorefs-internal" title="read_response(*, request_method=None, timeout=None)
-
-  
-      async
-  " href="#blackbull.client.http1.HTTP1Client.read_response"><code>read_response</code></a></li>
-<li><a class="autorefs autorefs-internal" title="Abort
-
-
-  
-      dataclass
-  " href="../../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Abort"><code>Abort</code></a>       → <code>transport.abort()</code> (RST on Linux);
-                         walks no further steps.</li>
-</ul>
-</details>
 
     </div>
 
@@ -6372,13 +6318,7 @@ fail or a normal protocol outcome.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Send body octets to the peer.</p>
-<p>Same semantics as <a class="autorefs autorefs-internal" title="send_raw(data, *, byte_interval=0.0)
-
-  
-      async
-  " href="#blackbull.client.http1.HTTP1Client.send_raw"><code>send_raw</code></a>, kept separate for readability
-at call sites that frame headers separately from the body.</p>
+        <p>Send body bytes with the same semantics as send_raw.</p>
 
 
     </div>
@@ -6855,8 +6795,7 @@ HTTP client can no longer read or write the connection.</p>
 
     <div class="doc doc-contents ">
 
-        <p>PEP 562 — <code>SendBytes</code> is resolved only when a caller names it, so the
-deprecation warning reaches that caller and <code>import *</code> stays silent.</p>
+        <p>Deprecated SendBytes alias for SendRawBytes; removal no earlier than 2027-08-19.</p>
 
 
     </div>

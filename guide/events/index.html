@@ -5898,26 +5898,9 @@ defined points in the application's lifetime.</p>
 </tr>
 </tbody>
 </table>
-<p>Two axes are in play: <strong>does the hook block the emitter</strong> (is it
-awaited before <code>emit</code> returns?) and <strong>can its failure affect the
-emitter</strong> (does the exception propagate?).</p>
-<ul>
-<li><code>intercept</code> blocks <em>and</em> propagates — it participates in the
-  request and may abort it. Writing an authentication check as a
-  plain observer would silently let unauthorized requests through:
-  the request proceeds before the observer finishes, and an
-  observer cannot signal failure. Auth belongs here.</li>
-<li><code>on</code> (the default) neither blocks nor propagates — fire-and-forget
-  observation. Putting slow telemetry in an interceptor would add
-  latency to every request; put it here instead.</li>
-<li><code>on(..., blocking=True)</code> blocks but does <strong>not</strong> propagate — the
-  "observe but block" mode. Use it when a side effect must <em>complete</em>
-  within the event's lifetime yet must not be able to break what
-  emitted it. The canonical case is releasing a per-request resource
-  on <code>scope_completed</code> (close a DB session, delete a temp file): the
-  cleanup has to finish before the scope is gone, but a failing
-  cleanup must not corrupt a response that is already sent.</li>
-</ul>
+<p>Use interceptors for authorization or validation: an observer cannot reject
+a request. Use detached observers for telemetry; use blocking observers for
+cleanup that must be awaited. Cancellation can interrupt awaited hooks.</p>
 <h2 id="appintercept-synchronous-interception"><code>@app.intercept</code> — synchronous interception<a class="headerlink" href="#appintercept-synchronous-interception" title="Permanent link">&para;</a></h2>
 <p>Register an interceptor for a named event:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span><span class="p">,</span> <span class="n">Event</span>
@@ -5960,10 +5943,9 @@ other side-effects that the request path should not depend on.</p>
     <span class="k">if</span> <span class="n">session</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </code></pre></div>
-<p>This is the right mode for cleanup keyed to an event's completion:
-the work is guaranteed to finish within the event's lifetime (unlike
-a detached observer, which may outlive the scope), but a failure in
-one cleanup handler neither aborts the others nor breaks the emitter.
+<p>Use this mode for cleanup before the event returns. Cancellation can still
+interrupt cleanup; an ordinary handler exception is logged and does not
+abort later observers or the emitter.
 Blocking observers run after any interceptors and before any detached
 observers for the same event.</p>
 <h2 id="testing-your-hooks">Testing your hooks<a class="headerlink" href="#testing-your-hooks" title="Permanent link">&para;</a></h2>
@@ -6334,19 +6316,6 @@ cancellation and logs a warning naming the listener, and the next
 listener is still served.  Detached observers are not awaited before
 the transport closes.</p>
 <h2 id="exception-handling">Exception handling<a class="headerlink" href="#exception-handling" title="Permanent link">&para;</a></h2>
-<p>Restated:</p>
-<ul>
-<li><strong>Interceptor raises</strong> → remaining interceptors for that event
-  do not run; the exception propagates to the emitter (the
-  framework code that called <code>emit</code>).  For lifespan events, this
-  typically aborts startup or shutdown.</li>
-<li><strong>Observer raises</strong> (detached or <code>blocking=True</code>) → the exception
-  is caught and logged at <code>ERROR</code> on the <code>blackbull</code> logger; other
-  observers for the same event continue to run; the emitter never
-  sees the exception.  A blocking observer is awaited but still
-  isolated, so a failing cleanup on <code>scope_completed</code> cannot break a
-  response that has already been sent.</li>
-</ul>
 <p>There is no built-in re-emission of failures as a separate
 <code>error</code> event.  If you want one, register a wrapper observer
 that emits an application-defined event in its own <code>except</code>

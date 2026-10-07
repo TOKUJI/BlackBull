@@ -5736,16 +5736,11 @@ wait in the kernel's accept queue, bounded by the creator's <code>Backlog=</code
 the fd is adopted and by
 <a href="../../reference/env-vars/#socket-tuning"><code>BB_SOCKET_BACKLOG</code></a> where BlackBull
 binds it.  The window lasts as long as the startup hook runs, with no deadline
-from the framework.  The kernel admits <code>backlog + 1</code> parked connections per
-socket, each holding one 128 KiB receive buffer on a stock Linux (nothing reads,
-so it does not autotune upward): <strong>128.125 MiB per listener</strong> at the default,
-256.25 MiB dual-stack, and 4097 × 128 KiB = <strong>512.125 MiB</strong> on an adopted
-fd given <code>Backlog=4096</code>.
-<code>BB_SOCKET_RCVBUF</code> sets that buffer on the listener and parked connections
-inherit it: a requested <code>262144</code> is 416 KiB effective each, making the window
-<strong>416.406 MiB</strong> per listener, 832.812 MiB dual-stack.  A window longer than the
-client's SYN retransmission budget (about two minutes) loses the excess.
-BlackBull documents this window rather than forcing it smaller.</p>
+from the framework. Budget startup memory across every listener's backlog
+and the receive buffers of parked connections. Effective kernel values are
+platform-dependent; adopted sockets retain the creator's backlog.
+<code>BB_SOCKET_RCVBUF</code> affects listeners BlackBull binds and is inherited by their
+accepted connections. Long startup hooks can exceed clients' connect budgets.</p>
 <h3 id="what-a-client-beyond-the-backlog-observes">What a client beyond the backlog observes<a class="headerlink" href="#what-a-client-beyond-the-backlog-observes" title="Permanent link">&para;</a></h3>
 <p>Until startup completes, <code>backlog + 1</code> connections can wait.  Beyond that:</p>
 <table>

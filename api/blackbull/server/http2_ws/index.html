@@ -5623,17 +5623,8 @@
 
     <div class="doc doc-contents first">
 
-        <p>HTTP/2 WebSocket byte-stream adapters (RFC 8441).</p>
-<p>HTTP2WSReader and HTTP2WSWriter bridge between the HTTP/2 DATA frame layer
-and the RFC 6455 WebSocket codec (ws_codec.py).</p>
-<p>HTTP2WSReader — AbstractReader backed by DATA frame payloads pushed by
-HTTP2Actor._on_data_frame(). Implements the same put_DATAFrame / put_disconnect
-interface as HTTP2Recipient so the existing _signal_recipients() helper and
-_on_data_frame() dispatch work without modification.</p>
-<p>HTTP2WSWriter — AbstractWriter that wraps an HTTP2Sender and translates raw
-WebSocket frame bytes into http.response.body events (inheriting HTTP/2 flow
-control from the sender). close() sends a final empty DATA+END_STREAM to signal
-orderly HTTP/2 stream termination per RFC 8441 §5.</p>
+        <p>RFC 8441 byte-stream adapters. Reuse the HTTP/2 connection
+factory and flow control; do not create another HPACK context.</p>
 
 
 

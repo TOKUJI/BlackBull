@@ -5657,29 +5657,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>MQTT 5.0 per-connection actor and its raw-protocol entry point.</p>
-<p><a class="autorefs autorefs-internal" href="#blackbull.mqtt.connection.MQTT5Actor"><code>MQTT5Actor</code></a> is one per connection. Its <strong>inbox carries only
-outbound packets</strong> (<a class="autorefs autorefs-internal" title="Send
-
-
-  
-      dataclass
-  " href="../broker/#blackbull.mqtt.broker.Send"><code>Send</code></a> from the broker, plus
-local transport refusals). <code>Close</code> sets terminal state
-without needing a queue slot. Its <code>run()</code> — draining that inbox — is the
-<em>sole writer</em> to the socket, so there are no cross-task write races.  A sibling
-reader loop decodes the wire (via <a class="autorefs autorefs-internal" href="#blackbull.mqtt.connection.PacketFramer"><code>PacketFramer</code></a>) and <code>send</code>s control
-messages to the broker.  <a class="autorefs autorefs-internal" title="serve_connection(reader, writer, ctx, broker, *, app_handlers=None, tap=None)
-
-  
-      async
-  " href="#blackbull.mqtt.connection.serve_connection"><code>serve_connection</code></a> is the
-<a class="autorefs autorefs-internal" title="RawProtocolHandler = Callable[['AbstractReader', 'AbstractWriter', 'ProtocolContext'], Awaitable[None]]
-
-  
-      module-attribute
-  " href="../../server/protocol_registry/#blackbull.server.protocol_registry.RawProtocolHandler"><code>RawProtocolHandler</code></a> body that wires
-the two together.</p>
+        <p>MQTT reader and sole-writer connection actor.</p>
+<p>All output traverses the writer inbox; Close changes terminal state without
+requiring a queue slot. Supervise both tasks and finish Detach before teardown.</p>
 
 
 

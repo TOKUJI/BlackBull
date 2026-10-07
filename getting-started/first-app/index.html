@@ -5645,11 +5645,9 @@
 
 
 <h1 id="your-first-app">Your First App<a class="headerlink" href="#your-first-app" title="Permanent link">&para;</a></h1>
-<p>The <a href="../hello-world/">Hello World</a> used the full ASGI
-<code>(scope, receive, send)</code> triplet so you could see what BlackBull
-gives every handler.  Most real handlers don't need most of that.
-BlackBull detects this at route-registration time and lets you
-omit whatever you aren't using.</p>
+<p><a href="../hello-world/">Hello World</a> uses <code>(conn, receive, send)</code>. A handler is
+full-form only when both <code>receive</code> and <code>send</code> are present; otherwise BlackBull
+injects its declared inputs and sends its return value.</p>
 <h2 id="simplified-handlers">Simplified handlers<a class="headerlink" href="#simplified-handlers" title="Permanent link">&para;</a></h2>
 <p>Drop the parameters you don't use; return the response value
 instead of calling <code>send</code>:</p>
@@ -5830,8 +5828,8 @@ $<span class="w"> </span>curl<span class="w"> </span>localhost:8000/tasks
 <h2 id="when-to-use-the-full-triplet">When to use the full triplet<a class="headerlink" href="#when-to-use-the-full-triplet" title="Permanent link">&para;</a></h2>
 <p>The simplified form covers most needs, but not all:</p>
 <ul>
-<li><strong>WebSocket handlers</strong> always receive the full
-  <code>(conn, receive, send)</code> triplet.</li>
+<li><strong>WebSocket full-form handlers</strong> use <code>(conn, receive, send)</code>; simplified
+  handlers can inject a <code>WebSocket</code> helper. See <a href="../../guide/websockets/">WebSockets</a>.</li>
 <li><strong>Middleware</strong> functions keep the <code>(conn, receive, send, call_next)</code>
   shape; the simplified adaptation does not apply to them.</li>
 <li><strong>Streaming uploads / long polling</strong> need to call <code>receive()</code> in

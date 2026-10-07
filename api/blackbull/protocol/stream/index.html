@@ -5623,14 +5623,8 @@
 
     <div class="doc doc-contents first">
 
-        <p>HTTP/2 stream state and the priority tree (RFC 7540 §5).</p>
-<p>Each <code>Stream</code> node owns the dispatch target (native Connection, or ASGI scope on the compat lanes) for one in-flight request as
-well as its position in the dependency tree (parent + weight) used by the
-priority machinery.  <code>StreamState</code> enumerates the lifecycle states
-defined in RFC 7540 §5.1; <code>on_headers_received</code> / <code>on_data_received</code>
-perform the corresponding transitions.</p>
-<p>Stream identifier <code>0</code> is reserved for connection-level frames and is the
-root of every priority tree.</p>
+        <p>HTTP/2 stream state. Stream 0 belongs to the connection; native
+request state stays a Connection even on compatibility lanes.</p>
 
 
 
@@ -5666,16 +5660,10 @@ root of every priority tree.</p>
 
 
 
-        <p>One node in the HTTP/2 stream-priority tree (RFC 7540 §5.1, §5.3).</p>
-<p>A <code>Stream</code> carries the request's dispatch target (Connection or ASGI scope),
-plus its position in the priority tree (parent + weight).</p>
-<p><code>identifier == 0</code> is the connection-level pseudo-stream
-(RFC 7540 §5.1.1) and acts as the root of the tree; SETTINGS, PING,
-GOAWAY, and connection-level WINDOW_UPDATE frames target it.
-Client-initiated request streams use odd identifiers, server-pushed
-streams use even identifiers (RFC 7540 §5.1.1).</p>
-<p><code>window_size</code> defaults to the connection's initial flow-control window
-when omitted (the value lives on the sender, not the stream).</p>
+        <p>HTTP/2 stream state with a native Connection dispatch target.</p>
+<p>Stream 0 is connection-level state. Active requests are indexed as root
+children; legacy dependency priority frames do not build a scheduling tree.
+Client stream ids are odd; server push ids are even. Senders own default windows.</p>
 
 
 
@@ -5709,12 +5697,7 @@ when omitted (the value lives on the sender, not the stream).</p>
 
     <div class="doc doc-contents ">
 
-        <p>Locate a node by stream_id.</p>
-<p>A stream nests under a priority parent only when PRIORITY names
-another peer stream as its dependency, which is rare — in practice
-every peer-initiated stream is a direct child of root.  So the
-search stays flat and recurses only where the tree has depth; a
-subtree walk on every miss costs O(N) per lookup and finds nothing.</p>
+        <p>Find a stream id, returning None on a miss.</p>
 
 
     </div>

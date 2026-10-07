@@ -6077,38 +6077,11 @@
 
     <div class="doc doc-contents first">
 
-        <p>Unified protocol registry.</p>
-<p>BlackBull dispatches every accepted connection through a single
-<a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.ProtocolRegistry"><code>ProtocolRegistry</code></a>.  <code>http1</code> and <code>http2</code> are built-in <em>bindings</em>;
-non-HTTP protocols (raw TCP, and later MQTT/Redis) register their own bindings
-via <a class="autorefs autorefs-internal" title="raw_handler(name, *, port=None, detector=None, tls=False, stateful=True)" href="../../app/#blackbull.app.BlackBull.raw_handler"><code>BlackBull.raw_handler</code></a> / <a class="autorefs autorefs-internal" title="register_protocol_handler(name, handler, *, detector=None, port=None, tls=False, stateful=True)" href="../../app/#blackbull.app.BlackBull.register_protocol_handler"><code>BlackBull.register_protocol_handler</code></a>.</p>
-<p>A <em>binding</em> owns protocol selection, <em>its own</em> framing reads, and Actor
-construction.  <code>ConnectionActor</code> peeks only a tiny protocol-agnostic
-discriminator prefix; the 24-byte
-HTTP/2 preface read and the HTTP/1.1 request-line read live in
-<a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.Http2Binding"><code>Http2Binding</code></a> / <a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.Http1Binding"><code>Http1Binding</code></a>, reached through the single
-<a class="autorefs autorefs-internal" title="serve(conn)
+        <p>Protocol bindings own detection, framing reads and actor construction.</p>
+<p>ConnectionActor peeks without consuming; bindings claim by ALPN or ordered
+cleartext detection. Port-bound raw protocols skip detection. Keep internal
+bindings out of the top-level public exports.</p>
 
-  
-      async
-  " href="#blackbull.server.protocol_registry.ProtocolBinding.serve"><code>ProtocolBinding.serve</code></a> entry point.</p>
-<p>Two dispatch routes:</p>
-<ul>
-<li><strong>Detection</strong> (the shared HTTP listener): <code>ConnectionActor</code> peeks the
-  discriminator and asks each <a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.ProtocolBinding"><code>ProtocolBinding</code></a> via <code>claims</code> — ALPN
-  first, then the ordered cleartext chain (<code>http2</code> preface, <code>http1</code>
-  fallback) — then calls the winner's <code>serve</code>.</li>
-<li><strong>Port-bound</strong> (raw protocols): a binding registered with <code>port=</code> gets its
-  own listening socket; connections there skip detection entirely.</li>
-</ul>
-
-
-<details class="note" open>
-  <summary>Note</summary>
-  <p>Do not export the internal classes from <code>blackbull/__init__.py</code>; the
-public surface is <a class="autorefs autorefs-internal" title="raw_handler(name, *, port=None, detector=None, tls=False, stateful=True)" href="../../app/#blackbull.app.BlackBull.raw_handler"><code>BlackBull.raw_handler</code></a> and
-<a class="autorefs autorefs-internal" title="register_protocol_handler(name, handler, *, detector=None, port=None, tls=False, stateful=True)" href="../../app/#blackbull.app.BlackBull.register_protocol_handler"><code>BlackBull.register_protocol_handler</code></a>.</p>
-</details>
 
 
 
@@ -6169,10 +6142,7 @@ public surface is <a class="autorefs autorefs-internal" title="raw_handler(name,
 
 
 
-        <p>Everything a <a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.ProtocolBinding"><code>ProtocolBinding</code></a> needs to build its Actor.</p>
-<p>Assembled once per connection by <code>ConnectionActor</code> and handed to the
-selected binding's <code>serve_*</code> method.  Keeps the binding API narrow and
-decouples bindings from <code>ConnectionActor</code>'s internals.</p>
+        <p>Per-connection inputs for the selected ProtocolBinding to construct its actor.</p>
 
 
 
@@ -6358,13 +6328,7 @@ alike — which is what keeps <code>ConnectionActor</code> protocol-agnostic.</p
 
     <div class="doc doc-contents ">
 
-        <p>Unified detection predicate: does this binding own a connection whose
-first bytes are <em>prefix</em> (with negotiated <em>alpn</em>)?</p>
-<p>The single selection seam for cleartext + shared-port dispatch.
-Default delegates to
-<a class="autorefs autorefs-internal" title="matches_cleartext(first_line)" href="#blackbull.server.protocol_registry.ProtocolBinding.matches_cleartext"><code>matches_cleartext</code></a>; <a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.RawBinding"><code>RawBinding</code></a> overrides it to consult
-its <a class="autorefs autorefs-internal" href="#blackbull.server.protocol_registry.ProtocolDetector"><code>ProtocolDetector</code></a>.  <code>alpn</code> is accepted so a future binding
-can claim on the negotiated token, not just the wire prefix.</p>
+        <p>Claim a shared-port connection by prefix; defaults to matches_cleartext.</p>
 
 
     </div>

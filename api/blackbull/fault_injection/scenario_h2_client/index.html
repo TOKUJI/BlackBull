@@ -5897,70 +5897,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Programmable HTTP/2 <strong>client-side</strong> scenario model.</p>
-<p>A <a class="autorefs autorefs-internal" title="ScenarioH2Client
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h2_client.ScenarioH2Client"><code>ScenarioH2Client</code></a> is a sequence of typed <em>steps</em> that
-<a class="autorefs autorefs-internal" title="execute_scenario(scenario)
-
-  
-      async
-  " href="../../client/http2/#blackbull.client.http2.HTTP2Client.execute_scenario"><code>blackbull.client.http2.HTTP2Client.execute_scenario</code></a> walks in order
-against a live connection.  This is the client-side half of the HTTP/2
-toolkit: a programmable client that drives a target <em>server</em> through
-deliberate misbehaviour — a preface that never arrives, a header block
-opened and abandoned, a Rapid Reset burst, a window never opened.</p>
-<p>Its twin is <a class="autorefs autorefs-internal" href="../scenario_h1/#blackbull.fault_injection.scenario_h1"><code>blackbull.fault_injection.scenario_h1</code></a>, the client-side
-vocabulary one protocol over, and this module takes that twin's names
-wherever the two mean the same thing: <a class="autorefs autorefs-internal" title="SendRawBytes
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h2_client.SendRawBytes"><code>SendRawBytes</code></a>,
-<a class="autorefs autorefs-internal" title="ReadResponse
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h2_client.ReadResponse"><code>ReadResponse</code></a>, <a class="autorefs autorefs-internal" title="Sleep
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h2_client.Sleep"><code>Sleep</code></a>, <a class="autorefs autorefs-internal" title="Abort
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h2_client.Abort"><code>Abort</code></a>, and the fields of
-<a class="autorefs autorefs-internal" title="ScenarioH2ClientResult
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h2_client.ScenarioH2ClientResult"><code>ScenarioH2ClientResult</code></a>.</p>
-<p>Two steps have no HTTP/1.1 counterpart:</p>
-<ul>
-<li><a class="autorefs autorefs-internal" title="SendPreface
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h2_client.SendPreface"><code>SendPreface</code></a> — HTTP/1.1 has no connection preface.</li>
-<li><a class="autorefs autorefs-internal" title="SendFrame
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h2_client.SendFrame"><code>SendFrame</code></a> — HTTP/2 is framed where HTTP/1.1 is a byte stream, so
-  the typed step builds a frame rather than a blob.</li>
-</ul>
-<p>The bytes are assembled here and not by the production send path;
-<code>docs/guide/fault_injection.md</code> says why.</p>
+        <p>HTTP/2 client-side scenarios for a target server.</p>
+<p>Assemble fault bytes independently of production request sending. Shared
+transport steps do not make the two wire roles interchangeable.</p>
 
 
 
@@ -6644,21 +6583,7 @@ with that delay.</p>
 
 
 
-        <p>Read frames until one satisfies <code>match</code>, or the timeout wins.</p>
-<p>A <strong>filter</strong>: non-matching frames are read, counted in
-<code>wait_skipped</code>, and passed over.  Twin of
-<a class="autorefs autorefs-internal" title="WaitForClientFrame
-
-
-  
-      dataclass
-  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.WaitForClientFrame"><code>WaitForClientFrame</code></a>.</p>
-<p>This is what makes an HTTP/2 client scenario able to observe a
-<em>verdict</em>.  A single <code>ReadResponse</code> cannot: the first frame any
-correct server sends is its handshake SETTINGS, so a GOAWAY or
-RST_STREAM is always further down the stream, at a depth that varies
-by peer.  A scenario that had to guess that depth was a scenario
-written against one server.</p>
+        <p>Filter frames until match or timeout; count and consume nonmatches in wait_skipped.</p>
 
 
 
@@ -6701,10 +6626,7 @@ written against one server.</p>
 
     <div class="doc doc-contents ">
 
-        <p>PEP 562 — warn when the deprecated spelling is actually used.</p>
-<p>A module-level assignment would alias silently; going through
-<code>__getattr__</code> means only a caller who reaches for <code>SendBytes</code> is
-warned, and is warned at their own call site.</p>
+        <p>Deprecated SendBytes alias for SendRawBytes; removal no earlier than 2027-08-19.</p>
 
 
     </div>
@@ -6743,12 +6665,7 @@ could not state one that disagrees with the payload.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Assemble one HEADERS frame from <em>step</em>.</p>
-<p>HPACK encoding goes through the <code>hpack</code> package the server also uses,
-because a <em>correct</em> block is the baseline every header fault is a
-deviation from — hand-rolling it would make even the well-formed case a
-guess.  <code>raw_block</code> is the escape hatch for blocks HPACK will not
-produce.</p>
+        <p>Build HEADERS using HPACK; raw_block permits arbitrary encoded bytes.</p>
 
 
     </div>

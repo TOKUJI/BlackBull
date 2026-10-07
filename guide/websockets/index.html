@@ -6388,10 +6388,8 @@ same limit:</p>
 <p>The second exists because the first cannot see what a frame <em>becomes</em>.
 Two paths grow a message after the frame check has already passed:</p>
 <ul>
-<li><strong>Decompression.</strong> With <code>permessage-deflate</code> negotiated, the frame on
-  the wire is compressed.  Deflate ratios measured in this tree reach
-  <strong>1028.8:1</strong>, so a 1 MiB frame — comfortably legal under the frame cap
-  — inflates to roughly 1 GiB.</li>
+<li><strong>Decompression.</strong> A compressed frame can inflate beyond the frame cap;
+  the message cap applies to the inflated payload.</li>
 <li><strong>Fragmentation.</strong> Each continuation frame is individually legal; the
   sum is what costs memory.</li>
 </ul>
@@ -6409,9 +6407,8 @@ a <code>ws_max_message_size</code> cap hit on <code>blackbull.caps</code> (see
 </code></pre></div>
 <p>The default is the largest message the Autobahn test suite sends, chosen
 so conformance passes with nothing configured.  <strong>If your application
-does not serve huge messages, lower it.</strong>  The default bounds the
-amplification but does not remove it: at the ratio above, a peer still
-buys 16 MiB of your memory for about 16 KiB of its own bandwidth.</p>
+does not serve huge messages, lower it.</strong> Budget per-connection buffering
+across concurrent peers; this cap is not a process-memory limit.</p>
 <h2 id="read-ahead-and-back-pressure">Read-ahead and back-pressure<a class="headerlink" href="#read-ahead-and-back-pressure" title="Permanent link">&para;</a></h2>
 <p><code>BB_WS_QUEUE_DEPTH</code> selects how far ahead of your handler the
 connection reads.  It defaults to <code>0</code>.</p>

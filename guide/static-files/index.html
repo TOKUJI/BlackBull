@@ -5862,19 +5862,14 @@ serves static assets directly, and you don't want the framework
 double-serving the same files.</p>
 <h2 id="how-it-serves-files">How it serves files<a class="headerlink" href="#how-it-serves-files" title="Permanent link">&para;</a></h2>
 <h3 id="in-memory-cache-opt-in">In-memory cache (opt-in)<a class="headerlink" href="#in-memory-cache-opt-in" title="Permanent link">&para;</a></h3>
-<p><code>StaticFiles</code> supports an in-process body cache for fast cache-hit
-serving.  It is <strong>off by default</strong>: every request does a fresh
-<code>stat()</code> and reads the body from disk.  This matches the behaviour
-of Starlette / FastAPI / Flask static serving and keeps BlackBull's
-default behaviour compatible with standards that require "read
-files from disk on every request, no in-memory caching" (e.g. the
-HttpArena standard-mode static profile).</p>
+<p>The body cache is off by default. Enable it only if retaining file bodies
+in each worker's memory and delaying on-disk edit visibility is acceptable.</p>
 <p>Opt in by passing <code>cache=True</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Default — read from disk every request.</span>
 <span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/assets'</span><span class="p">,</span> <span class="s1">'public/assets'</span><span class="p">)</span>
 
 <span class="c1"># Opt-in — small files (≤ 4 MiB each, up to 256 entries) held in</span>
-<span class="c1"># process memory; stat() syscall throttled to once per second per</span>
+<span class="c1"># process memory; cached-body validation throttled to once per second per</span>
 <span class="c1"># entry; sibling-existence answers memoised across requests.</span>
 <span class="n">app</span><span class="o">.</span><span class="n">static</span><span class="p">(</span><span class="s1">'/assets'</span><span class="p">,</span> <span class="s1">'public/assets'</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
@@ -5890,11 +5885,8 @@ HttpArena standard-mode static profile).</p>
 </ul>
 <p>When to leave it off (the default):</p>
 <ul>
-<li>nginx / a CDN fronts the framework — they handle the static path
-  far more efficiently than any in-process cache can.</li>
+<li>A reverse proxy or CDN already serves the static paths.</li>
 <li>You want edit-on-disk visibility to be immediate.</li>
-<li>You're running the benchmark suites HttpArena's standard-mode
-  rules describe.</li>
 </ul>
 <p>The cache is per-process — multi-worker deployments hold a
 separate cache in each worker.</p>

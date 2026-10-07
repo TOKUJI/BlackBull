@@ -5833,23 +5833,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Connection transport front end: <code>asyncio.BufferedProtocol</code> over one buffer.</p>
-<p>One of these per accepted connection, created before the protocol is known —
-the shared listener detects HTTP/1.1, h2c, and MQTT off the same resident
-bytes, so the buffer belongs to the <em>connection</em>, not to any one protocol.
-<a class="autorefs autorefs-internal" href="#blackbull.server.connection_protocol.BufferReader"><code>BufferReader</code></a> presents the <code>AbstractReader</code> surface,
-so the body recipient and the WebSocket/h2c successors work unchanged.</p>
-<p><code>docs/about/internals.md</code> §Who decides, and who acts argues the split between
-the two classes: the reader owns the receive decisions, the protocol owns the
-socket.  Three facts cross that boundary as published state rather than as a
-call — <code>BufferReader.read_offer</code>, <code>ConnectionProtocol.reading_paused</code>,
-<code>ReadBuffer.drained_boundary</code> — under one rule:</p>
-<pre><code>A published field has exactly one writer — its owner.  Reading it across
-the boundary is free; changing it is a method call on the owner, gated on
-a cheap read so it happens only when a change is actually due.
-</code></pre>
-<p>Encapsulation normally <em>enforces</em> ownership; publishing gives that up, so the
-rule is tested instead — <code>tests/unit/test_receive_decisions.py</code>.</p>
+        <p>One connection buffer and transport callbacks.</p>
+<p>BufferReader owns receive policy; ConnectionProtocol owns socket operations.
+Published state has exactly one writer, its owner. See docs/about/internals.md.</p>
 
 
 
@@ -5887,15 +5873,9 @@ rule is tested instead — <code>tests/unit/test_receive_decisions.py</code>.</p
 
 
 
-        <p><code>AbstractReader</code> over a <a class="autorefs autorefs-internal" href="../read_buffer/#blackbull.server.read_buffer.ReadBuffer"><code>ReadBuffer</code></a> fed by <a class="autorefs autorefs-internal" href="#blackbull.server.connection_protocol.ConnectionProtocol"><code>ConnectionProtocol</code></a>.</p>
-<p>Every method serves from resident bytes first and only parks when it needs
-more, so a pipelined or keep-alive peer's next head usually completes
-without a loop turn.  This is where the receive decisions live; the
-Internals page says why.</p>
-<p>Those decisions are deliberately not on
-<code>AbstractReader</code>: two of its three implementations have
-no transport to pause, so promoting the competence to the interface would
-force a no-op onto them.</p>
+        <p>Read resident bytes before waiting for more.</p>
+<p>Own high-water pause decisions, including the starving-reader exception.
+Only one coroutine may wait for input at a time.</p>
 
 
 
@@ -6003,16 +5983,10 @@ condition backpressure exists to prevent is not the one in play.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Park until more arrives, declaring the wait first.</p>
-<p>Parking releases the high-water pause, and must: a starved reader is
-waiting for precisely the bytes the pause is refusing to read, so
-without this any single read larger than the mark deadlocks — a
-WebSocket frame, or a <code>chunked</code> chunk whose size the peer chose.</p>
-<p>Parking is also the only moment a recv-size demand can be consulted, so
-a caller that has one writes <code>read_offer</code> around its call.  Not a
-<em>want</em> argument here: the readers that park without a size would pay a
-pair of stores to declare nothing, which measured as the header path
-funding what the body path saves.</p>
+        <p>Park after releasing the high-water pause.</p>
+<p>A starving reader must resume input even if its requested slice exceeds the
+watermark. The reader publishes read_offer around this wait; a paused
+transport cannot otherwise supply the bytes needed to unblock it.</p>
 
 
     </div>
@@ -6044,14 +6018,8 @@ funding what the body path saves.</p>
 
 
 
-        <p>Buffered-protocol front end for one H/1.1 connection.</p>
-<p>The transport half of the receive path: it owns the socket callbacks, the
-callback↔coroutine rendezvous, and the two flow-control calls — but none of
-the judgement about when to make them.  Those belong to
-<a class="autorefs autorefs-internal" href="#blackbull.server.connection_protocol.BufferReader"><code>BufferReader</code></a>, which is the only object that knows what has been
-asked for; this class executes what it is told.  Its one comparison — the
-byte-level high-water threshold — is a transport fact, not a judgement:
-whether a crossing pauses the peer is the Reader's call.</p>
+        <p>Own transport callbacks and wakeups for one connection.</p>
+<p>BufferReader decides pause/resume policy; this object applies it.</p>
 
 
 
@@ -6087,13 +6055,7 @@ whether a crossing pauses the peer is the Reader's call.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The transport signalled EOF: the peer will send nothing more.</p>
-<p>A fact about the socket, which is why it lives here.  It is <strong>not</strong>
-the same question as <code>BufferReader.at_eof</code> — bytes already
-delivered are still there to be served after the peer has gone, so a
-reader is at EOF only when this is true <em>and</em> its buffer is empty.
-One name for both questions made every call site a guess about which
-was meant.</p>
+        <p>Return transport EOF; buffered bytes may still remain, so this differs from reader.at_eof.</p>
 
     </div>
 
@@ -6143,10 +6105,7 @@ was meant.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Block only while the transport is over its high-water mark.</p>
-<p>Returns without awaiting in the common case, which matters: an
-unconditional await here is one loop turn per response send, the very
-cost the inbound rewrite is removing on the read side.</p>
+        <p>Wait only while the transport is above its write high-water mark.</p>
 
 
     </div>

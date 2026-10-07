@@ -5611,49 +5611,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Differential oracle for HTTP/1.1 implementation comparison.</p>
-<p>Public surface for differentially comparing two HTTP/1.1
-implementations against the same <a class="autorefs autorefs-internal" title="Scenario
-
-
-  
-      dataclass
-  " href="../#blackbull.fault_injection.Scenario"><code>Scenario</code></a>
-— typically a reference (e.g. nginx) against a target under test.</p>
-<p>Useful externally for client-library / proxy authors who want to
-assert behavioural parity between two implementations under
-wire-level fault injection.</p>
-<p>Components:</p>
-<ul>
-<li><a class="autorefs autorefs-internal" href="#blackbull.fault_injection.oracle_h1.Category"><code>Category</code></a> — the 9-way enum that buckets each example.</li>
-<li><code>ACCEPTED_CATEGORIES</code> — pass-through set (<code>OK</code>,
-    <code>BOTH_REJECTED</code>); divergences sit outside.</li>
-<li><a class="autorefs autorefs-internal" title="SideOutcome
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.oracle_h1.SideOutcome"><code>SideOutcome</code></a> — what one server returned (response, or
-    exception / timeout) in normalised form.</li>
-<li><a class="autorefs autorefs-internal" title="normalize_response(resp)" href="#blackbull.fault_injection.oracle_h1.normalize_response"><code>normalize_response</code></a>, <a class="autorefs autorefs-internal" title="categorize(ng, bb)" href="#blackbull.fault_injection.oracle_h1.categorize"><code>categorize</code></a> — the pure
-    functions that compare the two sides.</li>
-<li><a class="autorefs autorefs-internal" title="run_scenario(host, port, scenario)
-
-  
-      async
-  " href="#blackbull.fault_injection.oracle_h1.run_scenario"><code>run_scenario</code></a> — the async wrapper that drives a
-    <a class="autorefs autorefs-internal" title="Scenario
-
-
-  
-      dataclass
-  " href="../#blackbull.fault_injection.Scenario"><code>Scenario</code></a> against
-    <code>(host, port)</code> and returns <code>(SideOutcome, wire_bytes)</code>.</li>
-<li><code>PER_REQUEST_TIMEOUT_S</code> — wall budget cap per side.</li>
-</ul>
-<p>Test-suite-specific glue (fixtures, Hypothesis strategies, corpus
-capture, <code>DiffContext</code>) continues to live in the conformance
-harness — it is not part of the public surface.</p>
+        <p>Differential HTTP/1.1 oracle.</p>
+<p>Compare normalized outcomes under a per-side timeout. A divergence is not
+automatically a protocol defect; inspect its category and RFC requirement.</p>
 
 
 

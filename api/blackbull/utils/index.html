@@ -5118,28 +5118,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.utils.is_client_error" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        is_client_error
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.utils.is_server_error" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        is_server_error
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.utils.pop_safe" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5515,28 +5493,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.utils.is_client_error" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        is_client_error
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.utils.is_server_error" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        is_server_error
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.utils.pop_safe" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5588,14 +5544,6 @@
     <div class="doc doc-contents first">
 
         <p>Shared utilities and enumerations.</p>
-<p>Provides:</p>
-<ul>
-<li><code>Scheme</code>: <code>StrEnum</code> with <code>http</code> and <code>websocket</code> values used throughout routing.</li>
-<li><code>pop_safe</code>: moves a key between dicts with an optional rename, no-op when absent.</li>
-<li><code>do_nothing</code>: awaitable no-op used as the innermost middleware-chain terminator.</li>
-<li><code>HTTP2</code>: the HTTP/2 client connection preface (RFC 9113 §3.4).</li>
-<li><code>is_client_error</code> / <code>is_server_error</code>: 3.11-safe HTTP status classifiers.</li>
-</ul>
 
 
 
@@ -5671,44 +5619,6 @@ be handed to the router.</p>
 
 </div>
 
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.utils.is_client_error" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">is_client_error</span><span class="p">(</span><span class="n">status</span><span class="p">)</span></code>
-
-<a href="#blackbull.utils.is_client_error" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>True for a 4xx status (RFC 9110 client error).  3.11-safe replacement
-for <code>HTTPStatus.is_client_error</code> (which is 3.12+).</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.utils.is_server_error" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">is_server_error</span><span class="p">(</span><span class="n">status</span><span class="p">)</span></code>
-
-<a href="#blackbull.utils.is_server_error" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>True for a 5xx status (RFC 9110 server error).  3.11-safe replacement
-for <code>HTTPStatus.is_server_error</code> (which is 3.12+).</p>
-
-
-    </div>
-
-</div>
 
 <div class="doc doc-object doc-function">
 

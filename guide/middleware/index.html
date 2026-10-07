@@ -6033,20 +6033,13 @@ are importable from <code>blackbull.asgi</code> if you want to name one directly
 Everything here is annotation-only: nothing is validated or converted at
 runtime, and unannotated middleware keeps working exactly as before.</p>
 <div class="admonition note">
-<p class="admonition-title">Native path: the send channel carries <code>NativeResponse</code></p>
-<p>On BlackBull's own HTTP path (HTTP/1.1 and HTTP/2), the response events
-a middleware's inner <code>send</code> wrapper observes are <code>NativeResponse</code>
-objects — not dicts.  A middleware that subscripts <code>event['type']</code>
-must first pass through <code>event.push is not None</code> messages: their headers
-describe a promised request, not the response. For responses, branch on
-the object's arms: <code>event.header is not None</code>
-(header arm, with <code>event.status</code> / <code>event.header.get(b'name')</code>),
-<code>event.body is not None</code> (body chunk, with <code>event.more_body</code>), and
-<code>event.trailers is not None</code>.  The <code>@as_middleware</code> decorator
-guarantees this single native representation for the wrappers it
-normalises; only on the WebSocket / external-host lanes do the same
-wrappers see plain dicts.  Use
-<a href="../testing/"><code>blackbull.testing.native</code></a> to exercise the native path.</p>
+<p class="admonition-title">Match the active send lane</p>
+<p>Middleware declaring <code>conn</code> receives native HTTP responses even under an
+external host. Middleware requesting <code>scope</code> receives ASGI event dicts. For native
+responses, pass <code>event.push is not None</code> through unchanged: those headers
+describe a promised request. Inspect response head, body and trailers
+through their object arms. Use <a href="../testing/">native test clients</a> to
+exercise that lane.</p>
 </div>
 <h2 id="the-as_middleware-decorator">The <code>@as_middleware</code> decorator<a class="headerlink" href="#the-as_middleware-decorator" title="Permanent link">&para;</a></h2>
 <p>Route handlers can return <code>Response</code> / <code>JSONResponse</code> objects
@@ -6054,8 +6047,9 @@ instead of calling <code>send(...)</code> with raw ASGI events.  A middleware
 that wraps <code>send</code> would otherwise have to handle both forms.
 Decorate the middleware with <code>@as_middleware</code> and the inner
 wrapper sees a single native representation: <code>NativeResponse</code> on
-the HTTP path (HTTP/1.1 and HTTP/2), plain ASGI dicts on the
-WebSocket / external-host lanes —
+the HTTP path (HTTP/1.1 and HTTP/2), plain ASGI dicts when the middleware
+requests <code>scope</code>. WebSocket send wrappers must also accept native WebSocket
+messages when the handler emits them —
 <code>Response</code> objects are converted for you, never leaking through:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">as_middleware</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
@@ -6216,7 +6210,7 @@ deprecated in 0.38 and <strong>removed in 0.54.0</strong>.</p>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="s1">'session'</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'user'</span><span class="p">,</span> <span class="s1">'anonymous'</span><span class="p">)))</span>
 </code></pre></div>
 <p>Handlers read and write the session through <code>conn.state['session']</code>;
-before; see the <code>blackbull-session</code> README for cookie attributes,
+See the <code>blackbull-session</code> README for cookie attributes,
 secret resolution, and session-clearing semantics.</p>
 <h3 id="cache"><code>Cache</code><a class="headerlink" href="#cache" title="Permanent link">&para;</a></h3>
 <p>Per-worker in-memory response cache for <code>GET</code> and <code>HEAD</code>.

@@ -719,17 +719,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#zero-cost-when-unused" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Zero cost when unused
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -5537,17 +5526,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#zero-cost-when-unused" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Zero cost when unused
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -5735,14 +5713,6 @@ warned about rather than silently repaired.</p>
 <p>On a WebSocket the same rule matters more, because a socket ends by
 exception far more often than a request does — see
 <a href="../websockets/#dependency-lifetime-read-this-before-injecting-a-database-handle">dependency lifetime</a>.</p>
-<h2 id="zero-cost-when-unused">Zero cost when unused<a class="headerlink" href="#zero-cost-when-unused" title="Permanent link">&para;</a></h2>
-<p>Everything is resolved at <strong>registration time</strong>: a handler that declares
-no <code>Depends</code> parameter compiles to exactly the wrapper it compiled to
-before this feature existed — no per-request stack, no empty dependency
-loop, no reflection.  (FastAPI, by contrast, runs <code>solve_dependencies()</code>
-and enters two <code>AsyncExitStack</code>s on every request even with no
-dependencies declared.)  Handlers that do use <code>Depends</code> pay only for what
-they declared.</p>
 <p><code>Depends</code> parameters are not request inputs, so they are excluded from the
 generated <a href="../openapi/">OpenAPI</a> spec.</p>
 

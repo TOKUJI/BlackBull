@@ -5775,22 +5775,11 @@ the peer pulls bytes off the socket.  <code>BB_WRITE_TIMEOUT</code> (default
 1 byte/sec, the connection is closed before the handler hangs
 indefinitely.</p>
 <h3 id="http2">HTTP/2<a class="headerlink" href="#http2" title="Permanent link">&para;</a></h3>
-<p><code>HTTP2Sender._write_data()</code> enforces per-stream and per-connection
-flow control per RFC 9113 §6.9.  Before writing each DATA frame
-the sender waits on an <code>asyncio.Event</code> until either window has
-credit, and re-checks both after clearing the event so a
-WINDOW_UPDATE arriving mid-clear cannot be lost.</p>
-<p>The handler's next <code>yield</code> only fires after the previous chunk's
-<code>await send()</code> returns — and that return only happens after the
-peer has granted enough WINDOW_UPDATE credit to put the chunk on
-the wire.  No background queue, no buffering, no per-stream
-unbounded growth.  <code>BB_REQUEST_TIMEOUT</code> bounds total per-stream
-runtime if you want a hard ceiling on streams that produce
-forever.</p>
-<p>The unit test <a href="https://github.com/TOKUJI/BlackBull/blob/master/tests/unit/test_sse.py"><code>test_http2_sender_blocks_when_window_closed</code></a>
-proves this experimentally: forcing both windows to zero before
-the write starts produces zero wire bytes; signalling the
-<code>_window_open</code> event releases the write.</p>
+<p>HTTP/2 writes require both stream and connection flow-control credit.
+The next generator yield waits for send to finish, so a closed window applies
+backpressure. BB_WRITE_TIMEOUT bounds an individual socket/credit wait;
+BB_REQUEST_TIMEOUT can impose a total handler budget, including intentional
+long-lived streams. These waits do not need application-side polling.</p>
 <h2 id="when-sse-when-websocket-when-chunked-http">When SSE, when WebSocket, when chunked HTTP<a class="headerlink" href="#when-sse-when-websocket-when-chunked-http" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -5824,9 +5813,9 @@ and <strong>plain <code>StreamingResponse</code></strong> for non-browser HTTP c
 (LLM token streams over <code>httpx.stream</code>, log tail downloads, etc.).</p>
 <h2 id="caveats">Caveats<a class="headerlink" href="#caveats" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Compression interaction</strong>: the <code>Compression</code> middleware buffers
-  the full body before deciding whether to compress; pair it with
-  a route-specific exclusion if you want SSE delivered unbuffered.</li>
+<li><strong>Compression interaction</strong>: Compression handles complete bodies. On a
+  streamed chunk, it releases any held response head and passes subsequent
+  chunks through uncompressed; it does not gather the whole stream.</li>
 <li><strong><code>Content-Length</code></strong>: streaming responses do not set
   <code>content-length</code>; the transport advertises chunked encoding
   (HTTP/1.1) or stream framing (HTTP/2).  Clients that require a

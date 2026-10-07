@@ -5599,19 +5599,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Extension mechanism — the single, generic plugin contract.</p>
-<p>An <a class="autorefs autorefs-internal" href="#blackbull.extension.Extension"><code>Extension</code></a> wires itself into a <a class="autorefs autorefs-internal" href="../app/#blackbull.app.BlackBull"><code>BlackBull</code></a>
-application through the public <code>app.*</code> API: routes, middleware, event
-listeners, and — for non-HTTP protocols — <code>app.register_protocol_handler</code>.
-Registration goes through one core method, <a class="autorefs autorefs-internal" title="add_extension(ext)" href="../app/#blackbull.app.BlackBull.add_extension"><code>BlackBull.add_extension</code></a>, so
-the core class carries <strong>no</strong> protocol-specific surface.</p>
-<p>This generalises the convention that <code>OpenAPIExtension</code> already followed
-(<code>extension_key</code> + <code>init_app(app)</code> + self-storage in <code>app.extensions</code>).
-Protocol extensions (the MQTT broker is the reference) are <em>just</em> extensions
-that call <code>register_protocol_handler</code> in <code>init_app</code> — there is
-deliberately no separate "protocol extension" base class until a second
-protocol justifies one.</p>
-<p>See <code>docs/guide/extensions.md</code>.</p>
+        <p>Extensions register through app.add_extension and public app APIs.</p>
+<p>Protocol extensions use the same lifecycle and registration mechanism;
+do not add a separate protocol-extension base without a shared requirement.</p>
 
 
 

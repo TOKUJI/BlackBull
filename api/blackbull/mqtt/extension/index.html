@@ -5843,28 +5843,7 @@ registered after that endpoint was wired in.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Yield the compiled <a class="autorefs autorefs-internal" title="Tap
-
-
-  
-      dataclass
-  " href="../tap/#blackbull.mqtt.tap.Tap"><code>Tap</code></a> for each registered <code>on_message</code> handler.</p>
-<p>The dispatch-side counterpart of <a class="autorefs autorefs-internal" title="iter_subscriptions()" href="#blackbull.mqtt.extension.MQTTExtension.iter_subscriptions"><code>iter_subscriptions</code></a>: that
-method yields the <em>display</em> form (<code>topic</code> as the application wrote
-it, <code>{name}</code> captures restored) for documentation tools; this yields
-the already-compiled <a class="autorefs autorefs-internal" title="Tap
-
-
-  
-      dataclass
-  " href="../tap/#blackbull.mqtt.tap.Tap"><code>Tap</code></a> objects, so a dispatch consumer
-(<code>MQTTTestBroker</code>) can feed them straight to
-<a class="autorefs autorefs-internal" title="run_taps(taps, message, *, raise_exceptions=False)
-
-  
-      async
-  " href="../tap/#blackbull.mqtt.tap.run_taps"><code>blackbull.mqtt.tap.run_taps</code></a> without re-parsing the filters.
-Both reflect the handlers registered <em>at call time</em>.</p>
+        <p>Yield compiled tap registrations present at call time.</p>
 
 
     </div>

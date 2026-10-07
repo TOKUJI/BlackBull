@@ -7095,30 +7095,11 @@
 
     <div class="doc doc-contents first">
 
-        <p>BlackBull's own async client, speaking the server's wire code from the
-other side.</p>
-<p>Pure Python, no third-party protocol library, and the same frame and parser
-implementations the server uses — which is what makes it useful for testing
-BlackBull against its own bytes and for pointing at a deliberately broken
-peer.</p>
-<p>Pick a client by naming the protocol, or let ALPN decide:</p>
-<ul>
-<li><a class="autorefs autorefs-internal" href="#blackbull.client.Client"><code>Client</code></a> negotiates over TLS and hands back
-  whichever of the two it chose.  With no TLS there is no ALPN to read, so it
-  is always HTTP/1.1 — h2c is supported, but only by naming
-  <a class="autorefs autorefs-internal" href="#blackbull.client.HTTP2Client"><code>HTTP2Client</code></a> yourself.</li>
-<li><a class="autorefs autorefs-internal" href="#blackbull.client.WebSocketClient"><code>WebSocketClient</code></a> (an HTTP/1.1 upgrade)
-  and <a class="autorefs autorefs-internal" href="#blackbull.client.WebSocketH2Client"><code>WebSocketH2Client</code></a> (extended
-  CONNECT) are chosen explicitly, never by negotiation.</li>
-</ul>
-<p>Every client is an async context manager, and the connection lives exactly as
-long as its <code>async with</code> block.  Everything they raise derives from
-<a class="autorefs autorefs-internal" href="#blackbull.client.ClientError"><code>ClientError</code></a>, so one <code>except</code> catches the
-family and the subclasses tell the causes apart.</p>
-<p>The scenario primitives re-exported here — <code>Scenario</code>, <code>Step</code>, <code>Abort</code>
-and the rest — belong to <code>blackbull.fault_injection</code>; this is an alias, not
-a second implementation.</p>
-<p><code>docs/guide/client.md</code> answers what the defaults do and do not bound.</p>
+        <p>Async protocol clients.</p>
+<p>Client selects HTTP/1.1 without TLS; name HTTP2Client explicitly for h2c.
+Clients own one connection for their async context. TimeoutError and raw
+WebSocket read failures do not all derive from ClientError; see
+docs/guide/client.md. Scenario exports alias blackbull.fault_injection.</p>
 
 
 
@@ -7261,7 +7242,7 @@ always HTTP/1.1.  WebSocket is never dispatched to; name its client.</p>
 
 
 
-        <p>Base class for all client-side errors.</p>
+        <p>Base for protocol client errors; built-in TimeoutError is separate.</p>
 
 
 
@@ -7349,7 +7330,7 @@ concatenation of all DATA-frame payloads received on the stream.</p>
 
 
 
-        <p>The connection was closed unexpectedly (e.g. server sent GOAWAY).</p>
+        <p>The connection is closed or unusable.</p>
 
 
 
@@ -7494,56 +7475,9 @@ returned <a class="autorefs autorefs-internal" href="http1/#blackbull.client.htt
 
     <div class="doc doc-contents ">
 
-        <p>Walk <code>scenario.steps</code> against the connected socket.</p>
-<p>Never raises.  Every outcome (response, timeout, transport
-failure, hard-abort) is folded into the returned
-<a class="autorefs autorefs-internal" title="ScenarioResult
+        <p>Run connected-socket scenario steps and collect outcomes in ScenarioResult.</p>
+<p>Record peer responses, timeouts and transport failures; Abort stops further steps.</p>
 
-
-  
-      dataclass
-  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a> so callers can categorise without
-try/except boilerplate per scenario.</p>
-
-
-<details class="step-dispatch" open>
-  <summary>Step dispatch</summary>
-  <ul>
-<li><a class="autorefs autorefs-internal" title="SendRawBytes
-
-
-  
-      dataclass
-  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.SendRawBytes"><code>SendRawBytes</code></a> → <a class="autorefs autorefs-internal" title="send_raw(data, *, byte_interval=0.0)
-
-  
-      async
-  " href="http1/#blackbull.client.http1.HTTP1Client.send_raw"><code>send_raw</code></a></li>
-<li><a class="autorefs autorefs-internal" title="Sleep
-
-
-  
-      dataclass
-  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Sleep"><code>Sleep</code></a>       → <code>asyncio.sleep</code></li>
-<li><a class="autorefs autorefs-internal" title="ReadResponse
-
-
-  
-      dataclass
-  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.ReadResponse"><code>ReadResponse</code></a> → <a class="autorefs autorefs-internal" title="read_response(*, request_method=None, timeout=None)
-
-  
-      async
-  " href="http1/#blackbull.client.http1.HTTP1Client.read_response"><code>read_response</code></a></li>
-<li><a class="autorefs autorefs-internal" title="Abort
-
-
-  
-      dataclass
-  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Abort"><code>Abort</code></a>       → <code>transport.abort()</code> (RST on Linux);
-                         walks no further steps.</li>
-</ul>
-</details>
 
     </div>
 
@@ -7630,13 +7564,7 @@ fail or a normal protocol outcome.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Send body octets to the peer.</p>
-<p>Same semantics as <a class="autorefs autorefs-internal" title="send_raw(data, *, byte_interval=0.0)
-
-  
-      async
-  " href="http1/#blackbull.client.http1.HTTP1Client.send_raw"><code>send_raw</code></a>, kept separate for readability
-at call sites that frame headers separately from the body.</p>
+        <p>Send body bytes with the same semantics as send_raw.</p>
 
 
     </div>
@@ -8161,18 +8089,8 @@ odd, monotonically-increasing client-initiated stream ID
 
     <div class="doc doc-contents ">
 
-        <p>This connection's one HPACK context (RFC 7541 §2.3, RFC 9113 §4.3).</p>
-<p>The dynamic table is connection state and the peer keeps a single
-decoder for it, so every header block written to this connection has
-to come from this one encoder.  A second <code>FrameFactory</code> on the same
-connection keeps a second table that diverges the moment the two
-interleave, and the peer then resolves one stream's index against a
-field the other inserted.  Anything that frames on this connection —
-including the RFC 8441 WebSocket client layered over it — takes its
-factory from here rather than building one.</p>
-<p>It also carries the decoder's <code>max_header_list_size</code>, so a second
-factory would decode inbound blocks without the cap this connection
-advertises.</p>
+        <p>Return this connection's shared HPACK encoder/decoder and header limit.</p>
+<p>Every header producer, including extended CONNECT, must reuse this context.</p>
 
     </div>
 
@@ -8196,36 +8114,10 @@ advertises.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Walk <code>scenario.steps</code> against the connected socket.</p>
-<p>The HTTP/2 counterpart of
-<a class="autorefs autorefs-internal" title="execute_scenario(scenario)
+        <p>Run HTTP/2 fault steps and collect peer/transport outcomes in the result.</p>
+<p>Unsupported step vocabularies and an exited client raise instead of being
+classified as peer failures. Abort stops further steps.</p>
 
-  
-      async
-  " href="http1/#blackbull.client.http1.HTTP1Client.execute_scenario"><code>blackbull.client.http1.HTTP1Client.execute_scenario</code></a>, and
-deliberately the same shape: every <em>outcome</em> — a frame read, a
-timeout, a transport failure, a hard-abort — is folded into the
-returned result, so callers categorise without a try/except per
-scenario.  Raised instead is the scenario this connection cannot
-express at all: a step belonging to another vocabulary, or a client
-whose context has exited.  Neither is news about the peer, and
-folding one would make a closed client indistinguishable from a
-silent server.</p>
-
-
-<details class="step-dispatch" open>
-  <summary>Step dispatch</summary>
-  <ul>
-<li><code>SendPreface</code>  → the RFC 9113 §3.4 preface bytes</li>
-<li><code>SendFrame</code>    → one frame, assembled here rather than by the
-  production sender (which is what lets a scenario declare a
-  length its payload does not match)</li>
-<li><code>SendRawBytes</code> → arbitrary bytes, optionally one at a time</li>
-<li><code>Sleep</code>        → <code>asyncio.sleep</code></li>
-<li><code>ReadResponse</code> → one frame, or a recorded timeout</li>
-<li><code>Abort</code>        → <code>transport.abort()</code>; walks no further steps</li>
-</ul>
-</details>
 
     </div>
 
@@ -8414,7 +8306,7 @@ turns an orderly shutdown into an error.</p>
 
 
 
-        <p>The client refused to send a request that violates the protocol.</p>
+        <p>A request or peer response violates the protocol.</p>
 
 
 
@@ -8550,11 +8442,9 @@ whether to treat that as a transport-fail or normal outcome.</p>
 
 
 
-        <p>The peer's response head passed a byte budget the client set.</p>
-<p>Distinct from <a class="autorefs autorefs-internal" href="exceptions/#blackbull.client.exceptions.ProtocolError"><code>ProtocolError</code></a>: the response was well-formed as far
-as it was read.  What failed is a limit this client chose, so a caller that
-wants the peer's output anyway can raise the budget rather than conclude
-the peer is broken.</p>
+        <p>A response head or body exceeds a configured client budget.</p>
+<p>This is a local limit, distinct from a protocol violation. Raise the budget
+only if the caller can safely accept more data.</p>
 
 
 
@@ -8642,40 +8532,9 @@ the peer is broken.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Decode arbitrary bytes into a scenario.</p>
-<p>Total function: <em>every</em> byte string yields a valid scenario,
-including the empty string (→ empty scenario).  Designed so
-atheris's coverage-guided byte mutations always produce
-runnable input — the fuzzer never spends cycles on parser
-errors.</p>
-<p>Encoding:</p>
-<ul>
-<li>The decoder walks <code>raw</code> left-to-right.  At each
-    position the next byte selects an opcode via <code>% 4</code>
-    (every byte value is therefore a legal opcode tag).</li>
-<li>Each opcode then consumes a small payload from the
-    following bytes.  If the payload is short (end of input),
-    decoding stops cleanly and the partial scenario is
-    returned.</li>
-</ul>
-<p>Opcode layout::</p>
-<pre><code>byte % 4 == 0  → SEND
-    next 2 bytes (big-endian uint16) = length;
-    next ``length`` bytes = data;
-    next 1 byte (% len(_BYTE_INTERVAL_TABLE))
-      → byte_interval.
-byte % 4 == 1  → SLEEP
-    next 1 byte (% len(_SLEEP_TABLE)) → duration.
-byte % 4 == 2  → READ
-    next 1 byte (% len(_TIMEOUT_TABLE)) → timeout.
-byte % 4 == 3  → ABORT
-    no payload.  Remaining bytes are discarded — an
-    Abort short-circuits execution anyway, so it's the
-    natural terminator.
-</code></pre>
-<p>Bounded payload sizes (uint16 length) keep individual
-scenarios well under 64 KiB, which is what we want for
-per-iteration fuzz throughput.</p>
+        <p>Decode every byte string into a runnable fuzz scenario, including empty input.</p>
+<p>Truncated input returns the completed steps. Abort discards remaining bytes;
+SEND payload lengths are uint16. This decoder must not raise on arbitrary input.</p>
 
 
     </div>
@@ -8724,15 +8583,7 @@ a file without one parses to an unnamed scenario.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serialise to JSON Lines: one <code>{"op": ..., ...}</code> per line.</p>
-<p>Bytes payloads are base64-encoded so the result round-trips
-through stdout / git / json.loads without escape ambiguity.
-Round-tripped by <code>from_json</code>.</p>
-<p>The scenario's name rides the first line under the op <code>HEADER</code>,
-the convention the other three vocabularies use, so the file stays
-one line-oriented stream with no out-of-band metadata.  Without it
-a round trip silently dropped the name, and a catalogue case that
-came back anonymous cannot say which case it is.</p>
+        <p>Serialize JSON Lines with base64 byte payloads and a first HEADER carrying name.</p>
 
 
     </div>
@@ -8791,11 +8642,8 @@ HTTP/1.1 differential suite.</p>
 
 
 
-        <p>Outcome of one <code>HTTP1Client.execute_scenario</code> call.</p>
-<p>Exactly one of <code>response</code> / <code>exception</code> / <code>timed_out</code> /
-<code>aborted</code> is the meaningful field; the others are <code>None</code> /
-<code>False</code>.  The executor never raises, so a caller categorises on this
-object rather than on an exception.</p>
+        <p>Collect scenario outcomes; fields are not mutually exclusive.</p>
+<p>A timeout may precede a later response; response is newest, received holds all.</p>
 
 
 
@@ -9151,15 +8999,8 @@ if <a class="autorefs autorefs-internal" title="connect(path='/', *, response_ti
 
     <div class="doc doc-contents ">
 
-        <p>The connection's HPACK context — the <code>HTTP2Client</code>'s own.</p>
-<p>Extended CONNECT rides an ordinary HTTP/2 connection that may already
-be carrying <code>request()</code> traffic, and RFC 9113 §4.3 gives that
-connection one dynamic table in each direction.  Reading the context
-from the connection is what keeps the CONNECT's header block and
-every other block on the wire encoded against the same table the
-peer's single decoder is building.</p>
-<p>Raises <code>RuntimeError</code> before <code>__aenter__</code>: the context comes
-into being with the connection, so there is none to hand out yet.</p>
+        <p>Reuse the HTTP2Client connection's HPACK context.</p>
+<p>Raise RuntimeError before entering the connection context.</p>
 
     </div>
 
@@ -9523,8 +9364,7 @@ client).  Server PONG frames are silently dropped.</p>
 
     <div class="doc doc-contents ">
 
-        <p>PEP 562 — <code>SendBytes</code> is resolved only when a caller names it, so the
-deprecation warning reaches that caller and <code>import *</code> stays silent.</p>
+        <p>Deprecated SendBytes alias for SendRawBytes; removal no earlier than 2027-08-19.</p>
 
 
     </div>

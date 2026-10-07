@@ -2863,17 +2863,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.scenario_h1.scenario_to_json" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        scenario_to_json
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5858,17 +5847,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.scenario_h1.scenario_to_json" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        scenario_to_json
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5909,59 +5887,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Programmable HTTP/1.1 wire-level scenario model.</p>
-<p>A <a class="autorefs autorefs-internal" title="Scenario
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h1.Scenario"><code>Scenario</code></a> is a sequence of typed <em>steps</em> that the
-<a class="autorefs autorefs-internal" title="execute_scenario(scenario)
-
-  
-      async
-  " href="../../client/#blackbull.client.HTTP1Client.execute_scenario"><code>blackbull.client.HTTP1Client.execute_scenario</code></a> executor walks
-in order against a live socket.  This is the <em>client-side</em> half of
-the <a class="autorefs autorefs-internal" href="../#blackbull.fault_injection"><code>blackbull.fault_injection</code></a> toolkit: a programmable client
-that drives a target HTTP/1.1 server through deliberate misbehaviour
-— slowloris trickle, mid-request idle, abrupt RST, partial reads —
-expressed as data, not procedural test code.</p>
-<p>The symmetric <em>server-side</em> half (programmable HTTP/2 server emitting
-deliberate misbehaviour toward a client) lives in
-<a class="autorefs autorefs-internal" href="../h2_server/#blackbull.fault_injection.h2_server"><code>blackbull.fault_injection.h2_server</code></a>.</p>
-<p>Use cases:</p>
-<ul>
-<li>Conformance differential testing — Hypothesis generates scenarios
-    and <a class="autorefs autorefs-internal" href="../oracle_h1/#blackbull.fault_injection.oracle_h1"><code>blackbull.fault_injection.oracle_h1</code></a> compares the target
-    server's response to a reference (e.g. nginx).</li>
-<li>Coverage-guided fuzzing — atheris's byte mutations decode into
-    scenarios via <a class="autorefs autorefs-internal" title="from_bytes(raw)
-
-  
-      classmethod
-  " href="#blackbull.fault_injection.scenario_h1.Scenario.from_bytes"><code>Scenario.from_bytes</code></a>.</li>
-<li><strong>External callers</strong> — server-library authors, proxy authors, and
-    security researchers driving their server through programmable
-    misbehaviour from a pytest suite.</li>
-</ul>
-<p>Two serialisations are supported:</p>
-<ul>
-<li><a class="autorefs autorefs-internal" title="to_json()" href="#blackbull.fault_injection.scenario_h1.Scenario.to_json"><code>Scenario.to_json</code></a> / <a class="autorefs autorefs-internal" title="from_json(src)
-
-  
-      classmethod
-  " href="#blackbull.fault_injection.scenario_h1.Scenario.from_json"><code>Scenario.from_json</code></a> — JSON Lines,
-    one step per line.  Diff-friendly in git; readable when failures
-    are pasted into reports.</li>
-<li><a class="autorefs autorefs-internal" title="from_bytes(raw)
-
-  
-      classmethod
-  " href="#blackbull.fault_injection.scenario_h1.Scenario.from_bytes"><code>Scenario.from_bytes</code></a> — a <em>total</em> opcode-tagged decoder.
-    Every byte string maps to a valid scenario, so atheris's byte-level
-    mutations never crash on input parsing — each mutation produces a
-    distinct execution path against the server.</li>
-</ul>
+        <p>HTTP/1.1 client-side fault scenarios for a target server.</p>
+<p>JSON Lines preserves typed steps. from_bytes is a total decoder for fuzz
+inputs: malformed input must still map to a scenario rather than crash parsing.</p>
 
 
 
@@ -6265,40 +6193,9 @@ whether to treat that as a transport-fail or normal outcome.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Decode arbitrary bytes into a scenario.</p>
-<p>Total function: <em>every</em> byte string yields a valid scenario,
-including the empty string (→ empty scenario).  Designed so
-atheris's coverage-guided byte mutations always produce
-runnable input — the fuzzer never spends cycles on parser
-errors.</p>
-<p>Encoding:</p>
-<ul>
-<li>The decoder walks <code>raw</code> left-to-right.  At each
-    position the next byte selects an opcode via <code>% 4</code>
-    (every byte value is therefore a legal opcode tag).</li>
-<li>Each opcode then consumes a small payload from the
-    following bytes.  If the payload is short (end of input),
-    decoding stops cleanly and the partial scenario is
-    returned.</li>
-</ul>
-<p>Opcode layout::</p>
-<pre><code>byte % 4 == 0  → SEND
-    next 2 bytes (big-endian uint16) = length;
-    next ``length`` bytes = data;
-    next 1 byte (% len(_BYTE_INTERVAL_TABLE))
-      → byte_interval.
-byte % 4 == 1  → SLEEP
-    next 1 byte (% len(_SLEEP_TABLE)) → duration.
-byte % 4 == 2  → READ
-    next 1 byte (% len(_TIMEOUT_TABLE)) → timeout.
-byte % 4 == 3  → ABORT
-    no payload.  Remaining bytes are discarded — an
-    Abort short-circuits execution anyway, so it's the
-    natural terminator.
-</code></pre>
-<p>Bounded payload sizes (uint16 length) keep individual
-scenarios well under 64 KiB, which is what we want for
-per-iteration fuzz throughput.</p>
+        <p>Decode every byte string into a runnable fuzz scenario, including empty input.</p>
+<p>Truncated input returns the completed steps. Abort discards remaining bytes;
+SEND payload lengths are uint16. This decoder must not raise on arbitrary input.</p>
 
 
     </div>
@@ -6347,15 +6244,7 @@ a file without one parses to an unnamed scenario.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serialise to JSON Lines: one <code>{"op": ..., ...}</code> per line.</p>
-<p>Bytes payloads are base64-encoded so the result round-trips
-through stdout / git / json.loads without escape ambiguity.
-Round-tripped by <code>from_json</code>.</p>
-<p>The scenario's name rides the first line under the op <code>HEADER</code>,
-the convention the other three vocabularies use, so the file stays
-one line-oriented stream with no out-of-band metadata.  Without it
-a round trip silently dropped the name, and a catalogue case that
-came back anonymous cannot say which case it is.</p>
+        <p>Serialize JSON Lines with base64 byte payloads and a first HEADER carrying name.</p>
 
 
     </div>
@@ -6414,11 +6303,8 @@ HTTP/1.1 differential suite.</p>
 
 
 
-        <p>Outcome of one <code>HTTP1Client.execute_scenario</code> call.</p>
-<p>Exactly one of <code>response</code> / <code>exception</code> / <code>timed_out</code> /
-<code>aborted</code> is the meaningful field; the others are <code>None</code> /
-<code>False</code>.  The executor never raises, so a caller categorises on this
-object rather than on an exception.</p>
+        <p>Collect scenario outcomes; fields are not mutually exclusive.</p>
+<p>A timeout may precede a later response; response is newest, received holds all.</p>
 
 
 
@@ -6680,10 +6566,7 @@ response further along than it thinks.</p>
 
     <div class="doc doc-contents ">
 
-        <p>PEP 562 — warn when the deprecated spelling is actually used.</p>
-<p>A module-level assignment would alias silently; going through
-<code>__getattr__</code> means only a caller who reaches for <code>SendBytes</code> is
-warned, and is warned at their own call site.</p>
+        <p>Deprecated SendBytes alias for SendRawBytes; removal no earlier than 2027-08-19.</p>
 
 
     </div>
@@ -6727,28 +6610,7 @@ presence alone.  <code>header_absent</code> takes a name.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Parse what <a class="autorefs autorefs-internal" title="scenario_to_json(scenario)" href="#blackbull.fault_injection.scenario_h1.scenario_to_json"><code>scenario_to_json</code></a> produced.  Twin of the other three.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.fault_injection.scenario_h1.scenario_to_json" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">scenario_to_json</span><span class="p">(</span><span class="n">scenario</span><span class="p">)</span></code>
-
-<a href="#blackbull.fault_injection.scenario_h1.scenario_to_json" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Serialise <em>scenario</em> to JSON Lines (one step per line).</p>
-<p>The same free function the other three vocabularies expose, so a reader
-comparing the four files is not told they differ where they do not.
-<code>Scenario.to_json</code> is the same serialisation reached as a method.</p>
+        <p>Parse what <a class="autorefs autorefs-internal" title="to_json()" href="#blackbull.fault_injection.scenario_h1.Scenario.to_json"><code>Scenario.to_json</code></a> produced.  Twin of the other three.</p>
 
 
     </div>

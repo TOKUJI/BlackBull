@@ -5250,10 +5250,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#fault-injection-the-differentiator" class="md-nav__link">
+  <a href="#fault-injection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Fault injection — the differentiator
+        Fault injection
       
     </span>
   </a>
@@ -5265,28 +5265,6 @@
     <span class="md-ellipsis">
       
         Conformance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#performance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Performance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#testing-infrastructure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Testing infrastructure
       
     </span>
   </a>
@@ -5548,10 +5526,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#fault-injection-the-differentiator" class="md-nav__link">
+  <a href="#fault-injection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Fault injection — the differentiator
+        Fault injection
       
     </span>
   </a>
@@ -5563,28 +5541,6 @@
     <span class="md-ellipsis">
       
         Conformance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#performance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Performance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#testing-infrastructure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Testing infrastructure
       
     </span>
   </a>
@@ -5623,95 +5579,34 @@
 
 
 <h1 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h1>
-<p>BlackBull makes a small number of deliberate architectural bets. This page
-states them and the reasoning behind each, so you can judge the framework on
-its design rather than a feature checklist. For the line-by-line internals,
-see <a href="../internals/">Internals</a>; for "does this fit my project?", see
-<a href="../../getting-started/why-blackbull/">Is BlackBull right for your project?</a>.</p>
 <h2 id="protocol-ownership">Protocol ownership<a class="headerlink" href="#protocol-ownership" title="Permanent link">&para;</a></h2>
-<p>BlackBull implements HTTP/1.1, HTTP/2, WebSocket, gRPC-over-h2c, and MQTT 5.0
-in pure Python. It does <strong>not</strong> delegate the wire to Uvicorn, Hypercorn,
-<code>h11</code>, <code>wsproto</code>, or <code>h2</code>. Every frame — every HPACK block, every stream
-state transition, every chunk boundary — is Python you can step through in a
-debugger.</p>
-<p>The trade-off is explicit: BlackBull carries the cost of implementing and
-conforming protocols itself, in exchange for two things no delegating stack
-can offer — end-to-end debuggability, and the ability to make the protocol
-layer do things a library won't let you (see <em>Fault injection</em> below).</p>
+<p>Keep HTTP/1.1, HTTP/2, WebSocket, gRPC and MQTT wire handling in BlackBull's
+Python code. Do not replace it with a third-party protocol state machine.
+HPACK uses the pure-Python <code>hpack</code> codec; standard-library C extensions and
+optional <code>uvloop</code> do not change protocol ownership.</p>
 <h2 id="multi-protocol-one-process">Multi-protocol, one process<a class="headerlink" href="#multi-protocol-one-process" title="Permanent link">&para;</a></h2>
-<p>A single <code>python app.py</code> serves every protocol at once — HTTP routes,
-a WebSocket channel, a gRPC service, and an MQTT broker, in one runtime.
-Non-HTTP protocols attach through one seam, <code>app.add_extension(...)</code>, while
-the HTTP core stays protocol-agnostic. There is no reverse proxy to configure,
-no separate broker process, and no C extension in the path.</p>
-<p>Ports are not part of the count. A deployment states the sockets it wants as
-<a href="../../guide/listeners/">listeners</a> — cleartext and TLS side by side, two
-certificates, an admin port on loopback — and one process serves all of them,
-with every worker on every one.</p>
-<p>This is the bet behind the IoT-gateway and edge use cases: protocol density
-in a single deployable, on hardware where running four services is a burden.</p>
+<p>All protocols share one runtime. Attach non-HTTP protocols through
+<code>app.add_extension(...)</code> and select sockets through
+<a href="../../guide/listeners/">listeners</a>. Protocol dispatch belongs to bindings,
+not application routing or a second server runtime.</p>
 <h2 id="actor-model">Actor model<a class="headerlink" href="#actor-model" title="Permanent link">&para;</a></h2>
-<p>Concurrency is message-passing, not shared-lock. A <code>ConnectionActor</code> owns
-each connection and spawns the protocol actor that claims it — <code>HTTP1Actor</code>,
-<code>HTTP2Actor</code>, <code>WebSocketActor</code>, <code>BrokerActor</code>. Each runs its own inbox loop;
-state that would otherwise need a lock lives inside one actor and is mutated
-only by that actor's loop.</p>
-<p>The payoff is isolation: a misbehaving or slow connection is contained to its
-own actor and cannot corrupt another's state. The same model runs your HTTP
-routes, the MQTT broker, and the gRPC handlers — one concurrency story across
-every protocol. See <a href="../internals/">Internals</a> for the actor topology and the
-per-actor supervisor strategies; the one <code>TaskGroup</code> is HTTP/2's per-stream
-supervision in <code>HTTP2Actor.run()</code>.</p>
-<h2 id="fault-injection-the-differentiator">Fault injection — the differentiator<a class="headerlink" href="#fault-injection-the-differentiator" title="Permanent link">&para;</a></h2>
-<p>Because BlackBull owns its HTTP implementations, it can be instructed to
-<strong>misbehave on command</strong>: half-closed streams, exhausted flow-control
-windows, illegal SETTINGS frames, trailers where none belong on HTTP/2; a
-status line delivered a byte at a time, a <code>Content-Length</code> that lies, a
-chunked body that stops mid-chunk on HTTP/1.1 — all crafted from a Python
-script. A delegating stack cannot easily do this, because the misbehaviour
-would have to be programmed into a third-party protocol library.</p>
-<p>The same ownership creates the obligation that goes with it: the fault
-servers assemble their own bytes rather than calling the production send
-path, because a breaker sharing the production serialiser cannot emit a fault
-that serialiser has.</p>
-<p>That makes BlackBull a portable conformance test bench: if you maintain an
-HTTP client, proxy, or middleware, you can drive it against adversarial
-protocol conditions in CI, and run a differential oracle that compares
-BlackBull's wire behaviour against a reference server such as nginx. See the
-<a href="../../guide/fault_injection/">Fault injection guide</a>.</p>
+<p>Mutable protocol state has one owner. Coordinate concurrent work through
+messages and explicit lifetime boundaries, not shared locks. MQTT routing
+and socket output have separate serial inbox owners. HTTP/2 streams share
+connection-level framing, HPACK and flow control while retaining isolated
+request work. See <a href="../internals/">Internals</a> and
+<a href="../mqtt-actor-design/">MQTT broker design</a>.</p>
+<h2 id="fault-injection">Fault injection<a class="headerlink" href="#fault-injection" title="Permanent link">&para;</a></h2>
+<p>Fault servers assemble their own wire bytes. They must not reuse production
+serializers, because a shared serializer cannot expose its own defects.
+Use the <a href="../../guide/fault_injection/">fault-injection guide</a> for scenarios
+and differential oracles.</p>
 <h2 id="conformance">Conformance<a class="headerlink" href="#conformance" title="Permanent link">&para;</a></h2>
-<p>BlackBull is validated against the same external suites used to check nginx
-and Envoy, not just its own tests:</p>
-<ul>
-<li><strong>h2spec</strong> (RFC 9113 + RFC 7541) — the de-facto HTTP/2 + HPACK suite,
-  ~146 numbered cases, run in CI on every push.</li>
-<li><strong>Autobahn|Testsuite</strong> (RFC 6455) — ~500 WebSocket cases.</li>
-<li><strong>Differential oracle</strong> — BlackBull vs nginx, compared wire-for-wire on a
-  captured request corpus.</li>
-</ul>
-<p>The authoritative status is the CI pipeline, not any point-in-time local run;
-see <a href="../conformance/">Conformance</a> for how to reproduce each suite and where
-the CI results live.</p>
-<h2 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">&para;</a></h2>
-<p>BlackBull is benchmarked with <a href="https://github.com/">HttpArena</a> against the
-popular Python async frameworks on identical cloud hardware; the harness and
-per-release results live under <code>bench/</code>. The headline is that a pure-Python
-stack is competitive-to-faster on throughput despite owning every byte — the
-numbers, and the methodology, are in the benchmark results rather than quoted
-here so they never go stale. See <a href="../conformance/">Conformance</a> and the
-<code>bench/</code> directory.</p>
-<h2 id="testing-infrastructure">Testing infrastructure<a class="headerlink" href="#testing-infrastructure" title="Permanent link">&para;</a></h2>
-<p>The framework ships the tooling used to keep it correct:</p>
-<ul>
-<li>Programmable fault injection (HTTP/1 client + HTTP/2 server scenarios).</li>
-<li>Atheris fuzzing integration over the parsers.</li>
-<li>A multi-job CI conformance pipeline (h2spec, Autobahn, corpus replay,
-  HTTP/2 flow control, gRPC interop).</li>
-</ul>
+<p>Use <a href="../conformance/">conformance workflows</a> and their artifacts to check a
+change. A finite suite establishes its cases, not complete correctness.
+Keep measurements and run records under <code>bench/</code>.</p>
 <h2 id="what-blackbull-defers">What BlackBull defers<a class="headerlink" href="#what-blackbull-defers" title="Permanent link">&para;</a></h2>
-<p>These bets have a cost, and the honest list of what BlackBull leaves to the
-ecosystem — auth/rate-limiting middleware, ORM/DB integration, Pydantic-grade
-body-schema generation, AnyIO/Trio compatibility, community breadth — is in
+<p>Before extending the public surface, check
 <a href="https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md">Known limitations</a>
 and the <a href="../../getting-started/why-blackbull/">use-case guide</a>.</p>
 

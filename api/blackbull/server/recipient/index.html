@@ -4937,17 +4937,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.make_item" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        make_item
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6320,17 +6309,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.make_item" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        make_item
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6651,30 +6629,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>The receive side: bytes off the transport, events into the application.</p>
-<p>Two layers, deliberately separable.  An
-<a class="autorefs autorefs-internal" href="#blackbull.server.recipient.AbstractReader"><code>AbstractReader</code></a> is a
-protocol-agnostic async byte source; a
-<a class="autorefs autorefs-internal" href="#blackbull.server.recipient.BaseRecipient"><code>BaseRecipient</code></a> turns those bytes
-into what the application reads, one subclass per protocol —
-<a class="autorefs autorefs-internal" href="#blackbull.server.recipient.HTTP1Recipient"><code>HTTP1Recipient</code></a>,
-<a class="autorefs autorefs-internal" href="#blackbull.server.recipient.HTTP2Recipient"><code>HTTP2Recipient</code></a> and
-<a class="autorefs autorefs-internal" href="#blackbull.server.recipient.WebSocketRecipient"><code>WebSocketRecipient</code></a>.</p>
-<p>Each HTTP recipient offers the body on two channels.  <code>__call__</code> yields the
-ASGI event dict a full-form handler's <code>receive()</code> returns; <code>next_chunk()</code>
-yields <code>bytes</code>, with <code>None</code> for end of body, and is what
-<code>Connection.body()</code> and <code>Connection.stream()</code> consume.  Both channels share
-one end marker, so a reader may start on either.  The Internals page argues why
-the native one exists.</p>
-<p><code>CONNECTION_REUSABLE</code>, <code>CONNECTION_NEEDS_DRAIN</code> and
-<code>CONNECTION_MUST_CLOSE</code> are the verdicts
-<a class="autorefs autorefs-internal" title="after_dispatch()" href="#blackbull.server.recipient.HTTP1Recipient.after_dispatch"><code>HTTP1Recipient.after_dispatch</code></a>
-returns: serve the next request as we stand, drain the unread body first, or
-close.</p>
-<p>The bounds a hostile peer meets on this path — body size, frame and message
-size, queue depth, minimum read rate, idle and body timeouts — are constructor
-arguments here, defaulted from the <code>BB_*</code> settings
-<code>docs/reference/env-vars.md</code> lists.</p>
+        <p>Protocol receive channels.</p>
+<p>Native next_chunk returns bytes or None; ASGI <strong>call</strong> returns events.
+Both share completion state. HTTP/1.1 after_dispatch determines whether to
+reuse, drain or close; never reuse a framing-invalid stream.</p>
 
 
 
@@ -6790,16 +6748,9 @@ raw-protocol read loop — should use a reader that overrides this).</p>
 
     <div class="doc doc-contents ">
 
-        <p>Buffer up to <em>n</em> bytes for peeking.  <code>False</code> if EOF came first.</p>
-<p>This is what lets connection detection choose a protocol without
-eating the bytes it inspected.  A reader that owns its buffer
-overrides this and genuinely consumes nothing.</p>
-<p>The default cannot: it has only <code>read</code>, so it <em>does</em> consume,
-and parks what it took in <code>_ahead</code>.  <a class="autorefs autorefs-internal" title="take_ahead()" href="#blackbull.server.recipient.AbstractReader.take_ahead"><code>take_ahead</code></a> hands
-that back to the caller, which restores the stream by wrapping this
-reader in a <a class="autorefs autorefs-internal" href="#blackbull.server.recipient.PrefixReader"><code>PrefixReader</code></a>.  Same outcome, one indirection more
-— and it keeps every reader, including test doubles, usable for
-detection without each one reimplementing pushback.</p>
+        <p>Buffer n bytes for peeking; return False on early EOF.</p>
+<p>The default consumes into _ahead. Call take_ahead and wrap with PrefixReader
+to restore inspected input; buffer-owning readers may peek without consuming.</p>
 
 
     </div>
@@ -7088,19 +7039,11 @@ recipient logic is decoupled from asyncio internals.</p>
 
 
 
-        <p>Accumulates RFC 6455 fragmented frames and signals message completion.</p>
-<p>Feed each data/continuation frame via <code>feed()</code>.  Returns
-<code>(message_opcode, full_payload)</code> when the final FIN=1 continuation
-arrives; returns <code>None</code> while still accumulating.</p>
-<p>Raises <code>ProtocolError</code> on violations:
-- CONTINUATION frame with no fragmentation in progress (§5.4)
-- New TEXT/BINARY opener while a fragmented message is open (§5.4)</p>
-<p><em>max_total</em> bounds the reassembled message; <code>0</code> disables it.  The
-check runs <strong>before</strong> the append, so the frame that crosses the bound is
-refused rather than paid for.  Raises <a class="autorefs autorefs-internal" href="../ws_codec/#blackbull.server.ws_codec.MessageTooLarge"><code>MessageTooLarge</code></a>, which the
-caller turns into CLOSE 1009.  Note this bounds the <em>compressed</em> bytes
-when permessage-deflate is in play; the inflated size is bounded
-separately, because only one of the two is knowable here.</p>
+        <p>Assemble data frames into (opcode, payload, compressed), or None until complete.</p>
+<p>Reject continuation without an opener, a new opener during assembly, and RSV1
+on continuations. max_total=0 disables the pre-append size cap; breaches raise
+MessageTooLarge for CLOSE 1009. This cap bounds compressed bytes; inflation
+requires its own bound.</p>
 
 
 
@@ -7166,15 +7109,9 @@ separately, because only one of the two is knowable here.</p>
 
 
 
-        <p>Reads an HTTP/1.1 request body and emits a single <code>http.request</code> event.</p>
-<p>Body bytes are read lazily on the first <code>__call__</code> using the
-Content-Length or Transfer-Encoding header of the <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="../../connection/#blackbull.connection.Connection"><code>Connection</code></a> it is
-bound to.  Subsequent calls return <code>{'type': 'http.disconnect'}</code>.</p>
+        <p>Yield lazy HTTP/1.1 request-body slices as http.request events.</p>
+<p>Framing comes from Content-Length or Transfer-Encoding. After the terminal
+body event, subsequent calls return http.disconnect.</p>
 
 
 
@@ -7404,26 +7341,12 @@ timeout, which is recorded as a cap hit first.</p>
 
 
 
-        <p>Delivers HTTP/2 DATA frames as ASGI <code>http.request</code> events.</p>
-<p>The server loop feeds frames via <code>put_DATAFrame()</code> (non-blocking).
-The ASGI app calls <code>__call__()</code> which suspends until an event is available,
-hiding the concurrency from both sides.</p>
-<p>For GET-style requests (END_STREAM on HEADERS, no DATA frames), the caller
-invokes <a class="autorefs autorefs-internal" title="mark_end_of_stream_on_headers()" href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers"><code>mark_end_of_stream_on_headers</code></a> instead of pre-queuing an
-empty <code>http.request</code> event, which <code>__call__</code> then synthesizes
-lazily — no queue is allocated unless the handler reads.</p>
-<p><strong>Consume-based inbound flow control</strong>: when constructed with
-a <code>credit_callback</code>, WINDOW_UPDATE credit for a DATA frame is replayed
-through the callback when the app <em>pops</em> the event — not when the frame is
-enqueued.  A stalled handler then stops crediting, the peer's window
-closes, and the peer back-pressures instead of overflowing a frame-count
-queue into RST_STREAM(ENHANCE_YOUR_CALM).  In this mode the queue is
-bounded by <code>credit_budget</code> bytes (the advertised inbound window — a
-conformant peer cannot exceed it) plus a generous frame-count abuse cap;
-<code>put_DATAFrame</code> returning <code>False</code> therefore means the peer overran the
-closed window or dribbled degenerate frames, and the RST is a true abuse
-backstop.  Without a callback the queue is bounded and credit is issued
-at enqueue instead (push streams, direct test use).</p>
+        <p>Deliver HTTP/2 body events from non-blocking put_DATAFrame calls.</p>
+<p>With credit_callback, replay flow credit only on consumption; never also
+credit at enqueue. Bound queued bytes by credit_budget and retain a frame-count
+abuse cap. A False put refuses the stream. Without the callback, enforce the
+frame-count queue bound and credit at enqueue. END_STREAM on HEADERS requires
+mark_end_of_stream_on_headers so the first read delivers an empty final body.</p>
 
 
 
@@ -7469,35 +7392,6 @@ at enqueue instead (push streams, direct test use).</p>
 
 
 
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.recipient.HTTP2Recipient.make_item" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">make_item</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-staticmethod"><code>staticmethod</code></small>
-  </span>
-
-<a href="#blackbull.server.recipient.HTTP2Recipient.make_item" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>The queue's payload: <code>(chunk, end_of_stream)</code>.</p>
-<p>The pair the two channels need and nothing else, so neither pays for
-the other's encoding: <code>__call__</code> builds an ASGI event from it,
-<a class="autorefs autorefs-internal" title="next_chunk()
-
-  
-      async
-  " href="#blackbull.server.recipient.HTTP2Recipient.next_chunk"><code>next_chunk</code></a> hands the bytes straight over.</p>
-
-
-    </div>
-
-</div>
 
 <div class="doc doc-object doc-function">
 
@@ -7599,11 +7493,7 @@ waiting, so none is created for the disconnect.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Enqueue a clean, empty end-of-body.</p>
-<p>The trailers case (RFC 9113 §8.1): a second HEADERS on an open request
-stream ends the body without carrying any.  Enqueues the native pair:
-building an <code>http.request</code> dict here only to translate it back one
-line later would put a request-dict producer back on the native path.</p>
+        <p>Enqueue an empty final body event when request trailers end the stream.</p>
 
 
     </div>
@@ -7734,16 +7624,8 @@ debugging aid.</p>
 
 
 
-        <p>An <code>AbstractReader</code> that replays an already-read <em>prefix</em>.</p>
-<p>Connection detection peeks the first bytes of a stream to decide which
-protocol owns it; wrapping the underlying reader in a <code>PrefixReader</code> hands
-the <em>still-complete</em> stream to the protocol that claims it — the peeked bytes
-are served back first, then reads fall through to the underlying reader.</p>
-<p>This is what keeps the dispatcher from consuming protocol-specific bytes
-on the connection's behalf.  The
-fast native <code>readuntil</code> / <code>readexactly</code> of the underlying reader are
-used once the prefix is drained, including the seam case where the separator
-straddles the prefix/underlying boundary.</p>
+        <p>Replay inspected prefix bytes before the underlying stream.</p>
+<p>Separators may straddle that seam; detection must not consume protocol input.</p>
 
 
 
@@ -7941,27 +7823,12 @@ and wrap it in <code>AsyncioReader</code> internally.</p>
 
 
 
-        <p>Reads WebSocket frames and emits ASGI <code>websocket.*</code> events.</p>
-<p>First call returns <code>{'type': 'websocket.connect'}</code>.  Subsequent calls
-read the next frame from the transport:
-  - Text frame   → <code>{'type': 'websocket.receive', 'text': ..., 'bytes': None}</code>
-  - Binary frame → <code>{'type': 'websocket.receive', 'text': None, 'bytes': ...}</code>
-  - Close frame  → <code>{'type': 'websocket.disconnect', 'code': 1000}</code>
-  - Ping frame   → sends Pong immediately, then reads the next frame
-  - Pong frame   → silently dropped, reads the next frame</p>
-<p><strong>Two read modes, selected by <code>ws_queue_depth</code>.</strong>  <code>0</code> (default) reads
-<em>inline</em>, in the app's own task when it calls <code>receive()</code>: no reader task
-and no queue, so the connection measures the same loop touches per request
-as HTTP/1.1, and read-ahead adds exactly one future and one <code>call_soon</code>
-per message on top — <code>bench/loop_touches.py</code> holds both figures and fails
-if either moves.  <code>&gt; 0</code> is <em>eager</em>: a background task reads ahead into a
-bounded queue of that depth.</p>
-<p>Both modes deliver an identical <em>ASGI</em> event sequence; only the timing of
-control-frame servicing and the existence of buffering differ.  Inline mode
-answers PING and echoes CLOSE (RFC 6455 §5.5) when the app drives the next
-read, which §5.5.2 permits.  Registering a <code>websocket_message</code> listener
-does not force read-ahead on; the <code>BB_WS_QUEUE_DEPTH</code> reference entry
-says what happens instead.</p>
+        <p>Receive complete WebSocket messages, after an initial connect event.</p>
+<p>ws_queue_depth=0 reads inline when the app calls receive(); a positive depth
+uses a bounded read-ahead queue. Both deliver the same events, but inline
+PING/CLOSE servicing waits for a read or the control watchdog. Registering
+a websocket_message observer uses the deferred-reader path described in
+docs/guide/websockets.md; it does not enable eager read-ahead.</p>
 
 
 
@@ -7997,11 +7864,7 @@ says what happens instead.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The RFC 6455 §7.4 close code, once the read side has finished.</p>
-<p>The single record of how this connection ended.  The actor keeps no
-copy of its own: that would mean intercepting every event to look for
-a disconnect, and two records of one fact is one place for them to
-disagree.</p>
+        <p>Return the close code once the read side finishes.</p>
 
     </div>
 

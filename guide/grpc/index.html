@@ -5720,7 +5720,7 @@ traffic, in one process, with no C extensions and nothing to compile on ARM.</p>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">healthz</span><span class="p">():</span>
     <span class="k">return</span> <span class="p">{</span><span class="s1">'ok'</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
 
-<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">cert</span><span class="o">=</span><span class="s1">'cert.pem'</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="s1">'key.pem'</span><span class="p">)</span>   <span class="c1"># gRPC needs HTTP/2 (TLS+ALPN)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">'cert.pem'</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">'key.pem'</span><span class="p">)</span>   <span class="c1"># gRPC needs HTTP/2 (TLS+ALPN)</span>
 </code></pre></div>
 <h2 id="the-handler-contract">The handler contract<a class="headerlink" href="#the-handler-contract" title="Permanent link">&para;</a></h2>
 <p>A gRPC handler is a coroutine:</p>

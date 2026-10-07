@@ -6007,26 +6007,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Programmable HTTP/1.1 <strong>server-side</strong> scenario model.</p>
-<p>A <a class="autorefs autorefs-internal" title="ScenarioH1Server
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h1_server.ScenarioH1Server"><code>ScenarioH1Server</code></a> is a sequence of typed <em>steps</em> that
-<a class="autorefs autorefs-internal" href="../h1_server/#blackbull.fault_injection.h1_server.H1FaultServer"><code>H1FaultServer</code></a> walks in order
-against a connected client.  This is the server-side half of the HTTP/1.1
-toolkit: a programmable server that drives a target <em>client</em> through
-deliberate misbehaviour — a status line delivered a byte at a time, a
-<code>Content-Length</code> that overstates the body, a chunked body that stops
-mid-chunk, a connection dropped mid-response.</p>
-<p>The symmetric client-side half — a programmable <em>client</em> driving a real
-server — is <a class="autorefs autorefs-internal" href="../scenario_h1/#blackbull.fault_injection.scenario_h1"><code>blackbull.fault_injection.scenario_h1</code></a>.  Its vocabulary
-looks similar and is <strong>not</strong> reusable here: <code>ReadResponse</code> names the
-other end of the wire.  Two vocabularies, because there are two roles.</p>
-<p>Everything a scenario emits is raw bytes; there is no typed
-<code>SendResponse</code> step.  <code>docs/guide/fault_injection.md</code> says why that is
-load-bearing.</p>
+        <p>HTTP/1.1 server-side scenarios for a target client.</p>
+<p>Output is raw bytes. Client-side ReadResponse vocabulary belongs to the
+other role and must not be reused here.</p>
 
 
 
@@ -6556,10 +6539,7 @@ extension; <code>terminator</code> can be replaced to stage a bad CRLF.</p>
 
 
 
-        <p>Emit one header line.</p>
-<p><code>fold</code> writes it as an obs-fold continuation (RFC 9112 §5.2, which
-deprecates the form and requires a recipient to reject or normalise
-it) — expressible before only as a hand-built byte string.</p>
+        <p>Emit a header; fold=True emits obs-fold (RFC 9112 §5.2).</p>
 
 
 
@@ -6664,11 +6644,7 @@ way.</p>
 
 
 
-        <p>Emit a status line, field by field.</p>
-<p>Nothing validates: a status line with no reason phrase, an impossible
-version, or a three-digit code that is not a status are all faults
-worth staging.  What it buys over raw bytes is that the <em>shape</em> is
-legible — a reader sees which field the scenario is bending.</p>
+        <p>Emit status-line fields without validation; malformed values are intentional.</p>
 
 
 

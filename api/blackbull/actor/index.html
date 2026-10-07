@@ -5599,27 +5599,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>The two base types every BlackBull actor is built from.</p>
-<p><a class="autorefs autorefs-internal" href="#blackbull.actor.Actor"><code>Actor</code></a> owns a queue and a loop that drains it;
-<a class="autorefs autorefs-internal" title="Message
-
-
-  
-      dataclass
-  " href="#blackbull.actor.Message"><code>Message</code></a> is what goes in the queue.  Together they
-are the whole mechanism: state lives inside one actor and is mutated only by
-that actor's own loop, so any coordination between two of them is a message,
-never a shared object or a lock.</p>
-<p>To write one, subclass <code>Actor</code>, override <code>_handle</code>, and declare each
-message a subclass of <code>Message</code>.  A subclass is a plain dataclass, so its
-fields are ordinary dataclass fields; <code>sender</code> is inherited and left out of
-equality, which lets two messages with the same payload compare equal
-regardless of who sent them.</p>
-<p>An actor's inbox does not exist until first use and is created on the loop
-that touches it, so an <code>Actor</code> may be constructed before the event loop is
-running.</p>
-<p><code>docs/about/internals.md</code> has the actor hierarchy the server assembles from
-these — which actor owns a connection, a stream, a request.</p>
+        <p>Single-owner state through serial message handling.</p>
+<p>Subclass Actor._handle and Message. Coordinate actors with messages, not
+shared mutable objects or locks. An inbox is created on first use, allowing
+construction before an event loop starts.</p>
 
 
 

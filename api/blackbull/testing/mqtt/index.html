@@ -5601,14 +5601,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>In-process MQTT test environment: drive <code>on_message</code> taps with no socket.</p>
-<p><a class="autorefs autorefs-internal" href="#blackbull.testing.mqtt.MQTTTestBroker"><code>MQTTTestBroker</code></a> feeds PUBLISHes into an app's registered taps directly --
-topic matching and <code>{name}</code> captures included -- with no TCP socket, no
-CONNECT and no MQTT client.  Taps run inline and a failing one raises, so a
-test is deterministic whatever the extension's <code>tap_mode</code> says.</p>
-<p>Only the tap pipeline is exercised.  Broker routing, QoS flows and retained
-messages belong to the conformance suite, not to this helper.  The MQTT guide
-shows a test written against it.</p>
+        <p>In-process MQTT tap tests.</p>
+<p>Taps run inline and failures propagate regardless of configured tap mode.
+This does not exercise routing, CONNECT, QoS or retained messages.</p>
 
 
 

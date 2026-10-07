@@ -4822,28 +4822,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.warmup--motivation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Motivation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.warmup--safety" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Safety
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.warmup.run_warmup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5517,28 +5495,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.warmup--motivation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Motivation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.warmup--safety" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Safety
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.warmup.run_warmup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5611,33 +5567,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Pre-fork warm-up — run an app's warm-up hooks <em>once</em> in the master before it
-binds a listening socket or forks workers, so every worker is born warm.</p>
-<h4 id="blackbull.server.warmup--motivation">Motivation<a class="headerlink" href="#blackbull.server.warmup--motivation" title="Permanent link">&para;</a></h4>
-<p>One asyncio event loop per worker services both <code>accept()</code> and request
-processing, so a <strong>cold</strong> CPU-bound coroutine — a fresh gRPC codec encoding
-thousands of streams, a burst of cold TLS handshakes — can hold the loop until
-the kernel listen backlog overflows and a colocated load generator's redial
-storm turns the transient into an <code>ECONNREFUSED</code> collapse.  The empirical
-tell is that the <em>second</em> run of the same process is always clean: warmth, not
-structure, is the differentiator.</p>
-<p>Warm-up registered via <a class="autorefs autorefs-internal" title="on_warmup(fn)" href="../../app/#blackbull.app.BlackBull.on_warmup"><code>BlackBull.on_warmup</code></a> therefore runs here, once,
-before the listening socket exists:</p>
-<ul>
-<li><strong>Before bind + fork</strong> (multi-worker): forked workers inherit the warmed heap
-  via copy-on-write.  PEP 659's adaptive specialization lives in the code
-  objects on the heap, so it survives <code>fork()</code>; <code>gc.collect()</code> +
-  <code>gc.freeze()</code> keep the warmed pages COW-shared instead of being dirtied by
-  the first post-fork collection.</li>
-<li><strong>Before serving</strong> (single-worker): the one process is warm before it binds.</li>
-</ul>
-<h4 id="blackbull.server.warmup--safety">Safety<a class="headerlink" href="#blackbull.server.warmup--safety" title="Permanent link">&para;</a></h4>
-<p>Warm-up is best-effort and must never crash the master: every failure is logged
-and swallowed, degrading to a cold start.  It uses only in-process ASGI drives
-and in-memory (<code>ssl.MemoryBIO</code>) handshakes — never a socket, a live
-connection, or a lingering event loop that a subsequent <code>fork()</code> could
-inherit (the classic <code>preload_app</code> hazard).  The temporary loop
-<a class="autorefs autorefs-internal" title="run_warmup(app, ssl_context=None)" href="#blackbull.server.warmup.run_warmup"><code>run_warmup</code></a> uses is closed before it returns.</p>
+        <p>Best-effort warm-up before binding and fork.</p>
+<p>Never leave a live socket, task or temporary event loop for workers to inherit.
+Failures log and fall back to cold startup; the wall-clock budget must bound boot.</p>
 
 
 
@@ -5670,12 +5602,8 @@ inherit (the classic <code>preload_app</code> hazard).  The temporary loop
 
     <div class="doc doc-contents ">
 
-        <p>Synchronous pre-fork entry point (called from <code>serve</code> before bind/fork).</p>
-<p>No-op when <em>app</em> registered no <a class="autorefs autorefs-internal" title="on_warmup(fn)" href="../../app/#blackbull.app.BlackBull.on_warmup"><code>BlackBull.on_warmup</code></a> hooks.  Otherwise
-runs the hooks (plus the built-in TLS warm-up when <em>ssl_context</em> is set) in a
-<strong>temporary</strong> event loop that is closed before returning, so a subsequent
-<code>fork()</code> never inherits a live loop.  Ends with <code>gc.collect()</code> +
-<code>gc.freeze()</code> to keep the warmed pages copy-on-write-shared across fork.</p>
+        <p>Run best-effort warmup hooks before fork in a temporary, closed event loop.</p>
+<p>Single-worker startup runs hooks on the serving loop instead.</p>
 
 
     </div>
@@ -5697,11 +5625,7 @@ runs the hooks (plus the built-in TLS warm-up when <em>ssl_context</em> is set) 
 
     <div class="doc doc-contents ">
 
-        <p>Prime the TLS handshake path with <em>n</em> in-memory handshakes (no socket).</p>
-<p>Drives full handshakes between the server <em>ssl_context</em> and a throwaway
-client context over paired <code>ssl.MemoryBIO</code> buffers, faulting in the
-OpenSSL / RSA / ALPN code the TLS benchmark profiles hit cold on run-1.
-Self-contained: creates no listener and no file descriptor.</p>
+        <p>Warm TLS using in-memory SSL BIOs, without binding a listener.</p>
 
 
     </div>
@@ -5723,10 +5647,7 @@ Self-contained: creates no listener and no file descriptor.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Async warm-up used by the single-worker path (runs on the serving loop).</p>
-<p>Same behaviour as <a class="autorefs autorefs-internal" title="run_warmup(app, ssl_context=None)" href="#blackbull.server.warmup.run_warmup"><code>run_warmup</code></a> minus the temporary-loop management:
-the single-worker process never forks, so warming on the loop that will go
-on to serve is both correct and cheaper.  Never raises.</p>
+        <p>Run best-effort hooks on the serving loop; log hook failures without preventing startup.</p>
 
 
     </div>

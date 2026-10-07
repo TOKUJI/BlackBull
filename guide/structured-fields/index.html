@@ -5535,14 +5535,9 @@
 
 
 <h1 id="structured-fields-rfc-9651">Structured Fields (RFC 9651)<a class="headerlink" href="#structured-fields-rfc-9651" title="Permanent link">&para;</a></h1>
-<p>Every HTTP header defined by the IETF since ~2021 — <code>Priority</code>,
-<code>Deprecation</code>, <code>Accept-Query</code>, rate-limit signalling, Client Hints —
-uses <strong>Structured Field Values</strong> (RFC 9651) instead of a bespoke
-grammar.  BlackBull ships a strict parser and serialiser for all of
-it in <code>blackbull.protocol.structured_fields</code>, verified against the
-HTTP Working Group's
-<a href="https://github.com/httpwg/structured-field-tests">conformance suite</a>
-(2,135 cases).</p>
+<p>Use blackbull.protocol.structured_fields to parse and serialize RFC 9651
+values. Choose the header's specified top-level type; arbitrary HTTP fields
+are not necessarily Structured Fields.</p>
 <h2 id="reading-structured-headers">Reading structured headers<a class="headerlink" href="#reading-structured-headers" title="Permanent link">&para;</a></h2>
 <p><code>Headers</code> exposes one accessor per top-level SF type.  Each returns
 <code>None</code> when the field is absent <strong>or</strong> fails strict parsing — RFC 9651

@@ -5877,10 +5877,7 @@ Emitted as one INFO line on 'blackbull.access' after the response completes.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Self-formatting message body.  <code>emit_access_log</code> hands the record
-to <code>logger.info</code> as the message so this — and the <code>format()</code> string
-build it wraps — runs on the logging listener thread, not the event
-loop.  Cached because several sink handlers may format the same record.</p>
+        <p>Format once and cache for multiple logging sinks.</p>
 
 
     </div>
@@ -5922,14 +5919,7 @@ record waited in the logging queue.  Idempotent; returns <code>self</code>.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Build directly from a <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="../../connection/#blackbull.connection.Connection"><code>Connection</code></a>
-so the self-hosted actor never materializes the ASGI
-scope just to record the access line.</p>
+        <p>Snapshot parsed Connection fields without creating an ASGI scope.</p>
 
 
     </div>
@@ -5993,10 +5983,7 @@ tracing is disabled, so callers don't need to guard themselves.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Finish a request's record and emit it.  A no-op when there is none.</p>
-<p>Paired with <a class="autorefs autorefs-internal" title="open_record(conn, aggregator, loop_start=None)" href="#blackbull.server.access_log.open_record"><code>open_record</code></a>, so a caller that opened a record does not
-also have to remember the final <code>mark</code> or repeat the <code>is not None</code>
-guard at every dispatch exit.</p>
+        <p>Mark dispatch done and emit; no-op for None.</p>
 
 
     </div>
@@ -6014,13 +6001,7 @@ guard at every dispatch exit.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Finish a WebSocket session's record and emit it.  A no-op when there is
-none — a session that never opened a record (no consumer, per
-<a class="autorefs autorefs-internal" title="request_record_needed(aggregator)" href="#blackbull.server.access_log.request_record_needed"><code>request_record_needed</code></a>) must not crash its close path.</p>
-<p>A session is not a request dispatch: it has no <code>dispatch_done</code> phase,
-and what it reports instead is the close code the peer or the server
-ended on.  Separate from <a class="autorefs autorefs-internal" title="close_record(record)" href="#blackbull.server.access_log.close_record"><code>close_record</code></a> for that reason, so neither
-protocol actor has to know which terminal field belongs to which shape.</p>
+        <p>Emit session close code without a dispatch_done phase; no-op for None.</p>
 
 
     </div>
@@ -6061,20 +6042,10 @@ the raw <code>receive</code> instead.  Body-level disconnect detection
 
     <div class="doc doc-contents ">
 
-        <p>Emit <em>record</em> on the access logger if INFO is enabled.</p>
-<p>The <code>isEnabledFor</code> gate matters because <code>record.as_extra()</code> is
-evaluated before <code>logger.info</code> decides to discard the call — measured at
-~1.2% of CPU under <code>-R 5000</code> with <code>BB_ACCESS_LOG=0</code>.</p>
-<p>The record is its own message (self-formatting via <code>__str__</code>), so the
-<code>format()</code> build runs on the logging listener thread; <code>finalize()</code>
-snapshots the duration first, so a deferred format still reports the
-request's real duration rather than duration + queue latency.  The
-structured <code>extra</code> fields stay eager — they are the documented public
-access-log API, held by <code>tests/integration/test_access_log.py</code>.</p>
-<p>A default access logger is enqueued directly, skipping the stdlib
-<code>logging.Logger._log</code> machinery that is ~93% of the loop-side emit cost.
-User handlers or filters on <code>blackbull.access</code> would be bypassed by that,
-so their presence takes the standard <code>logger.info</code> path instead.</p>
+        <p>Emit on the access logger when INFO is enabled.</p>
+<p>Snapshot duration before deferred formatting so queue latency is excluded.
+Keep structured extra fields eager. User handlers or filters require the
+standard logging path; direct enqueue must not bypass them.</p>
 
 
     </div>
@@ -6092,19 +6063,9 @@ so their presence takes the standard <code>logger.info</code> path instead.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Start a request's access-log record, or <code>None</code> if nothing reads it.</p>
-<p>The one place that answers "does this request need a record, and if so
-what does a fresh one look like".  Both protocol actors call it; neither
-decides the gate, builds the record, or knows that <code>conn.state</code> is where
-it is published.</p>
-<p><em>loop_start</em> seeds the phase trace with the keep-alive loop's entry
-timestamps, which only the H/1 actor has to give.</p>
-<p>The record is always built from the <code>Connection</code>, never from an ASGI
-scope: the actor has the parsed Connection on every lane, and on the
-<code>BB_FORCE_ASGI_SCOPE</code> lane the emitted scope shares <code>conn.state</code> by
-identity — so the app's rebuilt Connection reads back the same record.
-That sharing is the contract <code>BlackBull._dispatch</code> relies on to source
-<code>request_completed</code>'s wire fields.</p>
+        <p>Open a request record when a consumer exists; otherwise return None.</p>
+<p>Publish in conn.state, shared by compatibility scopes. loop_start seeds
+HTTP/1.1 keep-alive timing; snapshot wire fields before application rewrites.</p>
 
 
     </div>

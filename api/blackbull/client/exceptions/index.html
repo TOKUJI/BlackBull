@@ -5633,9 +5633,7 @@
 
     <div class="doc doc-contents first">
 
-        <p>Exception hierarchy for the protocol-layer client.</p>
-<p>All client-side errors derive from <code>ClientError</code> so callers can catch the
-whole family with one <code>except</code> clause and still distinguish specific causes.</p>
+        <p>Client errors; timeouts use the built-in TimeoutError.</p>
 
 
 
@@ -5673,7 +5671,7 @@ whole family with one <code>except</code> clause and still distinguish specific 
 
 
 
-        <p>Base class for all client-side errors.</p>
+        <p>Base for protocol client errors; built-in TimeoutError is separate.</p>
 
 
 
@@ -5704,7 +5702,7 @@ whole family with one <code>except</code> clause and still distinguish specific 
 
 
 
-        <p>The connection was closed unexpectedly (e.g. server sent GOAWAY).</p>
+        <p>The connection is closed or unusable.</p>
 
 
 
@@ -5766,7 +5764,7 @@ whole family with one <code>except</code> clause and still distinguish specific 
 
 
 
-        <p>The client refused to send a request that violates the protocol.</p>
+        <p>A request or peer response violates the protocol.</p>
 
 
 
@@ -5797,11 +5795,9 @@ whole family with one <code>except</code> clause and still distinguish specific 
 
 
 
-        <p>The peer's response head passed a byte budget the client set.</p>
-<p>Distinct from <a class="autorefs autorefs-internal" href="#blackbull.client.exceptions.ProtocolError"><code>ProtocolError</code></a>: the response was well-formed as far
-as it was read.  What failed is a limit this client chose, so a caller that
-wants the peer's output anyway can raise the budget rather than conclude
-the peer is broken.</p>
+        <p>A response head or body exceeds a configured client budget.</p>
+<p>This is a local limit, distinct from a protocol violation. Raise the budget
+only if the caller can safely accept more data.</p>
 
 
 

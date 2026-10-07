@@ -5767,35 +5767,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>Application taps on broker routing — the <code>on_message</code> observability layer.</p>
-<p>A <em>tap</em> is an async <code>(message, **captures) -&gt; None</code> callback registered via
-<a class="autorefs autorefs-internal" title="on_message(topic='#')" href="../#blackbull.mqtt.MQTTExtension.on_message"><code>blackbull.mqtt.MQTTExtension.on_message</code></a> for a topic filter.  Taps are
-best-effort observers on top of normal broker routing; the broker runs whether
-or not any tap is registered.</p>
-<p>Two dispatch engines share one code path (<a class="autorefs autorefs-internal" title="run_taps(taps, message, *, raise_exceptions=False)
-
-  
-      async
-  " href="#blackbull.mqtt.tap.run_taps"><code>run_taps</code></a>):</p>
-<ul>
-<li><strong>actor</strong> (default) — <a class="autorefs autorefs-internal" href="#blackbull.mqtt.tap.TapActor"><code>TapActor</code></a> is a single, lifespan-owned consumer.
-  A connection actor hands it a <a class="autorefs autorefs-internal" title="Message
-
-
-  
-      dataclass
-  " href="#blackbull.mqtt.tap.Message"><code>Message</code></a> with <a class="autorefs autorefs-internal" title="offer(message)" href="#blackbull.mqtt.tap.TapActor.offer"><code>TapActor.offer</code></a>
-  (non-blocking) and returns immediately, so a slow tap can never back-pressure
-  the connection or the broker.  Its inbox is <strong>bounded</strong>; on overflow the
-  <em>newest</em> message is dropped and a running dropped-count is logged (taps are
-  best-effort, but silent loss is unacceptable).</li>
-<li><strong>inline</strong> — the connection actor awaits the callbacks itself.  This is the
-  original contract, retained as an internal option so the perf comparison
-  (<code>bench/mqtt/tap_throughput.py</code>) stays reproducible.</li>
-</ul>
-<p>A topic filter may carry <code>{name}</code> capture segments
-(<code>'sensors/{room}/temperature'</code>); <code>{name}</code> matches one level like <code>+</code> and
-binds it as a keyword argument to the callback, mirroring HTTP path params.</p>
+        <p>Best-effort application taps independent of broker routing.</p>
+<p>Actor mode drops newest on bounded-inbox overflow; inline mode backpressures
+only the publishing connection. Both share matching. A {name} topic segment
+captures one level and supplies a keyword argument.</p>
 
 
 
@@ -5835,11 +5810,7 @@ binds it as a keyword argument to the callback, mirroring HTTP path params.</p>
 
 
 
-        <p>A published message handed to an <code>on_message</code> tap.</p>
-<p>A plain, immutable read-model of one PUBLISH — neither the wire codec
-<code>MQTTPublish</code> nor the actor inbox <code>Message</code> base, both of which it
-sits between.  It takes the bare name anyway, because <code>Message</code> is
-what aiomqtt and paho call this and what users reach for.</p>
+        <p>Immutable published-message view for on_message taps.</p>
 
 
 
@@ -5889,11 +5860,7 @@ what aiomqtt and paho call this and what users reach for.</p>
 
 
 
-        <p>A compiled <code>on_message</code> registration.</p>
-<p><code>match_filter</code> is the topic filter with each <code>{name}</code> segment rewritten
-to <code>+</code> (so the validated <a class="autorefs autorefs-internal" title="topic_matches_filter(topic, filter_str)" href="../messages/#blackbull.mqtt.messages.topic_matches_filter"><code>topic_matches_filter</code></a> does the matching);
-<code>captures</code> records the <code>(level_index, name)</code> of each <code>{name}</code> segment
-for binding once a topic matches.</p>
+        <p>Compiled on_message filter with named captures.</p>
 
 
 
@@ -6043,11 +6010,7 @@ messages is preserved and tap latency never reaches the connection or broker.</p
 
     <div class="doc doc-contents ">
 
-        <p>Enqueue <em>message</em> without blocking; drop-newest on overflow.</p>
-<p>Taps are best-effort observability, so a full queue drops the incoming
-message rather than back-pressuring the publisher — but the running
-dropped count is always logged, since silent loss is the one
-unacceptable outcome.</p>
+        <p>Enqueue without blocking; drop newest on overflow and log the dropped count.</p>
 
 
     </div>

@@ -5787,30 +5787,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>Native response message for the H1 send path.</p>
-<p>The unified response message BlackBull's own server carries on the native
-path.  One class replaces the ASGI start/body/trailers dicts: a response
-object may carry any combination of <code>header</code> (status line + headers),
-<code>body</code> (chunks), and <code>trailers</code>, so a complete response is <strong>one object
-and one <code>send</code></strong>, while streaming is header-object then body-chunk objects.</p>
-<p>Design invariants (validated in <code>bench/scratch/send-model-c.py</code>):</p>
-<ul>
-<li><strong>Presence is <code>is not None</code>, never truthiness</strong> — an empty body is a real
-  body (204-style).  Middleware must preserve <code>None</code> when transforming
-  (<code>header or []</code> turns <code>None</code> into <code>[]</code> and the sender mis-detects a
-  header — a real bug caught in the scratch model).</li>
-<li><strong>DX via properties, not the wire shape</strong> — <code>resp.header</code> is a zero-copy
-  view with <code>get</code>/<code>append</code>/<code>getlist</code>/<code>__contains__</code>/<code>__len__</code>/
-  <code>__iter__</code> (BlackBull <code>Headers</code>-like); <code>body</code> is a plain <code>bytes</code>
-  with <code>content_length</code>/<code>is_empty</code>/<code>content_type</code> helpers.</li>
-<li><strong>Server hot path may read the raw slots</strong> (<code>_header</code>/<code>_body</code>) to skip
-  the property+view overhead; the properties exist for middleware and
-  handler-facing DX.</li>
-<li><strong><code>to_asgi()</code> is the boundary conversion</strong> — 1 object → ASGI event list,
-  used only at conversion boundaries: the external ASGI edge (<code>asgi=True</code>
-  / external hosts) and the middleware native-read arms (symmetric with
-  <a class="autorefs autorefs-internal" title="as_scope()" href="../connection/#blackbull.connection.Connection.as_scope"><code>Connection.as_scope</code></a>).</li>
-</ul>
+        <p>Native send messages.</p>
+<p>Presence is is not None, never truthiness: an empty body is real content.
+Preserve absent header/body/trailers through middleware. Introduce ASGI event
+dictionaries only at conversion boundaries.</p>
 
 
 
@@ -6087,27 +6067,9 @@ either way (RFC 9113 §8.1).</p>
 
 
 
-        <p>One message on the native WebSocket send channel.</p>
-<p>The WS counterpart of <a class="autorefs autorefs-internal" href="#blackbull.native.NativeResponse"><code>NativeResponse</code></a>, and it exists for the same
-reason.  HTTP has a native send message and the sender a native arm;
-WebSocket would otherwise be native only in the sense that "conn is
-native, no scope" while its <em>event channel</em> stayed ASGI-shaped — so
-<code>websocket.*</code> dicts would travel object → middleware → actor → sender
-on BlackBull's own path.
-The handler never saw them (that is the <a class="autorefs autorefs-internal" href="../websocket/#blackbull.websocket.WebSocket"><code>WebSocket</code></a>
-object's whole point), but everything under it did.</p>
-<p>Three kinds, discriminated by <code>kind</code> rather than by which of seven
-fields happens to be set — the variants carry disjoint payloads, so a tag
-reads better here than the presence test that suits <code>NativeResponse</code>'s
-combinable arms:</p>
-<ul>
-<li><code>ACCEPT</code> — <code>subprotocol</code> / <code>headers</code>; completes the handshake.</li>
-<li><code>SEND</code> — exactly one of <code>text</code> (<code>str</code>) or <code>data</code> (<code>bytes</code>).</li>
-<li><code>CLOSE</code> — <code>code</code> / <code>reason</code>.</li>
-</ul>
-<p><code>data</code> rather than <code>bytes</code>: the ASGI key is <code>bytes</code>, but a slot of
-that name shadows the builtin at every use site inside the class.
-<a class="autorefs autorefs-internal" title="to_asgi()" href="#blackbull.native.NativeWSMessage.to_asgi"><code>to_asgi</code></a> maps it back for the boundary.</p>
+        <p>A native WebSocket send message.</p>
+<p>ACCEPT carries subprotocol/headers; SEND exactly one of text/data;
+CLOSE code/reason. to_asgi maps data to the ASGI bytes key at a boundary.</p>
 
 
 
@@ -6171,17 +6133,9 @@ raw <code>(conn, receive, send)</code> compat surface — exactly like
 
     <div class="doc doc-contents ">
 
-        <p>Wrap <em>inner_send</em> so native send-channel objects arrive as ASGI dicts.</p>
-<p>Native message types own a <code>to_asgi()</code>, and cross the same two
-edges: the external-host boundary (uvicorn / <code>asgi=True</code>) and the
-scope-declared middleware's own send wrapper.  Consumers there subscript
-<code>event['type']</code>, so a native object reaching them raises in <em>their</em> code,
-not ours.</p>
-<p>This is deliberately the single place that decides which types convert: the
-HTTP message was expanded at both edges and the WebSocket one at neither,
-because each edge carried its own <code>isinstance</code> list.  A new native message
-now cannot be handled at one edge and forgotten at the other.  Anything
-already ASGI-shaped passes straight through.</p>
+        <p>Expand native HTTP/WebSocket messages to ASGI dictionaries at a boundary.</p>
+<p>Use for external hosts and scope-declared middleware. Pass already-ASGI
+values through unchanged.</p>
 
 
     </div>

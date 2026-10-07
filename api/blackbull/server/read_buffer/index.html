@@ -5821,23 +5821,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>The single owned buffer for the H/1.1 inbound path.</p>
-<p>One <code>bytearray</code> per connection, written <strong>directly by the kernel</strong> through
-<a class="autorefs autorefs-internal" title="get_buffer(sizehint, *, want=0)" href="#blackbull.server.read_buffer.ReadBuffer.get_buffer"><code>ReadBuffer.get_buffer</code></a> and read by cursor.  Every inbound byte is
-materialised once: the head is sliced out for the parser, the body is handed
-out as a <code>memoryview</code>, and a keep-alive peer's next request is simply the bytes
-that were already sitting between the cursors.</p>
-<p>Deliberately free of HTTP semantics.  It reports an over-budget head with
-<code>LIMIT_EXCEEDED</code> rather than raising, because the 431 belongs to the
-actor; it distinguishes "EOF with nothing" from "EOF mid-head" only by leaving
-<code>available</code> intact, because deciding between a silent close and a 400 is
-also the actor's job.</p>
-<p>Free of <em>receive</em> policy for the same reason: it grows on demand, reports a
-drained message boundary, tracks the message's peak resident bytes, and offers
-<code>release_to_floor</code>, but takes none of those decisions.  The Internals
-page says which object does.</p>
-<p>Not thread-safe and not concurrency-safe — one connection, one buffer, one
-actor loop, per the actor model.</p>
+        <p>Single connection-owned byte buffer.</p>
+<p>Keep protocol verdicts and receive policy outside this class. It reports
+bytes and drained boundaries; the reader decides when to release capacity.
+Not safe for concurrent readers or cross-thread mutation.</p>
 
 
 
@@ -6084,14 +6071,9 @@ is still pending.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Length of the message head, terminator included, or a sentinel.</p>
-<p>Returns <code>-1</code> when the terminator has not arrived yet and
-<code>LIMIT_EXCEEDED</code> when <em>limit</em> (0 = unbounded) is passed without
-one.</p>
-<p>The scan resumes from where the last call stopped, backed off by three
-bytes so a <code>\r\n\r\n</code> split across two arrivals is still found.
-Without that resumption a peer dribbling one byte per segment makes
-every arrival re-scan the whole head — quadratic, and attacker-chosen.</p>
+        <p>Return head length including terminator, -1 if incomplete, or LIMIT_EXCEEDED.</p>
+<p>limit=0 is unbounded. Resume across split terminators without rescanning the
+whole head; reset scan state at each message boundary.</p>
 
 
     </div>
@@ -6161,68 +6143,9 @@ transport has already handed over.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Materialise and consume the next <em>n</em> bytes.</p>
-<p>The one copy per message: the head goes to the parser as <code>bytes</code>
-because the parse path's <code>split</code>/<code>translate</code> bulk ops need a real
-buffer object, and those are what keep the parser at C speed.</p>
-<p>Two ways to make that copy, and which one wins depends on size — so
-the size decides, the same shape as the send path's join-vs-vectored
-gate.  Slicing the <code>bytearray</code> allocates an intermediate and copies
-twice; a <code>memoryview</code> slice copies once but pays for building and
-releasing the view.  Measured on this tree (min of 7, µs/call):</p>
-<table>
-<thead>
-<tr>
-<th>n</th>
-<th>bytearray slice</th>
-<th>memoryview</th>
-<th>ratio</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>300</td>
-<td>0.102</td>
-<td>0.180</td>
-<td>1.77×</td>
-</tr>
-<tr>
-<td>4 KiB</td>
-<td>0.197</td>
-<td>0.242</td>
-<td>1.23×</td>
-</tr>
-<tr>
-<td>8 KiB</td>
-<td>0.270</td>
-<td>0.289</td>
-<td>1.07×</td>
-</tr>
-<tr>
-<td>16 KiB</td>
-<td>0.559</td>
-<td>0.413</td>
-<td>0.74×</td>
-</tr>
-<tr>
-<td>1 MiB</td>
-<td>1052</td>
-<td>16.4</td>
-<td>0.02×</td>
-</tr>
-</tbody>
-</table>
-<p>The crossover sits between 8 and 16 KiB.  Below it the view setup
-dominates and the double copy is cheaper — and <em>every request</em> takes
-its head through here, so that is the hot path.  Above it the second
-copy dominates and doubles peak memory besides (2.0 → 1.0 MiB on a
-1 MiB take), which matters because a body read asks for whatever the
-peer declared.</p>
-<p>Above the threshold the view is released explicitly rather than left
-to refcounting: a <code>bytearray</code> with a live export raises <code>BufferError</code>
-on resize, and the next <code>get_buffer</code> may resize.  Tying that to when a
-temporary happens to be collected is how it becomes a load-dependent
-crash.</p>
+        <p>Materialize and consume the next n bytes.</p>
+<p>Use the size gate for copying. Release temporary memoryviews before returning:
+a live export prevents the next buffer resize and can cause BufferError.</p>
 
 
     </div>
@@ -6240,9 +6163,7 @@ crash.</p>
 
     <div class="doc doc-contents ">
 
-        <p>A view of the next <em>n</em> resident bytes — no copy, not consumed.</p>
-<p>Body bytes reach the application through this, so a request that is
-streamed or sent to a file never allocates a <code>bytes</code> for its payload.</p>
+        <p>Return an unconsumed view of the next n resident bytes; callers own its lifetime.</p>
 
 
     </div>

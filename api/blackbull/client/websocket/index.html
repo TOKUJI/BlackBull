@@ -5723,19 +5723,8 @@
 
     <div class="doc doc-contents first">
 
-        <p>WebSocket client (RFC 6455).</p>
-<p>Two pieces:</p>
-<ul>
-<li><code>WebSocketClient</code> opens a TCP/TLS connection and drives the HTTP/1.1
-  <code>Upgrade: websocket</code> handshake.</li>
-<li><code>WebSocketSession</code>, returned by <code>WebSocketClient.connect</code>, owns the
-  post-handshake frame loop: <code>send_text</code> / <code>send_bytes</code> / <code>receive</code> /
-  <code>ping</code> / <code>close</code>.</li>
-</ul>
-<p>Reuses <code>HTTP1RequestSender</code> / <code>HTTP1ResponseRecipient</code> for the handshake
-and <code>encode_frame(mask=True)</code> / <code>WebSocketRecipient(require_masked=False)</code>
-for post-handshake frames — the same codec serves both directions,
-parameterised by the <code>mask</code> flag.</p>
+        <p>HTTP/1.1 WebSocket client. Client frames are masked; incoming
+server frames must not be. The returned session owns post-handshake reads.</p>
 
 
 

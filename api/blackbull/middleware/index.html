@@ -5702,11 +5702,8 @@
     <div class="doc doc-contents first">
 
         <p>Public middleware exports.</p>
-<p>Names are short nouns: the module path supplies the "this is middleware"
-context, so a suffix would only repeat it.</p>
-<p>The <code>*Middleware</code>-suffixed spellings and the <code>compress</code> pre-built
-instance remain reachable through PEP 562 <code>__getattr__</code>, each with a
-one-time <code>DeprecationWarning</code>, and will be removed in a future release.</p>
+<p>Legacy Middleware-suffixed aliases and compress emit DeprecationWarning;
+use the unsuffixed classes for new code.</p>
 
 
 
@@ -6094,22 +6091,11 @@ opt-in cache in particular, and why it is off by default.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serve files from <code>directory</code> (or <code>root_dir</code>).</p>
-<p><code>index</code> (default <code>None</code> — off): when set to a filename (e.g.
-<code>'index.html'</code>), a request that resolves to a <em>directory</em> is
-served that file from inside the directory if it exists.  Left off, a
-request that resolves to a directory is not served at all; the
-<code>blackbull serve</code> CLI turns it on to match <code>python -m
-http.server</code>'s directory-index behaviour.</p>
-<p><code>cache</code> (default <code>False</code>): when <code>True</code>, small file bodies are
-held in a bounded in-memory <code>OrderedDict</code> and the <code>stat()</code>
-syscall is throttled.  When <code>False</code>, every request stats and
-reads afresh.  Turn it on only where BlackBull terminates static
-traffic itself, with no nginx or CDN in front.</p>
-<p><code>conditional</code> (default <code>True</code>): emit <code>ETag</code> + <code>Last-Modified</code>
-validators and honour <code>If-None-Match</code> / <code>If-Modified-Since</code> with a
-304.  Set <code>False</code> to suppress validators (e.g. the <code>blackbull
-serve --no-etag</code> path).</p>
+        <p>Serve directory or root_dir; at least one must be supplied.</p>
+<p>index=None disables directory indexes. cache=True holds small bodies in a
+bounded per-worker cache; its validation TTL can delay on-disk edits.
+conditional=False disables validators and 304 responses. See
+docs/guide/static-files.md for cache, traversal and production-mode limits.</p>
 
 
     </div>
@@ -6139,55 +6125,11 @@ serve --no-etag</code> path).</p>
 
 
 
-        <p>Rewrite <code>conn['client']</code> and <code>conn['scheme']</code> from proxy headers.</p>
-<p>Applied only when the direct TCP peer matches the configured trusted set.
-Trusted proxies must append their observed peer or overwrite the chain;
-standalone proto/prefix assertions must replace client-supplied values.</p>
-<p>Supported headers (in precedence order):</p>
-<ol>
-<li>RFC 7239 <code>Forwarded</code> — <code>for=&lt;ip&gt;; proto=&lt;scheme&gt;</code></li>
-<li><code>X-Forwarded-For</code> — walk right to left to the first untrusted IP</li>
-<li><code>X-Forwarded-Proto</code> — rewrite <code>conn['scheme']</code></li>
-</ol>
-
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>trusted_proxies</code>
-            </td>
-            <td>
-                  <code><span title="list">list</span>[<span title="str">str</span>] | <span title="str">str</span> | None</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>IP addresses or CIDR strings (IPv4 or IPv6).  Accepts a
-single string or a list.  Defaults to loopback (<code>'127.0.0.1'</code>, <code>'::1'</code>).</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-        <p>Usage::</p>
-<pre><code>app = BlackBull(trusted_proxies=['127.0.0.1', '10.0.0.0/8'])
-
-# or register explicitly for more control:
-from blackbull import TrustedProxyMiddleware
-app.use(TrustedProxyMiddleware(['127.0.0.1', '::1']))
-</code></pre>
+        <p>Rewrite conn.client and conn.scheme only behind configured trusted peers.</p>
+<p>Proxies must append the observed peer or overwrite the chain. Standalone
+proto/prefix assertions must replace client-supplied values. Forwarded takes
+precedence over X-Forwarded-For/Proto; walk right to left to the first
+untrusted IP. Trust defaults to loopback. See the reverse-proxy guide.</p>
 
 
 
@@ -6230,33 +6172,11 @@ app.use(TrustedProxyMiddleware(['127.0.0.1', '::1']))
 
     <div class="doc doc-contents ">
 
-        <p>Decorator that marks an async function <strong>or</strong> class as BlackBull middleware.</p>
-<p>Wraps <code>call_next</code> so any <code>send</code> callable the middleware passes to it is
-automatically normalised — Response/JSONResponse objects are converted to
-NativeResponse before reaching the middleware's inner <code>send</code> wrapper.
-The wrapper therefore only ever sees the native representation
-(<code>NativeResponse</code> on the HTTP path — H1 and H2).</p>
-<p>Applied to an async function (signature <code>(conn, receive, send, call_next)</code>)::</p>
-<pre><code>@as_middleware
-async def timing_mw(conn, receive, send, call_next):
-    async def timed_send(event):
-        # event is a NativeResponse on the HTTP path
-        await send(event)
-    await call_next(conn, receive, timed_send)
-</code></pre>
-<p>Applied to a class whose <code>__call__</code> is the middleware coroutine::</p>
-<pre><code>@as_middleware
-class Cache:
-    async def __call__(self, conn, receive, send, call_next):
-        async def cap_send(event):
-            # event is a NativeResponse on the HTTP path
-            ...
-        await call_next(conn, receive, cap_send)
-</code></pre>
-<p>Power users who need to handle raw <code>send</code> arguments (e.g. because their
-middleware is used in a context where no simplified handlers are registered)
-should omit this decorator — their <code>call_next</code> is then wired directly to
-the next handler with no extra wrapping.</p>
+        <p>Decorate a function or class with (conn, receive, send, call_next) middleware.</p>
+<p>Normalize downstream HTTP sends to NativeResponse before the middleware's
+send wrapper. A first request parameter named scope opts into ASGI scope
+and event dictionaries at both edges, including WebSocket events.
+Omit the decorator to handle raw downstream send arguments.</p>
 
 
     </div>

@@ -6023,22 +6023,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>MQTT 5 broker — a non-core "bridge" protocol shipped with BlackBull.</p>
-<p>A <strong>bridge protocol</strong>: it rides the Non-ASGI bridge and shares none of the
-HTTP stack the framework exists to implement.  Its own subpackage keeps that
-boundary explicit and leaves it extractable as a standalone
-<code>blackbull-mqtt</code> distribution.  See <code>docs/guide/mqtt.md</code>.</p>
-<p>Wire it in through the generic extension seam::</p>
-<pre><code>from blackbull import BlackBull
-from blackbull.mqtt import MQTTExtension
-
-app = BlackBull()
-mqtt = app.add_extension(MQTTExtension(port=1883))
-
-@mqtt.on_message(topic='sensors/+/temperature')
-async def on_temp(msg: Message):
-    print(msg.topic, msg.payload)
-</code></pre>
+        <p>MQTT 5 broker through the generic extension mechanism.</p>
+<p>Register MQTTExtension with app.add_extension; HTTP dispatch stays independent.
+See docs/guide/mqtt.md for broker and tap contracts.</p>
 
 
 
@@ -6316,28 +6303,7 @@ registered after that endpoint was wired in.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Yield the compiled <a class="autorefs autorefs-internal" title="Tap
-
-
-  
-      dataclass
-  " href="tap/#blackbull.mqtt.tap.Tap"><code>Tap</code></a> for each registered <code>on_message</code> handler.</p>
-<p>The dispatch-side counterpart of <a class="autorefs autorefs-internal" title="iter_subscriptions()" href="extension/#blackbull.mqtt.extension.MQTTExtension.iter_subscriptions"><code>iter_subscriptions</code></a>: that
-method yields the <em>display</em> form (<code>topic</code> as the application wrote
-it, <code>{name}</code> captures restored) for documentation tools; this yields
-the already-compiled <a class="autorefs autorefs-internal" title="Tap
-
-
-  
-      dataclass
-  " href="tap/#blackbull.mqtt.tap.Tap"><code>Tap</code></a> objects, so a dispatch consumer
-(<code>MQTTTestBroker</code>) can feed them straight to
-<a class="autorefs autorefs-internal" title="run_taps(taps, message, *, raise_exceptions=False)
-
-  
-      async
-  " href="tap/#blackbull.mqtt.tap.run_taps"><code>blackbull.mqtt.tap.run_taps</code></a> without re-parsing the filters.
-Both reflect the handlers registered <em>at call time</em>.</p>
+        <p>Yield compiled tap registrations present at call time.</p>
 
 
     </div>
@@ -6493,11 +6459,7 @@ start with ASCII text.</p>
 
 
 
-        <p>A published message handed to an <code>on_message</code> tap.</p>
-<p>A plain, immutable read-model of one PUBLISH — neither the wire codec
-<code>MQTTPublish</code> nor the actor inbox <code>Message</code> base, both of which it
-sits between.  It takes the bare name anyway, because <code>Message</code> is
-what aiomqtt and paho call this and what users reach for.</p>
+        <p>Immutable published-message view for on_message taps.</p>
 
 
 
@@ -6600,11 +6562,7 @@ coroutine function (its <code>__name__</code>/docstring name the AsyncAPI operat
 
 
 
-        <p>A compiled <code>on_message</code> registration.</p>
-<p><code>match_filter</code> is the topic filter with each <code>{name}</code> segment rewritten
-to <code>+</code> (so the validated <a class="autorefs autorefs-internal" title="topic_matches_filter(topic, filter_str)" href="messages/#blackbull.mqtt.messages.topic_matches_filter"><code>topic_matches_filter</code></a> does the matching);
-<code>captures</code> records the <code>(level_index, name)</code> of each <code>{name}</code> segment
-for binding once a topic matches.</p>
+        <p>Compiled on_message filter with named captures.</p>
 
 
 
@@ -6754,11 +6712,7 @@ messages is preserved and tap latency never reaches the connection or broker.</p
 
     <div class="doc doc-contents ">
 
-        <p>Enqueue <em>message</em> without blocking; drop-newest on overflow.</p>
-<p>Taps are best-effort observability, so a full queue drops the incoming
-message rather than back-pressuring the publisher — but the running
-dropped count is always logged, since silent loss is the one
-unacceptable outcome.</p>
+        <p>Enqueue without blocking; drop newest on overflow and log the dropped count.</p>
 
 
     </div>

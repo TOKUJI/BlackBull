@@ -1395,10 +1395,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#direct-handler-tests" class="md-nav__link">
+  <a href="#direct-asgi-app-calls" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Direct handler tests
+        Direct ASGI app calls
       
     </span>
   </a>
@@ -5969,10 +5969,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#direct-handler-tests" class="md-nav__link">
+  <a href="#direct-asgi-app-calls" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Direct handler tests
+        Direct ASGI app calls
       
     </span>
   </a>
@@ -6074,9 +6074,6 @@ and <strong>a defect on one layer is invisible to the others</strong>.</p>
 </tr>
 </tbody>
 </table>
-<p><code>TestClient</code> used to be the default recommendation.  It is now the
-<strong>ASGI-boundary instrument</strong>, not the everyday one — the reasoning is in
-<a href="#choosing-between-native-and-testclient">Choosing between <code>native</code> and <code>TestClient</code></a>.</p>
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
 <p>Install the testing extras for <code>pytest</code>, <code>pytest-asyncio</code>,
 <code>httpx[http2]</code>, <code>websockets</code>, and <code>hypothesis</code>:</p>
@@ -6215,37 +6212,15 @@ session:</p>
 <li><strong>Plaintext HTTP/1.1 and WebSocket.</strong> TLS and HTTP/2 are out of
   scope for this tier — use the BlackBull clients + ephemeral port
   pattern below, which negotiates ALPN against a real certificate.</li>
-<li><strong>Startup cost is one loopback socket</strong> — no subprocess, no fork.
-  Per-request cost is loopback TCP, well under a millisecond.</li>
+<li><strong>No subprocess or fork.</strong> One loopback listener per context.</li>
 <li><strong>It accepts the way <code>Server</code> does</strong>, connection cap included, so what
   your tests exercise is the accept and read path the server actually ships.</li>
 </ul>
 <h2 id="choosing-between-native-and-testclient">Choosing between <code>native</code> and <code>TestClient</code><a class="headerlink" href="#choosing-between-native-and-testclient" title="Permanent link">&para;</a></h2>
-<p>Both run in-process and neither needs a port, so the difference is not
-speed — it is <em>which code runs</em>.</p>
-<div class="highlight"><pre><span></span><code>native.get(app, '/x')                TestClient(app).get('/x')
-  → Connection                         → httpx.ASGITransport
-  → app(conn, receive, send)           → builds an ASGI scope dict
-  → isinstance(conn, Connection)       → app(scope, receive, send)
-      → True   ← production branch     → isinstance(conn, Connection)
-  → dispatch                               → False
-                                       → Connection.from_scope(scope)
-                                       → dispatch
-</code></pre></div>
-<p><code>TestClient</code> therefore never takes the branch every production request
-takes.  What it <em>uniquely</em> covers is the conversion chain itself: a
-missing <code>_CONNECTION_FIELDS</code> entry, or a coercion bug in
-<code>from_scope()</code>, shows up there and nowhere else — which is exactly why
-it stays, and why BlackBull keeps a CI lane that runs the whole suite
-under <code>BB_FORCE_ASGI_SCOPE=1</code>.</p>
-<p>So:</p>
-<ul>
-<li><strong>Writing an application test?</strong> Use <code>native</code> (or <code>NativeTestServer</code>
-  when the wire matters).</li>
-<li><strong>Deploying under uvicorn, hypercorn, or another ASGI host?</strong> Keep a
-  handful of <code>TestClient</code> tests — they are what proves the boundary
-  still works.</li>
-</ul>
+<p>Use native helpers for application behavior and TestClient for the scope
+conversion used by external-ASGI hosts. Neither exercises wire framing.
+Use NativeTestServer for plaintext HTTP/1.1/WebSocket; use a real server
+and protocol client for HTTP/2 and TLS.</p>
 <h2 id="testclient-the-asgi-boundary"><code>TestClient</code> — the ASGI boundary<a class="headerlink" href="#testclient-the-asgi-boundary" title="Permanent link">&para;</a></h2>
 <p><code>blackbull.testing.TestClient</code> is a synchronous in-memory client
 modelled on <code>httpx.Client</code>: GET / POST / PUT / DELETE all work
@@ -6254,11 +6229,6 @@ dispatched directly into the ASGI app — no socket, no port.
 The ASGI <code>lifespan</code> protocol runs around the <code>with</code> block, so
 <code>@app.on_startup</code> / <code>@app.on_shutdown</code> handlers fire in the
 expected order.</p>
-<p>Its job is the <strong>compatibility boundary</strong>: it drives the app the way
-an external ASGI host does, through a scope dict and <code>from_scope()</code>.
-Everything below still works as documented — it is the recommendation
-that changed, not the API.  For application-logic tests, reach for
-<a href="#quick-start-with-native"><code>native</code></a> instead.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.testing</span><span class="w"> </span><span class="kn">import</span> <span class="n">TestClient</span>
 
@@ -6334,17 +6304,11 @@ for accompanying form fields).  Each <code>files</code> entry is
 <span class="c1"># Custom scheme via httpx.Auth subclass — e.g. a bearer token</span>
 <span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/api/me'</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">'Authorization'</span><span class="p">:</span> <span class="s1">'Bearer abc.def.ghi'</span><span class="p">})</span>
 </code></pre></div>
-<p><strong>Per-request timeout</strong> — pass <code>timeout=</code> (seconds, or an
-<code>httpx.Timeout</code> for finer control):</p>
-<div class="highlight"><pre><span></span><code><span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/slow'</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span>
-</code></pre></div>
-<p>Default timeouts can be passed on the <code>TestClient</code> constructor
-via the <code>headers=</code> / <code>cookies=</code> / <code>follow_redirects=</code> options,
-or set after construction by mutating <code>client.headers</code> /
-<code>client.cookies</code> — both forward to the underlying
-<code>httpx.AsyncClient</code>, so the standard httpx jar semantics apply
-(cookies set by responses persist across subsequent requests on
-the same client).</p>
+<p>ASGITransport does not enforce network read/write timeouts: requests call the
+app in process. Use a test-level deadline for hung application code and a
+real transport when asserting client timeout behavior.</p>
+<p>Default headers, cookies and redirect behavior are constructor options;
+<code>client.headers</code> and <code>client.cookies</code> can also be updated between requests.</p>
 <div class="highlight"><pre><span></span><code><span class="k">with</span> <span class="n">TestClient</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">'X-Test-Tag'</span><span class="p">:</span> <span class="s1">'integration'</span><span class="p">})</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
     <span class="c1"># X-Test-Tag goes out on every request below</span>
     <span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/api/one'</span><span class="p">)</span>
@@ -6704,8 +6668,8 @@ drives the app over an in-process channel — no port, no TCP:</p>
                              <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s1">'Authorization'</span><span class="p">:</span> <span class="sa">f</span><span class="s1">'Bearer </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="s1">'</span><span class="p">})</span>
         <span class="k">assert</span> <span class="n">r</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="mi">0</span><span class="p">][</span><span class="s1">'title'</span><span class="p">]</span> <span class="o">==</span> <span class="s1">'Buy milk'</span>
 </code></pre></div>
-<p><code>httpx[http2]</code> lets you pass <code>http2=True</code> and drive the HTTP/2
-path through the same in-process adapter.</p>
+<p>ASGITransport does not send HTTP/2 frames, even with <code>http2=True</code>.
+Use a socket-based test to exercise the HTTP/2 actor and flow control.</p>
 <p>When to pick which:</p>
 <ul>
 <li><strong><code>NativeTestServer</code></strong> for HTTP/1.1 and WebSocket wire behaviour
@@ -6717,15 +6681,14 @@ path through the same in-process adapter.</p>
 <li><strong><code>httpx.ASGITransport</code></strong> when you are asserting on the ASGI
   boundary and want the async equivalent of <code>TestClient</code>.</li>
 </ul>
-<h2 id="direct-handler-tests">Direct handler tests<a class="headerlink" href="#direct-handler-tests" title="Permanent link">&para;</a></h2>
-<p>For unit-level assertions on a single handler — no transport,
-no routing — call the app callable directly with a hand-rolled
-scope.  <code>BlackBull.__call__</code> is a standard ASGI 3.0 callable so
+<h2 id="direct-asgi-app-calls">Direct ASGI app calls<a class="headerlink" href="#direct-asgi-app-calls" title="Permanent link">&para;</a></h2>
+<p>Call the app with a hand-built scope to assert its emitted ASGI events.
+This includes routing and middleware but no protocol transport.  <code>BlackBull.__call__</code> is a standard ASGI 3.0 callable so
 the stub <code>send</code> is a single-argument coroutine that receives
 event dicts:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span><span class="p">,</span> <span class="n">JSONResponse</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.server.headers</span><span class="w"> </span><span class="kn">import</span> <span class="n">Headers</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.headers</span><span class="w"> </span><span class="kn">import</span> <span class="n">Headers</span>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
@@ -6741,7 +6704,7 @@ event dicts:</p>
         <span class="s1">'method'</span><span class="p">:</span> <span class="n">method</span><span class="p">,</span>
         <span class="s1">'path'</span><span class="p">:</span> <span class="n">path</span><span class="p">,</span>
         <span class="s1">'query_string'</span><span class="p">:</span> <span class="sa">b</span><span class="s1">''</span><span class="p">,</span>
-        <span class="s1">'headers'</span><span class="p">:</span> <span class="n">Headers</span><span class="p">([]),</span>
+        <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[],</span>
         <span class="s1">'state'</span><span class="p">:</span> <span class="p">{},</span>
     <span class="p">}</span>
 

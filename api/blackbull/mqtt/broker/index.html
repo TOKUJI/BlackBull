@@ -5865,25 +5865,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>MQTT 5.0 broker — the routing/session state owner (actor model).</p>
-<p><a class="autorefs autorefs-internal" href="#blackbull.mqtt.broker.BrokerActor"><code>BrokerActor</code></a> is one per app/worker, supervisor/lifespan-owned. It owns
-<em>all</em> routing state (subscriptions, sessions, retained messages, the live
-connection registry) and processes its inbox serially, so there are no locks
-and no shared mutable state. Per-connection actors (see
-<a class="autorefs autorefs-internal" href="../connection/#blackbull.mqtt.connection"><code>blackbull.mqtt.connection</code></a>) <code>send</code> it the Level A messages defined here
-and receive <a class="autorefs autorefs-internal" title="Send
-
-
-  
-      dataclass
-  " href="#blackbull.mqtt.broker.Send"><code>Send</code></a> / <a class="autorefs autorefs-internal" title="Close
-
-
-  
-      dataclass
-  " href="#blackbull.mqtt.broker.Close"><code>Close</code></a> back.</p>
-<p>Because the broker outlives every connection actor, a Will (LWT) routes to live
-subscribers during a peer's teardown with no special-casing.</p>
+        <p>Single-owner MQTT routing and session state.</p>
+<p>Per-connection actors send commands through the serial broker inbox. Keep
+admission, retirement and session mutations on that FIFO boundary.</p>
 
 
 

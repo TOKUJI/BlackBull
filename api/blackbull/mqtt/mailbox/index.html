@@ -5613,23 +5613,13 @@ room for a sentinel. No task is created for a blocked admission.</p>
 
 
 
-        <p>An actor inbox bounded by both message count and queued wire bytes.</p>
-<p><em>maxsize</em> and <em>max_bytes</em> must both be positive; <em>size_of</em> charges each
-message its wire size, and <code>queued_bytes</code> is the running total of what
-is waiting.  A message is admitted only if it fits under both budgets, so
-a mailbox can be full on bytes while nearly empty on count.</p>
-<p>Which of the three refusals you get says what to do about it.
-<code>MailboxTooLarge</code> means the message cannot fit <em>any</em> state of this
-mailbox — draining will not help, and the sender is misconfigured against
-the byte budget.  <code>asyncio.QueueFull</code> from <code>put_nowait</code> means it would
-fit an empty mailbox but not this one; <code>put</code> waits for that room instead
-of raising.  <code>MailboxClosed</code> means the owner has stopped, from
-<code>put</code>/<code>put_nowait</code> at once and from <code>get</code> once what was queued has
-been handed out.</p>
-<p><code>close</code> wakes every waiter without needing room for a sentinel; pass
-<code>discard=True</code> to drop what is still queued rather than let it drain.</p>
-<p><code>docs/about/mqtt-actor-design.md</code> covers which side of an MQTT
-connection waits on space and which side refuses instead.</p>
+        <p>Actor inbox bounded by positive message-count and wire-byte budgets.</p>
+<p>size_of charges queued wire bytes, not heap usage. MailboxTooLarge means a
+message cannot fit even when empty; QueueFull means put_nowait lacks current
+space, while put waits. close wakes all waiters without a sentinel. Puts
+then raise MailboxClosed; gets drain queued items before raising it unless
+close(discard=True) drops them. See docs/about/mqtt-actor-design.md for
+which actors may wait for space without deadlocking.</p>
 
 
 

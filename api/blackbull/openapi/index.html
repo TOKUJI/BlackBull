@@ -5643,36 +5643,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>OpenAPI 3.1 spec generation + Swagger UI for BlackBull apps.</p>
-<p>Walk the router and emit a minimal but valid OpenAPI document describing every
-HTTP route the app exposes.  v1 covers what the router itself already knows:</p>
-<ul>
-<li>paths, methods, scheme (HTTP-only — WebSocket routes are skipped);</li>
-<li>path parameters with schemas derived from the converter (<code>str</code> / <code>int</code> /
-  <code>uuid</code> / <code>path</code>);</li>
-<li>handler docstring → <code>summary</code> / <code>description</code>;</li>
-<li>a stub <code>200</code> response and, for write methods, a permissive
-  <code>requestBody: object</code> placeholder.</li>
-</ul>
-<p>What v1 does <strong>not</strong> do:</p>
-<ul>
-<li>Request-body schemas — handlers do not yet declare body models, so the spec
-  describes them as <code>{"type": "object"}</code>.  Add a model layer (Pydantic or
-  dataclass-with-schema) to lift this.</li>
-<li>Security schemes — auth is application-defined here, so no global
-  <code>securitySchemes</code> are emitted.  Add per-app via the override parameter.</li>
-<li>Tags / grouping — single flat list per path.</li>
-</ul>
-<p>Usage from an app::</p>
-<pre><code>app = BlackBull()
-app.enable_openapi(title='My API', version='1.0.0')
-
-@app.route(path='/items/{item_id:int}')
-async def get_item(item_id: int):
-    return {'id': item_id}
-</code></pre>
-<p>After <code>app.run()</code> the spec is reachable at <code>/openapi.json</code> and the
-Swagger UI at <code>/docs</code>.</p>
+        <p>OpenAPI generation from registered routes.</p>
+<p>Handler docstrings become summary/description. Dataclass annotations provide body schemas; security requires explicit
+configuration. Supply overrides for contracts not expressed by annotations.</p>
 
 
 
@@ -5815,7 +5788,7 @@ ext.init_app(app)</p>
 
     <div class="doc doc-contents ">
 
-        <p>Return a self-contained HTML page hosting Swagger UI pointed at <em>spec_url</em>.</p>
+        <p>Return Swagger UI HTML for spec_url, loading assets from a CDN.</p>
 
 
     </div>

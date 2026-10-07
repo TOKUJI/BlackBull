@@ -5557,20 +5557,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>Worker process entry point for multi-worker deployments.</p>
-<p>Each worker is a forked child that inherits pre-bound socket file descriptors
-from the master, creates a fresh asyncio event loop, and runs a standard
-ASGIServer with those sockets.</p>
+        <p>Forked worker entry point.</p>
+<p>Create a fresh event loop, run lifespan per worker and leave SIGINT handling
+to the master. Workers handle its SIGTERM.</p>
 
-
-<details class="the-worker" open>
-  <summary>The worker</summary>
-  <ul>
-<li>ignores SIGINT (the master handles Ctrl+C and sends SIGTERM to workers)</li>
-<li>runs lifespan independently (startup/shutdown per worker)</li>
-<li>tracks active connections via the ASGIServer connection counter</li>
-</ul>
-</details>
 
 
 
@@ -5611,7 +5601,7 @@ bound_listeners:
     fork — every listener this worker owns, which the master decided from
     each listener's own <code>workers</code> field.
 ssl_context:
-    TLS context to pass to asyncio.start_server, or None for plain HTTP.
+    TLS context for accepted connections, or None for cleartext.
 disowned:
     Listening sockets this worker inherited through fork but does not
     serve — another worker's, or a single-owner listener it does not own.

@@ -6006,10 +6006,7 @@ that opened the block.</p>
 
 
 
-        <p>Base class for client-side reactions to an incoming HTTP/2 frame.</p>
-<p>Subclasses set <code>FRAME_TYPE</code> and implement <code>respond(client)</code>.
-<code>__init_subclass__</code> registers each concrete subclass keyed on its
-<code>FRAME_TYPE</code> so <code>ResponderFactory.create</code> can dispatch by type.</p>
+        <p>Frame responders set FRAME_TYPE and implement respond(client).</p>
 
 
 

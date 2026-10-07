@@ -5838,9 +5838,8 @@ Enforcement targets the QUERY method; other methods registered on the same
 route still receive the <code>Accept-Query</code> header but are not Content-Type-gated.</p>
 <p>Two more RFC 10008 notes:</p>
 <ul>
-<li>The response-cache rules (the cache key must incorporate the request
-  content) bind <em>caches</em>, not origin servers — BlackBull ships no
-  response cache, so nothing to configure.</li>
+<li>QUERY cache keys must include request content. The built-in Cache middleware
+  does not cache QUERY; any cache you add must satisfy that rule.</li>
 <li>OpenAPI 3.1 has no <code>query</code> operation, so QUERY routes are not emitted
   in the <a href="../openapi/">generated spec</a> (they are never faked as another
   operation).</li>
@@ -6010,9 +6009,9 @@ middlewares:</p>
 <p>Declaring a <code>WebSocket</code> parameter gets you the connection as an object.
 The raw <code>(conn, receive, send)</code> triplet is still accepted and still
 supported; a route is classified once, at registration, by whether its
-signature contains both <code>receive</code> and <code>send</code>.  The HTTP simplified-handler
-features — path params, query params, <code>Depends</code> — are not injected into
-WebSocket handlers yet.</p>
+signature contains both <code>receive</code> and <code>send</code>. Simplified WebSocket handlers
+can also inject path/query parameters and Depends providers; see
+<a href="../websockets/#dependency-lifetime-read-this-before-injecting-a-database-handle">dependency lifetime</a>.</p>
 <p>See <a href="../websockets/">WebSockets</a> for the handshake,
 subprotocol negotiation, fragmented messages, <code>permessage-deflate</code>,
 and the RFC 8441 (HTTP/2) transport.</p>

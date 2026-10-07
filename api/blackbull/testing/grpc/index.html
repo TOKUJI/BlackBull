@@ -5579,26 +5579,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>An app-facing seam for testing your own gRPC servicers.</p>
-<p>BlackBull ships a gRPC <strong>server</strong> and no gRPC client, and this module does
-not add one.  What it adds is the boilerplate the framework's own gRPC
-tests repeat — serve the app on an ephemeral h2c port, POST with
-<code>content-type: application/grpc</code>, read the status back out of the
-<em>trailing</em> headers — behind one helper::</p>
-<pre><code>async with GrpcTestServer(app) as grpc:
-    reply = await grpc.unary('/demo.Greeter/SayHello', b'world')
-
-assert reply.status is GrpcStatus.OK
-assert reply.message == b'hi world'
-</code></pre>
-<p>Every gRPC response reports its status in trailing headers, success and
-error alike, so a transport without <code>http.response.trailers</code> never
-observes completion — which is why this runs over a real socket rather than
-in process.  <code>docs/guide/grpc.md</code> argues it under "Why not the in-process
-test client".</p>
-<p>The gRPC analogue of <a class="autorefs autorefs-internal" href="../native/#blackbull.testing.native.NativeTestServer"><code>NativeTestServer</code></a>,
-and the same shape: a real server on a loopback port, the whole dispatch
-path exercised, and the port left public so anything else can drive it.</p>
+        <p>Loopback gRPC test server.</p>
+<p>Status lives in trailers, so an in-process ASGI transport that loses trailers
+cannot establish gRPC completion. This helper does not provide a general gRPC client.</p>
 
 
 

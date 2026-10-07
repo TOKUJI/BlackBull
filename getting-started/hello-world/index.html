@@ -5569,7 +5569,7 @@
 
 
 <h1 id="hello-world">Hello World<a class="headerlink" href="#hello-world" title="Permanent link">&para;</a></h1>
-<p>The minimal BlackBull app — full ASGI 3.0 form.</p>
+<p>A full-form BlackBull handler using a native Connection.</p>
 <div class="highlight"><span class="filename">myapp.py</span><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlackBull</span><span class="p">,</span> <span class="n">Response</span>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
@@ -5588,11 +5588,11 @@
 <div class="highlight"><pre><span></span><code>$<span class="w"> </span>curl<span class="w"> </span>localhost:8000/
 Hello,<span class="w"> </span>world!
 </code></pre></div>
-<p>That's a complete server: an HTTP/1.1 listener bound on
-<code>127.0.0.1:8000</code> with one route registered.  No external server
-process and no separate framework package — <code>BlackBull</code> is both.</p>
+<p>This binds port 8000 on every interface. To bind only loopback, use
+<code>app.run(listeners=[Listener(Tcp(8000, host='127.0.0.1'))])</code> with
+<code>Listener</code> and <code>Tcp</code> imported from <code>blackbull</code>; see <a href="../../guide/listeners/">Listeners</a>.</p>
 <h2 id="the-full-triplet">The full triplet<a class="headerlink" href="#the-full-triplet" title="Permanent link">&para;</a></h2>
-<p>Every HTTP handler receives three arguments:</p>
+<p>Full-form HTTP handlers receive three arguments; simplified handlers can omit them:</p>
 <table>
 <thead>
 <tr>

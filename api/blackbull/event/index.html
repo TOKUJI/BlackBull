@@ -2287,17 +2287,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.event.EventDispatcher.has_listeners" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        has_listeners
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.event.EventDispatcher.intercept" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5610,17 +5599,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.event.EventDispatcher.has_listeners" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        has_listeners
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.event.EventDispatcher.intercept" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5687,26 +5665,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>Event-driven dispatcher.</p>
-<p>Implements the minimal Pub/Sub dispatcher used by <code>BlackBull.on</code> /
-<code>BlackBull.intercept</code>.  Three delivery modes are supported:</p>
-<ul>
-<li><strong>Interception</strong> (<code>intercept</code>): handlers are awaited in registration order;
-  exceptions propagate to the emitter and abort subsequent interceptors.</li>
-<li><strong>Blocking observation</strong> (<code>on(..., blocking=True)</code>): handlers are awaited in
-  registration order <em>before</em> <code>emit</code> returns, but their exceptions are caught
-  and logged — they never reach the emitter or abort siblings.  This is the
-  "observe but block" mode: use it when a side effect must <em>complete</em> within the
-  event's lifetime (resource cleanup on <code>scope_completed</code>) yet must not be
-  able to break the thing that emitted it.</li>
-<li><strong>Observation</strong> (<code>on</code>): handlers are scheduled as independent
-  <code>asyncio.Task</code>s (fire-and-forget); exceptions are caught and logged and
-  never reach the emitter or other observers.</li>
-</ul>
-<p>The two observation modes share isolation (a failing observer is contained);
-they differ only in whether <code>emit</code> waits for them.  Blocking is the right
-default for cleanup that must finish before the request context is gone;
-detached is right for telemetry that must not add latency to the hot path.</p>
+        <p>Event dispatch with three lifetime contracts.</p>
+<p>Interceptors run in order and propagate failures. Blocking observers finish
+before emit returns but isolate failures. Detached observers do not extend
+the event lifetime; use blocking observers for cleanup that must finish first.</p>
 
 
 
@@ -5878,22 +5840,7 @@ logged at WARNING and cancelled.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Drain pending observer tasks during shutdown.</p>
-<p>Waits up to <code>shutdown_timeout</code> seconds (configured at
-construction) for all in-flight observer tasks to complete.  Any
-tasks still running after the timeout are logged at WARNING and
-cancelled.</p>
-<p>Drains to quiescence through <a class="autorefs autorefs-internal" title="drain(timeout=5.0)
-
-  
-      async
-  " href="#blackbull.event.EventDispatcher.drain"><code>drain</code></a>, so an observer that emits
-is waited for too.</p>
-<p>The cost is that a pathological observer chain can hold shutdown for
-the full budget rather than returning early.  Returning early is the
-wrong answer, not a cheaper one, and <code>shutdown_timeout</code> is the
-ceiling — so an observer chain that never quiesces is a bounded
-latency cost at shutdown.</p>
+        <p>Wait up to shutdown_timeout for quiescence; warn and cancel remaining observers.</p>
 
 
     </div>
@@ -5915,20 +5862,8 @@ latency cost at shutdown.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Wait until no detached observer task is outstanding.</p>
-<p>Returns <code>True</code> on quiescence, <code>False</code> if <em>timeout</em> ran out
-first.  <strong>Nothing is cancelled either way</strong> — that is the whole
-difference from <a class="autorefs autorefs-internal" title="aclose()
-
-  
-      async
-  " href="#blackbull.event.EventDispatcher.aclose"><code>aclose</code></a>, which is a shutdown operation and
-kills what overruns.  A test helper that cancelled the work it was
-asked to observe would make the side-effect it exists to reveal
-unobservable.</p>
-<p>Drains to <em>quiescence</em>, not to a snapshot: an observer may itself
-emit, so the set is re-read after every wait and a second generation
-is waited for too.</p>
+        <p>Wait for observer quiescence, including tasks emitted by observers.</p>
+<p>Return False on timeout, True on quiescence; never cancel pending work.</p>
 
 
     </div>
@@ -5968,26 +5903,6 @@ is waited for too.</p>
 observer.  On expiry, cancellation is requested, a warning
 identifies the handler, and dispatch continues without waiting for
 it to stop.  <code>None</code> disables this limit.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.event.EventDispatcher.has_listeners" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">has_listeners</span><span class="p">(</span><span class="n">event_name</span><span class="p">)</span></code>
-
-<a href="#blackbull.event.EventDispatcher.has_listeners" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Return True if any interceptor or observer is registered for <code>event_name</code>.</p>
-<p>One set lookup, and it never inserts an entry for a name nobody has
-registered, so a caller may ask on every event.</p>
 
 
     </div>

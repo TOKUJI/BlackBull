@@ -5699,26 +5699,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Bound, listening sockets for the server to accept on.</p>
-<p>Everything here hands back sockets already through <code>bind()</code> and <code>listen()</code>
-— the caller passes them to the event loop and never binds again.  A bind that
-fails is reported as <code>None</code> (or an absence from the returned list) rather
-than raised, so check what you got back.  Which function to call depends on
-where the socket comes from:</p>
-<ul>
-<li><a class="autorefs autorefs-internal" title="create_dual_stack_sockets(port, backlog=_DEFAULT_BACKLOG, reuseport=False, sndbuf=0, rcvbuf=0, keepalive=True, user_timeout_ms=0, host=None)" href="#blackbull.protocol.rsock.create_dual_stack_sockets"><code>create_dual_stack_sockets</code></a>
-  for a TCP port, one socket per family so both stacks are reached portably.</li>
-<li><a class="autorefs autorefs-internal" title="create_unix_socket(path, backlog=_DEFAULT_BACKLOG, sndbuf=0, rcvbuf=0, mode=432)" href="#blackbull.protocol.rsock.create_unix_socket"><code>create_unix_socket</code></a> for an
-  <code>AF_UNIX</code> path.</li>
-<li><a class="autorefs autorefs-internal" title="adopt_listening_fd(fd)" href="#blackbull.protocol.rsock.adopt_listening_fd"><code>adopt_listening_fd</code></a> when a
-  supervisor bound it — systemd socket activation, or <code>--bind fd://N</code>.</li>
-<li><a class="autorefs autorefs-internal" title="adopt_inherited_sockets()" href="#blackbull.protocol.rsock.adopt_inherited_sockets"><code>adopt_inherited_sockets</code></a>
-  when the master re-exec'd itself and passed its own listeners across.</li>
-</ul>
-<p>The last two return sockets that are <em>already</em> listening; binding them again
-is an error.  <code>SO_REUSEPORT</code> is how several workers share one port, and the
-module constant <code>REUSEPORT_SUPPORTED</code> says whether this host offers it.</p>
-<p>See <code>docs/deployment/unix-and-fd.md</code> for the deployment shapes these serve.</p>
+        <p>Bound and listening sockets.</p>
+<p>Check for None or absent results after bind failure. Adopted sockets are
+already listening and must not be bound again; see docs/deployment/unix-and-fd.md.</p>
 
 
 
@@ -5751,16 +5734,8 @@ module constant <code>REUSEPORT_SUPPORTED</code> says whether this host offers i
 
     <div class="doc doc-contents ">
 
-        <p>Build <code>socket.socket</code> objects from fds inherited across exec.</p>
-<p>Returns <code>None</code> when no inherited fds are advertised (the normal
-cold-start path).  Returns a list of bound, listening sockets when
-the master process has re-exec'd itself for an auto-reload — the
-fds were marked inheritable, the env var <code>BB_INHERIT_FDS</code> was set
-to a comma-separated fd list, and they survived the exec.</p>
-<p>Callers MUST NOT bind/listen on the returned sockets — they are
-already in the listening state from before exec.</p>
-<p>The env var is cleared after adoption so child workers forked from
-this process do not also try to adopt the same fds.</p>
+        <p>Adopt owned listening descriptors advertised by BB_INHERIT_FDS, or return None.</p>
+<p>Do not bind/listen again. Clear the variable so forked workers cannot adopt twice.</p>
 
 
     </div>
@@ -5848,19 +5823,9 @@ multiworker path already handles set_inheritable as needed.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Create one IPv4 socket (<code>0.0.0.0</code>) <strong>and</strong> one IPv6 socket (<code>::</code>),
-both listening on <em>port</em>.</p>
-<p>Naming a <em>host</em> asks for that interface instead, which is one socket in
-one family — the point of naming it is to reach nothing else.</p>
-<p>Using two explicit sockets — each with <code>IPV6_V6ONLY</code> set on the IPv6
-one — is the most portable way to accept both IPv4 and IPv6 connections
-on all major platforms (Linux, macOS, Windows).</p>
-<p>When <em>port</em> is 0 (let the OS pick a free port), the IPv4 socket is bound
-first to obtain the assigned port number, then the IPv6 socket is bound to
-that <strong>same</strong> port.  This guarantees both sockets share a single port,
-which is what callers expect.</p>
-<p>Returns a list that contains whichever sockets were successfully bound
-(typically two, but may be one if the platform lacks IPv6 support).</p>
+        <p>Bind wildcard IPv4/IPv6 listeners, or only the named host's interface.</p>
+<p>port=0 shares the assigned port across families. Return successfully bound
+sockets; IPv6 may be unavailable.</p>
 
 
     </div>

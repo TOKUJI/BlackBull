@@ -972,10 +972,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#when-this-shape-fits-and-when-it-doesnt" class="md-nav__link">
+  <a href="#deployment-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        When this shape fits — and when it doesn't
+        Deployment limits
       
     </span>
   </a>
@@ -5549,10 +5549,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#when-this-shape-fits-and-when-it-doesnt" class="md-nav__link">
+  <a href="#deployment-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        When this shape fits — and when it doesn't
+        Deployment limits
       
     </span>
   </a>
@@ -5591,23 +5591,7 @@
 
 
 <h1 id="edge-inference-serving">Edge inference serving<a class="headerlink" href="#edge-inference-serving" title="Permanent link">&para;</a></h1>
-<p>A recurring deployment shape for local ML models: a
-Raspberry-Pi-class box (often ARM, often headless) runs a model and
-has to serve two very different kinds of traffic at once —</p>
-<ul>
-<li><strong>interactive clients</strong> — browser tabs, <code>curl</code>, <code>httpx</code> — that call
-  an HTTP endpoint and want the answer <em>streamed token by token</em> as
-  it is generated, and</li>
-<li><strong>devices</strong> — sensors, cameras, controllers — that report telemetry
-  and drop batch jobs over <strong>MQTT</strong>, the protocol they already speak.</li>
-</ul>
-<p>The conventional stack for this is three or four moving parts: an
-ASGI server for HTTP, a reverse proxy in front of it for HTTP/2, a
-separate MQTT broker, and whatever glue keeps them coordinated. On
-an edge box every extra part is another daemon to provision, another
-config file, and — on ARM or RISC-V — potentially another native
-dependency to cross-compile.</p>
-<p>BlackBull's bet is that one process can carry the whole surface:</p>
+<p>This example serves SSE token streams and MQTT device traffic in one process.</p>
 <div class="highlight"><pre><span></span><code>                        one Python process
 ┌──────────────────────────────────────────────────────────┐
 │  :8000   HTTP/1.1 · HTTP/2 (h2c, or ALPN with TLS)       │
@@ -5620,11 +5604,10 @@ dependency to cross-compile.</p>
 └──────────────────────────────────────────────────────────┘
     browsers · curl · httpx           devices · workers
 </code></pre></div>
-<p>Everything above is pure Python — no C extensions, so <code>pip install
-blackbull</code> completes on any architecture CPython runs on, with no
-build step and nothing to cross-compile. The runnable version of
-this page is
-<a href="https://github.com/TOKUJI/BlackBull/blob/master/examples/edge_inference.py"><code>examples/edge_inference.py</code></a>.</p>
+<p>The runnable version is
+<a href="https://github.com/TOKUJI/BlackBull/blob/master/examples/edge_inference.py"><code>examples/edge_inference.py</code></a>.
+Use one worker for this example: its HTTP handlers and MQTT tap share
+in-memory readings, while a multi-worker broker belongs only to worker 0.</p>
 <h2 id="the-serving-surface-sse-token-streaming">The serving surface: SSE token streaming<a class="headerlink" href="#the-serving-surface-sse-token-streaming" title="Permanent link">&para;</a></h2>
 <p>Token-streaming inference is a plain streaming handler: iterate the
 model, yield one SSE event per token
@@ -5730,33 +5713,12 @@ messages).</p>
 <li><strong>Queue state lives in this process.</strong> A broker restart clears
   in-flight session state; there is no persistence layer.</li>
 </ul>
-<h2 id="when-this-shape-fits-and-when-it-doesnt">When this shape fits — and when it doesn't<a class="headerlink" href="#when-this-shape-fits-and-when-it-doesnt" title="Permanent link">&para;</a></h2>
-<p>This is deliberately a <em>narrow</em> pitch. It fits when:</p>
-<ul>
-<li>the deployment target is <strong>one box</strong> — an edge device, a
-  single-board computer, a small VM — and you want the whole serving
-  surface in one <code>python app.py</code>;</li>
-<li>clients genuinely benefit from <strong>streamed output</strong> and <strong>HTTP/2
-  multiplexing</strong> (several consumers per connection);</li>
-<li>devices already speak <strong>MQTT</strong> and you'd rather not operate a
-  separate broker for them;</li>
-<li>the target is <strong>ARM / RISC-V / anything without a C toolchain</strong>,
-  where "no native dependencies" is the difference between <code>pip
-  install</code> and an afternoon of cross-compilation.</li>
-</ul>
-<p>It is <em>not</em> the right shape when:</p>
-<ul>
-<li><strong>inference throughput is the bottleneck</strong> — BlackBull moves the
-  bytes; it does not batch, schedule, or accelerate the model. A
-  dedicated inference server in front of the GPU does more for
-  throughput than any web framework choice;</li>
-<li>you need a <strong>fleet-scale message bus</strong> — the broker runs on one
-  worker process, in memory (<a href="../mqtt/#limitations">limitations</a>);
-  it is a device-gateway broker, not a clustered one;</li>
-<li>your stack needs <strong>Trio/AnyIO</strong>, or the other trade-offs in
-  <a href="../../getting-started/why-blackbull/">Is BlackBull right for your project?</a>
-  cut against you.</li>
-</ul>
+<h2 id="deployment-limits">Deployment limits<a class="headerlink" href="#deployment-limits" title="Permanent link">&para;</a></h2>
+<p>BlackBull does not batch, schedule or accelerate model inference. Keep
+blocking model calls off the event loop, bound queued tokens to the memory
+budget, and stop the model when the consumer disconnects. Cancelling an
+<code>asyncio.to_thread</code> task does not stop the running thread.</p>
+<p>The broker is in memory, with one worker owner; see <a href="../mqtt/#limitations">MQTT limitations</a>.</p>
 <h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>blackbull
 python<span class="w"> </span>examples/edge_inference.py

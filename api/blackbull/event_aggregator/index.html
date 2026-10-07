@@ -5841,17 +5841,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Where an actor's internal message becomes an application-facing event.</p>
-<p>BlackBull has two event levels, and they do not meet by accident.  Level A is
-actor-to-actor traffic that application code cannot subscribe to; Level B is
-what <code>@app.on</code> and <code>@app.intercept</code> see.
-<a class="autorefs autorefs-internal" href="#blackbull.event_aggregator.EventAggregator"><code>EventAggregator</code></a> is the single
-seam between them: an actor calls the <code>on_*</code> method for what happened, and
-the aggregator decides the Level B event's name and detail shape.</p>
-<p>That indirection is why the detail dict a listener receives is stable across
-transports — an HTTP/1.1 request, an HTTP/2 stream and an external ASGI host
-reach the same method here and produce the same keys.</p>
-<p><code>docs/guide/events.md</code> lists the events and what each detail carries.</p>
+        <p>Boundary from internal actor traffic to application events.</p>
+<p>Keep application event names and detail shapes transport-independent.
+See docs/guide/events.md for the public contract.</p>
 
 
 
@@ -5933,10 +5925,7 @@ It is a framework-internal component.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Return True if any <code>request_completed</code> handler is registered.</p>
-<p>Cached against the dispatcher's registration generation, so the
-request path can ask on every request and the lookup runs only when
-listeners change.</p>
+        <p>Check request_completed registration; cache invalidates when listeners change.</p>
 
 
     </div>
@@ -5954,11 +5943,7 @@ listeners change.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Return True if any <code>request_disconnected</code> handler is registered.</p>
-<p>Read on the request hot path to decide whether the disconnect-detecting
-receive wrapper needs to be built at all.  Cached against the
-dispatcher's registration generation, so the lookup runs only when
-listeners change.</p>
+        <p>Check request_disconnected registration; cache invalidates when listeners change.</p>
 
 
     </div>
@@ -5976,12 +5961,7 @@ listeners change.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Return True if any <code>websocket_message</code> handler is registered.</p>
-<p>The WebSocket receive path calls this per frame to skip the
-<code>Event</code> + detail-dict allocation and the <code>emit</code> indirection when
-nothing is listening (the common case on a throughput workload).
-Cached against the dispatcher's registration generation, so the
-lookup runs only when listeners change.</p>
+        <p>Check current registration; the cache invalidates when listeners change.</p>
 
 
     </div>
@@ -6235,13 +6215,7 @@ self-hosted path, or an ASGI scope dict only on the <code>BB_FORCE_ASGI_SCOPE</c
 
     <div class="doc doc-contents ">
 
-        <p>Fire Level B <code>websocket_message</code> (<code>conn</code> is a Connection).</p>
-<p>Canonical detail shape <code>{'conn', 'text', 'bytes'}</code> — the shape the
-direct-recipient path and docs/guide/events.md use.</p>
-<p>Guarded like the other <code>on_*</code> methods: with no <code>websocket_message</code>
-listener, the <code>Event</code> + detail-dict allocation and the <code>emit</code>
-indirection are skipped (the cached predicate is the receive path's
-documented skip mechanism).</p>
+        <p>Emit websocket_message with conn/text/bytes detail when listeners exist.</p>
 
 
     </div>

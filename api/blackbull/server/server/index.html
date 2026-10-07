@@ -4872,17 +4872,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.server.Server.open_socket" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        open_socket
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.server.Server.run" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5678,17 +5667,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.server.Server.open_socket" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        open_socket
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.server.Server.run" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5777,27 +5755,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>The listening server: binds sockets, accepts connections, drives lifespan.</p>
-<p><a class="autorefs autorefs-internal" href="#blackbull.server.server.Server"><code>Server</code></a> — <code>ASGIServer</code> is an alias — is
-the object under <code>BlackBull.run()</code>.  It resolves its
-<a class="autorefs autorefs-internal" title="Listener
-
-
-  
-      dataclass
-  " href="../listener/#blackbull.server.listener.Listener"><code>Listener</code></a> set into bound sockets, each
-terminating the TLS context its listener names, and accepts on them through
-<code>_AcceptGate</code>, which counts every accepted descriptor against the connection
-cap on any event loop.  Every accepted
-connection becomes a buffered protocol and, from there, one
-<a class="autorefs autorefs-internal" href="../connection_actor/#blackbull.server.connection_actor.ConnectionActor"><code>ConnectionActor</code></a>.
-<a class="autorefs autorefs-internal" href="#blackbull.server.server.LifespanManager"><code>LifespanManager</code></a> drives the ASGI
-lifespan handshake around all of it.</p>
-<p><code>run()</code> blocks until <code>stop()</code>.  <code>stop()</code> closes the listeners first, then
-lets the requests already in flight finish inside a drain budget instead of
-cancelling them, because a cancelled handler leaves a client holding a
-half-written response.  <code>open_socket()</code> binds without serving — what the
-multi-worker master, and a test that needs a port before it forks, both use.</p>
+        <p>Listener, accept-admission and lifespan ownership.</p>
+<p>Count TLS handshakes from accept. Stop listeners before draining accepted
+work. open_socket binds without serving for embedding and forked workers.</p>
 
 
 
@@ -5833,14 +5793,9 @@ multi-worker master, and a test that needs a port before it forks, both use.</p>
 
 
 
-        <p>Async context manager that drives the ASGI lifespan protocol.</p>
-<p>On enter: launches the app's lifespan task and delivers 'lifespan.startup'.
-Raises RuntimeError if the app responds with 'lifespan.startup.failed'.
-On exit: delivers 'lifespan.shutdown'; 'lifespan.shutdown.failed' raises
-RuntimeError with the app's message.</p>
-<p>Implemented as a class (not asynccontextmanager) so that <strong>aenter</strong> and
-<strong>aexit</strong> can be called independently — e.g. startup() / shutdown() — without
-leaving a zombie async-generator that asyncio tries to finalize on loop close.</p>
+        <p>Drive ASGI startup and shutdown, raising RuntimeError on reported failure.</p>
+<p>Startup and shutdown may be called separately; keep the lifespan task owned
+until shutdown completes.</p>
 
 
 
@@ -6026,28 +5981,6 @@ between "the server's" and "its own".</p>
     <div class="doc doc-contents ">
 
         <p>One buffered protocol per accept; <code>_AcceptGate</code> serves it.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.server.Server.open_socket" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">open_socket</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">unix_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">inherited_fd</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
-
-<a href="#blackbull.server.server.Server.open_socket" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Bind every listener this server was asked for.</p>
-<p>A caller that named <code>listeners=</code> gets those.  A caller that said it
-the old way — a port, a Unix path, or an inherited fd — gets one
-listener built from those arguments, so there is one binding path and
-not two.</p>
 
 
     </div>

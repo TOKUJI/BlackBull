@@ -3564,17 +3564,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages--decoder-return-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Decoder return contract
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.mqtt.messages.ConnectFlags" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5924,17 +5913,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages--decoder-return-contract" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Decoder return contract
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.mqtt.messages.ConnectFlags" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6425,26 +6403,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>MQTT 5.0 control-packet codec.</p>
-<p>Level-A (pure-data) layer for the <code>blackbull-mqtt</code> broker sidecar: the 15
-MQTT 5.0 control packets as frozen dataclasses, a wire encoder/decoder, the
-MQTT 5.0 property system, reason codes, and the topic-filter matching
-algorithm.  No I/O and no broker state live here — that is the job of
-<a class="autorefs autorefs-internal" href="../broker/#blackbull.mqtt.broker"><code>blackbull.mqtt.broker</code></a> and <a class="autorefs autorefs-internal" href="../connection/#blackbull.mqtt.connection"><code>blackbull.mqtt.connection</code></a>.</p>
-
-
-<details class="reference" open>
-  <summary>MQTT Version 5.0, OASIS Standard</summary>
-  <p>https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html</p>
-</details>        <h4 id="blackbull.mqtt.messages--decoder-return-contract">Decoder return contract<a class="headerlink" href="#blackbull.mqtt.messages--decoder-return-contract" title="Permanent link">&para;</a></h4>
-<p><a class="autorefs autorefs-internal" title="decode_packet(data)" href="#blackbull.mqtt.messages.decode_packet"><code>decode_packet</code></a> returns the decoded message object.  Every message also
-unpacks into <code>(message, bytes_consumed)</code> so a caller walking a buffer of
-concatenated packets can advance its offset::</p>
-<pre><code>msg = decode_packet(buf)            # attribute access / isinstance
-msg, consumed = decode_packet(buf)  # buffer-walking
-</code></pre>
-<p>This dual ergonomics is provided by <code>MQTTMessage.__iter__</code>; the consumed
-count is recorded on the instance during decode.</p>
+        <p>Pure MQTT 5 packet codec, without I/O or broker state.</p>
+<p>Decoded messages also unpack as (message, bytes_consumed) for buffer walking.
+Packet property and direction rules follow the MQTT 5 OASIS specification.</p>
 
 
 
@@ -7400,14 +7361,9 @@ refusal of that filter alone (§3.9).</p>
 
 
 
-        <p>SUBSCRIBE — ask for one or more topic filters (§3.8).</p>
-<p><code>subscriptions</code> pairs each filter with its maximum QoS.  <code>packet_id</code>
-defaults to <code>None</code> only so the field can be passed by keyword; §3.8.2
-requires one, and construction without it raises.</p>
-<p><code>subscription_options</code> is the §3.8.3.1 per-entry options — <code>no_local</code>,
-<code>retain_as_published</code>, <code>retain_handling</code> — as one dict per entry in
-<code>subscriptions</code>.  Decoding always fills it; hand-built packets may leave
-it <code>None</code> to take the defaults.</p>
+        <p>Subscribe to (filter, max_qos) pairs with a required packet_id.</p>
+<p>subscription_options carries per-entry no_local/retain_as_published/
+retain_handling. Decoding fills it; None on hand-built packets uses defaults.</p>
 
 
 
@@ -7512,11 +7468,7 @@ were listed (§3.11).</p>
 
 
 
-        <p>UNSUBSCRIBE — drop the listed topic filters (§3.10).</p>
-<p><code>topics</code> holds the filters as subscribed, matched literally rather than
-by wildcard expansion.  <code>packet_id</code> defaults to <code>None</code> only so the
-field can be passed by keyword; §3.10.2 requires one, and construction
-without it raises.</p>
+        <p>Unsubscribe literal registered filters; packet_id is required.</p>
 
 
 
@@ -7936,12 +7888,7 @@ Raises <a class="autorefs autorefs-internal" href="#blackbull.mqtt.messages.Inco
 
     <div class="doc doc-contents ">
 
-        <p>§3.3.1 — DUP (bit 3), QoS (bits 2-1), RETAIN (bit 0).</p>
-<p>QoS is two bits, so the field can hold 3, and §3.3.1-4 says a PUBLISH
-with both QoS bits set is a <strong>Malformed Packet</strong>.  Masking alone
-returned it as a value: nothing downstream acknowledged qos 3 (only 1
-and 2 have an ack path), so such a packet was routed and retained with
-no acknowledgement at all -- delivered, and invisible.</p>
+        <p>Decode DUP/QoS/RETAIN (MQTT §3.3.1); reject QoS=3 as malformed.</p>
 
 
     </div>
@@ -8108,10 +8055,8 @@ subscriptions (§4.8.2).</p>
 
     <div class="doc doc-contents ">
 
-        <p>§4.7.1 — Validate a subscription Topic <em>Filter</em>.</p>
-<p>Returns True when valid; raises <code>ValueError</code> describing the first
-rule violated.  Enforces single-<code>#</code> / terminal-<code>#</code> / whole-level
-wildcard rules (§4.7.1.2-3) and the <code>$share</code> share-name rule (§4.8.2).</p>
+        <p>Validate MQTT §4.7.1/§4.8.2 wildcard and shared-subscription grammar.</p>
+<p>Return True when valid, False on NUL; raise ValueError for other violations.</p>
 
 
     </div>

@@ -5701,22 +5701,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Per-connection rescheduled deadline.</p>
-<p>No per-connection asyncio timer.  One singleton <code>TimerHandle</code> per
-process re-arms itself every <code>_TICK_S</code> and walks the registry of
-armed <a class="autorefs autorefs-internal" href="#blackbull.server.deadline.ConnectionDeadline"><code>ConnectionDeadline</code></a> instances for expirations, so arming
-costs a <code>loop.time()</code>, a comparison and a set insertion — ~0.34 µs
-against the ~1.7 µs of a <code>TimerHandle</code> plus heap push plus cancel.</p>
-<p>Trade-off: a fired deadline lands within <code>[now, now + _TICK_S]</code>
-rather than at the exact requested instant.  At the default
-<code>_TICK_S = 0.3 s</code> this is ~3 % slop on the tightest configurable
-deadline (<code>BB_HEADER_TIMEOUT</code> default 10 s) and ~1 % on the
-<code>body_timeout</code> default 30 s.  Tune via <code>BB_DEADLINE_TICK_MS</code>
-(milliseconds, default 300, floor 10).</p>
-<p>The scanner is loop-scoped and lazily started on the first <code>arm</code>;
-it quiesces (cancels its own handle) when the registry empties and
-auto-resurrects on the next <code>arm</code>.  Each worker process has its
-own scanner.</p>
+        <p>Loop-scoped shared deadline scanner.</p>
+<p>Enforcement can lag by one BB_DEADLINE_TICK_MS interval. The registry must
+quiesce when empty and resume on the next arm; each worker owns its scanner.</p>
 
 
 
@@ -5873,24 +5860,9 @@ single task that constructed it.</p>
 
 
 
-        <p>Bounds a drain on a connection's writer, via the same scanner.</p>
-<p>Rides in <code>_Scanner._REGISTRY</code> alongside
-<a class="autorefs autorefs-internal" href="#blackbull.server.deadline.ConnectionDeadline"><code>ConnectionDeadline</code></a> — the scanner only needs
-<code>_deadline_at</code> and <code>_fire_from_scanner</code>.  Two differences from
-that class, both forced by the write path:</p>
-<p><em>Binding is per-arm, not per-construction.</em>  HTTP/2 drains the one
-connection-level writer from per-stream tasks, so the task to cancel
-is whichever one is parked in <code>drain()</code> right now — not whichever
-one happened to build the writer.</p>
-<p><em>One owner at a time.</em>  Concurrent drains are not nested drains, so
-a second entrant does not re-arm and does not interpret a firing —
-it simply rides along.  Two tasks can only be inside <code>drain()</code>
-simultaneously when the transport is paused, which is precisely the
-slow-read shape the timeout defends against; letting a later drain
-push the deadline out would let a peer that dribbles
-acknowledgements hold the connection open indefinitely.  When the
-owner's deadline fires it closes the transport, which is what
-resolves the riders.</p>
+        <p>Bound writer drain with a task owner selected per arm.</p>
+<p>Concurrent riders must not rearm or interpret firing. The owner closes the
+transport on deadline, resolving every rider; one shared scanner serves all.</p>
 
 
 
@@ -5936,18 +5908,9 @@ resolves the riders.</p>
 
 
 
-        <p>Per-connection WebSocket idle state, riding the shared tick scanner.</p>
-<p>Inline reading (the default) services PING/CLOSE only when the handler
-calls <code>receive()</code>.  A handler that goes quiet — long work between
-reads, or send-only — stops servicing control frames, and (with a
-<code>websocket_message</code> listener) stops producing events.  This watchdog
-bounds both: while a connection has been quiet for more than one tick,
-the scanner fires the connection's callback roughly every tick, and the
-callback services buffered control frames / starts the deferred reader.</p>
-<p>Registry state plus a callback, under this module's no-per-connection-timer
-rule, re-armed on every fire so it keeps watching until <a class="autorefs autorefs-internal" title="disarm()" href="#blackbull.server.deadline.WsIdleWatchdog.disarm"><code>disarm</code></a>.
-<code>touch()</code> on each receive/send keeps an actively-driven connection from
-ever firing.</p>
+        <p>Service quiet WebSocket control/deferred reads through the shared scanner.</p>
+<p>Receive/send touch activity; disarm removes the watch. Quiet connections
+invoke the callback roughly each tick without per-connection timer handles.</p>
 
 
 

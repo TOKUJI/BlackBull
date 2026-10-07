@@ -5623,9 +5623,7 @@ admin port bound to loopback — you state them directly instead:</p>
     <span class="n">Listener</span><span class="p">(</span><span class="n">Tcp</span><span class="p">(</span><span class="mi">9443</span><span class="p">),</span> <span class="n">tls</span><span class="o">=</span><span class="n">tls</span><span class="p">),</span>         <span class="c1"># and another</span>
 <span class="p">],</span> <span class="n">workers</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
 </code></pre></div>
-<p>All four run in <strong>one process</strong>, and every worker serves every one of them.
-Before listeners existed this deployment cost four processes, each with the
-full worker count.</p>
+<p>All four HTTP listeners run in each worker process.</p>
 <h2 id="what-a-listener-says">What a listener says<a class="headerlink" href="#what-a-listener-says" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="n">Listener</span><span class="p">(</span><span class="n">where</span><span class="p">,</span> <span class="n">speaks</span><span class="o">=</span><span class="s1">'http'</span><span class="p">,</span> <span class="n">tls</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
@@ -5741,7 +5739,8 @@ reclaims the lifespan task before the original startup exception is reported.</p
 </table>
 <p>A raising <code>@app.on_shutdown</code> hook therefore makes a single-worker process log
 the failure and exit <code>1</code>, so a supervisor can act on it.  With <code>workers &gt; 1</code>
-or <code>--reload</code> the master exits <code>0</code>; check the workers' logs.</p>
+or <code>--reload</code>, failed worker cleanup also makes the master exit non-zero;
+check the workers' logs for the cause.</p>
 <p><strong>Signals.</strong>  <code>SIGINT</code> and <code>SIGTERM</code> both run the shutdown.  <code>SIGTERM</code> lets
 in-flight requests finish for up to
 <a href="../../reference/env-vars/#connection-limits-and-timeouts"><code>BB_WORKER_DRAIN_TIMEOUT</code></a>;

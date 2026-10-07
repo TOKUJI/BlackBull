@@ -5904,8 +5904,7 @@ read can only ever report that the handshake started:</p>
 <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">received</span>                  <span class="c1"># every frame read, in order</span>
 </code></pre></div>
 <p><code>result.received</code> holds everything a read step took off the wire, in
-order; <code>result.response</code> stays the most recent one.  Before both existed,
-a second read overwrote the first and the loss was silent.</p>
+order; <code>result.response</code> stays the most recent one.</p>
 <h3 id="closing-the-connection-three-ways-not-two">Closing the connection: three ways, not two<a class="headerlink" href="#closing-the-connection-three-ways-not-two" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -5942,8 +5941,8 @@ report a pass while exercising the keep-alive path.</p>
 <li><strong>gRPC</strong> has no fault injection of its own.  gRPC rides HTTP/2, so
   <code>H2FaultServer</code> already misbehaves <em>beneath</em> a gRPC client at the
   transport layer — but gRPC-specific faults (an invalid <code>grpc-status</code>,
-  a malformed length-prefixed message, a trailers-only response) cannot
-  be expressed.</li>
+  a malformed length-prefixed message, a trailers-only response) have no
+  dedicated typed API or catalogue. Raw-byte steps can construct them.</li>
 <li><strong>MQTT</strong> has none and is not planned to.  The broker is server-side by
   design and fault injection for it is out of scope.</li>
 <li><strong>WebSocket</strong> has none in either direction.</li>
@@ -5996,8 +5995,8 @@ context with ALPN <code>h2</code> advertised:</p>
         <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">wait_for</span><span class="p">(</span><span class="n">client</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'/'</span><span class="p">),</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
 </code></pre></div>
 <p>Omitting <code>ssl_context=</code> runs the server as plaintext h2c — fine for
-prior-knowledge clients, but httpx / curl / hyper-h2 only negotiate
-HTTP/2 via ALPN over TLS, so most real clients need the TLS path.</p>
+prior-knowledge clients such as <code>curl --http2-prior-knowledge</code>. For clients
+that require ALPN, such as httpx, supply the TLS context.</p>
 <p>After each connection, <code>fault_server.last_result</code> is a
 <code>ScenarioH2Result</code> carrying step-completion count, byte counters,
 whether a <code>WaitForClientFrame</code> step timed out, and the
@@ -6051,7 +6050,7 @@ connection:</p>
             <span class="n">match</span><span class="o">=</span><span class="p">{</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'HEADERS'</span><span class="p">,</span> <span class="s1">'stream_id'</span><span class="p">:</span> <span class="mi">1</span><span class="p">},</span>
             <span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">,</span>
         <span class="p">),</span>
-        <span class="c1"># Emit a malformed frame (illegal frame type 0xFF).</span>
+        <span class="c1"># Emit an unknown frame type; outside a field block the peer must ignore it.</span>
         <span class="n">SendRawBytes</span><span class="p">(</span><span class="sa">b</span><span class="s1">'</span><span class="se">\x00\x00\x00\xff\x00\x00\x00\x00\x01</span><span class="s1">'</span><span class="p">),</span>
         <span class="c1"># Pause so the client has time to react.</span>
         <span class="n">H2Sleep</span><span class="p">(</span><span class="mf">0.5</span><span class="p">),</span>
@@ -6068,7 +6067,7 @@ connection:</p>
   framework's frame factory.  Most frames carry their own type byte,
   flags, stream id, and payload.</li>
 <li><code>SendRawBytes(data, byte_interval=0.0)</code> — escape hatch for bytes
-  the typed factory cannot construct (illegal type bytes, oversize
+  the typed factory cannot construct (unknown type bytes, oversize
   frames, malformed length fields).  <code>byte_interval &gt; 0</code> trickles
   byte-by-byte for slowloris patterns.</li>
 <li><code>WaitForClientFrame(match, timeout=5.0)</code> — pause until an inbound
@@ -6331,8 +6330,6 @@ code path — and carry no equivalent lock.</p>
 </tr>
 </tbody>
 </table>
-<p>It was previously two files, one per protocol.  A file per cell would have
-meant four, and the next cell five.</p>
 <p>Cells B and C need <code>pip install 'blackbull[fault-injection]'</code>; without it
 they report themselves skipped rather than failing.</p>
 <p>Cell B's output is worth reading for the two rows that come back <strong>200</strong>:

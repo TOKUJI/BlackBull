@@ -5557,16 +5557,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Serving files off the filesystem.</p>
-<p><a class="autorefs autorefs-internal" href="#blackbull.middleware.static.StaticFiles"><code>StaticFiles</code></a> is the whole public
-surface: conditional requests, byte ranges, precompressed siblings and the
-optional in-memory cache all live behind it.  <code>docs/guide/static-files.md</code>
-is where to read about when to turn each of those on.</p>
-<p>Importing this module has one effect beyond defining that class: it registers
-<code>.woff</code>, <code>.woff2</code>, <code>.webp</code>, <code>.avif</code> and <code>.wasm</code> with the standard
-<code>mimetypes</code> module, which slim container images often lack.  The
-registration is process-wide and benefits every caller of
-<code>mimetypes.guess_type</code>, not only this middleware.</p>
+        <p>Static-file middleware.</p>
+<p>Import registers additional MIME types process-wide. Usage, containment and
+cache visibility contracts are in docs/guide/static-files.md.</p>
 
 
 
@@ -5658,22 +5651,11 @@ opt-in cache in particular, and why it is off by default.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serve files from <code>directory</code> (or <code>root_dir</code>).</p>
-<p><code>index</code> (default <code>None</code> — off): when set to a filename (e.g.
-<code>'index.html'</code>), a request that resolves to a <em>directory</em> is
-served that file from inside the directory if it exists.  Left off, a
-request that resolves to a directory is not served at all; the
-<code>blackbull serve</code> CLI turns it on to match <code>python -m
-http.server</code>'s directory-index behaviour.</p>
-<p><code>cache</code> (default <code>False</code>): when <code>True</code>, small file bodies are
-held in a bounded in-memory <code>OrderedDict</code> and the <code>stat()</code>
-syscall is throttled.  When <code>False</code>, every request stats and
-reads afresh.  Turn it on only where BlackBull terminates static
-traffic itself, with no nginx or CDN in front.</p>
-<p><code>conditional</code> (default <code>True</code>): emit <code>ETag</code> + <code>Last-Modified</code>
-validators and honour <code>If-None-Match</code> / <code>If-Modified-Since</code> with a
-304.  Set <code>False</code> to suppress validators (e.g. the <code>blackbull
-serve --no-etag</code> path).</p>
+        <p>Serve directory or root_dir; at least one must be supplied.</p>
+<p>index=None disables directory indexes. cache=True holds small bodies in a
+bounded per-worker cache; its validation TTL can delay on-disk edits.
+conditional=False disables validators and 304 responses. See
+docs/guide/static-files.md for cache, traversal and production-mode limits.</p>
 
 
     </div>

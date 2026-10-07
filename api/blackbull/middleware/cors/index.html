@@ -5557,13 +5557,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Cross-Origin Resource Sharing.</p>
-<p><a class="autorefs autorefs-internal" href="#blackbull.middleware.cors.CORS"><code>CORS</code></a> answers preflight <code>OPTIONS</code> requests
-itself and attaches the headers a browser needs before it will hand a
-cross-origin response to page script.  A request with no <code>Origin</code>, or an
-<code>Origin</code> the configuration does not allow, passes through untouched — this
-middleware never refuses a request, because the enforcement happens in the
-browser.</p>
+        <p>CORS response headers and preflight handling.</p>
+<p>CORS is browser enforcement, not server authorization. Unallowed origins
+pass through without granting cross-origin access.</p>
 
 
 

@@ -5591,22 +5591,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Canned-misbehaviour catalogue for HTTP/2 client testing.</p>
-<p>Each function returns a <a class="autorefs autorefs-internal" title="ScenarioH2
-
-
-  
-      dataclass
-  " href="../#blackbull.fault_injection.ScenarioH2"><code>ScenarioH2</code></a>
-that drives <a class="autorefs autorefs-internal" href="../#blackbull.fault_injection.H2FaultServer"><code>H2FaultServer</code></a> through
-one well-known misbehaviour pattern: one named pathology per scenario,
-so a suite can <code>parametrize</code> over the set.  The four spec-grade
-categories they cover — half-closed streams, exhausted flow-control
-windows, illegal SETTINGS, weird frame sequences — are tabulated in
-<code>docs/guide/fault_injection.md</code> against the builder for each.</p>
-<p>Catalogue entries are pure builders.  They allocate nothing at
-import time, take no I/O, and the returned scenario is immutable;
-two consecutive calls to the same builder are interchangeable.</p>
+        <p>Named fault-scenario builders.</p>
+<p>Builders perform no I/O and allocate no scenarios at import. Returned
+scenarios are immutable; use them in parametrized resilience tests.</p>
 
 
 

@@ -1206,15 +1206,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#patterns-and-pitfalls-from-real-extractions" class="md-nav__link">
+  <a href="#packaging-an-extension" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Patterns and pitfalls from real extractions
+        Packaging an extension
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Patterns and pitfalls from real extractions">
+    <nav class="md-nav" aria-label="Packaging an extension">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1296,17 +1296,6 @@
         
       </ul>
     </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#common-extension-categories" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Common extension categories
-      
-    </span>
-  </a>
   
 </li>
       
@@ -5764,15 +5753,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#patterns-and-pitfalls-from-real-extractions" class="md-nav__link">
+  <a href="#packaging-an-extension" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Patterns and pitfalls from real extractions
+        Packaging an extension
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Patterns and pitfalls from real extractions">
+    <nav class="md-nav" aria-label="Packaging an extension">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -5857,17 +5846,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#common-extension-categories" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Common extension categories
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -5946,8 +5924,6 @@ through the existing <code>app.*</code> APIs:</p>
         <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hello</span><span class="p">():</span>
             <span class="k">return</span> <span class="p">{</span><span class="s1">'message'</span><span class="p">:</span> <span class="sa">f</span><span class="s1">'</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_greeting</span><span class="si">}</span><span class="s1"> from extension'</span><span class="p">}</span>
 
-        <span class="c1"># Keep a reference so the registered handler is not GC'd</span>
-        <span class="c1"># if the user does not retain it.</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">_handler</span> <span class="o">=</span> <span class="n">hello</span>
 
 
@@ -6133,12 +6109,7 @@ simply pass a middleware callable through it:</p>
 <p>See <a href="../middleware/">Middleware</a> for the full middleware
 contract, including how to short-circuit the chain and how to
 inspect responses via <code>intercepting_send</code>.</p>
-<h2 id="patterns-and-pitfalls-from-real-extractions">Patterns and pitfalls from real extractions<a class="headerlink" href="#patterns-and-pitfalls-from-real-extractions" title="Permanent link">&para;</a></h2>
-<p>The following notes come from packaging an in-tree middleware
-(<code>blackbull.middleware.Session</code>) as the standalone
-<a href="https://github.com/TOKUJI/blackbull-session"><code>blackbull-session</code></a>
-extension during the 0.38 cycle.  They are concrete decisions, not
-hypothetical advice.</p>
+<h2 id="packaging-an-extension">Packaging an extension<a class="headerlink" href="#packaging-an-extension" title="Permanent link">&para;</a></h2>
 <h3 id="pick-a-dependencies-floor-that-matches-what-you-import">Pick a <code>dependencies</code> floor that matches what you import<a class="headerlink" href="#pick-a-dependencies-floor-that-matches-what-you-import" title="Permanent link">&para;</a></h3>
 <p><code>app.extensions</code> landed in BlackBull 0.36.0.
 An extension that touches it must pin at least that floor:</p>
@@ -6152,12 +6123,11 @@ Don't pin an exact version; that fights with downstream apps that
 want a different patch level.</p>
 <h3 id="reuse-the-frameworks-public-middleware-helpers">Reuse the framework's public middleware helpers<a class="headerlink" href="#reuse-the-frameworks-public-middleware-helpers" title="Permanent link">&para;</a></h3>
 <p>Two BlackBull APIs are useful to extension authors and are
-guaranteed-stable public surface:</p>
+public APIs; respect the declared minimum BlackBull version:</p>
 <ul>
-<li><code>from blackbull.middleware import as_middleware</code> — class
-  decorator that normalises <code>call_next</code> so any <code>send</code> wrapper your
-  middleware installs receives plain ASGI event dicts, not
-  <code>Response</code> objects.  Saves you from <code>isinstance</code> guards.</li>
+<li><code>from blackbull.middleware import as_middleware</code> — normalizes <code>Response</code>
+  objects for the active native or external-ASGI lane. A send wrapper must
+  handle that lane's messages; see <a href="../middleware/">Middleware</a>.</li>
 <li><code>from blackbull.asgi import ASGIEvent</code> — symbolic constants for
   ASGI event type strings (<code>HTTP_RESPONSE_START</code>, etc.).  Prefer
   these over hard-coded literals.</li>
@@ -6228,103 +6198,9 @@ construction:</p>
         <span class="p">)</span>
         <span class="o">...</span>
 </code></pre></div>
-<p>Schedule the removal with <strong>two gates: at least three MINOR releases
-ahead AND at least one calendar month after the deprecation lands</strong> —
-whichever boundary is later.  For a deprecation announced in v0.38.0
-on 2026-06-14, both gates put the earliest removal at v0.41.0 or
-later, and not before 2026-07-14.  Naming both gates in the warning
-text (rather than a single bare version target) anchors authors and
-users alike and forecloses cargo-cult removal at the release-count
-gate alone.  Early-alpha status does not shorten this window: users
-plan migrations against the announced removal target, and a
-too-short window forces emergency migrations.  At the same time,
-don't ship a deprecation without <em>some</em> removal plan — "deprecated
-forever" code accretes maintenance debt without the migration
-benefit.</p>
-<h2 id="common-extension-categories">Common extension categories<a class="headerlink" href="#common-extension-categories" title="Permanent link">&para;</a></h2>
-<p>BlackBull's core ships protocols, routing, middleware, events,
-error handling, and a minimal OpenAPI generator.  Almost everything
-else is deliberately <em>not</em> in the framework — partly to keep the
-core small and audited, partly because most of these categories
-have several reasonable shapes and BlackBull does not endorse one.
-The table below is informational, not a roadmap; ship one of these
-as <code>blackbull-&lt;name&gt;</code> on PyPI and it becomes a citizen of the
-extension ecosystem.</p>
-<table>
-<thead>
-<tr>
-<th>Category</th>
-<th>Reasonable shapes (pick one per extension)</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>Sessions</strong></td>
-<td>signed cookie (<a href="https://github.com/TOKUJI/blackbull-session"><code>blackbull-session</code></a>), Redis-backed, SQL-backed</td>
-<td>Signed cookies have no server state; backed stores allow revocation.</td>
-</tr>
-<tr>
-<td><strong>Authentication</strong></td>
-<td>JWT bearer, OAuth2 PKCE, API keys, session-cookie auth, mutual TLS, HMAC-signed requests</td>
-<td>BlackBull does not ship a blessed auth method.  Pick the one that matches your threat model and credential lifecycle.</td>
-</tr>
-<tr>
-<td><strong>Authorization / RBAC</strong></td>
-<td>per-route decorators, policy objects (Casbin-style), scope-based</td>
-<td>Often composes with an auth extension via <code>app.extensions['auth']</code>.</td>
-</tr>
-<tr>
-<td><strong>Observability</strong></td>
-<td>Prometheus metrics, OpenTelemetry tracing, structured access logs, Sentry error reporting</td>
-<td>The <code>blackbull.*</code> and <code>blackbull.access</code> loggers are the natural hook points; see <a href="../logging/">Logging</a>.</td>
-</tr>
-<tr>
-<td><strong>Rate limiting</strong></td>
-<td>token bucket, leaky bucket, sliding window; in-process / Redis-backed</td>
-<td>Best wired through <code>app.intercept('before_handler')</code>.</td>
-</tr>
-<tr>
-<td><strong>Caching</strong></td>
-<td>response cache (already in tree as <code>Cache</code> middleware), fragment cache, full-page edge cache</td>
-<td>Re-extraction of <code>Cache</code> is an option once user signal warrants.</td>
-</tr>
-<tr>
-<td><strong>Database integration</strong></td>
-<td>SQLAlchemy async, Tortoise, raw <code>asyncpg</code>, SQLite via <code>aiosqlite</code></td>
-<td>Connection-pool lifecycle ties to <code>@app.on('lifespan_startup')</code> / <code>lifespan_shutdown</code>.</td>
-</tr>
-<tr>
-<td><strong>Background tasks</strong></td>
-<td>in-process <code>asyncio.create_task</code> helpers, ARQ bridge, Celery bridge</td>
-<td>Mind shutdown ordering: drain in <code>lifespan_shutdown</code> before pools close.</td>
-</tr>
-<tr>
-<td><strong>Admin / dashboards</strong></td>
-<td>route-mount admin UIs, OpenAPI-driven CRUD</td>
-<td>Most depend on an auth extension being already wired.</td>
-</tr>
-<tr>
-<td><strong>CORS / CSRF / security headers</strong></td>
-<td><code>CORS</code> (already in tree), CSP / HSTS injectors, double-submit CSRF</td>
-<td>Single-touchpoint middlewares — straightforward to ship as extensions if your variant differs from the in-tree default.</td>
-</tr>
-<tr>
-<td><strong>WebSocket helpers</strong></td>
-<td>room/channel managers, pub-sub bridges (Redis, NATS), broadcast routers</td>
-<td>Build on the <a href="../websockets/"><code>scheme=Scheme.websocket</code></a> route form.</td>
-</tr>
-<tr>
-<td><strong>Static / templates</strong></td>
-<td>static-file extras (already in tree), Jinja2 / Mako / minify-html bridges</td>
-<td>Templates are usually a library, not an extension — call them from your handler.</td>
-</tr>
-</tbody>
-</table>
-<p>The framework does not curate this list — there's no
-"blessed extension" registry.  If you want others to find your
-extension, the discovery path is PyPI search for <code>blackbull-</code> and
-linking to your project from your own documentation.</p>
+<p>Schedule removal at least three MINOR releases and one calendar month after
+announcing the deprecation, using whichever boundary is later. State both
+gates and the replacement in the warning so users can plan their migration.</p>
 
 
 

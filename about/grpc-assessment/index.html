@@ -70,7 +70,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#grpc-over-blackbull-assessment" class="md-skip">
+        <a href="#grpc-design" class="md-skip">
           Skip to content
         </a>
       
@@ -5394,76 +5394,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-grpc-over-http2-needs" class="md-nav__link">
+  <a href="#streaming-and-cancellation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What gRPC over HTTP/2 needs
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-blackbull-provides-today" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What BlackBull provides today
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-sprint-32-unlocks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What Sprint 32 unlocks
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#whats-still-missing-for-a-minimum-grpc-server" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What's still missing for a minimum gRPC server
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#effort-estimate" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Effort estimate
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#open-question" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Open question
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-shipped-vs-whats-deferred" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What shipped vs. what's deferred
+        Streaming and cancellation
       
     </span>
   </a>
@@ -5524,76 +5458,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-grpc-over-http2-needs" class="md-nav__link">
+  <a href="#streaming-and-cancellation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What gRPC over HTTP/2 needs
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-blackbull-provides-today" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What BlackBull provides today
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-sprint-32-unlocks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What Sprint 32 unlocks
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#whats-still-missing-for-a-minimum-grpc-server" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What's still missing for a minimum gRPC server
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#effort-estimate" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Effort estimate
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#open-question" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Open question
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-shipped-vs-whats-deferred" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What shipped vs. what's deferred
+        Streaming and cancellation
       
     </span>
   </a>
@@ -5620,257 +5488,23 @@
   
 
 
-<h1 id="grpc-over-blackbull-assessment">gRPC over BlackBull — assessment<a class="headerlink" href="#grpc-over-blackbull-assessment" title="Permanent link">&para;</a></h1>
-<blockquote>
-<p><strong>Status update (Sprint 57): unary gRPC has shipped.</strong>  The sections
-below were written as a pre-implementation <em>assessment</em>; they are kept
-for the streaming/back-pressure analysis, which is still accurate for
-the Phase 2 work that has <strong>not</strong> shipped.  For how to use what exists
-today, see the <a href="../../guide/grpc/">gRPC guide</a>.  The architecture
-decision behind the shipped implementation is recorded immediately
-below.</p>
-</blockquote>
+<h1 id="grpc-design">gRPC design<a class="headerlink" href="#grpc-design" title="Permanent link">&para;</a></h1>
 <h2 id="design-decision-grpc-rides-the-asgi-bridge-not-a-new-actor">Design decision: gRPC rides the ASGI bridge, not a new Actor<a class="headerlink" href="#design-decision-grpc-rides-the-asgi-bridge-not-a-new-actor" title="Permanent link">&para;</a></h2>
-<p>The multi-protocol expansion proposal (in the project's planning notes)
-originally sketched a dedicated
-<code>GrpcStreamActor</code> (a Layer-2 protocol Actor, peer to <code>WebSocketActor</code> /
-<code>MQTTActor</code>) plus a <code>ConnectionActor</code> dispatch branch.  The shipped
-implementation does <strong>not</strong> do that.  Unary gRPC is served as a
-<strong>Layer-4 application</strong> through the existing ASGI <code>(scope, receive, send)</code>
-bridge: <code>BlackBull._dispatch</code> detects <code>content-type: application/grpc</code>
-and hands the call to <code>blackbull.grpc.serve_grpc</code>, which reads the
-length-prefixed request via <code>receive()</code>, dispatches through a
-<code>GrpcServiceRegistry</code>, and writes the response message + <code>grpc-status</code>
-trailers via <code>send()</code> (reusing the HTTP/2 <code>http.response.trailers</code> emit
-path).</p>
-<p>Why this, and not a <code>GrpcStreamActor</code>:</p>
-<ul>
-<li><strong>gRPC is a dialect of HTTP/2, not a peer protocol.</strong>  WebSocket and
-  MQTT get their own Layer-2 Actors because their wire semantics do not
-  map onto HTTP request/response.  Unary gRPC <em>is</em> an HTTP/2 request with
-  a framed body and trailers — all of which <code>HTTP2Actor</code> and the
-  <code>HTTP2Sender</code> trailers path already implement.  A dedicated Actor would
-  re-derive framing, flow control, and trailer emission the HTTP/2 layer
-  already owns.</li>
-<li><strong>The actor model's guarantee is still honoured.</strong>  <code>HTTP2Actor</code> spawns
-  a <code>StreamActor</code>/<code>RequestActor</code> per stream, so <strong>every gRPC call already
-  runs in its own isolated stream task</strong> with its own recipient/receive
-  queue and <code>send</code>.  A crashing handler cannot affect sibling streams.
-  That isolation comes for free from the existing actor stack — gRPC did
-  not have to add an Actor to get it.</li>
-<li><strong>Zero blast radius.</strong>  No edits to <code>ConnectionActor</code> or <code>HTTP2Actor</code>;
-  they stay completely gRPC-agnostic (to them a gRPC call is just an
-  HTTP/2 stream).  Existing REST / WebSocket / HTTP/2 behaviour cannot
-  regress.</li>
-</ul>
-<p>Where this bends — <strong>streaming RPCs (Phase 2, not shipped).</strong>  Bidi and
-server-/client-streaming map awkwardly onto a single request/response
-ASGI exchange and need live flow-control back-pressure (see <em>What Sprint
-32 unlocks</em> and the open question below).  That is the point at which a
-more Actor-native handler — closer to how <code>WebSocketActor</code> drives a
-long-lived DATA loop — may be worth introducing.  The decision to revisit
-the Actor question is deferred to when streaming lands, not made now.</p>
-<hr />
-<p>The rest of this document is the original pre-implementation assessment.
-It exists so a future decision about gRPC <em>streaming</em> can start from a
-clear picture of what BlackBull already provides, what Sprint 32
-added, and what is still missing.</p>
-<h2 id="what-grpc-over-http2-needs">What gRPC over HTTP/2 needs<a class="headerlink" href="#what-grpc-over-http2-needs" title="Permanent link">&para;</a></h2>
-<p>gRPC is a layered protocol that runs on top of HTTP/2.  A minimal
-gRPC server has to provide:</p>
-<ol>
-<li><strong>HTTP/2 framing.</strong>  Streams, HEADERS / DATA frames, flow control.</li>
-<li><strong>Trailers.</strong>  <code>grpc-status</code>, <code>grpc-message</code>, and any
-   <code>Status-Details-Bin</code> are sent as HTTP/2 trailing headers, not body.</li>
-<li><strong>Bidirectional streaming.</strong>  Both client-streaming (server reads
-   N request messages) and server-streaming (server emits N response
-   messages) require long-lived <code>receive()</code> / <code>send</code> loops.</li>
-<li><strong>Per-stream cancellation propagation.</strong>  When the peer sends
-   <code>RST_STREAM</code>, the handler should see it as a cancellation signal,
-   not as silent connection closure.</li>
-<li><strong>Flow-control awareness.</strong>  Server-streaming RPCs MUST back-pressure
-   when the peer's receive window closes — otherwise a slow consumer
-   OOMs the server.</li>
-<li><strong>Content-type negotiation.</strong>  Routes that handle
-   <code>application/grpc</code> (or <code>application/grpc+proto</code>,
-   <code>application/grpc-web+proto</code>, etc.) need to dispatch differently
-   from regular HTTP routes.</li>
-<li><strong>Length-prefixed message framing in the body.</strong>  Each gRPC
-   message is <code>1 byte (compressed flag) + 4 bytes (length) + N bytes
-   (payload)</code>.  Application concern, but the helpers belong somewhere.</li>
-<li><strong><code>grpc-status</code> trailer + RST-code mapping.</strong>  Errors map between
-   gRPC status codes, HTTP/2 RST_STREAM codes, and the
-   <code>grpc-status</code>/<code>grpc-message</code> trailer headers.</li>
-</ol>
-<h2 id="what-blackbull-provides-today">What BlackBull provides today<a class="headerlink" href="#what-blackbull-provides-today" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Concern</th>
-<th>Status</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>HTTP/2 framing</td>
-<td>✓</td>
-<td><code>blackbull.server.http2_actor</code>, RFC 9113 compliant; conformance harness in <code>tests/conformance/http2/</code>.</td>
-</tr>
-<tr>
-<td>Trailers (<code>http.response.trailers</code>)</td>
-<td>✓</td>
-<td>Both HTTP/1.1 (chunked) and HTTP/2 paths.  Implemented in <code>HTTP1Sender</code> and <code>HTTP2Sender</code>.</td>
-</tr>
-<tr>
-<td>Bidirectional streaming</td>
-<td>⚠</td>
-<td><code>receive()</code> returns successive <code>http.request</code> events as DATA frames arrive; <code>send()</code> writes back.  No special bidi support, but the primitives exist.</td>
-</tr>
-<tr>
-<td>Per-stream cancellation</td>
-<td>⚠ partial</td>
-<td><code>RST_STREAM</code> triggers <code>http.disconnect</code> on <code>receive()</code>.  Adequate signal; not a first-class cancellation primitive.</td>
-</tr>
-<tr>
-<td>Send-side flow-control visibility</td>
-<td>✓ as of v0.31</td>
-<td><code>conn.extensions['http.response.http2_stream']</code> snapshots <code>send_window_remaining</code> and <code>connection_send_window_remaining</code>.  See <em>What Sprint 32 unlocks</em> below.</td>
-</tr>
-<tr>
-<td><code>application/grpc</code> content negotiation</td>
-<td>✓ Sprint 57</td>
-<td><code>BlackBull._dispatch</code> routes <code>content-type: application/grpc</code> to <code>serve_grpc</code> when <code>app.enable_grpc()</code> was called.</td>
-</tr>
-<tr>
-<td>Length-prefixed message framing</td>
-<td>✓ Sprint 57</td>
-<td><code>blackbull.grpc.codec.encode_message</code> / <code>decode_messages</code> — pure binary, protobuf-free.</td>
-</tr>
-<tr>
-<td><code>grpc-status</code> trailer + RST-code mapping</td>
-<td>✓ Sprint 57 (unary)</td>
-<td><code>blackbull.grpc.GrpcStatus</code> + the <code>serve_grpc</code> trailers path; <code>grpc-message</code> is percent-encoded per spec.</td>
-</tr>
-</tbody>
-</table>
-<p>Net: BlackBull is closer to a gRPC-capable HTTP/2 server than I
-expected before doing this audit.  The framing layer is solid;
-what's missing is mostly <em>gRPC-flavoured glue</em> on top of primitives
-we already have.</p>
-<h2 id="what-sprint-32-unlocks">What Sprint 32 unlocks<a class="headerlink" href="#what-sprint-32-unlocks" title="Permanent link">&para;</a></h2>
-<p>Sprint 32 added <code>conn.extensions['http.response.http2_stream']</code>
-exposing <code>send_window_remaining</code> and
-<code>connection_send_window_remaining</code> (per RFC 9113 §5.2).  This is
-the missing primitive a gRPC server-streaming implementation
-needs to back-pressure correctly:</p>
-<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">server_streaming_rpc</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">ext</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'http.response.http2_stream'</span><span class="p">]</span>
-    <span class="k">for</span> <span class="n">msg</span> <span class="ow">in</span> <span class="n">produce_many_messages</span><span class="p">():</span>
-        <span class="c1"># If send window is below a threshold, the peer's recv buffer</span>
-        <span class="c1"># is filling up — defer the next message via cooperative yield</span>
-        <span class="c1"># or a brief asyncio.sleep instead of blasting it through.</span>
-        <span class="k">if</span> <span class="n">ext</span><span class="p">[</span><span class="s1">'send_window_remaining'</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">MIN_WINDOW</span><span class="p">:</span>
-            <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
-            <span class="c1"># Re-read snapshot: NB - v0.31 ships a snapshot at scope</span>
-            <span class="c1"># build time; the value above does NOT update mid-request.</span>
-            <span class="c1"># See "Open question" below.</span>
-        <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.body'</span><span class="p">,</span>
-                    <span class="s1">'body'</span><span class="p">:</span> <span class="n">frame</span><span class="p">(</span><span class="n">msg</span><span class="p">),</span> <span class="s1">'more_body'</span><span class="p">:</span> <span class="kc">True</span><span class="p">})</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.trailers'</span><span class="p">,</span>
-                <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">'grpc-status'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'0'</span><span class="p">)]})</span>
-</code></pre></div>
-<p>Without this hint, a gRPC server has no way to know when to slow
-down — it would either ignore back-pressure entirely (OOM risk
-under slow consumers) or peek at internal HTTP/2 sender state
-(layering violation).</p>
-<h2 id="whats-still-missing-for-a-minimum-grpc-server">What's still missing for a minimum gRPC server<a class="headerlink" href="#whats-still-missing-for-a-minimum-grpc-server" title="Permanent link">&para;</a></h2>
-<p>In rough order of effort:</p>
-<ol>
-<li><strong>Live window-snapshot updates</strong> (small, half a sprint).
-   Sprint 32 ships a snapshot at scope-build time.  For real
-   gRPC server-streaming the application needs the <em>current</em>
-   value at each iteration of its emit loop.  Either:</li>
-<li>Re-read the dict and have the populate site re-snapshot
-     (requires a hook); or</li>
-<li>
-<p>Replace the scalar with a tiny callable
-     (<code>conn.extensions['http.response.http2_stream']['send_window']()</code>)
-     that reads the sender's current state.</p>
-</li>
-<li>
-<p><strong><code>application/grpc</code> content-type routing</strong> (small, ~1-2 days).
-   A middleware that, when <code>content-type</code> starts with
-   <code>application/grpc</code>, rewrites the route key or sets a scope flag
-   the router dispatches on.</p>
-</li>
-<li>
-<p><strong>gRPC trailer / status helpers</strong> (small, ~1-2 days).
-   A <code>blackbull.grpc.Status</code> enum + a <code>grpc_send_status(send,
-   code, message)</code> helper that emits the appropriate trailer.</p>
-</li>
-<li>
-<p><strong>Length-prefixed message framing helpers</strong> (small, ~1 day).
-   <code>pack_message(payload) → bytes</code> and an async
-   <code>read_messages(receive) → AsyncIterator[bytes]</code> that unframes
-   the length-prefixed wire format.  Independent of protobuf.</p>
-</li>
-<li>
-<p><strong>Cancellation as first-class signal</strong> (medium, ~3-5 days).
-   Today <code>http.disconnect</code> arrives on <code>receive()</code>.  gRPC apps
-   typically expect an <code>asyncio.CancelledError</code>-flavoured signal
-   instead.  An adapter that converts disconnect → cancel a
-   handler task is reasonable scope.</p>
-</li>
-<li>
-<p><strong>Bidi streaming ergonomics</strong> (medium, ~3-5 days).
-   The primitives are there; a small DSL (<code>async for req in
-   request_iter:</code>, <code>await response_stream.send(msg)</code>) would make
-   it much nicer than poking at <code>receive()</code> / <code>send</code> directly.</p>
-</li>
-<li>
-<p><strong>Protobuf integration</strong> (large, <em>out of core scope</em>).
-   Generated code from <code>protoc</code> expects specific call shapes
-   (<code>async def MyRpc(request, context): ...</code>).  An adapter library
-   that runs generated stubs against BlackBull handlers belongs in
-   a separate package (<code>blackbull-grpc</code>) so the framework core stays
-   protobuf-free.</p>
-</li>
-</ol>
-<h2 id="effort-estimate">Effort estimate<a class="headerlink" href="#effort-estimate" title="Permanent link">&para;</a></h2>
-<p>A <strong>minimal</strong> gRPC unary + server-streaming demo (items 1–4 above)
-fits in one ~1-week sprint, on top of Sprint 32's foundation.</p>
-<p>A <strong>production-shaped</strong> gRPC implementation (items 1–6 plus the
-<code>blackbull-grpc</code> package starter) is 2-3 sprints — comparable to
-Sprint 31's static-file sendfile work in shape and risk.</p>
-<h2 id="open-question">Open question<a class="headerlink" href="#open-question" title="Permanent link">&para;</a></h2>
-<p>The biggest design question — and the reason this is an assessment
-document, not an implementation — is whether the <code>send_window</code>
-field should be a <strong>scalar snapshot</strong> or a <strong>live property</strong>.</p>
-<ul>
-<li>Scalar (Sprint 32): simple, ASGI-flat, but useless for
-  iterative server-streaming RPCs that need real-time pressure
-  signals.</li>
-<li>Live property: a tiny callable on the scope.  More invasive
-  (ASGI scopes are conventionally pure data).  But this is the
-  shape gRPC genuinely needs.</li>
-</ul>
-<p>A future sprint can pick one based on a real adopter's workload.
-Until then, the snapshot is <em>load-bearing for diagnostics</em> (you
-can log it from request_received / before_handler) even if it
-doesn't yet enable full back-pressure loops.</p>
-<h2 id="what-shipped-vs-whats-deferred">What shipped vs. what's deferred<a class="headerlink" href="#what-shipped-vs-whats-deferred" title="Permanent link">&para;</a></h2>
-<p><strong>Shipped (Sprint 57, unary):</strong> items 2–4 above — <code>application/grpc</code>
-content-type dispatch, <code>grpc-status</code>/<code>grpc-message</code> trailer helpers, and
-length-prefixed framing — plus the <code>GrpcServiceRegistry</code>, <code>GrpcContext</code>,
-and <code>app.enable_grpc()</code>.  See the <a href="../../guide/grpc/">gRPC guide</a>.</p>
-<p><strong>Deferred (Phase 2):</strong> items 1, 5, 6, 7 — live window-snapshot updates,
-cancellation as a first-class signal, bidi-streaming ergonomics, and the
-separate protobuf-integration package — all of which are specific to
-<em>streaming</em> RPCs.  These are the items that would also reopen the
-"GrpcStreamActor vs. ASGI bridge" question (see the design decision at the
-top).  Promotion criteria: a concrete adopter need for gRPC <em>streaming</em>
-that the unary path does not cover.</p>
+<p>gRPC uses HTTP/2 stream lifetime, flow control and trailers. Do not add a
+connection dispatcher or duplicate those mechanisms in the gRPC layer.
+Each call owns isolated stream work, not the connection.</p>
+<p>Keep message framing, compression, metadata, status and deadlines in
+<code>blackbull.grpc</code>. Handlers exchange bytes; protobuf adapters stay optional.</p>
+<h2 id="streaming-and-cancellation">Streaming and cancellation<a class="headerlink" href="#streaming-and-cancellation" title="Permanent link">&para;</a></h2>
+<p>Unary, server-streaming, client-streaming and bidirectional calls share the
+same transport. Await its send path for backpressure; diagnostic window
+snapshots are not an admission mechanism.</p>
+<p>Cancellation must finalize response generators and release per-call work.
+<code>grpc-timeout</code> bounds the whole call, including streaming. Failures after the
+first message still need status trailers.</p>
+<p>Read <code>blackbull/grpc/asgi.py</code> for call lifetime and <code>registry.py</code> for handler
+classification. Public contracts are in the <a href="../../guide/grpc/">gRPC guide</a>;
+external-client checks live in <code>tests/conformance/grpc/</code>.</p>
 
 
 

@@ -6529,39 +6529,11 @@
 
     <div class="doc doc-contents first">
 
-        <p>Test clients for BlackBull applications — three instruments, three layers.</p>
-<p><a class="autorefs autorefs-internal" href="native/#blackbull.testing.native"><code>blackbull.testing.native</code></a> drives application logic, its
-<a class="autorefs autorefs-internal" href="native/#blackbull.testing.native.NativeTestServer"><code>NativeTestServer</code></a> drives the full stack on
-a loopback socket, and <a class="autorefs autorefs-internal" href="#blackbull.testing.TestClient"><code>TestClient</code></a> drives the ASGI compatibility
-boundary.  <code>docs/guide/testing.md</code> tabulates which to reach for; a defect
-on one layer is invisible to the others.</p>
-<p><a class="autorefs autorefs-internal" href="#blackbull.testing.TestClient"><code>TestClient</code></a> is not the everyday one.  It reaches the app through
-<code>httpx.ASGITransport</code> → ASGI scope dict → <code>from_scope()</code>, never taking
-the <code>isinstance(conn, Connection)</code> branch of <code>BlackBull.__call__</code>.  What
-it uniquely covers is that conversion chain, where a coercion bug surfaces
-here and nowhere else in the suite.</p>
-<p><code>TestClient</code> usage — a boundary-conformance instrument::</p>
-<pre><code>from blackbull import BlackBull
-from blackbull.testing import TestClient
-
-app = BlackBull()
-
-@app.route('/')
-async def hello():
-    return "hi"
-
-def test_asgi_boundary():
-    with TestClient(app) as client:
-        response = client.get('/')
-        assert response.status_code == 200
-        assert response.text == "hi"
-</code></pre>
-<p>The client is a context manager so that ASGI <code>lifespan.startup</code> runs
-before any request and <code>lifespan.shutdown</code> runs on exit.  Apps that
-don't implement the lifespan protocol are tolerated silently.  A failure
-the app reports is not: both <code>lifespan.startup.failed</code> and
-<code>lifespan.shutdown.failed</code> raise out of the block.</p>
-<p>For everything else, start from <code>docs/guide/testing.md</code>.</p>
+        <p>Application test instruments.</p>
+<p>Native helpers test dispatch; NativeTestServer tests the wire stack;
+TestClient tests the external ASGI boundary. Choosing one does not cover
+the other layers. TestClient runs lifespan and raises reported startup or
+shutdown failures; see docs/guide/testing.md.</p>
 
 
 
@@ -7033,17 +7005,10 @@ the same client under plain <code>with</code>.</p>
 
 
 
-        <p>In-memory HTTP+WebSocket test client for ASGI 3.0 applications.</p>
-<p>Provides a synchronous façade over <code>httpx.AsyncClient</code> +
-<code>httpx.ASGITransport</code> by hosting an event loop in a background
-thread.  HTTP request methods (<code>get</code>, <code>post</code>, <code>put</code>, …)
-forward to the underlying <code>httpx.AsyncClient</code>; WebSocket sessions
-use a dedicated bridge to the ASGI receive/send channels.</p>
-<p>Use as a context manager so that the ASGI <code>lifespan</code> protocol
-runs around the test::</p>
-<pre><code>with TestClient(app) as client:
-    ...
-</code></pre>
+        <p>Synchronous HTTP/ASGITransport and native BlackBull WebSocket tests.</p>
+<p>HTTP methods forward to httpx. WebSocket sessions pass a Connection and do
+not exercise a generic scope-only ASGI app. Use as a context manager to run
+lifespan startup and shutdown.</p>
 
 
 
@@ -7525,14 +7490,9 @@ none.  <code>reason</code> is its optional UTF-8 explanation.</p>
 
 
 
-        <p>Synchronous WebSocket session against an ASGI application.</p>
-<p>Open via <a class="autorefs autorefs-internal" title="websocket_connect(url, subprotocols=None, headers=None, cookies=None, timeout=5.0)" href="#blackbull.testing.TestClient.websocket_connect"><code>TestClient.websocket_connect</code></a> as a context manager::</p>
-<pre><code>with client.websocket_connect('/ws') as ws:
-    ws.send_text('ping')
-    assert ws.receive_text() == 'pong'
-</code></pre>
-<p>Raises <a class="autorefs autorefs-internal" href="../websocket/#blackbull.websocket.WebSocketDisconnect"><code>WebSocketDisconnect</code></a> when the server closes (or
-rejects) the connection.</p>
+        <p>Synchronous BlackBull WebSocket session using its native Connection boundary.</p>
+<p>Open through TestClient.websocket_connect as a context manager. Server close
+or handshake rejection raises WebSocketDisconnect.</p>
 
 
 
@@ -7734,16 +7694,7 @@ rejects) the connection.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Yield successive text messages from the server until the WebSocket closes.</p>
-<p>Stops cleanly when the server emits a <code>websocket.close</code> — the
-<a class="autorefs autorefs-internal" href="../websocket/#blackbull.websocket.WebSocketDisconnect"><code>WebSocketDisconnect</code></a> raised by the underlying receive
-is caught and converted into normal iterator termination, so
-the test can write::</p>
-<pre><code>with client.websocket_connect('/stream') as ws:
-    for msg in ws.iter_text():
-        ...
-</code></pre>
-<p>without an explicit try/except around the loop.</p>
+        <p>Yield text messages until close; convert WebSocketDisconnect to iterator termination.</p>
 
 
     </div>
@@ -7882,25 +7833,10 @@ the test can write::</p>
 
     <div class="doc doc-contents ">
 
-        <p>Build the <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="../connection/#blackbull.connection.Connection"><code>Connection</code></a> an H/1.1 request line would have produced.</p>
-<p>The field derivations mirror the HTTP/1.1 parser's, so a Tier 1 test and
-a real request agree on what the handler sees:</p>
-<ul>
-<li>the query string is split off <code>path</code> and carried in <code>query_string</code>,
-  never in <code>raw_path</code>;</li>
-<li><code>path</code> is percent-decoded, <code>raw_path</code> keeps the undecoded bytes;</li>
-<li>a <code>host</code> header is supplied when the caller gave none, because every
-  HTTP/1.1 request carries one (RFC 9112 §3.2) and code that reads it
-  would otherwise behave differently under test than on the wire;</li>
-<li>a <code>content-length</code> is derived from <em>body</em> for the same reason — an
-  explicit one from the caller wins, so a test can still synthesise a
-  mismatched framing header on purpose.</li>
-</ul>
+        <p>Build a Connection without protocol parsing.</p>
+<p>Split query from path; retain undecoded raw_path and percent-decode path.
+Supply missing Host and Content-Length; an explicit Content-Length wins so
+tests can synthesize inconsistent framing.</p>
 
 
     </div>

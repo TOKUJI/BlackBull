@@ -5489,14 +5489,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Handshake middleware — accepts the connection before the handler runs.</p>
-<p>Strips the accept/close boilerplate from a raw-triplet handler.  It works
-with either handler form: the handshake is recorded on the connection, so a
-<a class="autorefs autorefs-internal" href="../../websocket/#blackbull.websocket.WebSocket"><code>WebSocket</code></a> built downstream adopts that state
-instead of waiting for a <code>websocket.connect</code> already consumed.</p>
-<p>The object form makes it redundant — <code>await ws.accept()</code> is the line it
-removes — but the two combine rather than conflict, so a route need not
-change its middleware list and its handler signature together.</p>
+        <p>Handshake middleware for raw and object-form WebSocket handlers.</p>
+<p>Downstream WebSocket objects adopt the recorded handshake state; do not
+wait for an already-consumed websocket.connect event.</p>
 
 
 

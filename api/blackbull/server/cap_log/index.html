@@ -5623,49 +5623,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>Cap-hit observability.</p>
-<p>Every user-tunable resource cap in BlackBull (header sizes, the four
-timeouts, connection cap, WS frame cap, WS queue depth, H/2 stream
-caps, compression in-flight) is silent by default when it rejects
-traffic.  Operators see the consequence — a 503, a CLOSE 1009, a
-dropped event — but no record naming the cap.  Regressions like the
-1 MiB WS frame default that shipped in v0.35.0 (caught by the
-43 conformance lane in v0.39.0) can hide across releases.</p>
-<p>This module emits one <code>WARNING</code>-level record per cap rejection on
-the <code>blackbull.caps</code> logger so a deployment that subscribes to
-that logger gets actionable visibility without grep-walking the
-framework code.</p>
-<p>Surface:</p>
-<ul>
-<li><a class="autorefs autorefs-internal" title="log_cap_hit(cap, requested, limit, *, counter=None, peer=None, scope_path=None, protocol=None, connection_id=None, advice=None)" href="#blackbull.server.cap_log.log_cap_hit"><code>log_cap_hit</code></a> — the single emission point.  Call from any
-  cap-rejection site with the cap name, requested value, and limit.</li>
-<li><a class="autorefs autorefs-internal" href="#blackbull.server.cap_log.CapHitCounter"><code>CapHitCounter</code></a> — per-connection state for the "first hit
-  per cap logs in full; later hits silently counted; summary on
-  <a class="autorefs autorefs-internal" title="flush(*, peer=None, protocol=None, connection_id=None)" href="#blackbull.server.cap_log.CapHitCounter.flush"><code>flush</code></a>" rate-limit pattern.</li>
-<li><a class="autorefs autorefs-internal" title="bind()" href="#blackbull.server.cap_log.CapHitCounter.bind"><code>CapHitCounter.bind</code></a> — context manager that installs the
-  counter on a <code>ContextVar</code>.  All
-  <a class="autorefs autorefs-internal" title="log_cap_hit(cap, requested, limit, *, counter=None, peer=None, scope_path=None, protocol=None, connection_id=None, advice=None)" href="#blackbull.server.cap_log.log_cap_hit"><code>log_cap_hit</code></a> calls inside the <code>with</code> block (including
-  those in child tasks created via <code>asyncio.TaskGroup</code>, which
-  inherit context) automatically pick up the counter.  Zero
-  plumbing through actor constructors.</li>
-</ul>
-<p>Every emitted record carries a <code>connection_id</code> so SIEM /
-log-aggregation pipelines can correlate first-hit, intermediate
-summary, and graceful-close summary records that all belong to the
-same connection — useful when <code>peer</code> is shared across many
-clients behind a NAT.</p>
-<p>The counter also runs two dirty-flush triggers so a connection
-torn down by RST (or any abnormal path that skips graceful
-<code>flush</code>) still emits a summary for any suppressed hits:</p>
-<ul>
-<li><strong>Threshold trigger</strong>: after <code>flush_threshold</code> suppressed hits
-  on any single cap, emit an intermediate summary and reset counts.
-  Default 100; set to 0 to disable.</li>
-<li><strong>Interval trigger</strong>: an asyncio timer task started on the first
-  suppressed hit emits an intermediate summary after
-  <code>flush_interval</code> seconds if any cap still has suppressed
-  hits.  Default 60.0 s; set to 0 to disable.</li>
-</ul>
+        <p>Resource-cap refusal records on blackbull.caps.</p>
+<p>Use log_cap_hit at enforcement sites. A bound CapHitCounter propagates to
+child tasks through context; flush suppressed-hit summaries at teardown.
+Threshold and interval flushes cover abnormal closes.</p>
 
 
 
@@ -5828,34 +5789,10 @@ reuse afterwards if the holder is pooled.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Emit one cap-hit record on <code>blackbull.caps</code> at WARN level.</p>
-<p><em>advice</em> is appended to the message: what the operator should change.</p>
-<p>The structured fields land in <code>record.extra</code> (<code>cap</code>,
-<code>requested</code>, <code>limit</code>, <code>peer</code>, <code>scope_path</code>, <code>protocol</code>,
-<code>connection_id</code>) so log handlers can route or aggregate
-without parsing the message string.</p>
-<p>Resolution order for the rate-limit counter:</p>
-<ol>
-<li>The explicit <em>counter</em> keyword argument, if given.</li>
-<li>The active <a class="autorefs autorefs-internal" href="#blackbull.server.cap_log.CapHitCounter"><code>CapHitCounter</code></a> from the ambient
-   <code>ContextVar</code> (set via
-   <a class="autorefs autorefs-internal" title="bind()" href="#blackbull.server.cap_log.CapHitCounter.bind"><code>CapHitCounter.bind</code></a>).</li>
-<li><code>None</code> — every call emits, no rate limiting.</li>
-</ol>
-<p><code>connection_id</code> resolution mirrors the counter chain:</p>
-<ol>
-<li>The explicit <code>connection_id</code> keyword argument, if given.</li>
-<li>The active counter's <a class="autorefs autorefs-internal" title="connection_id
-
-  
-      property
-  " href="#blackbull.server.cap_log.CapHitCounter.connection_id"><code>CapHitCounter.connection_id</code></a>.</li>
-<li><code>None</code> — record carries <code>connection_id=None</code>.</li>
-</ol>
-<p>The first call per <code>(counter, cap)</code> emits a full record;
-subsequent calls return silently and increment the counter's
-suppression tally.  <code>counter.flush()</code> at connection close
-emits one summary per suppressed cap.</p>
+        <p>Log a cap refusal with structured fields and operator advice.</p>
+<p>Explicit counter and connection_id override ambient context. Without a
+counter, every call emits. With one, first hits emit and repeats accumulate
+until flush; the connection owner must flush at teardown.</p>
 
 
     </div>

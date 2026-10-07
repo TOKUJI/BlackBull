@@ -5775,13 +5775,7 @@
 
     <div class="doc doc-contents first">
 
-        <p>Case-insensitive, ordered, multi-valued HTTP header store.</p>
-<p>Provides:</p>
-<ul>
-<li><code>Headers</code>: satisfies the ASGI <code>Iterable[tuple[bytes, bytes]]</code> contract while
-  adding <code>get</code>, <code>getlist</code>, case-insensitive lookup, <code>append</code>, and <code>+</code> concatenation.</li>
-<li><code>HeaderList</code>: type alias for <code>Iterable[tuple[bytes, bytes]]</code>.</li>
-</ul>
+        <p>Ordered, multi-valued byte headers with case-insensitive lookup.</p>
 
 
 
@@ -5817,33 +5811,10 @@
 
 
 
-        <p>Ordered multi-valued HTTP header store.</p>
-<p>Satisfies the ASGI <code>Iterable[[byte string, byte string]]</code> contract
-while also providing O(1) dict-like lookup.</p>
-<p><strong>Invariants</strong>:</p>
-<ul>
-<li>Header names and values are always <code>bytes</code> (per ASGI spec).</li>
-<li>Lookups are case-insensitive: the internal index is keyed on
-  <code>name.lower()</code> (RFC 7230 §3.2 — header field names are case-insensitive).
-  <code>__contains__</code>, <code>__getitem__</code>, <code>getlist</code>, and <code>get</code> accept any
-  casing; iteration preserves the original casing of the input.</li>
-<li>Insertion order of duplicate names is preserved (RFC 7230 §3.2.2).</li>
-</ul>
-<p>Examples::</p>
-<pre><code>headers = Headers([(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')])
-
-list(headers)
-# [(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')]   # ASGI iteration
-
-headers.getlist(b'set-cookie')
-# [(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')]
-
-headers.getlist(b'missing')
-# []
-
-headers.get(b'host')          # first value, or default
-# b'localhost:8000'
-</code></pre>
+        <p>Ordered multi-valued headers with bytes names and values.</p>
+<p>Lookups ignore name casing; iteration preserves input casing and duplicate
+order. get returns the first value or its default; getlist returns all
+matching (name, value) pairs, or an empty list.</p>
 
 
 
@@ -5958,20 +5929,9 @@ One-argument form: <code>append(pairs)</code> — adds every pair in the iterabl
 
     <div class="doc doc-contents ">
 
-        <p>Build from pairs whose names are <strong>already lowercase</strong>.</p>
-<p>The caller must guarantee that; nothing here checks it, and a name
-containing uppercase would be indexed unreachably (every accessor
-lowercases before its fallback probe, so the field would be
-invisible to lookup while still appearing in iteration).</p>
-<p>Two callers can guarantee it.  <code>http1_actor._parse</code> lowercases
-each name while validating it, so re-lowercasing in <code>__init__</code>
-recomputes a known answer.  HTTP/2 field names are lowercase by
-protocol — RFC 9113 §8.2.1 makes an uppercase name malformed, and
-<code>HeadersFrame.parse_payload</code> rejects the frame before any pair
-reaches the header list.</p>
-<p>Takes ownership of <em>pairs</em> rather than copying it; the parser
-builds a throwaway list per request, and the copy is the point of
-the shortcut.  Do not pass a list you intend to keep mutating.</p>
+        <p>Adopt pairs whose names the caller guarantees are lowercase.</p>
+<p>Uppercase names would become unreachable through lookup. Do not mutate the
+list after handing it over; this path takes ownership instead of copying.</p>
 
 
     </div>

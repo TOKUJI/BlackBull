@@ -5711,12 +5711,8 @@
 
     <div class="doc doc-contents first">
 
-        <p>HTTP/2 client (RFC 7540).</p>
-<p><code>HTTP2Client</code> opens a single TCP/TLS connection, sends the connection
-preface and an initial SETTINGS frame, then drives request/response
-exchanges over multiple concurrent streams.</p>
-<p>The client is intended for <strong>wire-level testing</strong> of BlackBull's
-<code>ASGIServer</code> rather than as a feature-rich application client.</p>
+        <p>HTTP/2 client. HPACK and flow control are connection-owned;
+response state and deadlines are stream-owned.</p>
 
 
 
@@ -5854,18 +5850,8 @@ odd, monotonically-increasing client-initiated stream ID
 
     <div class="doc doc-contents ">
 
-        <p>This connection's one HPACK context (RFC 7541 §2.3, RFC 9113 §4.3).</p>
-<p>The dynamic table is connection state and the peer keeps a single
-decoder for it, so every header block written to this connection has
-to come from this one encoder.  A second <code>FrameFactory</code> on the same
-connection keeps a second table that diverges the moment the two
-interleave, and the peer then resolves one stream's index against a
-field the other inserted.  Anything that frames on this connection —
-including the RFC 8441 WebSocket client layered over it — takes its
-factory from here rather than building one.</p>
-<p>It also carries the decoder's <code>max_header_list_size</code>, so a second
-factory would decode inbound blocks without the cap this connection
-advertises.</p>
+        <p>Return this connection's shared HPACK encoder/decoder and header limit.</p>
+<p>Every header producer, including extended CONNECT, must reuse this context.</p>
 
     </div>
 
@@ -5889,36 +5875,10 @@ advertises.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Walk <code>scenario.steps</code> against the connected socket.</p>
-<p>The HTTP/2 counterpart of
-<a class="autorefs autorefs-internal" title="execute_scenario(scenario)
+        <p>Run HTTP/2 fault steps and collect peer/transport outcomes in the result.</p>
+<p>Unsupported step vocabularies and an exited client raise instead of being
+classified as peer failures. Abort stops further steps.</p>
 
-  
-      async
-  " href="../http1/#blackbull.client.http1.HTTP1Client.execute_scenario"><code>blackbull.client.http1.HTTP1Client.execute_scenario</code></a>, and
-deliberately the same shape: every <em>outcome</em> — a frame read, a
-timeout, a transport failure, a hard-abort — is folded into the
-returned result, so callers categorise without a try/except per
-scenario.  Raised instead is the scenario this connection cannot
-express at all: a step belonging to another vocabulary, or a client
-whose context has exited.  Neither is news about the peer, and
-folding one would make a closed client indistinguishable from a
-silent server.</p>
-
-
-<details class="step-dispatch" open>
-  <summary>Step dispatch</summary>
-  <ul>
-<li><code>SendPreface</code>  → the RFC 9113 §3.4 preface bytes</li>
-<li><code>SendFrame</code>    → one frame, assembled here rather than by the
-  production sender (which is what lets a scenario declare a
-  length its payload does not match)</li>
-<li><code>SendRawBytes</code> → arbitrary bytes, optionally one at a time</li>
-<li><code>Sleep</code>        → <code>asyncio.sleep</code></li>
-<li><code>ReadResponse</code> → one frame, or a recorded timeout</li>
-<li><code>Abort</code>        → <code>transport.abort()</code>; walks no further steps</li>
-</ul>
-</details>
 
     </div>
 

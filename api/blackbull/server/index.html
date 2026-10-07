@@ -4189,17 +4189,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.Server.open_socket" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        open_socket
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.Server.run" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5656,17 +5645,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.Server.open_socket" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        open_socket
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.Server.run" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5755,17 +5733,8 @@
 
     <div class="doc doc-contents first">
 
-        <p>BlackBull's own server: the socket layer beneath <code>BlackBull.run()</code>.</p>
-<p><a class="autorefs autorefs-internal" href="server/#blackbull.server.server.Server"><code>Server</code></a> — exported as <code>ASGIServer</code> as
-well — binds the listeners, accepts connections, and hands each one to a
-<a class="autorefs autorefs-internal" href="connection_actor/#blackbull.server.connection_actor.ConnectionActor"><code>ConnectionActor</code></a>, which
-detects the protocol off the connection's own buffer and spawns the actor that
-speaks it.  The rest of the package is that machinery: readers and recipients
-on the way in, senders on the way out, and the limits, deadlines and access
-logging around both.</p>
-<p>Construct a <a class="autorefs autorefs-internal" href="server/#blackbull.server.server.Server"><code>Server</code></a> directly to embed the
-server under an event loop you already own, or to bind a socket before forking
-a worker.</p>
+        <p>BlackBull's server. Construct Server/ASGIServer directly to embed it
+in an existing event loop or bind before forking.</p>
 
 
 
@@ -5941,28 +5910,6 @@ between "the server's" and "its own".</p>
     <div class="doc doc-contents ">
 
         <p>One buffered protocol per accept; <code>_AcceptGate</code> serves it.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.Server.open_socket" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">open_socket</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">unix_path</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">inherited_fd</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
-
-<a href="#blackbull.server.Server.open_socket" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Bind every listener this server was asked for.</p>
-<p>A caller that named <code>listeners=</code> gets those.  A caller that said it
-the old way — a port, a Unix path, or an inherited fd — gets one
-listener built from those arguments, so there is one binding path and
-not two.</p>
 
 
     </div>

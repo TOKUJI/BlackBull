@@ -832,10 +832,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#core-protocols-vs-bridge-protocols" class="md-nav__link">
+  <a href="#protocol-ownership" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Core protocols vs. bridge protocols
+        Protocol ownership
       
     </span>
   </a>
@@ -5526,10 +5526,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#core-protocols-vs-bridge-protocols" class="md-nav__link">
+  <a href="#protocol-ownership" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Core protocols vs. bridge protocols
+        Protocol ownership
       
     </span>
   </a>
@@ -5658,26 +5658,11 @@ go straight to the handler. WebSocket is unaffected — it is still reached thro
 an HTTP <code>Upgrade</code> on the HTTP listener, not as a top-level protocol.</p>
 <p>The bridge is <strong>dormant by default</strong>: an app with no <code>raw_handler</code> binds only the
 HTTP port and runs no raw code paths.</p>
-<h2 id="core-protocols-vs-bridge-protocols">Core protocols vs. bridge protocols<a class="headerlink" href="#core-protocols-vs-bridge-protocols" title="Permanent link">&para;</a></h2>
-<p>BlackBull distinguishes two tiers of protocol, and the distinction is
-deliberate:</p>
-<ul>
-<li><strong>Core protocols — the HTTP family.</strong> HTTP/1.1, HTTP/2, and (as they land)
-  gRPC and HTTP/3. These <em>are</em> the framework: they share the from-scratch HTTP
-  stack BlackBull exists to implement. gRPC is HTTP/2 + protobuf framing and
-  HTTP/3 is HTTP over QUIC, so both reuse the core stream machinery rather than
-  introducing a foreign transport. They live in the core (<code>blackbull.protocol</code>,
-  <code>blackbull.server</code>).</li>
-<li><strong>Bridge protocols — everything else.</strong> MQTT (and, in principle, Redis RESP,
-  AMQP, …) are independent protocol families that ride the Non-ASGI bridge but
-  share none of the HTTP protocol logic. They are wired in as
-  <a href="../extensions/">extensions</a> and live in their own subpackages
-  (<code>blackbull.mqtt</code>), kept opt-in via an extra (<code>pip install 'blackbull[mqtt]'</code>).
-  A bridge protocol is structured so it can be extracted to a standalone
-  <code>blackbull-&lt;name&gt;</code> distribution later without touching the core — the same
-  path <code>blackbull-session</code> took.</li>
-</ul>
-<p>The MQTT broker is the reference bridge protocol; see <a href="../mqtt/">MQTT broker</a>.</p>
+<h2 id="protocol-ownership">Protocol ownership<a class="headerlink" href="#protocol-ownership" title="Permanent link">&para;</a></h2>
+<p>HTTP-family wire handling stays in BlackBull's core. Non-HTTP protocols
+register through extensions and raw handlers; do not force them into ASGI
+request/response events. gRPC already runs over the shared HTTP/2 transport;
+HTTP/3 is unsupported.</p>
 <h2 id="events">Events<a class="headerlink" href="#events" title="Permanent link">&para;</a></h2>
 <p>Raw protocols emit the protocol-agnostic Level B events (subscribe with
 <code>@app.on</code>):</p>

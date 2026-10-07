@@ -5522,22 +5522,8 @@
     <div class="doc doc-contents first">
 
         <p>Per-request dependency injection for simplified handlers.</p>
-<p><code>Depends</code> marks a simplified-handler parameter as <em>provided by the
-framework</em> rather than by the request::</p>
-<pre><code>async def get_db():                    # async-generator provider
-    pool = await create_pool()
-    try:
-        yield pool                     # ← injected value
-    finally:
-        await pool.close()             # ← runs after the response is sent
-
-@app.route(path='/items/{id:int}')
-async def get_item(id: int, db=Depends(get_db)):
-    return await db.fetch_item(id)
-</code></pre>
-<p>Everything is resolved at <strong>registration time</strong>, so a handler that declares
-no <code>Depends</code> parameter carries no dependency machinery at all: no
-per-request stack, and no loop over an empty list.</p>
+<p>Async-generator providers finalize after response sending; put cleanup in
+finally. Provider forms are resolved at registration, not during dispatch.</p>
 
 
 
@@ -5573,90 +5559,12 @@ per-request stack, and no loop over an empty list.</p>
 
 
 
-        <p>Declare a per-request provider for one simplified-handler parameter.</p>
-<p>Use as the parameter's <em>default value</em>: <code>db=Depends(get_db)</code>.</p>
-<p>Provider forms (detected once, here):</p>
-<ul>
-<li><strong>async generator</strong> — yields the injected value exactly once; the code
-  after <code>yield</code> (or the <code>finally</code> block) runs after the response has
-  been sent, LIFO when several providers are active.</li>
-<li><strong>async function</strong> — awaited for the value; no cleanup.</li>
-<li><strong>sync function</strong> — called for the value; no cleanup.</li>
-</ul>
-
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>provider</code>
-            </td>
-            <td>
-                  <code><span title="typing.Callable">Callable</span>[[], <span title="typing.Any">Any</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Zero-parameter callable in one of the three forms above.</p>
-              </div>
-            </td>
-            <td>
-                <em>required</em>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>use_cache</code>
-            </td>
-            <td>
-                  <code><span title="bool">bool</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>When <code>True</code> (default), parameters of one handler that
-name the <em>same</em> provider share a single instance per request;
-<code>use_cache=False</code> calls the provider once per parameter.</p>
-              </div>
-            </td>
-            <td>
-                  <code>True</code>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-<p><span class="doc-section-title">Raises:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="TypeError">TypeError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>At construction, when <em>provider</em> is not callable, takes
-parameters (including a nested <code>Depends</code> default — not
-supported in v1), or is a sync generator function.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
+        <p>Inject a zero-argument provider with a default such as db=Depends(get_db).</p>
+<p>Async generators yield exactly once and finalize after response sending,
+LIFO across providers; put cleanup in finally so exceptions cannot skip it.
+Async functions are awaited; sync functions are called without cleanup.
+use_cache=True shares one value per provider per request. False invokes it
+per parameter. Sync generators and nested Depends parameters are rejected.</p>
 
 
 

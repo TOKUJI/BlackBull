@@ -5545,35 +5545,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>HPACK static-table fast path for outbound HEADERS / PUSH_PROMISE frames.</p>
-<p>RFC 7541 Appendix A defines the HPACK static table.  When a header pair's
-name AND value exactly match a static-table entry, the wire encoding is
-a single byte: <code>0x80 | index</code>.  This module precomputes those bytes
-for every entry where both name and value are defined — primarily
-<code>:status</code> (every response) and the request-side pseudo-headers used
-by PUSH_PROMISE (<code>:method</code>, <code>:scheme</code>, <code>:path</code>).</p>
-<p>Wire equivalence: given the same input, the encoder produces identical
-bytes.  Static-indexed fields do not mutate the encoder's dynamic table
-(RFC 7541 §6.1), so emitting precomputed bytes outside the encoder
-leaves dynamic-table state unchanged across requests.  Round-trip tests
-in <code>tests/conformance/http2/test_hpack_fastpath.py</code> assert byte
-equivalence.</p>
-<p>Coverage of RFC 7541 Appendix A indices 1–61 with both name and value
-defined (the only entries eligible for single-byte encoding):</p>
-<ul>
-<li>8–14   :status 200/204/206/304/400/404/500   (always-on response path)</li>
-<li>16     accept-encoding: gzip, deflate         (defensive — rare on responses)</li>
-<li>2–3    :method GET / POST                     (PUSH_PROMISE only)</li>
-<li>4–5    :path / and /index.html                (PUSH_PROMISE only)</li>
-<li>6–7    :scheme http / https                   (PUSH_PROMISE only)</li>
-</ul>
-<p>All other static-table entries are name-only (e.g. <code>content-type</code> at
-index 31 has no static value), so they cannot use the single-byte
-indexed encoding.  The table is exhausted at this encoding tier — any
-further fastpath work would need to handle the
-literal-with-indexed-name encoding (RFC 7541 §6.2), which involves
-encoder choices (Huffman vs raw, incremental indexing vs not) that we
-cannot pre-decide without coupling to encoder configuration.</p>
+        <p>HPACK static-index fast path.</p>
+<p>Use only exact name/value matches. Static entries do not mutate the dynamic
+table; literal encodings must still use the connection encoder.</p>
 
 
 
@@ -5606,11 +5580,7 @@ cannot pre-decide without coupling to encoder configuration.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Return the precomputed wire bytes for any static-indexed
-<code>(name, value)</code> pair, else <code>None</code>.</p>
-<p>Used by <code>PushPromise.save</code> to fast-path the request-side
-pseudo-headers (<code>:method</code>, <code>:scheme</code>, <code>:path</code>).  <code>name</code> and
-<code>value</code> may be <code>str</code> (the ASGI shape) or <code>bytes</code>.</p>
+        <p>Return static-table encoding for a str/bytes name/value pair, or None.</p>
 
 
     </div>
@@ -5628,10 +5598,7 @@ pseudo-headers (<code>:method</code>, <code>:scheme</code>, <code>:path</code>).
 
     <div class="doc doc-contents ">
 
-        <p>Return the precomputed wire bytes for <code>:status &lt;value&gt;</code> when the
-value matches a static-table entry, else <code>None</code>.</p>
-<p>Accepts <code>str</code> (the ASGI shape, e.g. <code>'200'</code>) or <code>bytes</code>.
-Kept as a separate function for the <code>Headers.save()</code> call site.</p>
+        <p>Return static-table encoding for a str/bytes status, or None.</p>
 
 
     </div>

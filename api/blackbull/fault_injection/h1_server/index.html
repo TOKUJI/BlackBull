@@ -5601,27 +5601,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>A deliberately misbehaving HTTP/1.1 server.</p>
-<p>The HTTP/1.1 half of the fault-injection grid's <em>server</em> direction — the
-cell the toolkit did not have.  Point your own HTTP/1.1 client at it and
-assert that the client survives what a real server can do wrong::</p>
-<pre><code>scenario = ScenarioH1Server(steps=[
-    WaitForRequest(),
-    SendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort'),
-    CloseGracefully(),
-])
-async with H1FaultServer(scenario) as srv:
-    with pytest.raises(...):
-        await my_client.get(f'http://{srv.host}:{srv.port}/')
-</code></pre>
-<p><strong>It assembles every byte itself</strong>, importing nothing from
-<code>blackbull.server.sender</code> or <code>blackbull.server.response</code> —
-<code>tests/unit/test_fault_injection_h1_server.py::TestTheBreakerIsIndependent</code>
-pins that, because the property is invisible until the day it matters.</p>
-<p>Two safety locks, the same pair <a class="autorefs autorefs-internal" href="../h2_server/#blackbull.fault_injection.h2_server.H2FaultServer"><code>H2FaultServer</code></a> carries and both in
-scope for security reports per <code>SECURITY.md</code>: it refuses to start in a
-production context, and it refuses a non-loopback bind without an explicit
-<code>allow_remote=True</code>.</p>
+        <p>Deliberately malformed HTTP/1.1 server.</p>
+<p>Assemble output independently of production senders. Production mode is
+refused; non-loopback binds require allow_remote=True.</p>
 
 
 

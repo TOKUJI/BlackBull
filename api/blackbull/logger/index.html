@@ -5709,28 +5709,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Keeping logging off the event loop, and the formatters and gates that help.</p>
-<p>Nothing here replaces the standard library — BlackBull logs through ordinary
-<code>logging</code> loggers and attaches no handler of its own until asked.  What this
-module adds is the machinery for logging from an event loop without paying for
-it there.</p>
-<p><a class="autorefs autorefs-internal" title="setup_async_logging(handlers=None, *, log_format=None, syslog_addr=None, batch_size=None, batch_timeout_ms=None, log_file=None)" href="#blackbull.logger.setup_async_logging"><code>setup_async_logging</code></a> moves every
-handler on the <code>blackbull</code> hierarchy behind a queue drained by a background
-thread, so a log call on the loop is an enqueue and nothing else; formatting,
-I/O and rotation all happen off the loop until
-<a class="autorefs autorefs-internal" title="teardown_async_logging()" href="#blackbull.logger.teardown_async_logging"><code>teardown_async_logging</code></a> undoes it.
-<a class="autorefs autorefs-internal" href="#blackbull.logger.JsonFormatter"><code>JsonFormatter</code></a> and
-<a class="autorefs autorefs-internal" href="#blackbull.logger.ColoredFormatter"><code>ColoredFormatter</code></a> are the two sink
-formats, and <a class="autorefs autorefs-internal" href="#blackbull.logger.BatchWriteHandler"><code>BatchWriteHandler</code></a>
-coalesces a burst of records into one write.</p>
-<p><a class="autorefs autorefs-internal" title="log(fn)" href="#blackbull.logger.log"><code>log</code></a> and
-<a class="autorefs autorefs-internal" title="debug_gate(logger)" href="#blackbull.logger.debug_gate"><code>debug_gate</code></a> are the other half: both read the
-logger's level once, at import, and cost nothing afterwards.  That is the one
-thing to know before using them — raising a level at runtime does not switch
-on what they guard, so configure <code>DEBUG</code> before importing the framework.</p>
-<p><code>docs/guide/logging.md</code> describes the three logger hierarchies
-(<code>blackbull</code>, <code>blackbull.access</code>, <code>blackbull.caps</code>) and the fields an
-access record carries.</p>
+        <p>Queued logging and import-time logging gates.</p>
+<p>Configure DEBUG before importing guarded code: raising logger levels later
+does not enable log/debug_gate wrappers. Sink I/O belongs off the event loop.</p>
 
 
 
@@ -5768,26 +5749,9 @@ access record carries.</p>
 
 
 
-        <p>Coalesce formatted records into one write per batch (O2 — batch writes,
-a.k.a. logging approach 4).</p>
-<p>The stdlib <code>StreamHandler</code> issues <code>stream.write()</code> + <code>stream.flush()</code>
-per record — one flushed write syscall per log line.  Under a high-rate
-access log that is the dominant cost on the listener thread.  This handler
-instead appends each formatted line to an in-memory buffer and lets a single
-long-lived flusher thread emit the batch as one <code>write()</code> when the buffer
-reaches <code>batch_size</code> <strong>or</strong> <code>flush_interval</code> seconds elapse — whichever
-comes first, so latency is bounded at low rate and syscalls collapse at high
-rate.</p>
-<p>Design notes:
-- <strong>One</strong> flusher thread total (not a <code>threading.Timer</code> per batch — that
-  would churn a thread per ~<code>batch_size</code> records under load).  It waits on
-  a <code>Condition</code> with the flush interval as its timeout: a full batch
-  notifies it awake, an idle interval wakes it to drain a partial batch.
-- Formatting runs on the flusher thread, so a deferred-format access record
-  still builds its string off the event loop (as with the plain default).
-- <code>close()</code> drains the buffer and joins the thread, so a partial trailing
-  batch is never lost at teardown.</p>
-<p>Opt-in: only constructed when <code>BB_LOG_BATCH_SIZE</code> &gt; 1.</p>
+        <p>Flush formatted records when a batch fills or its interval expires.</p>
+<p>One flusher thread handles all batches. close() drains trailing records and
+joins it. Do not inherit this live thread across fork.</p>
 
 
 
@@ -5944,27 +5908,9 @@ event loop, exactly as with the plain-text default.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Whether <em>logger</em> wants DEBUG, decided once at import.</p>
-<p><code>logger.debug(...)</code> is not free when DEBUG is off.  The call still
-happens, <code>Logger.debug</code> still calls <code>isEnabledFor</code>, the arguments are
-still evaluated — 24 executed bytecode instructions to emit nothing,
-measured.  Guarding with <code>isEnabledFor</code> yourself saves 6 of those,
-because that <em>is</em> what <code>debug</code> does; only a value settled at import
-brings it down to 4 (one global read and a branch).</p>
-<p>So modules on a per-request path do::</p>
-<pre><code>_DEBUG = debug_gate(logger)
-...
-if _DEBUG:
-    logger.debug('...', x)
-</code></pre>
-<p>This is the same bargain <a class="autorefs autorefs-internal" title="log(fn)" href="#blackbull.logger.log"><code>log</code></a> already makes and
-<code>docs/guide/logging.md</code> already documents: the level is read at import,
-so raising it afterwards does not switch these on.  Configure <code>DEBUG</code>
-before importing the framework, or restart.  The paths this guards emit
-around twenty lines per request, which is not something a running server
-is switched into anyway.</p>
-<p>Returns a plain bool rather than a callable on purpose — a callable would
-reintroduce the call this exists to remove.</p>
+        <p>Capture DEBUG enablement at import time.</p>
+<p>Configure the level before importing guarded code; later level changes do not
+update this bool. Guard argument evaluation as well as the logging call.</p>
 
 
     </div>
@@ -5982,21 +5928,9 @@ reintroduce the call this exists to remove.</p>
 
     <div class="doc doc-contents ">
 
-        <p>O4 fast path: enqueue an access-log record straight onto the async
-listener queue, bypassing <code>logging.Logger._log</code> (no <code>findCaller</code> stack
-walk, no filter chain, no <code>callHandlers</code> dispatch).</p>
-<p><em>msg</em> is the self-formatting <code>AccessLogRecord</code>; its <code>__str__</code>/<code>format()</code>
-still runs on the listener thread (deferred format preserved), because the
-sink formats the record there.  <em>extra</em> (<code>AccessLogRecord.as_extra()</code>) is
-merged onto the record so structured/JSON sinks keep their documented fields.</p>
-<p>Returns <code>True</code> when the record was enqueued (async logging active), or
-<code>False</code> when the caller must use the synchronous <code>logger</code> path (async
-logging disabled or torn down).  The level gate is the caller's job —
-<code>emit_access_log</code> checks <code>isEnabledFor(INFO)</code> before calling.</p>
-<p>This path does not run the logger's handler/filter chain, so
-<code>emit_access_log</code> only calls it when <code>blackbull.access</code> has no
-user-attached handlers or filters (see there); when it does, the standard
-<code>logger.info</code> path is used so those are honoured.</p>
+        <p>Enqueue an access record; return False when synchronous fallback is needed.</p>
+<p>The caller owns the INFO gate. This bypasses handler/filter chains, so use it
+only when the access logger has no user handlers or filters.</p>
 
 
     </div>

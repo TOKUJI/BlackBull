@@ -5635,17 +5635,9 @@
 
 
 <h1 id="security-model">Security model<a class="headerlink" href="#security-model" title="Permanent link">&para;</a></h1>
-<p>BlackBull parses every protocol itself and accepts connections directly, so
-it is the first thing an untrusted peer talks to. This page states what that
-peer can and cannot make the server spend, what the limits are out of the box,
-and what BlackBull explicitly does <strong>not</strong> claim.</p>
-<p>It describes the version it ships with. Where a limit is on by default, that is
-stated; where it is off, that is stated too, along with what to set.</p>
-<p>Most of it is about the server. The async HTTP client under <code>blackbull/client/</code>
-appears <strong>after</strong> the server rows in the tables below, at its own posture: it
-reads a response from a peer the operator chose, not a request from one who
-chose us, and that is a different standard — stated where it differs rather
-than assumed.</p>
+<p>Use this page to choose resource bounds. The tables cover audited paths, not
+a proof that every growable path has been found. Client and server limits
+have separate owners.</p>
 <h2 id="scope-and-trust-boundary">Scope and trust boundary<a class="headerlink" href="#scope-and-trust-boundary" title="Permanent link">&para;</a></h2>
 <p><strong>Every byte from a peer is untrusted until dispatch.</strong> Request lines, headers,
 bodies, WebSocket frames, HTTP/2 frames and MQTT packets are all parsed by
@@ -5731,19 +5723,8 @@ allocate on a peer's behalf, and each bound has a test named under
 <p><strong>A path a peer can grow gets a bound on one unit, on the total, and on how
 long it may take.</strong></p>
 </blockquote>
-<p>Read that as the <strong>rule this project holds itself to</strong>, not as a proven
-property of the whole surface. Applying it is what the table below records;
-finding every path it should apply to is a separate problem, and a harder one
-(see <a href="#non-claims">Non-claims</a>).</p>
-<p>The three questions are not interchangeable. A total cap with no time bound
-lets a peer hold a slot for as long as the cap allows; a time bound with no
-total cap lets it deliver forever in small, timely pieces. Almost every gap
-this project has found in its own defences was one shape — a cap on one unit
-standing in for a cap on the total. The exception is instructive: the HTTP/2
-priority tree was bounded per unit and had no total because nobody had counted
-it as storage at all, since nothing ever read what it stored. <strong>A write with no
-reader is still a growable path.</strong> Each row below names the knob for each
-column.</p>
+<p>Apply the rule to each growable path, including write-only state. Unit,
+aggregate, count and time limits are independent; one cannot replace another.</p>
 <table>
 <thead>
 <tr>
@@ -5897,12 +5878,9 @@ has — one of those charges nothing to <code>BB_CLIENT_HEAD_MAX_TOTAL</code>, w
 what owns the aggregate once fields are present.</p>
 <p>Full descriptions: <a href="../../reference/env-vars/">Environment variables</a>.</p>
 <h3 id="four-limits-that-are-less-obvious-than-they-look">Four limits that are less obvious than they look<a class="headerlink" href="#four-limits-that-are-less-obvious-than-they-look" title="Permanent link">&para;</a></h3>
-<p><strong>A message is bounded by what your handler receives, not by what the wire
-carried.</strong> <code>permessage-deflate</code> ratios measured in this codebase reach
-<strong>1028.8:1</strong>, so a WebSocket frame far under the 64 MiB frame cap can still
-inflate to gigabytes. <code>BB_WS_MAX_MESSAGE_SIZE</code> bounds the message <em>after</em>
-fragment reassembly and <em>after</em> inflation, and the inflate is bounded by zlib
-itself — an over-sized message is refused without ever being built.</p>
+<p><strong>Bound messages after reassembly and decompression.</strong> A small frame can
+inflate to a large message. <code>BB_WS_MAX_MESSAGE_SIZE</code> bounds inflation before
+the oversized result is materialized; a frame cap alone does not.</p>
 <p><strong>A size cap is judged from what the peer declares, before its payload is
 read.</strong> An over-cap <code>Content-Length</code>, an over-cap MQTT Remaining Length, and an
 over-cap HTTP/2 frame are all refused at the header. MQTT 5 permits a peer to
@@ -5982,7 +5960,7 @@ from a peer who chose us.</p>
 <td>Client</td>
 <td>HTTP/2</td>
 <td><code>bounded-when-configured</code></td>
-<td>the same two, and one of them is not merely off but absent; see qualification 4</td>
+<td>the same two default-open bounds; see qualification 4</td>
 </tr>
 </tbody>
 </table>
@@ -5999,22 +5977,14 @@ are the difference between the label and the whole truth:</p>
    Set <code>BB_REQUEST_TIMEOUT</code> if your application has no long-lived requests.</p>
 </li>
 <li>
-<p><strong>The default connection cap is only as protective as your <code>ulimit</code>.</strong>
-   <code>BB_MAX_CONNECTIONS</code> defaults to <code>auto</code>, which derives the cap from the
-   process's own <code>RLIMIT_NOFILE</code> less a 64-descriptor reserve. That is finite
-   and honest — a cap above the fd budget cannot be honoured, because the
-   descriptors run out first — but on a host whose limit is 1,048,576 the
-   derived cap is ~1,048,512. It bounds <em>descriptor exhaustion</em>, not
-   event-loop health. For the latter, set an explicit number; 1024 is a
-   typical single-loop value.</p>
+<p><strong>An auto connection cap is a descriptor budget, not a memory budget.</strong>
+   <code>auto</code> subtracts 64 reserved descriptors and those already open from
+   <code>RLIMIT_NOFILE</code>. Set an explicit cap for the worker's memory and CPU budget,
+   allowing for descriptors the application opens after acceptance starts.
+   TLS handshakes count from accept. Excess connections wait in the accept
+   queue; HTTP/1.1 and prior-knowledge h2c get best-effort 503, while ALPN-h2
+   and raw connections close silently.</p>
 </li>
-</ol>
-<p>Connections beyond the cap wait in the accept queue and each receives a
-   <code>503</code>, on every event loop.  A TLS connection counts from accept, while its
-   handshake is still running.  Under <code>auto</code>, 48 descriptors stay for the
-   process's own use — listeners, connection pools, open files; if yours holds
-   more, set the cap explicitly.</p>
-<ol>
 <li>
 <p><strong>An MQTT session that never expires is bounded by the total, not by the
    clock.</strong> §3.1.2.11.2 defines a Session Expiry Interval of <code>0xFFFFFFFF</code> as
@@ -6026,17 +5996,11 @@ are the difference between the label and the whole truth:</p>
    memory only and do not survive a restart.</p>
 </li>
 <li>
-<p><strong>The client's rung is the generous reading.</strong> Thirteen <code>BB_CLIENT_*</code>
-   bounds refuse traffic, and two — <code>BB_CLIENT_BODY_MAX_TOTAL</code> and
-   <code>BB_CLIENT_MIN_BODY_RATE</code> — ship off, which is exactly what
-   <code>bounded-when-configured</code> says. (Fifteen <code>BB_CLIENT_*</code> variables exist;
-   <code>BB_CLIENT_H2_ENABLE_PUSH</code> is a conformance switch and
-   <code>BB_CLIENT_MIN_BODY_RATE_GRACE</code> a modifier of the floor, and neither
-   refuses anything on its own. That split is not an editorial choice:
-   <code>_CLIENT_CAPS</code> and <code>_CLIENT_NOT_A_CAP</code> in
-   <code>tests/unit/test_cap_log_sites.py</code> declare it, and
-   <code>test_every_client_env_var_has_a_verdict</code> fails on the day a new variable
-   arrives with neither verdict.)</p>
+<p><strong>Client buffered-body and rate bounds default off.</strong> Set
+   <code>BB_CLIENT_BODY_MAX_TOTAL</code> when response size is predictable, and
+   <code>BB_CLIENT_MIN_BODY_RATE</code> only for transfers expected to make sustained
+   progress. Both apply to HTTP/1.1 and HTTP/2. Client send and WebSocket
+   limits use client-owned settings, separate from server tuning.</p>
 </li>
 </ol>
 <h2 id="defaults-and-deployment-checklist">Defaults and deployment checklist<a class="headerlink" href="#defaults-and-deployment-checklist" title="Permanent link">&para;</a></h2>
@@ -6088,38 +6052,6 @@ internet-facing</em> but <em>do I know what this peer should return</em>. Set
 occupy, because the buffered body costs about <strong>twice</strong> the cap in peak
 memory. <code>BB_CLIENT_MIN_BODY_RATE</code> asserts the peer is a transfer rather than a
 stream, which an event stream or a long poll is not.</p>
-<p>How the defaults compare, verified against primary sources:</p>
-<table>
-<thead>
-<tr>
-<th>Limit</th>
-<th>BlackBull</th>
-<th>Peer</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Max request body</td>
-<td>30 MiB (31,457,280 B)</td>
-<td>Kestrel <code>MaxRequestBodySize</code> 30,000,000 B (~28.6 MB) — the same class, not the same number</td>
-</tr>
-<tr>
-<td>Min request body rate</td>
-<td>240 B/s, 5 s grace</td>
-<td>Kestrel <code>MinRequestBodyDataRate</code> 240 B/s, 5 s grace — identical</td>
-</tr>
-<tr>
-<td>Max connections</td>
-<td>derived from <code>RLIMIT_NOFILE</code></td>
-<td>HAProxy <code>maxconn</code> also defaults to <code>ulimit -n</code>; nginx <code>worker_connections</code> 512; Kestrel <code>MaxConcurrentConnections</code> unlimited</td>
-</tr>
-<tr>
-<td>HTTP/2 keep-alive ping</td>
-<td>on, 300 s delay / 30 s timeout</td>
-<td>Kestrel <code>KeepAlivePingDelay</code> disabled by default, <code>KeepAlivePingTimeout</code> 20 s</td>
-</tr>
-</tbody>
-</table>
 <h2 id="evidence">Evidence<a class="headerlink" href="#evidence" title="Permanent link">&para;</a></h2>
 <p>Every claim on this page is backed by a test or an external conformance suite.</p>
 <table>
@@ -6193,23 +6125,10 @@ stream, which an event stream or a long poll is not.</p>
 </tbody>
 </table>
 <h2 id="non-claims">Non-claims<a class="headerlink" href="#non-claims" title="Permanent link">&para;</a></h2>
-<p>Stated plainly, because a security page that only lists strengths is worth
-less than one that draws its own boundary:</p>
+<p>The limits do not cover volumetric floods or arbitrary application resource
+use. No third-party audit or red-team exercise establishes completeness.
+Treat the tables as audited paths, not proof of absence of other paths.</p>
 <ul>
-<li><strong>No third-party security audit.</strong> No external firm has reviewed this code.</li>
-<li><strong>No red-team exercise.</strong> The limits above were derived by auditing the code
-  for growable paths, not by attacking a running deployment.</li>
-<li><strong>The coverage above is an audit result, not a proof.</strong> It comes from reading
-  the code for paths a peer can grow, and that method has found paths it had
-  previously missed — including twice on rows it had already written down. Read
-  the table as <em>what has been looked at</em>, not as <em>what exists</em>.</li>
-<li><strong>Not volumetric-DoS protection.</strong> Bandwidth and SYN floods are answered
-  upstream.</li>
-<li><strong>A malicious application handler is out of scope.</strong> BlackBull bounds what a
-  <em>peer</em> can spend, not what your own code can.</li>
-<li><strong>"No known gaps" is not "no gaps."</strong> A bound that no one has found missing is
-  not the same as a bound proven complete. This work is continuing, not
-  finished.</li>
 <li><strong>The server sends <code>100 (Continue)</code> only to HTTP/1.1.</strong> An HTTP/1.0 client
   gets no interim response at all and its <code>Expect</code> is ignored (COMP-NO-1XX-HTTP10),
   so a client that waits for the signal stalls until its own timeout. The
@@ -6247,14 +6166,10 @@ contrast is visible:</p>
 </li>
 <li><strong>A buffered response body costs about twice the cap in peak memory.</strong>
   Reaching ~1× means <code>stream()</code>, which exposes no status, no headers and sits
-  outside the cap — so today a caller can have ~1× <em>or</em> all three, never both.</li>
-<li><strong>This is an audit result, not a proof.</strong> The client's read paths were
-  enumerated by hand; that method has missed paths on this codebase before,
-  and it will again. No known gaps is not no gaps. What the rows above claim
-  is that each named bound holds — not that the list of rows is complete.</li>
+  outside the cap — so today a caller can have ~1× <em>or</em> all three, never both.
+Found something? Please open an issue at
+<a href="https://github.com/TOKUJI/BlackBull/issues">github.com/TOKUJI/BlackBull</a>.</li>
 </ul>
-<p>Found something? Please open an issue at
-<a href="https://github.com/TOKUJI/BlackBull/issues">github.com/TOKUJI/BlackBull</a>.</p>
 
 
 

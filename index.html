@@ -286,10 +286,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-you-get" class="md-nav__link">
+  <a href="#serving-and-interoperability" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What you get
+        Serving and interoperability
       
     </span>
   </a>
@@ -5467,10 +5467,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-you-get" class="md-nav__link">
+  <a href="#serving-and-interoperability" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What you get
+        Serving and interoperability
       
     </span>
   </a>
@@ -5549,32 +5549,17 @@ for the explicit list of behaviours to expect, and
 <a href="about/conformance/">Conformance</a> for the protocol-level
 test coverage behind the standards-compliance claims.</p>
 </div>
-<h2 id="what-you-get">What you get<a class="headerlink" href="#what-you-get" title="Permanent link">&para;</a></h2>
+<h2 id="serving-and-interoperability">Serving and interoperability<a class="headerlink" href="#serving-and-interoperability" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Routing + middleware</strong> in the shape ASGI apps already use, with
-  optional simplified handler signatures that drop <code>(scope, receive,
-  send)</code> boilerplate when you don't need them.</li>
-<li><strong>HTTP/1.1, HTTP/2, and WebSocket</strong> on the same listener — ALPN
-  negotiates HTTP/2; cleartext h2c is detected on first preface bytes;
-  WebSocket-over-HTTP/2 (RFC 8441) is available as an opt-in.</li>
-<li><strong>gRPC and MQTT 5 beside HTTP</strong> — <code>app.enable_grpc()</code> serves gRPC
-  (all four RPC shapes, <code>gzip</code> compression) over the same HTTP/2 port;
-  <code>app.add_extension(MQTTExtension(...))</code> runs a pure-Python MQTT 5
-  broker on its own port, in the same process.</li>
-<li><strong>An edge inference serving shape</strong> — SSE token streaming with
-  HTTP/2 multiplexing beside MQTT device ingest and <code>$share/…</code>
-  work queues, in one process that <code>pip install</code>s on ARM with no
-  C toolchain.  See <a href="guide/edge-inference/">Edge inference serving</a>.</li>
-<li><strong>Standards conformance</strong> — RFC 9112 (HTTP/1.1), RFC 9113
-  (HTTP/2 — h2spec passes), RFC 6455 (WebSocket — Autobahn passes),
-  RFC 8441 (Extended CONNECT for WebSocket over HTTP/2).</li>
-<li><strong>Predictable behaviour under load</strong> — per-connection deadline
-  subsystem, per-stream queue depth controls, cooperative event-loop
-  yielding.</li>
-<li><strong>Pre-fork multi-worker</strong> with <code>SO_REUSEPORT</code>, optional <code>uvloop</code>,
-  hot-reload via <code>watchfiles</code>, AF_UNIX + systemd socket activation.</li>
-<li><strong>PEP 561 typed</strong> distribution (downstream type-checkers honour
-  the inline annotations).</li>
+<li>HTTP/1.1, prior-knowledge h2c and WebSocket upgrades share the HTTP listener.
+  HTTP/2 over TLS uses ALPN; RFC 8441 WebSocket streams are opt-in.</li>
+<li>gRPC uses HTTP/2 on that listener. MQTT uses an extension and its own
+  listener, with one worker owning broker state.</li>
+<li>Native handlers and middleware use <code>Connection</code>. External-ASGI hosting
+  converts at the boundary; use <code>BB_FORCE_ASGI_SCOPE=1</code> to serve a foreign
+  ASGI app on BlackBull's server.</li>
+<li>See <a href="about/conformance/">Conformance</a> for coverage and
+  <a href="about/security-model/">Security model</a> for default resource bounds.</li>
 </ul>
 <h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>blackbull<span class="w">                        </span><span class="c1"># core</span>
@@ -5618,7 +5603,7 @@ ASGI-triplet form.</p>
   TLS, AF_UNIX, systemd activation, and reverse-proxy topologies.</li>
 <li>Curious about the design? <a href="about/architecture/">Architecture</a> covers
   the actor model, protocol ownership, and fault injection;
-  <a href="about/internals/">Internals</a> walks the implementation in detail.</li>
+  <a href="about/internals/">Internals</a> states implementation invariants and code ownership.</li>
 </ul>
 <div class="footnote">
 <hr />

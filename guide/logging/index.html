@@ -5827,7 +5827,7 @@ distinct purpose:</p>
 <tr>
 <td><code>blackbull.access</code></td>
 <td><code>INFO</code></td>
-<td>One record per completed HTTP/1.1 request (access log)</td>
+<td>One record per completed HTTP/1.1 request or HTTP/2 stream</td>
 </tr>
 <tr>
 <td><code>blackbull.caps</code></td>
@@ -5841,10 +5841,12 @@ distinct purpose:</p>
 </tr>
 </tbody>
 </table>
-<p>All three follow standard <code>logging</code> semantics — no handlers
-attached by default, so nothing is printed until you opt in.</p>
+<p>Configure levels and handlers through Python logging. Importing the package
+does not install a sink; serving with BB_ASYNC_LOGGING=1 installs the default
+async stderr sink. Access output still depends on its INFO level and
+BB_ACCESS_LOG.</p>
 <h2 id="access-log-blackbullaccess">Access log — <code>blackbull.access</code><a class="headerlink" href="#access-log-blackbullaccess" title="Permanent link">&para;</a></h2>
-<p>For every completed HTTP/1.1 request the server emits one <code>INFO</code>
+<p>For every completed HTTP/1.1 request or HTTP/2 stream the server emits one <code>INFO</code>
 record on the <code>blackbull.access</code> logger.  Default format:</p>
 <div class="highlight"><pre><span></span><code>{client_ip} "{method} {path} HTTP/{version}" {status} {bytes} {duration}ms
 </code></pre></div>
@@ -5932,9 +5934,7 @@ available in a custom <code>logging.Formatter</code> format string:</p>
 </code></pre></div>
 <h3 id="disabling-the-access-log">Disabling the access log<a class="headerlink" href="#disabling-the-access-log" title="Permanent link">&para;</a></h3>
 <p>Set the level above <code>INFO</code>, or set the environment variable
-<code>BB_ACCESS_LOG=0</code> (which gates record formatting at the call
-site — useful when running benchmarks that don't want logging
-overhead).</p>
+<code>BB_ACCESS_LOG=0</code> to disable access-record formatting.</p>
 <h2 id="built-in-async-logging-sinks">Built-in async logging sinks<a class="headerlink" href="#built-in-async-logging-sinks" title="Permanent link">&para;</a></h2>
 <p>With <code>BB_ASYNC_LOGGING=1</code> (the default) BlackBull installs a <code>QueueHandler</code> on
 the <code>blackbull</code> logger so every log call from the event loop enqueues in O(1); a
@@ -5983,11 +5983,7 @@ with the event loop). <code>BB_LOG_BATCH_SIZE</code> tunes the coalescing width,
 on/off switch; the timeout bounds visibility latency at low rate. To force an
 immediate per-record flush, disable async logging (<code>BB_ASYNC_LOGGING=0</code>, the
 synchronous path).</p>
-<p>When the access logger is left in its default state, records are enqueued on a
-fast path that skips the stdlib <code>logging.Logger._log</code> machinery (~93% of the
-per-emit cost). This is transparent: if you attach your own handlers or filters
-to <code>blackbull.access</code> (see the next section), BlackBull automatically uses the
-standard logging path so they are honoured.</p>
+<p>Custom handlers and filters attached to <code>blackbull.access</code> are honored.</p>
 <p>For the full list see <a href="../../reference/env-vars/">environment variables</a>.</p>
 <h2 id="extending-the-access-log-record-from-middleware">Extending the access log record from middleware<a class="headerlink" href="#extending-the-access-log-record-from-middleware" title="Permanent link">&para;</a></h2>
 <p>The <code>AccessLogRecord</code> for the current request is stored at
@@ -6053,13 +6049,7 @@ have already been imported will not activate <code>@log</code> logging for
 already-decorated functions.  Configure <code>DEBUG</code> level before
 importing framework modules, or restart the process.</p>
 <h3 id="the-same-applies-to-internal-debug-logging">The same applies to internal <code>DEBUG</code> logging<a class="headerlink" href="#the-same-applies-to-internal-debug-logging" title="Permanent link">&para;</a></h3>
-<p>Framework modules on a per-request path — request dispatch, HTTP/2
-frame parsing, the response senders — read the <code>DEBUG</code> level once
-at import and branch on the result, for the same reason <code>@log</code>
-does.  A <code>logger.debug(...)</code> call that emits nothing is not free:
-the call happens, its arguments are built, and the level is
-checked, which measured at 24 bytecode instructions per site.
-HTTP/2 was making twenty such calls per request.</p>
+<p>Internal request-path DEBUG traces also capture the level at import.</p>
 <p>So <strong>configure <code>DEBUG</code> before importing <code>blackbull</code></strong> if you want
 internal debug output:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
@@ -6198,7 +6188,7 @@ record on <code>blackbull.caps</code> when it fires.  Coverage:</p>
 </tr>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>
-<td>handler exceeded per-request budget (H/1.1 + H/2)</td>
+<td>handler exceeded its request budget (HTTP/1.1 + HTTP/2)</td>
 </tr>
 <tr>
 <td><code>BB_WRITE_TIMEOUT</code></td>
@@ -6246,14 +6236,8 @@ record on <code>blackbull.caps</code> when it fires.  Coverage:</p>
 </tr>
 </tbody>
 </table>
-<p>The async client under <code>blackbull/client/</code> keeps the same record for its
-own bounds.  The argument for a client having bounds at all is
-diagnostic — a client picks its peer, and
-<a href="../fault_injection/">fault injection</a> exists to point one at a server
-that misbehaves — so a bound that refused without naming itself would be
-no diagnostic at all.  A cap enforced on both protocols is two rejection
-sites and keeps two records, which is why this table has a column per
-protocol rather than a row per cap:</p>
+<p>Client bounds use the same records. A cap's refusal scope depends on the
+protocol:</p>
 <table>
 <thead>
 <tr>
@@ -6285,7 +6269,7 @@ protocol rather than a row per cap:</p>
 <tr>
 <td><code>BB_CLIENT_BODY_TIMEOUT</code></td>
 <td>one body read outlasted its deadline</td>
-<td>no frame for that stream inside the deadline</td>
+<td>no nonempty DATA progress for that stream inside the deadline</td>
 <td>—</td>
 </tr>
 <tr>

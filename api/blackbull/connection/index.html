@@ -5951,34 +5951,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>The native <code>Connection</code> interface — BlackBull's single internal request
-representation.</p>
-<p>BlackBull is a multi-protocol server that owns both sides of the wire on its
-self-hosted path; the ASGI <code>scope</code> dict is therefore an <em>internal
-data-format choice</em>, not an interoperability contract — and a poor one
-(untyped, string-keyed, carrying private <code>_</code>-prefixed keys). This module
-makes a typed <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="#blackbull.connection.Connection"><code>Connection</code></a> the internal model; the ASGI scope becomes
-a <strong>derived</strong> view produced by <a class="autorefs autorefs-internal" title="as_scope()" href="#blackbull.connection.Connection.as_scope"><code>Connection.as_scope</code></a> and consumed by
-<a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
-
-  
-      classmethod
-  " href="#blackbull.connection.Connection.from_scope"><code>Connection.from_scope</code></a>, used only where external compatibility needs
-it (uvicorn, <code>httpx.ASGITransport</code>/TestClient, third-party ASGI middleware).</p>
-<p>The <code>_CONNECTION_FIELDS</code> registry is the single source of truth from which
-both conversions are generated: adding a field to <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="#blackbull.connection.Connection"><code>Connection</code></a> without
-a registry entry is a test failure (proposal §4.2 / §9.5), which mechanically
-prevents the two representations from drifting apart.</p>
+        <p>Native request representation.</p>
+<p>ASGI scopes exist only at compatibility boundaries. Keep conversion fields
+in _CONNECTION_FIELDS; state and extensions remain shared after conversion.</p>
 
 
 
@@ -6174,9 +6149,7 @@ where it may live on a <code>scope</code> dict instead.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Matched URL path params, set by the router (values are converter-
-coerced, hence <code>Any</code>). The backing dict is created lazily on first
-access so no-param routes allocate nothing.</p>
+        <p>Router-assigned parameters with converter-coerced values.</p>
 
     </div>
 
@@ -6225,16 +6198,7 @@ answers a malformed value with 400 rather than a silent fallback).</p>
 
     <div class="doc doc-contents ">
 
-        <p>Query params keeping <strong>every</strong> value, parsed once and cached.</p>
-<p>The full <code>parse_qsl</code> result: <code>?tag=a&amp;tag=b</code> gives
-<code>{'tag': ['a', 'b']}</code>.  Unlike <a class="autorefs autorefs-internal" title="query
-
-  
-      property
-  " href="#blackbull.connection.Connection.query"><code>query</code></a>, which folds repeats to
-the last value, this is what list-valued keys need.  The backing dict
-is created lazily on first access, so handlers that never read a query
-param allocate nothing.</p>
+        <p>Return all query values per key, parsed once; query keeps only the last value.</p>
 
     </div>
 
@@ -6256,11 +6220,7 @@ param allocate nothing.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The client-offered WebSocket subprotocols (ASGI websocket scope's
-<code>subprotocols</code>), parsed from the <code>Sec-WebSocket-Protocol</code> request
-header. Empty on HTTP requests and on a WS handshake that offered none.
-Derived — not stored — so it needs no ASGI round-trip and the header
-stays the single source of truth.</p>
+        <p>Return client-offered WebSocket subprotocols; empty for HTTP or no offer.</p>
 
     </div>
 
@@ -6432,36 +6392,8 @@ fall back to the field defaults.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Yield the request body one chunk at a time, draining <code>receive</code> once.</p>
-<p>The streaming counterpart to <a class="autorefs autorefs-internal" title="body()
-
-  
-      async
-  " href="#blackbull.connection.Connection.body"><code>body</code></a>.  Use it when the handler only
-needs to <em>process</em> the body incrementally — count/hash/forward a large
-upload — so the working set stays one chunk instead of the whole
-payload::</p>
-<pre><code>total = 0
-async for chunk in conn.stream():
-    total += len(chunk)
-</code></pre>
-<p>Mutually exclusive with <a class="autorefs autorefs-internal" title="body()
-
-  
-      async
-  " href="#blackbull.connection.Connection.body"><code>body</code></a>/<a class="autorefs autorefs-internal" title="json()
-
-  
-      async
-  " href="#blackbull.connection.Connection.json"><code>json</code></a>/<a class="autorefs autorefs-internal" title="text(encoding='utf-8')
-
-  
-      async
-  " href="#blackbull.connection.Connection.text"><code>text</code></a>, which
-buffer: the body is a single-drain stream, so mixing the two on one
-request raises <code>RuntimeError</code> rather than silently returning a
-partial or empty body.  A mid-body disconnect raises
-<a class="autorefs autorefs-internal" href="../request/#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a>.</p>
+        <p>Yield body chunks once; mutually exclusive with body/json/text buffering.</p>
+<p>Mixing modes raises RuntimeError; mid-body disconnect raises ClientDisconnected.</p>
 
 
     </div>
@@ -6501,48 +6433,10 @@ partial or empty body.  A mid-body disconnect raises
 
     <div class="doc doc-contents ">
 
-        <p>Materialize the ASGI scope the dispatch pipeline consumes, with this
-typed <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="#blackbull.connection.Connection"><code>Connection</code></a> stashed on it for zero-reconversion reads.</p>
-<p>The single canonical <em>Connection → dispatch-ready scope</em> bridge shared
-by the H/1.1 <code>run()</code> and H/2 <code>_conn_to_scope</code> seams, which would
-otherwise each hand-roll the same five steps:</p>
-<ol>
-<li>derive the ASGI scope via <a class="autorefs autorefs-internal" title="as_scope()" href="#blackbull.connection.Connection.as_scope"><code>as_scope</code></a> (the one native→ASGI point);</li>
-<li>when <code>force_asgi</code> (the §4.3 <code>BB_FORCE_ASGI_SCOPE</code> dual-path lane),
-   round-trip through <a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
-
-  
-      classmethod
-  " href="#blackbull.connection.Connection.from_scope"><code>from_scope</code></a> so both the derived scope <em>and</em>
-   the Connection the consumers read are rebuilt from scratch on every
-   request, keeping the compat conversion from bitrotting.  <code>_asterisk_form</code>
-   is Connection-only (not in the scope), so carry it across the rebuild;</li>
-<li>restore <code>scope['headers']</code> to the rich <a class="autorefs autorefs-internal" href="../headers/#blackbull.headers.Headers"><code>Headers</code></a> object
-   (<code>as_scope</code> emits the ASGI <code>list[tuple]</code> form; internal <code>.get()</code>
-   callers want the object);</li>
-<li>re-expose the H/1.1 <code>_asterisk_form</code> OPTIONS marker on the envelope;</li>
-<li>stash the Connection under <code>CONNECTION_STASH_KEY</code>.</li>
-</ol>
-<p>Protocol-specific augmentation (the websocket-only <code>subprotocols</code> key)
-is layered on by the caller <em>after</em> this returns — it is not a
-<a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="#blackbull.connection.Connection"><code>Connection</code></a> field (proposal §2.1).</p>
-<p>The default (<code>force_asgi=False</code>) native path builds
-the scope by <strong>direct attribute access</strong>, placing the rich <code>Headers</code>
-object straight in (no <code>list(headers)</code> that the old code computed via
-the registry and then immediately discarded), and skips the per-field
-function-call indirection of <code>as_scope()</code>. The <code>force_asgi</code> dual-path
-conformance lane (§4.3) keeps the full <code>as_scope</code> → <code>from_scope</code> →
-<code>as_scope</code> round-trip so the compat conversion is still exercised.</p>
+        <p>Build the compatibility scope with its native Connection stashed.</p>
+<p>force_asgi exercises both conversions. Preserve Connection-only OPTIONS
+state across that rebuild. The caller adds protocol-specific fields afterward;
+state and extensions remain shared for late updates.</p>
 
 
     </div>
@@ -6569,20 +6463,9 @@ conformance lane (§4.3) keeps the full <code>as_scope</code> → <code>from_sco
 
     <div class="doc doc-contents ">
 
-        <p>Bind the <strong>raw</strong> body-receive channel onto the request's Connection so
-lazy <code>conn.body()</code> / <code>request.body()</code> drain the right stream once.</p>
-<p>Pass the <em>unwrapped</em> recipient, never a disconnect-detecting wrapper: the
-wrapper's closure captures <code>conn</code>, so storing it makes <code>conn</code> →
-wrapper → <code>conn</code> a cycle that only the generational GC can free, and its
-pauses are a measured tail-latency cost here.  The raw recipient holds no
-reference back, so refcounting frees the chain when the request ends.</p>
-<p>Idempotent — binds only when unset, so the external-ASGI path (uvicorn /
-<code>httpx.ASGITransport</code>), where <a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
-
-  
-      classmethod
-  " href="#blackbull.connection.Connection.from_scope"><code>Connection.from_scope</code></a> already bound
-the host's own receive channel, keeps that binding.</p>
+        <p>Bind the raw receive channel once.</p>
+<p>Never store a disconnect wrapper that captures conn: that creates a reference
+cycle. Preserve a receive channel already bound by an external ASGI host.</p>
 
 
     </div>
@@ -6649,37 +6532,9 @@ ASGI <code>scope</code> dict (idempotent — caller guards on <a class="autorefs
 
     <div class="doc doc-contents ">
 
-        <p>Return the typed <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="#blackbull.connection.Connection"><code>Connection</code></a> for this request, plus whether it
-was freshly built.</p>
-<p><em>target</em> is the threaded dispatch object — a <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="#blackbull.connection.Connection"><code>Connection</code></a> on the
-native path, or an ASGI scope dict on the external/compat lane.</p>
-<p>The one <em>ASGI-scope → Connection</em> accessor shared by the dispatcher
-(<code>app._connection_of</code>) and the router (<code>router._conn_of</code>).
-BlackBull's own protocol actors stash the <code>Connection</code> they parsed on the
-scope envelope under <code>CONNECTION_STASH_KEY</code>, so the self-hosted path
-reads it back with <strong>no</strong> re-conversion. Under an external ASGI server
-(uvicorn, <code>httpx.ASGITransport</code>) there is no stash, so build one via
-<a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
-
-  
-      classmethod
-  " href="#blackbull.connection.Connection.from_scope"><code>Connection.from_scope</code></a> — the single ASGI→native point — and stash it
-so later accessors in the same request reuse the one object.</p>
-<p>Returns <code>(conn, built)</code> where <em>built</em> is <code>True</code> only on the external
-path (no prior stash). Callers layer their own post-processing on a freshly
-built conn — the dispatcher links <code>scope['state']</code> to <code>conn.state</code>; the
-router seeds <code>path_params</code> from an input scope key — because those needs
-differ by call site.</p>
+        <p>Return (Connection, freshly_built), reusing the request's stash.</p>
+<p>Only an external scope without a stash needs conversion. Callers apply their
+own state/path-parameter linking to a freshly built connection.</p>
 
 
     </div>

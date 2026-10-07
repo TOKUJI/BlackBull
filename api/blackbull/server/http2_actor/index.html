@@ -5749,10 +5749,7 @@ surfacing to the caller.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Send a raw HTTP/2 frame via the control-plane sender.</p>
-<p>Every emitted RST_STREAM passes through here, which is what makes
-this the one place the G8 blind spot can be closed without dusting
-the counter across a dozen refusal sites.</p>
+        <p>Send a control frame and meter every emitted RST_STREAM at this boundary.</p>
 
 
     </div>
@@ -5784,10 +5781,8 @@ the counter across a dozen refusal sites.</p>
 
 
 
-        <p>Owns one HTTP/2 stream.</p>
-<p>Single-shot like RequestActor: run() processes one stream and returns.
-Delegates to RequestActor for ASGI dispatch.
-Supervisor strategy: isolate — RST_STREAM on unhandled error.</p>
+        <p>Run one HTTP/2 request through RequestActor with a native Connection.</p>
+<p>Isolate unhandled failure with RST_STREAM; do not share per-stream state.</p>
 
 
 

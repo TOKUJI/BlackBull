@@ -4729,23 +4729,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="exec_self_with_sockets">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.reload.exec_self_with_sockets--parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
         
       </ul>
@@ -5576,23 +5559,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="exec_self_with_sockets">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.reload.exec_self_with_sockets--parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Parameters
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
         
       </ul>
@@ -5635,31 +5601,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Auto-reload support for the BlackBull multi-worker master.</p>
-<p>The reload model is <strong>master re-exec</strong>:</p>
-<ol>
-<li>Master binds and listens on the configured sockets.</li>
-<li>Master forks worker processes; they inherit the listening sockets
-     via fd inheritance.</li>
-<li>A background <code>watchfiles</code> watcher signals the master when any
-     watched <code>*.py</code> file changes.</li>
-<li>Master sends SIGTERM to all workers and waits up to
-     <code>shutdown_timeout</code> for them to drain in-flight requests.</li>
-<li>Master marks the listening sockets inheritable, exports their fds
-     via <code>BB_INHERIT_FDS</code>, and <code>os.execvp</code>\ s <code>sys.executable</code>
-     with the original argv.</li>
-<li>The fresh master process adopts the inherited sockets
-     (see <a class="autorefs autorefs-internal" title="adopt_inherited_sockets()" href="../../protocol/rsock/#blackbull.protocol.rsock.adopt_inherited_sockets"><code>blackbull.protocol.rsock.adopt_inherited_sockets</code></a>)
-     and re-forks workers — now running the <em>new</em> code.</li>
-</ol>
-<p>Picking up new code requires the master itself to re-import, which is
-why we re-exec the whole process rather than <code>importlib.reload</code>.  On a
-successful re-exec, the listening sockets stay open throughout: the
-kernel multiplexes the same fd across master+workers while Python state churns.</p>
-<p>The watcher runs in a daemon thread so it can not block the master's
-synchronous supervision loop.  It debounces filesystem events itself
-(watchfiles default ~50 ms) so a single editor save does not trigger
-multiple reloads.</p>
+        <p>Master re-exec with inherited listening sockets.</p>
+<p>Re-import code by replacing the master, not importlib.reload. Keep listeners
+open across exec and close temporary event loops before fork.</p>
 
 
 
@@ -5768,20 +5712,9 @@ watch_filter:
 
     <div class="doc doc-contents ">
 
-        <p>Re-execute the current Python process, preserving listening sockets.</p>
-<p>Marks each socket's fd inheritable, sets <code>BB_INHERIT_FDS</code> to a
-comma-separated list of those fds, and calls <code>os.execvp</code> —
-which replaces the current process image while keeping fds open
-(unless <code>FD_CLOEXEC</code> is set, which we clear here).</p>
-<p>Does not return on success: the current process image is gone.</p>
-<h5 id="blackbull.server.reload.exec_self_with_sockets--parameters">Parameters<a class="headerlink" href="#blackbull.server.reload.exec_self_with_sockets--parameters" title="Permanent link">&para;</a></h5>
-<p>sockets:
-    Listening sockets the new process should adopt.  Caller is
-    responsible for having already terminated any subprocesses
-    that hold copies of these fds.
-argv:
-    Argv to exec.  Defaults to <code>sys.argv</code> (re-runs the same
-    command line).  <code>sys.executable</code> is always used as argv[0].</p>
+        <p>Re-execute without returning on success, preserving listening descriptors.</p>
+<p>The caller must terminate subprocesses holding copies first. argv defaults
+to sys.argv; sys.executable is always the executable.</p>
 
 
     </div>

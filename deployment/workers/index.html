@@ -6014,65 +6014,13 @@ does placement, or any time you would rather make this decision
 yourself.  Pinning is Linux-only (<code>sched_setaffinity</code>) and
 multi-worker-only; a single-worker server is never pinned.</p>
 <h3 id="workers-vs-cores-under-connection-churn">Workers vs cores under connection churn<a class="headerlink" href="#workers-vs-cores-under-connection-churn" title="Permanent link">&para;</a></h3>
-<p>The "one worker per core" advice assumes long-lived connections.
-When connections are short-lived — every request opens a new
-connection (<code>Connection: close</code>), or the workload rotates them
-every few requests — raising <code>BB_WORKERS</code> above the core count
-costs real throughput.  Measured on a 16-core cpuset, <code>/</code>
-endpoint, best-of-3:</p>
-<table>
-<thead>
-<tr>
-<th>workload</th>
-<th style="text-align: right;">W=16</th>
-<th style="text-align: right;">W=32</th>
-<th style="text-align: right;">W=64</th>
-<th style="text-align: right;">loss 16→64</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>keep-alive</td>
-<td style="text-align: right;">292k</td>
-<td style="text-align: right;">284k</td>
-<td style="text-align: right;">279k req/s</td>
-<td style="text-align: right;">~4.5 %</td>
-</tr>
-<tr>
-<td>churn</td>
-<td style="text-align: right;">96k</td>
-<td style="text-align: right;">90k</td>
-<td style="text-align: right;">81k req/s</td>
-<td style="text-align: right;">~16 %</td>
-</tr>
-</tbody>
-</table>
-<p>The churn loss is two stacked costs: the shared listener's
-<strong>accept race</strong> — every connection wakes every worker, which
-profiles show as <code>accept()</code> growing from ~3 % to ~11 % of worker
-time at 4× oversubscription — plus the general oversubscription
-amplification of per-connection work.</p>
-<p>Neither of the obvious knobs fixes it:</p>
-<ul>
-<li><code>BB_SOCKET_REUSEPORT=1</code> removes the accept race, but the
-  kernel's hash spreads a burst of new connections unevenly
-  across the per-worker queues and leaves cores idle — in the
-  same run it was still <em>slower</em> than the shared socket under
-  churn (87k vs 96k req/s at W=16).</li>
-<li><code>BB_CPU_PINNING=off</code> made no measurable difference (A/B at the
-  same worker counts).</li>
-</ul>
-<p>For churn-heavy deployments keep <code>BB_WORKERS</code> at or below the
-core count; extra workers buy contention, not throughput.</p>
+<p>Start at or below the available physical-core count and tune against your
+workload. Extra workers contend for CPU and accept queues, especially when
+clients reconnect frequently. Compare shared listeners and
+<code>BB_SOCKET_REUSEPORT=1</code> under that workload before choosing either.</p>
 <h2 id="warm-up-before-fork">Warm-up before fork<a class="headerlink" href="#warm-up-before-fork" title="Permanent link">&para;</a></h2>
-<p>A worker that has just forked runs interpreted bytecode: no
-specialization, no filled caches, cold branch predictors.  Every
-worker pays that cost separately, and under a pre-fork model it is
-paid <em>N</em> times for the same code.</p>
-<p><code>@app.on_warmup</code> moves the payment forward.  The hook runs once in
-the master, before the listening socket is created and before any
-worker forks, so the heap it warms is the heap every worker
-inherits:</p>
+<p><code>@app.on_warmup</code> runs once before binding listeners and forking workers.
+Only warm reusable code and data here; open per-worker resources at startup.</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on_warmup</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">warm</span><span class="p">(</span><span class="n">app</span><span class="p">):</span>
     <span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">Connection</span><span class="p">,</span> <span class="n">Headers</span>
@@ -6081,14 +6029,6 @@ inherits:</p>
         <span class="n">headers</span><span class="o">=</span><span class="n">Headers</span><span class="p">([(</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'application/grpc'</span><span class="p">)]))</span>
     <span class="k">await</span> <span class="n">app</span><span class="o">.</span><span class="n">warm_request</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">body</span><span class="o">=</span><span class="n">req_bytes</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">2000</span><span class="p">)</span>
 </code></pre></div>
-<p>Two mechanisms carry the warmth across <code>fork()</code>.  PEP 659
-specialization lives in the code objects, which are shared pages,
-so it survives.  Reference-count churn would otherwise dirty those
-pages and copy them per worker, so the framework calls
-<code>gc.collect()</code> and then <code>gc.freeze()</code> once warm-up finishes —
-<code>gc.freeze()</code> moves surviving objects to a permanent generation the
-collector no longer traverses, which is what keeps the pages shared
-rather than copied.</p>
 <p>The hook must therefore warm and nothing else.  A DB pool or a
 socket opened here would be inherited by every worker as the <em>same</em>
 file descriptor, which is a bug, not a saving; per-worker resources
@@ -6138,11 +6078,10 @@ python<span class="w"> </span>app.py
 <span class="c1"># Disable (only safe on a trusted local socket)</span>
 <span class="nv">BB_HEADER_TIMEOUT</span><span class="o">=</span><span class="m">0</span><span class="w"> </span>python<span class="w"> </span>app.py
 </code></pre></div>
-<p>HTTP/2 has no equivalent header timeout because the protocol
-doesn't allow a peer to drip header bytes one at a time —
-<code>HEADERS</code> and <code>CONTINUATION</code> frames carry their length in the
-frame header, and the <code>MAX_HEADER_LIST_SIZE</code> SETTING bounds the
-total.</p>
+<p>HTTP/2 uses the same BB_HEADER_TIMEOUT for an unfinished HEADERS/CONTINUATION
+block. A breach closes the connection with GOAWAY(ENHANCE_YOUR_CALM), because
+HPACK state is shared across streams. Frame lengths do not prevent a peer
+from stalling mid-frame or mid-block.</p>
 <h3 id="oversized-headers-memory-exhaustion">Oversized headers — memory exhaustion<a class="headerlink" href="#oversized-headers-memory-exhaustion" title="Permanent link">&para;</a></h3>
 <p>Two limits stop a 1 GB <code>X-Foo: &lt;random bytes&gt;</code> header from
 accumulating in the connection's read buffer while the server
@@ -6170,12 +6109,8 @@ than only the first:</p>
 </tr>
 </tbody>
 </table>
-<p>A request that exceeds either limit gets
-<code>431 Request Header Fields Too Large</code> and the connection is
-closed.  The exception is a <code>BB_HEADER_MAX_TOTAL</code> overrun with no
-line terminator inside the budget: that start-line never ended, so
-it is answered <code>400 Bad Request</code> — 431 would tell a peer to send
-fewer header fields than the zero it has sent.</p>
+<p>Oversized request lines receive 400; oversized fields or an oversized field
+block receive 431. Both close the HTTP/1.1 connection.</p>
 <p>Either way the server discards a bounded amount of what the peer
 is still sending before it closes, because a close with unread
 bytes queued makes the kernel send RST and the peer would never
@@ -6200,7 +6135,7 @@ see the rejection it was just given.</p>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>
 <td><code>0</code> (off)</td>
-<td>Per-HTTP/2-stream deadline in seconds.  Set in production (e.g. <code>30</code>) so an ASGI handler hung on an upstream call can't keep its stream slot indefinitely.  Stream is cancelled via <code>RST_STREAM CANCEL</code>.</td>
+<td>Handler deadline in seconds. HTTP/1.1 answers 408 and closes; HTTP/2 cancels the stream with <code>RST_STREAM CANCEL</code>. Set a positive budget compatible with long-lived requests.</td>
 </tr>
 </tbody>
 </table>
@@ -6269,12 +6204,11 @@ python<span class="w"> </span>app.py<span class="w"> </span>--cert<span class="w
 <p>What each line buys you:</p>
 <ul>
 <li><code>BB_WORKERS=0</code> — fills the CPU budget without hand-counting.</li>
-<li><code>BB_UVLOOP=1</code> — typical 1.5-2× throughput on HTTP/2 hot paths.</li>
+<li><code>BB_UVLOOP=1</code> — use uvloop when the <code>[speed]</code> extra is installed.</li>
 <li><code>BB_HEADER_TIMEOUT=3</code> — slowloris defence; 3 s is plenty
   behind a buffering reverse proxy.</li>
-<li><code>BB_REQUEST_TIMEOUT=30</code> — evicts stalled handlers from HTTP/2
-  stream slots.</li>
-<li><code>BB_MAX_CONNECTIONS=1000</code> — caps memory at a known ceiling.</li>
+<li><code>BB_REQUEST_TIMEOUT=30</code> — cancels stalled HTTP/1.1 and HTTP/2 handlers.</li>
+<li><code>BB_MAX_CONNECTIONS=1000</code> — bounds concurrent connections per worker; size it together with per-connection and per-stream budgets.</li>
 <li><code>BB_ACCESS_LOG=1</code> — leave on unless a separate log aggregator
   is consuming structured logs.</li>
 </ul>

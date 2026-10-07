@@ -5918,7 +5918,7 @@ the knobs most worth a second look:</p>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>
 <td><code>0</code> (off)</td>
-<td>Set to a positive value (e.g. <code>30</code>) so stalled handlers get evicted.</td>
+<td>Set to a positive value (e.g. <code>30</code>) to cancel stalled HTTP/1.1 or HTTP/2 handlers.</td>
 </tr>
 <tr>
 <td><code>BB_MAX_CONNECTIONS</code></td>
@@ -5928,7 +5928,7 @@ the knobs most worth a second look:</p>
 <tr>
 <td><code>BB_UVLOOP</code></td>
 <td><code>0</code></td>
-<td>Set to <code>1</code> for a typical 1.5-2× throughput improvement on HTTP/2 hot paths.</td>
+<td>Set to <code>1</code> to select uvloop; requires the <code>[speed]</code> extra.</td>
 </tr>
 </tbody>
 </table>

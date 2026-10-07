@@ -5523,14 +5523,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Utilities for middleware authors.</p>
-<p>Public API:
-- <code>as_middleware</code>: decorator that normalises the <code>send</code> callable so inner
-  send wrappers defined by the middleware always receive a single native
-  representation — <code>NativeResponse</code> on the HTTP path (H1 and H2), plain
-  ASGI event dicts only at the external-host edge — never raw
-  <code>Response</code> objects.  Works on both async middleware functions and
-  middleware classes (decorates <code>__call__</code>).</p>
+        <p>Middleware send adapters.</p>
+<p>Native wrappers receive NativeResponse on HTTP paths; ASGI dictionaries
+are introduced only at compatibility boundaries, never raw Response objects.</p>
 
 
 
@@ -5563,33 +5558,11 @@
 
     <div class="doc doc-contents ">
 
-        <p>Decorator that marks an async function <strong>or</strong> class as BlackBull middleware.</p>
-<p>Wraps <code>call_next</code> so any <code>send</code> callable the middleware passes to it is
-automatically normalised — Response/JSONResponse objects are converted to
-NativeResponse before reaching the middleware's inner <code>send</code> wrapper.
-The wrapper therefore only ever sees the native representation
-(<code>NativeResponse</code> on the HTTP path — H1 and H2).</p>
-<p>Applied to an async function (signature <code>(conn, receive, send, call_next)</code>)::</p>
-<pre><code>@as_middleware
-async def timing_mw(conn, receive, send, call_next):
-    async def timed_send(event):
-        # event is a NativeResponse on the HTTP path
-        await send(event)
-    await call_next(conn, receive, timed_send)
-</code></pre>
-<p>Applied to a class whose <code>__call__</code> is the middleware coroutine::</p>
-<pre><code>@as_middleware
-class Cache:
-    async def __call__(self, conn, receive, send, call_next):
-        async def cap_send(event):
-            # event is a NativeResponse on the HTTP path
-            ...
-        await call_next(conn, receive, cap_send)
-</code></pre>
-<p>Power users who need to handle raw <code>send</code> arguments (e.g. because their
-middleware is used in a context where no simplified handlers are registered)
-should omit this decorator — their <code>call_next</code> is then wired directly to
-the next handler with no extra wrapping.</p>
+        <p>Decorate a function or class with (conn, receive, send, call_next) middleware.</p>
+<p>Normalize downstream HTTP sends to NativeResponse before the middleware's
+send wrapper. A first request parameter named scope opts into ASGI scope
+and event dictionaries at both edges, including WebSocket events.
+Omit the decorator to handle raw downstream send arguments.</p>
 
 
     </div>

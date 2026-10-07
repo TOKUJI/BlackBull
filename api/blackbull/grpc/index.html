@@ -5987,29 +5987,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Pure-Python gRPC server support for BlackBull.</p>
-<p>gRPC runs on HTTP/2; BlackBull already ships a complete HTTP/2 implementation,
-so this package adds only the gRPC-specific pieces:</p>
-<ul>
-<li><a class="autorefs autorefs-internal" title="blackbull.grpc.codec" href="codec/#blackbull.grpc.codec"><code>codec</code></a> — Length-Prefixed-Message framing.</li>
-<li><a class="autorefs autorefs-internal" title="blackbull.grpc.compression" href="compression/#blackbull.grpc.compression"><code>compression</code></a> — gzip message compression (<code>grpc-encoding</code>).</li>
-<li><a class="autorefs autorefs-internal" href="registry/#blackbull.grpc.registry.GrpcServiceRegistry"><code>GrpcServiceRegistry</code></a> — <code>/Service/Method</code> → handler.</li>
-<li><a class="autorefs autorefs-internal" href="status/#blackbull.grpc.status.GrpcStatus"><code>GrpcStatus</code></a> / <a class="autorefs autorefs-internal" href="status/#blackbull.grpc.status.GrpcError"><code>GrpcError</code></a> — canonical codes.</li>
-<li><a class="autorefs autorefs-internal" title="serve_grpc(registry, conn, receive, send)
-
-  
-      async
-  " href="asgi/#blackbull.grpc.asgi.serve_grpc"><code>serve_grpc</code></a> + <a class="autorefs autorefs-internal" href="asgi/#blackbull.grpc.asgi.GrpcContext"><code>GrpcContext</code></a> — the ASGI bridge.</li>
-</ul>
-<p>Wire it into an app with <code>app.enable_grpc(registry)</code>; gRPC requests
-(<code>content-type: application/grpc</code>) are then multiplexed onto the same
-HTTP/2 port as the app's REST and WebSocket traffic.  All four RPC kinds are
-served — unary, server-streaming, client-streaming, and bidirectional — where a
-response-streaming handler is an async generator and a request-streaming handler
-takes an async iterator of request messages (<code>request_iter</code>).</p>
-<p>Protobuf is <strong>not</strong> a dependency: handlers receive and return raw message
-bytes, so the application chooses its own serialisation (<code>grpc_tools.protoc</code>
-output, <code>protobuf</code>, or hand-rolled).</p>
+        <p>gRPC server over HTTP/2.</p>
+<p>Enable with app.enable_grpc(registry). Handlers exchange raw message bytes;
+protobuf is optional. Streaming contracts are in docs/guide/grpc.md.</p>
 
 
 
@@ -6045,21 +6025,7 @@ output, <code>protobuf</code>, or hand-rolled).</p>
 
 
 
-        <p>Per-call context handed to a gRPC handler.</p>
-<p>Exposes request metadata (the HTTP/2 headers), the call deadline and peer,
-and lets the handler set the outgoing status, a human-readable message,
-leading/trailing metadata, or abort the call outright — the subset of
-grpcio's <code>ServicerContext</code> that a raw-bytes transport can honour.</p>
-<p><a class="autorefs autorefs-internal" title="send_initial_metadata(metadata)
-
-  
-      async
-  " href="asgi/#blackbull.grpc.asgi.GrpcContext.send_initial_metadata"><code>send_initial_metadata</code></a> is the only door to the response-start
-machinery <a class="autorefs autorefs-internal" title="serve_grpc(registry, conn, receive, send)
-
-  
-      async
-  " href="asgi/#blackbull.grpc.asgi.serve_grpc"><code>serve_grpc</code></a> binds before the handler runs.</p>
+        <p>Per-call metadata, peer, deadline and response status/metadata controls for raw-byte handlers.</p>
 
 
 
@@ -6592,9 +6558,8 @@ prefix or a message body shorter than its declared length.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serve a single gRPC call (unary or server-streaming) through the ASGI
-(scope, receive, send) bridge.  Never raises for handler/protocol errors:
-every failure path is reported as a gRPC status.</p>
+        <p>Serve any of the four gRPC call shapes through Connection/receive/send.</p>
+<p>Report handler and protocol failures as gRPC status.</p>
 
 
     </div>

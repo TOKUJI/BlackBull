@@ -6005,31 +6005,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>ASGI protocol types: event-type string constants, typed message shapes,
-and typed event wrappers.</p>
-<p>Three responsibilities, all framework-side:</p>
-<ul>
-<li><code>ASGIEvent</code>: namespace of ASGI 3.0 event-type strings, used for
-  <code>match</code>/<code>case</code> dispatch and equality checks across both the
-  framework and (importing from here) the server stack.  Every constant is
-  <code>Final</code>, so a type checker infers a <code>Literal</code> and comparisons against
-  them narrow the event unions below.</li>
-<li>The 19 <code>TypedDict</code> message shapes and the two direction unions
-  (<code>ASGIReceiveEvent</code> / <code>ASGISendEvent</code>) plus the two channel callable
-  aliases (<code>ASGIReceiveCallable</code> / <code>ASGISendCallable</code>).  These are
-  declarations only — erased at runtime, no wire or dispatch change.</li>
-<li><code>ResponseStart</code> / <code>ResponseBody</code>: dict-subclass wrappers for the
-  two outgoing response event shapes so middleware can dispatch on
-  Python type rather than string comparison.  Both subclass <code>dict</code>
-  so <code>isinstance(e, dict)</code> remains True — required for beartype and
-  any ASGI send callable annotated <code>event: dict</code>.</li>
-</ul>
-<p><strong>Naming rule</strong>: an <code>ASGI</code> prefix marks boundary vocabulary and is
-quarantined to this module; unprefixed names (<code>Connection</code>, <code>Headers</code>,
-<code>Request</code>, <code>Response</code>) are BlackBull's native layer.  The dicts on the
-channel are ASGI 3.0 events verbatim — the spec is free documentation for
-every key — so <code>rg "from .asgi import"</code> stays a literal map of the
-remaining ASGI surface.</p>
+        <p>ASGI boundary types and events.</p>
+<p>Keep ASGI-prefixed vocabulary here; native Connection and response objects
+belong outside this module. Response wrappers remain dict subclasses for
+external ASGI callables.</p>
 
 
 

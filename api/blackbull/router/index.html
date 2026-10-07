@@ -6051,15 +6051,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>URL routing for BlackBull.</p>
-<p><code>Router</code> maps <code>(path, method, scheme)</code> triples to handler chains.  Paths
-support exact strings, regex patterns, and <code>{name}</code> / <code>{name:converter}</code>
-parameter syntax; <code>ErrorRouter</code> does the same for HTTPStatus codes and
-exception classes.  <code>_register_chain</code> composes per-route middlewares with
-<code>functools.partial</code> so each middleware receives <code>call_next</code> bound to the
-next link.</p>
-<p><code>RouteGroup</code> is defined in <a class="autorefs autorefs-internal" href="../app/#blackbull.app"><code>blackbull.app</code></a> to avoid a circular
-import; this module re-exports it lazily through <code>__getattr__</code>.</p>
+        <p>Route registration and dispatch.</p>
+<p>RouteGroup is re-exported lazily from app to avoid a circular import.
+Handler and middleware contracts are in docs/guide/routing.md.</p>
 
 
 
@@ -6160,36 +6154,9 @@ registered with it need no migration.</p>
 
 
 
-        <p>Maps HTTP error statuses and exception classes to ASGI error-handler functions.</p>
-<p>Keys accepted by <strong>setitem</strong> / <strong>getitem</strong>:
-  - HTTPStatus value  (e.g. HTTPStatus.NOT_FOUND)
-  - Exception class   (e.g. ValueError)</p>
-
-
-<details class="lookup-rules" open>
-  <summary>Lookup rules</summary>
-  <ul>
-<li>HTTPStatus key: exact match only.</li>
-<li>Exception class: walks the MRO so a handler registered for a base class
-  (e.g. Exception) catches all unhandled subclasses.</li>
-<li>On a miss, returns the <em>default</em> handler passed at construction
-  (<code>None</code> when no default was given — caller decides the fallback).</li>
-</ul>
-</details>        <p>Usage::</p>
-<pre><code>errors = ErrorRouter()
-
-@errors(HTTPStatus.NOT_FOUND)
-async def handle_404(conn, receive, send):
-    ...
-
-@errors(ValueError)
-async def handle_value_error(conn, receive, send):
-    ...
-
-handler = errors[HTTPStatus.NOT_FOUND]   # → handle_404
-handler = errors[KeyError()]              # → handle_value_error via MRO (if registered)
-handler = errors[KeyError]               # same, accepting the class directly
-</code></pre>
+        <p>Map HTTPStatus values and exception classes to error handlers.</p>
+<p>Status lookup is exact. Exception instances or classes use MRO lookup;
+a miss returns the configured default, which may be None.</p>
 
 
 

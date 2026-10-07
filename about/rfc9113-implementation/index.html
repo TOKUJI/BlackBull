@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#rfc-9113-implemented" class="md-skip">
+        <a href="#http2-implementation-policies" class="md-skip">
           Skip to content
         </a>
       
@@ -5357,10 +5357,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#legend" class="md-nav__link">
+  <a href="#connection-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Legend
+        Connection setup
       
     </span>
   </a>
@@ -5368,10 +5368,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-starting-http2" class="md-nav__link">
+  <a href="#hpack-and-field-blocks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §3 — Starting HTTP/2
+        HPACK and field blocks
       
     </span>
   </a>
@@ -5379,10 +5379,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-http-frames" class="md-nav__link">
+  <a href="#flow-control" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §4 — HTTP Frames
+        Flow control
       
     </span>
   </a>
@@ -5390,10 +5390,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-streams-and-multiplexing" class="md-nav__link">
+  <a href="#stream-lifetime-and-error-scope" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §5 — Streams and Multiplexing
+        Stream lifetime and error scope
       
     </span>
   </a>
@@ -5401,10 +5401,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-frame-definitions" class="md-nav__link">
+  <a href="#message-validation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §6 — Frame Definitions
+        Message validation
       
     </span>
   </a>
@@ -5412,10 +5412,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-error-codes" class="md-nav__link">
+  <a href="#priority-and-push" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §7 — Error Codes
+        Priority and push
       
     </span>
   </a>
@@ -5423,65 +5423,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-expressing-http-semantics" class="md-nav__link">
+  <a href="#resource-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §8 — Expressing HTTP Semantics
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#9-http2-connections" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        §9 — HTTP/2 Connections
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#10-security-considerations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        §10 — Security Considerations
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#11-appendices" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        §11 / Appendices
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#coverage-summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Coverage summary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        See also
+        Resource limits
       
     </span>
   </a>
@@ -5559,10 +5504,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#legend" class="md-nav__link">
+  <a href="#connection-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Legend
+        Connection setup
       
     </span>
   </a>
@@ -5570,10 +5515,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-starting-http2" class="md-nav__link">
+  <a href="#hpack-and-field-blocks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §3 — Starting HTTP/2
+        HPACK and field blocks
       
     </span>
   </a>
@@ -5581,10 +5526,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-http-frames" class="md-nav__link">
+  <a href="#flow-control" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §4 — HTTP Frames
+        Flow control
       
     </span>
   </a>
@@ -5592,10 +5537,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#5-streams-and-multiplexing" class="md-nav__link">
+  <a href="#stream-lifetime-and-error-scope" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §5 — Streams and Multiplexing
+        Stream lifetime and error scope
       
     </span>
   </a>
@@ -5603,10 +5548,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-frame-definitions" class="md-nav__link">
+  <a href="#message-validation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §6 — Frame Definitions
+        Message validation
       
     </span>
   </a>
@@ -5614,10 +5559,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-error-codes" class="md-nav__link">
+  <a href="#priority-and-push" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §7 — Error Codes
+        Priority and push
       
     </span>
   </a>
@@ -5625,65 +5570,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-expressing-http-semantics" class="md-nav__link">
+  <a href="#resource-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        §8 — Expressing HTTP Semantics
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#9-http2-connections" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        §9 — HTTP/2 Connections
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#10-security-considerations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        §10 — Security Considerations
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#11-appendices" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        §11 / Appendices
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#coverage-summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Coverage summary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        See also
+        Resource limits
       
     </span>
   </a>
@@ -5710,886 +5600,85 @@
   
 
 
-<h1 id="rfc-9113-implemented">RFC 9113, implemented<a class="headerlink" href="#rfc-9113-implemented" title="Permanent link">&para;</a></h1>
-<p>A section-by-section reading of <a href="https://www.rfc-editor.org/rfc/rfc9113">RFC 9113</a>
-(HTTP/2) against the Python that implements it in BlackBull.</p>
-<p><strong>Who this is for</strong>: you already know RFC 9113 and want to see how a
-from-scratch, pure-Python server implements each requirement — and <em>why</em> it
-made the choices it did.  Each entry below reads <em>the RFC says X → BlackBull
-does Y → because Z</em>, keyed by the section number you already hold in your head.</p>
-<p><strong>The one thing to know up front</strong>: most Python HTTP/2 servers are built on
-the <a href="https://python-hyper.org/projects/h2/en/stable/"><code>h2</code> library</a>, a
-<em>sans-I/O state machine</em> — you feed it bytes, it returns events, the frame
-layer is invisible.  BlackBull is not built that way.  It is an <strong>actor</strong> that
-owns the socket and drives the frame loop itself, so every requirement below
-maps to a method you can open and step through with <code>pdb</code>.  The actor
-architecture itself is described in <a href="../internals/">Internals</a>; you do not need
-it to read this page — it surfaces here only where the RFC's behaviour depends
-on it (notably §5.4 error handling).</p>
-<h3 id="legend">Legend<a class="headerlink" href="#legend" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Mark</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>✅</td>
-<td>Implemented by BlackBull.  Most of it lives in <a href="https://github.com/TOKUJI/BlackBull/blob/master/blackbull/server/http2_actor.py"><code>http2_actor.py</code></a>; where a requirement is met by another component (<code>ConnectionActor</code>, the TLS layer) or a dependency (<code>hpack</code>), the text says so.</td>
-</tr>
-<tr>
-<td>✗</td>
-<td>Not implemented — the reason is given inline, and every such item is optional (see the <a href="#coverage-summary">coverage summary</a>).</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Code-reference convention</strong> (used throughout): a <strong>method</strong> is written
-<code>Class.method()</code> — e.g. <code>HTTP2Actor.receive()</code>; a <strong>module-level function</strong> is
-written <code>function() in file.py</code> — e.g. <code>parse_headers() in parser.py</code>; a
-<strong>class member</strong> (constant or instance attribute) is written <code>Class.NAME</code> — e.g.
-<code>HTTP2Actor._STREAM_ONLY_FRAME_TYPES</code>, <code>HTTP2Actor._connection_window_size</code> — so
-the reader always knows which actor owns the state.  A <strong>method-local variable</strong>
-is named with its method, e.g. "the <code>_frame_loop()</code>-local <code>waiting_continuation</code>".
-Behaviour is described in terms of the
-<strong>method</strong> that does the work, with any constant it consults named alongside —
-so every reference is something you can locate, not a bare name floating free.</p>
-<p>A <a href="#coverage-summary">coverage tally</a> at the foot lets you confirm you have
-seen every section of RFC 9113, not a curated subset.</p>
-<hr />
-<h2 id="3-starting-http2">§3 — Starting HTTP/2<a class="headerlink" href="#3-starting-http2" title="Permanent link">&para;</a></h2>
-<p><strong>§3.1 Version Identification / §3.2 "https" URIs</strong> ✅
-Over TLS, HTTP/2 is selected by ALPN <code>h2</code>, negotiated by <code>ConnectionActor</code>
-before <code>HTTP2Actor</code> exists; the actor only ever runs once the connection is
-known to be HTTP/2.  <em>Because</em> protocol detection is a connection-layer concern —
-the HTTP/2 driver should not have to re-derive which protocol it is.</p>
-<p><strong>§3.3 Prior Knowledge (h2c)</strong> ✅
-Cleartext HTTP/2 <em>is</em> supported via prior knowledge.  On a connection that did
-<strong>not</strong> negotiate ALPN <code>h2</code>, <code>ConnectionActor._dispatch()</code> sniffs the first
-line; if it is <code>PRI * HTTP/2.0\r\n</code> it validates the full 24-byte preface and
-spawns <code>HTTP2Actor</code> over the plaintext socket.  This shares the HTTP/1.1 port —
-there is no separate h2c-only port — which RFC 9113 §3.3 permits.  <em>Because</em>
-prior knowledge needs no Upgrade dance: a client committed to h2c simply opens
-with the preface, and the same listener can serve both protocols.  (The
-deliberate port-sharing is noted in
-<a href="https://github.com/TOKUJI/BlackBull/blob/master/KNOWN_LIMITATIONS.md"><code>KNOWN_LIMITATIONS.md</code></a>
-as an operational caveat, not a missing feature.)</p>
-<blockquote>
-<p>The <em>Upgrade</em>-based h2c bootstrap (the <code>Upgrade: h2c</code> / HTTP/1.1-101
-dance, originally RFC 7540 §3.2, deprecated by RFC 9113 §3.1) is <strong>not</strong>
-implemented — only prior-knowledge h2c is.  RFC 9113 removed the Upgrade
-mechanism that RFC 7540 defined, so this is the forward-looking shape.</p>
-</blockquote>
-<p><strong>§3.4 Connection Preface</strong> ✅
-After the 24-byte client preface, the server <strong>MUST</strong> send a SETTINGS frame as
-the very first frame.  <code>HTTP2Actor.run()</code> does exactly this on entry, and — when
-configured to grow the connection window — follows it with a connection-level
-WINDOW_UPDATE.  <em>Because</em> the preface is non-negotiable: a client will not
-proceed until it has seen the server's opening SETTINGS.</p>
-<hr />
-<h2 id="4-http-frames">§4 — HTTP Frames<a class="headerlink" href="#4-http-frames" title="Permanent link">&para;</a></h2>
-<p><strong>§4.1 Frame Format</strong> ✅
-Every frame is a 9-byte header — length(24) + type(8) + flags(8) +
-R(1)+stream_id(31) — followed by the payload.  <code>HTTP2Actor.receive()</code> reads
-exactly 9 bytes, extracts the length, then reads exactly that many more.
-<em>Because</em> <code>readexactly</code> over a known length is the whole of framing — no
-buffering heuristics, no partial-frame state to carry.</p>
-<p><strong>§4.2 Frame Size</strong> ✅
-Frames larger than <code>SETTINGS_MAX_FRAME_SIZE</code> are an error.
-<code>HTTP2Actor._frame_loop()</code> decides whether it is a <strong>connection</strong> error or a
-<strong>stream</strong> error by testing the frame type against the class-level frozenset
-<code>HTTP2Actor._FRAME_SIZE_CONNECTION_ERROR_TYPES</code> — header-block and
-connection-state frames (HEADERS, CONTINUATION, PUSH_PROMISE, SETTINGS) are
-connection-fatal, everything else is stream-fatal.  <em>Because</em> an oversized
-HEADERS frame corrupts the shared HPACK decoder state, so the whole connection
-must die — but an oversized DATA frame only dooms its own stream.</p>
-<p><strong>§4.3 Field Section Compression (HPACK)</strong> ✅
-Header bytes are accumulated into <code>frame.raw_block</code> and decoded by the
-<a href="https://pypi.org/project/hpack/"><code>hpack</code></a> library (the only third-party
-package in the protocol stack), wrapped by <code>hpack_fastpath.py</code> for the common
-short-header case.  <em>Because</em> HPACK is stateful at the connection level (a
-shared dynamic table); re-implementing a conformant codec is a sub-project of
-its own, and <code>hpack</code> is the de-facto Python reference — itself pure Python, so
-it stays <code>pdb</code>-debuggable.
-A block the codec cannot decode (bad table index, failed size update,
-oversized list) is a <strong>connection</strong> error: <code>HTTP2Actor</code> catches <code>hpack</code>'s
-<code>HPACKError</code> where a block is decoded — either while the frame is loaded or
-when the last CONTINUATION lands — and answers with
-<code>GOAWAY(COMPRESSION_ERROR)</code>, never <code>RST_STREAM</code>.  <em>Because</em> hpack may have
-applied part of a block before raising, so no later block on that connection
-is known to be decodable, and a stream error would leave it encoding against
-a table we no longer agree on.</p>
-<p>That connection-level state is why <strong>one <code>FrameFactory</code> serves a whole
-connection</strong> and everything framing on it takes that one — <code>HTTP2Actor.factory</code>
-on the server, <code>HTTP2Client.frame_factory</code> on the client, and the RFC 8441
-WebSocket client layered over it, which reads the context off the connection
-rather than holding one.  A second factory is a second dynamic table, and it
-stays consistent only until the two encoders interleave: the peer resolves
-every index against the single table its one decoder built, so a field indexed
-by one encoder is read back as a field the other inserted — one stream's header
-resolved inside another's block, with no error raised on either side.</p>
-<p>The frame classes hold that rule rather than assuming it.  A <code>Headers</code> or
-<code>PushPromise</code> asked to encode without the connection's encoder, or to decode a
-field block without its decoder, refuses and names the factory the codec comes
-from.  The alternative — standing in a fresh context, or skipping the decode —
-is the same divergence arriving by omission instead of by a second factory, and
-it looks like well-formed bytes all the way to the peer.</p>
-<hr />
-<h2 id="5-streams-and-multiplexing">§5 — Streams and Multiplexing<a class="headerlink" href="#5-streams-and-multiplexing" title="Permanent link">&para;</a></h2>
-<p><strong>§5.1 Stream States</strong> — four states matter for a server in practice:
-IDLE → OPEN → HALF_CLOSED_REMOTE → CLOSED.
-(The two "reserved" states exist only during server push and are not shown —
-the server sends PUSH_PROMISE but never receives one, so it only ever sees
-IDLE, OPEN, HALF_CLOSED_REMOTE, and CLOSED.)
-<code>HTTP2Actor._validate_stream_state(stream, frame_type)</code> is the gate for a live
-<code>Stream</code>: it returns <code>(error_code, level)</code> for an illegal frame in the current
-state, or <code>None</code> to allow it.  Normal retirement removes the node, so its
-CLOSED branch is defensive-only for a live object already marked CLOSED.</p>
-<table>
-<thead>
-<tr>
-<th>Live state</th>
-<th>Legal frames</th>
-<th>Result for any other frame</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>IDLE</td>
-<td>HEADERS, PRIORITY, CONTINUATION, PUSH_PROMISE</td>
-<td>GOAWAY(PROTOCOL_ERROR)</td>
-</tr>
-<tr>
-<td>HALF_CLOSED_REMOTE</td>
-<td>PRIORITY, WINDOW_UPDATE, RST_STREAM</td>
-<td>RST_STREAM(STREAM_CLOSED)</td>
-</tr>
-<tr>
-<td>CLOSED (defensive-only)</td>
-<td>PRIORITY, RST_STREAM</td>
-<td>HEADERS or CONTINUATION → GOAWAY(STREAM_CLOSED); otherwise → RST_STREAM(STREAM_CLOSED)</td>
-</tr>
-</tbody>
-</table>
-<p><em>Because</em> the state table is the heart of multiplexing — getting it wrong means
-either rejecting valid concurrent streams or leaking resources on dead ones.
-A subtlety: retired streams are not kept as full <code>Stream</code> objects, so their late
-frames cannot pass through <code>_validate_stream_state()</code>.  <code>_frame_loop()</code> instead
-consults the bounded closed-ID record before treating an absent node as IDLE.
-The exact record preserves whether retirement used an RST; after an entry is
-evicted, separate odd peer-stream and even push-stream high-water marks preserve
-CLOSED membership but not that origin.  For well-formed frames that reach this
-closed-ID branch, the current wire behaviour is:</p>
-<table>
-<thead>
-<tr>
-<th>Closed-ID origin</th>
-<th>Late WINDOW_UPDATE</th>
-<th>Late RST_STREAM</th>
-<th>PRIORITY</th>
-<th>HEADERS</th>
-<th>Other stream frames</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>retained, <code>via_rst=False</code></td>
-<td>no response</td>
-<td>no response</td>
-<td>accepted</td>
-<td>GOAWAY(STREAM_CLOSED)</td>
-<td>RST_STREAM(STREAM_CLOSED)</td>
-</tr>
-<tr>
-<td>retained, <code>via_rst=True</code></td>
-<td>RST_STREAM(STREAM_CLOSED)</td>
-<td>no response</td>
-<td>accepted</td>
-<td>GOAWAY(STREAM_CLOSED)</td>
-<td>RST_STREAM(STREAM_CLOSED)</td>
-</tr>
-<tr>
-<td>evicted, reset origin unknown</td>
-<td>no response</td>
-<td>no response</td>
-<td>accepted</td>
-<td>GOAWAY(STREAM_CLOSED)</td>
-<td>RST_STREAM(STREAM_CLOSED)</td>
-</tr>
-</tbody>
-</table>
-<p>This table records what the code answers, not a conformance claim for every
-cell.  The row merges peer and local resets — the record keeps one bit — and
-§5.1 answers them differently: after a <em>received</em> <code>RST_STREAM</code> a frame may be
-treated as a connection error of type <code>STREAM_CLOSED</code> (§5.4.2 permits the
-extra <code>RST_STREAM</code>, §6.1 requires one for DATA), while after one this server
-<em>sent</em> it must be minimally processed and then discarded.  §5.4.2 is
-categorical either way: no origin answers a late <code>RST_STREAM</code> in kind.</p>
-<p>A standalone CONTINUATION does not reach either state table: <code>_frame_loop()</code>
-rejects it first with <code>GOAWAY(PROTOCOL_ERROR)</code> under §6.10.  If a
-CONTINUATION reaches the retired-ID branch while a header block is open, it is
-treated like HEADERS and produces <code>GOAWAY(STREAM_CLOSED)</code>.  DATA follows the
-"other stream frames" column and also returns its payload credit to the
-connection window; it does not recreate stream credit or ownership.</p>
-<p>The <code>via_rst</code> marker means only whether retirement used a reset:
-<code>via_rst=False</code> is not evidence that local <code>END_STREAM</code> alone completed the
-stream.  The normal task-completion callback and other non-reset cleanup paths
-use it as well.  When the exact entry has been evicted, the implementation
-chooses the same lenient no-response rule because the reset origin is unknown.</p>
-<p>The no-response case preserves a legal timing race.  A peer can credit the
-last response DATA while the server concurrently sends terminal response DATA
-or trailers carrying <code>END_STREAM</code>; task completion can retire the <code>Stream</code>
-before that <code>WINDOW_UPDATE</code> is read.  Answering the delayed credit with a reset
-would turn a successfully completed exchange into a stream error.  A peer's
-<code>RST_STREAM</code> can cross the same terminal output before the peer observes it.</p>
-<p><code>HTTP2Actor._retire_stream()</code> is the single idempotent transition used by task
-completion and local or peer reset.  It releases the task, sender, recipient,
-stream-tree node, counters, and any unconsumed connection-window credit, then
-records only the closed identifier.  <em>Because</em> an integer is enough to route a
-late frame through the CLOSED rules; mixing the two identifier namespaces would
-make a closed push stream incorrectly classify a lower legal peer stream as
-closed.  An idle node created only to retain a future <code>PRIORITY_UPDATE</code> hint is
-kept in the exact record if reset, but does not advance a high-water mark: it
-was never opened, and a larger hint identifier says nothing about lower legal
-request streams.  The same rule applies when the server emits an ownerless
-<code>RST_STREAM</code> for a future identifier: the exact id is terminal, without
-implying that lower ids were opened and closed.</p>
-<p>Receiving <code>END_STREAM</code> closes the request body, not the response lifetime.  The
-stream remains owned while its app task produces the response, and retirement
-occurs only when that work completes or an error/reset ends it.</p>
-<p><strong>§5.1.1 Stream Identifiers</strong> ✅
-Peer-initiated streams <strong>MUST</strong> use odd identifiers, strictly increasing.
-Checked in <code>HTTP2Actor._frame_loop()</code>: an even id from the peer, or one <code>≤
-HTTP2Actor._last_peer_stream_id</code>, is a connection PROTOCOL_ERROR.  Server push uses even
-ids from <code>HTTP2Actor._allocate_push_stream_id()</code>.  <em>Because</em> the monotonic-odd
-rule is what lets both ends allocate ids without a round-trip; a violation means
-the peer's state machine has diverged from ours and the connection is no longer
-trustworthy.</p>
-<p><strong>§5.1.2 Stream Concurrency</strong> ✅
-RFC 9113 lets a server <em>choose</em> how many streams may run at once, and the server
-publishes its choice as <code>SETTINGS_MAX_CONCURRENT_STREAMS</code>.  When a new HEADERS
-frame would push past that limit, <code>HTTP2Actor._on_headers_frame()</code> answers it
-with <strong>RST_STREAM REFUSED_STREAM</strong> — a stream-level error, not a connection
-error.  <em>Because</em> the client did nothing wrong: it just bumped into a ceiling
-the server set for itself.  REFUSED_STREAM says exactly that — "I never started
-this one, so just retry it" — and the client keeps all its other in-flight
-streams, re-sending only the stream that didn't fit.  A connection error would
-be the wrong tool: it tears down the whole connection and forces the client to
-replay <em>every</em> request, punishing it for the server's own limit.</p>
-<p>When the over-limit HEADERS arrives with <code>END_HEADERS</code> unset, the refusal is
-<strong>deferred to the end of the header block</strong>: the CONTINUATION frames are
-accumulated (still under the <code>BB_HEADER_MAX_TOTAL</code> flood cap) and
-<code>HTTP2Actor._on_continuation_frame()</code> re-checks the limit at <code>END_HEADERS</code>,
-after the HPACK decode.  <em>Because</em> two §6.10 obligations survive the refusal:
-the peer's in-flight CONTINUATION frames are legal (refusing early would make
-the frame loop misread them as "unexpected CONTINUATION" and escalate to a
-bogus connection error), and the block must be HPACK-decoded regardless to
-keep the shared dynamic table in sync (§4.3).  A stream that no longer
-exceeds the limit by the time its block completes is simply admitted.</p>
-<p><strong>§5.2 Flow Control</strong> ✅
-A DATA frame may be sent only when <strong>two</strong> windows both have credit — the
-stream window and the connection window.  On the <em>send</em> (outbound) side,
-<code>HTTP2Actor</code> tracks <code>HTTP2Actor._peer_initial_window_size</code> (seeds a new
-stream's window) and a single shared <code>HTTP2Actor._conn_window</code>
-(<code>ConnectionWindow</code>, <code>sender.py</code>) that every stream's <code>HTTP2Sender</code> debits and
-awaits — one object, not a per-sender copy, so N concurrent streams share one
-stream-0 budget rather than drifting apart (the bug this fixed: see §6.9.1's
-sibling note below). Updated by <code>SettingsResponder</code> and
-<code>WindowUpdateResponder</code>. On the <em>receive</em> (inbound) side each stream's
-<code>HTTP2Recipient</code> tracks its own byte budget against the window we advertised
-in SETTINGS — the credit mechanics, and the bug that follows from getting
-either direction wrong, are in §6.9.1.  <em>Because</em> the two windows do two jobs
-that a single window can't do at once.  The <strong>stream</strong> window stops any one
-stream from hogging the connection — fairness between streams.  The
-<strong>connection</strong> window caps the <em>total</em> data in flight across <em>all</em> streams at
-once — a bound on how much the receiver has to buffer.  You need both:
-per-stream fairness alone can't bound total memory, and a total bound alone
-can't stop one stream from starving the rest.</p>
-<p>Send credit is committed synchronously before the first writer suspension,
-including coalesced HEADERS/DATA/trailer writes. Transport drain completion
-is not a credit grant, and cancellation or write failure does not
-refund a possibly delivered frame. Deferred bodies are taken out of their
-buffer before awaiting a write, so automatic flushing cannot send them twice.
-When a trailer must wait for body credit, its HPACK block is encoded only at
-the final write, preserving connection-wide header order across other streams.
-Every header-producing path also rechecks stream retirement before encoding,
-including after a body-credit wait.  Encoding an unsent block would mutate the
-shared dynamic table and make a later sibling refer to an entry its peer never
-received.
-The unit bound remains the peer's maximum DATA frame payload; the total is the
-peer's connection/stream credit, and the wait bound belongs to the existing
-server or client write timeout.</p>
-<p><strong>§5.3 Prioritization</strong> ✅ (as deprecation)
-RFC 9113 <strong>§5.3.2</strong> deprecated the priority <em>tree</em> (dependencies and weights)
-that <strong>RFC 7540</strong> had originally defined.
-BlackBull does not build the tree; it validates PRIORITY frames and discards
-the dependency signal, and takes its scheduling hint from RFC 9218
-<code>PRIORITY_UPDATE</code> instead — a simple <code>{'urgency', 'incremental'}</code> value (built
-by <code>_resolve_priority() in http2_actor.py</code> / <code>_build_h2_extensions() in
-http2_actor.py</code>) exposed at <code>conn.extensions['http.response.priority']</code>.
-<em>Because</em> the tree was unimplementable interoperably — RFC 9113 itself removed
-it, and modern clients send RFC 9218 urgency signals instead.
-(Background: §5.3.1.)</p>
-<p>"Does not build the tree" is now literally true of the state as well as the
-scheduling.  <code>PriorityResponder</code> used to record <code>weight</code> and re-parent
-children, and <code>_frame_loop</code> used to create a <code>Stream</code> node for PRIORITY on an
-idle stream.  Nothing read either field, and §6.3 permits PRIORITY in any
-stream state — so those writes were a way for a peer to add a tree node per
-frame for the life of the connection.  §5.3.1's self-dependency check is what
-survives.</p>
-<p><strong>§5.4 Error Handling</strong> ✅ — <em>this is where the actor model earns its place.</em>
-A <strong>connection error</strong> (§5.4.1) goes through <code>HTTP2Actor._connection_error()</code>:
-retire output owners, cancel pending credit replay, build GOAWAY with the
-accumulated <code>HTTP2Actor._last_peer_stream_id</code>, flush it, then <code>writer.close()</code> so
-the peer sees FIN after the GOAWAY; idempotent via <code>HTTP2Actor._goaway_sent</code>.  A
-<strong>stream error</strong> (§5.4.2) sends RST_STREAM and lets the stream's task die
-<em>without taking the connection down</em> — because
-<code>HTTP2Actor.run()</code> supervises every stream task in an <code>asyncio.TaskGroup</code>.
-<em>Because</em> the RFC's two-tier error model maps exactly onto the actor supervision
-model: stream-fatal = isolate the child task, connection-fatal = propagate and
-GOAWAY.  Both paths use the common retirement transition, which is safe when a
-reset races normal task completion.  A peer's graceful GOAWAY is different:
-already-accepted streams may finish their responses while new work stops.</p>
-<p><strong>§5.5 Extending HTTP/2</strong> ✅
-Unknown frame types <strong>MUST</strong> be ignored (outside a header block).  The parser
-returns <code>None</code> for an unrecognised type and <code>HTTP2Actor._frame_loop()</code> does
-<code>continue</code>.  <em>Because</em> forward-compatibility is a hard requirement — an endpoint
-that errored on unknown frames could not coexist with a peer using a newer
-extension.</p>
-<hr />
-<h2 id="6-frame-definitions">§6 — Frame Definitions<a class="headerlink" href="#6-frame-definitions" title="Permanent link">&para;</a></h2>
-<p><strong>How frames are represented and dispatched.</strong>  Every frame type is its own
-Python class — a <code>FrameBase</code> subclass in <code>frame_types.py</code> (<code>Data</code>, <code>Headers</code>,
-<code>Ping</code>, <code>SettingFrame</code>, …) that knows how to parse its own payload.
-<code>HTTP2Actor._frame_loop()</code> then routes each parsed frame one of two ways:</p>
-<ul>
-<li>the four frames that drive stream state and the request lifecycle — <strong>HEADERS,
-  CONTINUATION, DATA, GOAWAY</strong> — go to a dedicated <code>HTTP2Actor._on_*_frame()</code>
-  method (the <code>case</code> arms of a <code>match</code> on the frame type);</li>
-<li>the connection-control frames — <strong>PING, SETTINGS, WINDOW_UPDATE, PRIORITY,
-  RST_STREAM</strong> — fall through to a <code>Responder</code> class built by <code>ResponderFactory</code>
-  (e.g. <code>PingResponder</code>, <code>SettingsResponder</code>), keeping the loop itself small.</li>
-</ul>
-<p>The subsections below take the frame types in RFC order.  Each heading names
-the frame's <strong>class</strong> (the RFC definition → Python); the body says where it is
-dispatched and which method or responder handles it — DATA, in particular, is
-not one method but a chain of steps.</p>
-<p><strong>§6.1 DATA — <code>Data(FrameBase)</code></strong> ✅
-<code>HTTP2Actor._frame_loop()</code> dispatches a parsed <code>Data</code> frame to
-<code>HTTP2Actor._on_data_frame()</code>, but the handling fans out across several steps —
-the <code>Data</code> object is read in more than one place: a state check (DATA on
-HALF_CLOSED_REMOTE or CLOSED → RST STREAM_CLOSED, since the peer already sent
-END_STREAM), content-length accounting as bytes accumulate (§8.1.1), delivery to
-the stream's recipient, dual flow-control crediting on <em>consumption</em> (§6.9.1),
-and back-pressure (an inbound-window overrun or degenerate tiny-frame flood →
-RST ENHANCE_YOUR_CALM — the true abuse backstop once crediting is consume-based).
-<em>Because</em> DATA is the only frame that both moves application bytes and consumes
-flow-control credit — so it carries the most invariants and touches the most code.</p>
-<p><strong>§6.2 HEADERS — <code>Headers(FrameBase)</code></strong> ✅
-A <code>Headers</code> frame is handled by <code>HTTP2Actor._on_headers_frame()</code>, which runs the
-admission gauntlet: concurrency check first → REFUSED_STREAM if over the limit
-(§5.1.2) — unless <code>END_HEADERS</code> is unset, in which case the refusal waits for
-the block to complete (§5.1.2 above).  If <code>END_HEADERS</code> is unset, stash the
-frame and set the <code>_frame_loop()</code>-local flag <code>waiting_continuation</code> (§6.10).
-Malformed headers → RST PROTOCOL_ERROR before dispatch (§8.1.1).  Extended
-CONNECT (<code>:protocol</code>) routes to WebSocket (RFC 8441).  <em>Because</em> HEADERS is the
-stream's birth certificate — every admission, framing, and routing decision has
-to happen here, before any application code runs.</p>
-<p><strong>§6.3 PRIORITY — <code>Priority(FrameBase)</code></strong> ✅
-A <code>Priority</code> frame is dispatched to <code>PriorityResponder</code>, but its payload-length
-guard (it <strong>MUST</strong> be exactly 5 bytes → stream FRAME_SIZE_ERROR) is enforced in
-<code>HTTP2Actor._frame_loop()</code>, and the urgency signal is mapped by
-<code>_resolve_priority() in http2_actor.py</code>.  PRIORITY on a not-yet-seen stream
-creates <strong>no</strong> stream state: the frame is validated (§5.3.1 self-dependency →
-stream PROTOCOL_ERROR) and the deprecated dependency signal is dropped.
-<em>Because</em> the frame is still valid wire syntax even though the tree semantics
-are deprecated — reject the malformed, accept and ignore the well-formed, and
-hold nothing a peer can grow.</p>
-<p>RFC 9218 <code>PRIORITY_UPDATE</code> is the one path that still pre-creates a node, so
-a hint arriving before HEADERS survives to meet it; §7 permits bounding how
-many are buffered, and <code>SETTINGS_MAX_CONCURRENT_STREAMS</code> is the bound — a hint
-for more streams than the peer may open at once is a hint it can never redeem.
-Over the bound the frame is dropped and <code>h2_priority_update_buffer</code> is logged
-to <code>blackbull.caps</code>.</p>
-<p><strong>§6.4 RST_STREAM — <code>RstStream(FrameBase)</code></strong> ✅
-The basic "any → CLOSED" transition is applied by <code>RstStreamResponder</code>; ahead of
-it, <code>HTTP2Actor._frame_loop()</code> carries the <strong>CVE-2023-44487 (Rapid Reset)</strong>
-mitigation: a rolling window (<code>BB_FRAME_RATE_LIMIT</code> per <code>BB_FRAME_RATE_WINDOW</code>,
-default 20 per second) → GOAWAY ENHANCE_YOUR_CALM, raised <em>before</em> stream-state
-validation so abusive RSTs on idle/unknown streams still count.
-<em>Because</em> <code>SETTINGS_MAX_CONCURRENT_STREAMS</code> cannot catch the attack — a stream
-reset in the same round-trip never counts as "concurrent."</p>
-<p>Resets <strong>this server emits</strong> are counted on the same meter
-(<code>HTTP2Actor._count_emitted_rst()</code>, hooked into <code>send_frame</code>).  <em>Because</em> a
-stream reset costs the same slot churn whoever sent it, and a peer can provoke
-ours on demand by repeatedly tripping a real limit — an upload loop over
-<code>BB_MAX_BODY_SIZE</code>, say.  The consequence is deliberate: a client that keeps
-tripping a legitimate limit eventually loses its connection, and the cap-hit
-log names which limit it kept hitting so an operator can tell abuse from a bug.</p>
-<p><strong>§6.5 SETTINGS — <code>SettingFrame(FrameBase)</code></strong> ✅
-The server sends its own SETTINGS first from <code>HTTP2Actor.run()</code> (§3.4); a peer's
-<code>SettingFrame</code> is handled by <code>SettingsResponder</code>, which updates the window sizes
-and answers with ACK (§6.5.3).  The peer's <code>SETTINGS_ENABLE_PUSH</code> is tracked
-per connection, starting at its §6.5.2 initial value of <code>1</code>; valid <code>0</code> and <code>1</code>
-values disable and re-enable server push respectively.  Request extensions
-reflect that permission when each scope is built, while <code>_handle_push()</code> checks
-the current value again at send time and logs/drops a late-disabled event.
-<code>SETTINGS_ENABLE_CONNECT_PROTOCOL</code> (§6.5.2 / RFC 8441 §3) is advertised <strong>only</strong>
-when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.  <em>Because</em> you must not invite Extended CONNECT
-unless you can service it.</p>
-<p>SETTINGS is rate-metered on the same mechanism as RST_STREAM
-(<strong>CVE-2019-9515</strong>): each frame obliges the server to one ACK write, so an
-unbounded stream of them is free to send and not free to answer.  Metered
-<em>before</em> the responder runs, so an over-budget frame is refused rather than
-merely counted.</p>
-<p><strong>§6.6 PUSH_PROMISE — <code>PushPromise(FrameBase)</code></strong> ✅
-A server-sent <code>PushPromise</code> is built by <code>HTTP2Actor._handle_push()</code>: allocate the
-next even id, build pseudo-headers from the parent scope, send PUSH_PROMISE
-<strong>on the parent stream</strong> (so the client can associate it), then
-spawn the synthetic pushed request as its own stream task.  See §8.4 for the
-server-push semantics.  <code>HTTP2Actor._frame_loop()</code> rejects a <code>stream_id==0</code>
-PUSH_PROMISE by testing the type against the class-level frozenset
-<code>HTTP2Actor._STREAM_ONLY_FRAME_TYPES</code>.  <em>Because</em> the promise has to reference
-the request that triggered
-it, which is the parent stream — sending it on the new stream would leave the
-client unable to correlate.
-A PUSH_PROMISE <em>from</em> the peer is refused before the stream-state
-classification, as a connection error of type PROTOCOL_ERROR whatever the
-stream's state (§6.6 / §8.4 — a client cannot push).  <em>Because</em> that
-classification answers per state (idle: PROTOCOL_ERROR from §5.1;
-half-closed: RST_STREAM(STREAM_CLOSED)), and neither is this frame's answer.</p>
-<p><strong>§6.7 PING — <code>Ping(FrameBase)</code></strong> ✅
-A <code>Ping</code> frame is handled by <code>PingResponder</code>: PING with ACK → no-op (it answers
-our own PING); PING without ACK → echo with ACK, unchanged opaque data.
-<em>Because</em> PING is the connection liveness primitive;
-the only correct response is the identical payload with the flag flipped.</p>
-<p>Metered like SETTINGS (<strong>CVE-2019-9512</strong>) — one ACK write per frame is exactly
-the shape a flood exploits.</p>
-<p>The server also <strong>sends</strong> PING, as the liveness probe behind
-<code>BB_H2_IDLE_TIMEOUT</code> (<code>HTTP2Actor._probe_peer()</code>).  After that long with no
-frame in either direction the server asks rather than reaps: an idle HTTP/2
-connection is normal — a browser holds one for a page's lifetime, a gRPC
-channel idles between calls — and is not distinguishable from a dead one
-without asking.  Any inbound frame counts as the answer, not just a PING ACK:
-matching by opaque data would be more precise and no more true, since a peer
-that sent anything at all is there.  Silence for a further
-<code>BB_H2_PING_TIMEOUT</code> closes with GOAWAY <strong>NO_ERROR</strong> — nothing was violated;
-we asked a question and got no reply, which is a fact about the network rather
-than a complaint about the peer.</p>
-<p><strong>§6.8 GOAWAY — <code>GoAway(FrameBase)</code></strong> ✅
-A <code>GoAway</code> frame is handled in two directions.  <strong>Incoming</strong>
-(<code>HTTP2Actor._on_goaway_frame()</code>): echo a GOAWAY mirroring the peer's
-<code>last_stream_id</code>, then inject <code>http.disconnect</code> into every recipient and return
-from the loop.  <strong>Outgoing</strong> (<code>HTTP2Actor._connection_error()</code>): the §5.4.1
-connection-error path.  <em>Because</em> §6.8
-asks an endpoint to tell its peer which streams it processed before closing —
-echoing the last id is how the peer learns what it may safely retry.</p>
-<p><strong>§6.9 WINDOW_UPDATE — <code>WindowUpdate(FrameBase)</code></strong> ✅
-A <code>WindowUpdate</code> frame is handled by <code>WindowUpdateResponder</code>: <code>stream_id==0</code>
-credits the connection window; non-zero credits a stream's send window.  A zero
-increment is PROTOCOL_ERROR; overflow past 2³¹−1 is
-FLOW_CONTROL_ERROR.  <em>Because</em> the two scopes share one frame type but mean
-different things — the responder must dispatch on the stream id.</p>
-<p><strong>§6.9.1 The Flow-Control Window</strong> ✅
-The dual-credit mechanic in full — credited on <em>consumption</em>, not delivery:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># in HTTP2Recipient.__call__() — when the app pops an event off the queue</span>
-<span class="n">event</span><span class="p">,</span> <span class="n">credit</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_queue</span><span class="p">()</span><span class="o">.</span><span class="n">get</span><span class="p">()</span>
-<span class="k">if</span> <span class="n">credit</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_credit_cb</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-    <span class="bp">self</span><span class="o">.</span><span class="n">_uncredited</span> <span class="o">-=</span> <span class="n">credit</span>
-    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_credit_cb</span><span class="p">(</span><span class="n">credit</span><span class="p">)</span>   <span class="c1"># → window_update(stream_id, n); window_update(0, n)</span>
-</code></pre></div>
-<p>A single DATA frame debits <em>both</em> windows (§5.2), so both must be credited
-back — one <code>WINDOW_UPDATE</code> on the stream, one on stream 0 (the connection).
-The recipient transfers the stream-0 replay to a connection-owned task before
-awaiting it.  Connection credit is emitted first; stream credit follows in the
-consumer task only while the recipient remains live.  Cancelling a handler
-during its stream update therefore stops that stream-owned write without
-revoking the already-earned stream-0 credit, and connection teardown cancels
-any connection replay that has not completed before GOAWAY.
-Credit is sent when the <strong>application consumes</strong> the event, not when the
-frame is <em>delivered</em> to the recipient's queue — a stalled handler (blocked on
-<code>yield</code> under response back-pressure, or simply CPU-starved) then stops
-crediting, the peer's window closes, and the peer back-pressures on its own:
-the RFC's intended mechanism, working end-to-end rather than stopping at the
-server's queue.</p>
-<p><em>Because</em> enqueue-time crediting hides exactly the failure it should catch.
-Crediting the moment a frame lands in the queue reopens the peer's window
-whether or not the application is keeping up — so a queue with a bounded
-depth (frames, not bytes) becomes the only backstop, and once a slow-consumer
-handler fills it, the server's only remaining move is <code>RST_STREAM</code>. That
-surfaces as <em>application</em> churn (dropped streams under load) rather than the
-protocol back-pressure RFC 9113 actually describes. Crediting on consumption
-means the recipient's queue is sized in <strong>bytes</strong> — capped at the same
-value advertised in SETTINGS_INITIAL_WINDOW_SIZE, since a conformant peer can
-never have more un-credited bytes in flight than that — so <code>RST_STREAM</code> is
-reserved for a genuine abuse case (a peer that keeps sending past its closed
-window, or a degenerate flood of near-zero-length frames the byte budget
-can't see; the latter gets its own small frame-count cap).</p>
-<p>A stream that finishes — or is cancelled by <code>RST_STREAM</code> — without its
-handler draining the whole body leaves an "un-credited" balance: bytes the
-peer already debited from the shared <em>connection</em> window that were never paid
-back because the app never popped them.  <code>HTTP2Actor._release_recipient_credit</code>
-replays that balance to stream 0 whenever the common retirement transition
-releases the stream, so the connection window can't ratchet down to zero
-across a long-lived, high-churn connection.  A DATA frame rejected before it
-enters the recipient contributes its complete flow-controlled length,
-including padding; the RFC 8441 reader likewise hands back buffered credit it
-withheld.  Late DATA on an already-closed stream also returns its connection
-credit without recreating a stream owner.  The stream-level side is not
-replayed — the stream is gone — and any further frame on that id meets the
-§5.1 closed-stream rules.</p>
-<p><em>Because</em> the connection window is the easy half to forget, and forgetting it
-fails <em>late</em>.  Credit only the stream window — the obvious half — and everything
-works until ~65535 cumulative bytes have flowed; only then does the shared
-connection window reach zero, after which <em>every</em> stream stalls, even ones with
-plenty of their own credit.  A bug that surfaces only on a long-lived connection
-is exactly the kind that is easy to introduce and hard to notice, so crediting
-both windows — accounting for every byte the peer was ever debited for,
-including ones an abandoned stream never read — is the invariant to hold onto.</p>
-<p><strong>§6.10 CONTINUATION — <code>Continuation(FrameBase)</code></strong> ✅
-A <code>Continuation</code> frame is handled by <code>HTTP2Actor._on_continuation_frame()</code>,
-legal only while the <code>_frame_loop()</code>-local <code>waiting_continuation</code> is set; any
-other frame in that state → connection PROTOCOL_ERROR, checked <em>first</em> in the
-loop.  Bytes accumulate into
-<code>raw_block</code>; if it exceeds <code>BB_HEADER_MAX_TOTAL</code> (64 KiB) the connection is
-closed with GOAWAY ENHANCE_YOUR_CALM <em>before</em> <code>Headers.parse_payload()</code> — the
-<strong>CONTINUATION-flood / CVE-2024-27983</strong> defence.  <em>Because</em> an unbounded
-CONTINUATION stream is an OOM vector: you must cap the buffer before handing it
-to the HPACK decoder.  The not-yet-decoded block belongs to the connection's
-HPACK context, so resetting only its stream and continuing could leave decoder
-state ambiguous for later streams.</p>
-<hr />
-<h2 id="7-error-codes">§7 — Error Codes<a class="headerlink" href="#7-error-codes" title="Permanent link">&para;</a></h2>
-<p><strong>§7 Error Codes</strong> ✅
-The full <code>ErrorCodes</code> enum is used across the loop and responders:
-PROTOCOL_ERROR, STREAM_CLOSED, FRAME_SIZE_ERROR, FLOW_CONTROL_ERROR,
-REFUSED_STREAM, CANCEL, ENHANCE_YOUR_CALM.  Each appears above next to the
-condition that raises it; the §9 threat table cross-references the
-security-relevant ones.  <em>Because</em> the error code <em>is</em> the protocol's contract
-with the peer — REFUSED_STREAM vs CANCEL vs ENHANCE_YOUR_CALM each tell the
-client a different thing to do next.</p>
-<hr />
-<h2 id="8-expressing-http-semantics">§8 — Expressing HTTP Semantics<a class="headerlink" href="#8-expressing-http-semantics" title="Permanent link">&para;</a></h2>
-<p><strong>§8.1 Request/Response Exchange</strong> ✅
-<code>HTTP2Actor._spawn_stream_task()</code> bridges connection and application: create
-the <code>StreamActor</code>, optionally wrap in a request-timeout
-(<code>BB_REQUEST_TIMEOUT</code> → RST CANCEL on expiry) and a per-worker concurrency
-semaphore (<code>BB_H2_ACTIVE_STREAMS_1W</code>), then register and count the task only
-after task creation succeeds.  Failure rolls every prepared owner back through
-the common retirement transition.  An HTTP
-message is HEADERS → zero or more DATA → optional trailing HEADERS.  The
-app-boundary decision itself — call the app with the native <code>Connection</code>, or a
-materialised ASGI scope on the <code>BB_FORCE_ASGI_SCOPE=1</code> compat lane — is owned by
-the <strong>shared <code>RequestActor</code></strong> (the same actor HTTP/1.1 uses), so the seam
-between protocol and application is one place across protocols, and everything
-protocol-level is settled before the app sees a representation.  <em>Because</em> this
-is the seam between protocol and ASGI app; the boundary is a snapshot taken
-after every pre-dispatch mutation of the <code>Connection</code> (e.g. late
-<code>PRIORITY_UPDATE</code>), so the app always sees settled state.</p>
-<p><strong>§8.1.1 Malformed Messages</strong> ✅
-Malformed requests are RST PROTOCOL_ERROR <em>before the application sees them</em>,
-checked at two points: the direct-HEADERS path in
-<code>HTTP2Actor._on_headers_frame()</code> and the post-CONTINUATION path in
-<code>HTTP2Actor._on_continuation_frame()</code>.  The trailing field section is a field
-section too (§8.1), so <code>_complete_header_block()</code>'s trailers branch grades it
-with §8.2.1 and §8.3 and gives the request the same verdict instead of
-completing it.
-Content-length is validated by
-accumulating <code>stream.received_data_bytes</code>: excess on any frame → immediate RST;
-deficit at END_STREAM → RST (padding excluded).  <em>Because</em> §8.1.1 makes the
-server, not the app, responsible for rejecting framing-level malformation — a
-malformed request must never reach handler code.  (RFC 7540 located the
-content-length rule at §8.1.2.6; RFC 9113 folds it into §8.1.1.)</p>
-<p><strong>§8.2 HTTP Fields / §8.2.1 Field Validity</strong> ✅
-Field-level violations — including a pseudo-header value that is not UTF-8 —
-are flagged by <code>Headers.parse_payload()</code> / <code>parse_headers() in parser.py</code> (the
-<code>malformed</code> flag) and rejected as above.
-The alphabet is the RFC 9110 one, defined once in
-<code>blackbull/protocol/field_grammar.py</code>: a name is a §5.6.2 token and a value is
-§5.5 field-content, so the octets HTTP/1.1 refuses are the octets HTTP/2
-refuses — §8.2.1 names a field the two transports read differently as the
-request-smuggling surface.  Two differences stay by design: HTTP/2 refuses
-uppercase names (§8.2) where HTTP/1.1 accepts them, and refuses a value with
-SP or HTAB at either end (§8.2.1) where HTTP/1.1 trims it off the field line
-(RFC 9112 §5).
-<strong>§8.2.2 Connection-Specific Header Fields</strong> (e.g. <code>Connection</code>,
-<code>Transfer-Encoding</code>) are rejected at parse time (in <code>frame_types.py</code>).
-<strong>§8.2.3 Cookie crumb compression</strong> ✗ — not specially handled; cookies pass
-through as ordinary fields.  <em>Because</em> §8.2.3 is a compression optimisation, not
-a correctness requirement.</p>
-<p><strong>§8.3 HTTP Control Data</strong> ✅
-Pseudo-headers are parsed and validated before dispatch.  <strong>§8.3.1 Request
-Pseudo-Headers</strong> — <code>:method</code>, <code>:scheme</code>, <code>:path</code>, <code>:authority</code>; the <code>:path</code>
-split for pushed requests lives in <code>HTTP2Actor._handle_push()</code>, and a
-request's <code>:path</code> is graded with the visible-ASCII rule HTTP/1.1 applies to
-its request-target.  <code>:method</code> is an RFC 9110 §9.1 token and <code>:scheme</code> an RFC
-3986 §3.1 scheme, each graded wherever the field is present — §5.5/§5.6.2
-field validity alone lets <code>G,ET</code> and <code>a_b</code> through, and HTTP/1.1 refuses the
-first on its request line, so the transports would otherwise accept different
-methods.  The scheme rule has no HTTP/1.1 counterpart to match: that
-transport grades only an absolute-form target's scheme.  A scheme is
-case-insensitive and its canonical form is lowercase (RFC 3986 §3.1, RFC 9110
-§4.2.3), so <code>:scheme</code> is taken in that one spelling and the host rule, the
-RFC 8441 ws/wss mapping and <code>conn.scheme</code> all read it.
-<code>:authority</code> is validated and surfaced by <code>_request_headers_with_host() in
-parser.py</code> (v0.54.0): an <code>http(s)</code> request carrying neither <code>:authority</code> nor
-<code>Host</code> is malformed, as is an authority containing userinfo, RFC 3986 §3.2
-delimiters, whitespace, a control byte, or a non-ASCII byte, or one whose
-bracketed host is not <code>"[" IPv6address "]"</code> (§3.2.2's IP-literal; IPvFuture is
-not read).  That is the same grammar HTTP/1.1 enforces on its absolute-form
-authority and its <code>Host</code> field, one forbidden-octet scan serving both;
-multiple <code>Host</code> fields without <code>:authority</code> are likewise rejected.  A valid
-<code>:authority</code> is mapped into <code>conn.headers</code> as the <code>host</code> header,
-replacing any literal <code>Host</code> — the ASGI host mapping, mirroring H1's
-absolute-form-overrides-Host semantics — on both the request path and the
-RFC 8441 Extended CONNECT path, so <code>HTTP2Actor._handle_push()</code> synthesises
-pushed <code>:authority</code> from the parent scope's <code>host</code>.  Plain CONNECT is
-excluded (its <code>:authority</code> carries §8.5 tunnel semantics).  <em>Because</em> a
-request without a host authority has no target and the userinfo prohibition
-is an explicit §8.3.1 MUST; surfacing it as <code>host</code> keeps the same handler
-seeing the same headers under either transport.
-<strong>§8.3.2 Response Pseudo-Headers</strong> — <code>:status</code> is synthesised on the response
-path.  For the seven most common status codes (200, 204, 206, 304, 400, 404,
-500) the wire bytes are precomputed in <code>hpack_fastpath.py</code> via HPACK
-static-table indexing — a single-byte lookup that avoids the full encoder
-path.  <em>Because</em> pseudo-headers are the request line of HTTP/2; missing or
-duplicated ones are a malformed-message condition (§8.1.1).</p>
-<p><strong>§8.4 Server Push → <code>HTTP2Actor._handle_push()</code></strong> ✅
-Triggered by the ASGI <code>http.response.push</code> event from inside a handler.  Pushed
-requests are GET, safe, cacheable, body-less (<strong>§8.4.1</strong>); the pushed response
-streams on its own even-numbered stream (<strong>§8.4.2</strong>) registered in the same
-task, sender, recipient, tree, and counter lifecycle as peer streams.  <em>Because</em> push lets the
-server pre-empt a request it knows the client will make — but only for the
-method/cacheability class the RFC permits.  The actor also gates the event on
-the peer's current <code>SETTINGS_ENABLE_PUSH</code> permission before allocating a stream
-ID or mutating stream state.  The promised id enters the stream tree before the
-<code>PUSH_PROMISE</code> write can wait for transport drain.  A peer reset during that
-wait therefore retires only the push, and the resumed producer verifies
-ownership before dispatching its synthetic GET.  Cancellation after the
-promise reaches the transport emits a best-effort reset for the promised id
-while the connection is live; transport failure or connection teardown retires
-the reservation locally.</p>
-<p><strong>§8.5 The CONNECT Method</strong> ✅ (Extended CONNECT only)
-Plain CONNECT tunnelling is not offered, but <strong>Extended CONNECT</strong> (RFC 8441,
-<code>:protocol=websocket</code>) is — that is the WebSocket-over-HTTP/2 path, opt-in via
-<code>BB_H2_ENABLE_WEBSOCKET=1</code>.  Its task, sender, recipient, tree node, and
-per-connection WebSocket counter use the common stream retirement lifecycle.
-The WebSocket id and counter become owned only after its task group accepts the
-task, so a failed spawn cannot decrement another live WebSocket's count.
-<em>Because</em> the project's CONNECT use case is WebSocket bootstrapping, not proxy
-tunnelling.</p>
-<p><strong>§8.6 Upgrade / §8.7 Request Reliability / §8.8 Examples</strong> ✗ / n/a
-<code>Upgrade</code> does not exist in HTTP/2 (§8.6 explicitly forbids it).  §8.7
-(idempotency/retry hints) is the client's concern; §8.8 is illustrative.</p>
-<hr />
-<h2 id="9-http2-connections">§9 — HTTP/2 Connections<a class="headerlink" href="#9-http2-connections" title="Permanent link">&para;</a></h2>
-<p><strong>§9.1 Connection Management / Reuse</strong> ✅
-Connection lifetime, idle timeouts, and reuse are owned by <code>ConnectionActor</code> and
-the deadline subsystem, not by <code>HTTP2Actor</code>.  <em>Because</em> these are transport
-concerns shared with HTTP/1.1 and WebSocket.</p>
-<p><strong>§9.2 Use of TLS Features (§9.2.1–§9.2.3, Appendix A cipher list)</strong> ✅
-TLS version and cipher policy are configured where the <code>SSLContext</code> is built
-(in <code>ASGIServer</code>, via <code>server.py</code>) — not in the frame driver.  <em>Because</em> the HTTP/2
-layer runs only after the TLS handshake it does not perform.</p>
-<hr />
-<h2 id="10-security-considerations">§10 — Security Considerations<a class="headerlink" href="#10-security-considerations" title="Permanent link">&para;</a></h2>
-<p><strong>§10.1 Server Authority / §10.2 Cross-Protocol / §10.3 Intermediary
-Encapsulation / §10.4 Cacheability of Pushed Responses</strong> ✅
-Server authority and TLS cross-protocol defence rest on the TLS layer (§9.2);
-intermediary-encapsulation defence is the §8.2.1/§8.2.2 field-validity checks
-already enforced at parse time; pushed-response cacheability follows from the
-§8.4.1 safe/cacheable constraint.</p>
-<p><strong>§10.5 Denial-of-Service Considerations</strong> ✅ — the cross-cutting threat table:</p>
-<table>
-<thead>
-<tr>
-<th>Threat</th>
-<th>RFC</th>
-<th>Mitigation</th>
-<th>Code</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Rapid Reset (CVE-2023-44487)</td>
-<td>§6.4</td>
-<td><code>BB_FRAME_RATE_LIMIT</code> per <code>BB_FRAME_RATE_WINDOW</code> (20/s), inbound <strong>and</strong> server-emitted → GOAWAY ENHANCE_YOUR_CALM</td>
-<td><code>HTTP2Actor._frame_loop()</code>, <code>._count_emitted_rst()</code></td>
-</tr>
-<tr>
-<td>PING flood (CVE-2019-9512)</td>
-<td>§6.7</td>
-<td>Same meter, own budget — one ACK write per frame is the cost being exploited</td>
-<td><code>HTTP2Actor._meter()</code></td>
-</tr>
-<tr>
-<td>SETTINGS flood (CVE-2019-9515)</td>
-<td>§6.5</td>
-<td>Same meter, own budget; refused before the ACK responder runs</td>
-<td><code>HTTP2Actor._meter()</code></td>
-</tr>
-<tr>
-<td>Empty-frame flood (CVE-2019-9518 shape)</td>
-<td>§6.1, §6.10</td>
-<td>Zero-length <code>DATA</code>/<code>CONTINUATION</code> metered by <strong>count</strong> — they add no bytes, so <code>BB_HEADER_MAX_TOTAL</code> cannot see them</td>
-<td><code>HTTP2Actor._meter()</code></td>
-</tr>
-<tr>
-<td>Data dribble (CVE-2019-9511 shape)</td>
-<td>§6.9</td>
-<td><code>BB_WRITE_TIMEOUT</code> bounds waiting for <code>WINDOW_UPDATE</code>; the stream ends <code>RST_STREAM(CANCEL)</code>, not INTERNAL_ERROR — we gave up on a stream the peer abandoned</td>
-<td><code>HTTP2Sender._write_data()</code>, <code>FlowControlStalled</code></td>
-</tr>
-<tr>
-<td>Unfinished header block held open</td>
-<td>§4.3, §6.10</td>
-<td><code>BB_HEADER_TIMEOUT</code> on HEADERS→END_HEADERS → GOAWAY ENHANCE_YOUR_CALM.  A <strong>connection</strong> error, not a stream one: HPACK state is connection-wide and order-dependent, so a block whose bytes never arrived leaves the decoder unable to read any later block</td>
-<td><code>HTTP2Actor._end_for_stalled_header_block()</code></td>
-</tr>
-<tr>
-<td>Silent connection held indefinitely</td>
-<td>§6.7, §9</td>
-<td><code>BB_H2_IDLE_TIMEOUT</code> probes with PING; <code>BB_H2_PING_TIMEOUT</code> unanswered → GOAWAY NO_ERROR</td>
-<td><code>HTTP2Actor._liveness_watchdog()</code></td>
-</tr>
-<tr>
-<td>Declared body over the cap</td>
-<td>§8.1</td>
-<td><code>BB_MAX_BODY_SIZE</code> refused at HEADERS: full response, then <code>RST_STREAM(NO_ERROR)</code> per §8.1.  The connection survives — HTTP/2 frames every stream, so refused octets can never be re-read as the next request (unlike HTTP/1.1, where the refusal must close)</td>
-<td><code>HTTP2Actor._refuse_oversized_declared_body()</code></td>
-</tr>
-<tr>
-<td>Undeclared or dribbling body</td>
-<td>§6.9, §8.1</td>
-<td><code>BB_MAX_BODY_SIZE</code> counted as DATA arrives; <code>BB_MIN_BODY_RATE</code> judged on a rolling grace window, exempt while our own flow control is what slowed the peer</td>
-<td><code>HTTP2Recipient._body_limits_refuse()</code></td>
-</tr>
-<tr>
-<td>CONTINUATION flood / CVE-2024-27983 (§10.5.1)</td>
-<td>§6.10</td>
-<td><code>len(raw_block) &gt; BB_HEADER_MAX_TOTAL</code> → RST before parse</td>
-<td><code>HTTP2Actor._on_continuation_frame()</code></td>
-</tr>
-<tr>
-<td><code>stream_id==0</code> for stream-only frames</td>
-<td>§6.1–6.4, 6.6, 6.10</td>
-<td><code>HTTP2Actor._STREAM_ONLY_FRAME_TYPES</code> → connection PROTOCOL_ERROR</td>
-<td><code>HTTP2Actor._frame_loop()</code></td>
-</tr>
-<tr>
-<td>Oversized single header block (§10.5.1)</td>
-<td>§4.3, §8.1.1</td>
-<td><code>malformed</code> flag set during parse → RST</td>
-<td><code>parse_payload() in frame_types.py</code> / <code>parse_headers() in parser.py</code></td>
-</tr>
-<tr>
-<td>Stream exhaustion</td>
-<td>§5.1.2</td>
-<td>RST REFUSED_STREAM before scope is built</td>
-<td><code>HTTP2Actor._on_headers_frame()</code></td>
-</tr>
-<tr>
-<td>WebSocket stream exhaustion</td>
-<td>RFC 8441</td>
-<td><code>HTTP2Actor._ws_stream_count</code> cap (<code>BB_H2_WS_MAX_STREAMS</code>)</td>
-<td><code>HTTP2Actor._handle_h2_websocket()</code></td>
-</tr>
-<tr>
-<td>Concurrent-handler flood (1 worker)</td>
-<td>operational</td>
-<td><code>BB_H2_ACTIVE_STREAMS_1W</code> semaphore via <code>_run_when_stream_cap_admits() in http2_actor.py</code></td>
-<td><code>HTTP2Actor._spawn_stream_task()</code></td>
-</tr>
-<tr>
-<td>PRIORITY flood on idle streams</td>
-<td>§6.3, §5.3</td>
-<td>No state is created or recorded: the deprecated dependency signal is validated and dropped, so a PRIORITY frame buys nothing that outlives it.  Previously each one created a <code>Stream</code> node that was never removed</td>
-<td><code>HTTP2Actor._frame_loop()</code>, <code>PriorityResponder</code></td>
-</tr>
-<tr>
-<td>PRIORITY_UPDATE hint-buffer growth</td>
-<td>RFC 9218 §7</td>
-<td>Pre-created hint nodes bounded by <code>SETTINGS_MAX_CONCURRENT_STREAMS</code>; over it the frame is dropped and <code>h2_priority_update_buffer</code> logged</td>
-<td><code>PriorityUpdateResponder</code></td>
-</tr>
-</tbody>
-</table>
-<p><em>Because</em> DoS hardening is the part of the spec a from-scratch server most easily
-skips, and the part attackers most reliably probe.  Making it a single auditable
-table is the point.  Each of these defences is exercised by the
-<a href="../conformance/">conformance and fuzz suites</a> — h2spec's error-handling and
-flow-control cases, the in-tree Rapid-Reset and CONTINUATION-flood tests, and
-the parser fuzzers — so the security posture is <em>tested</em>, not just asserted.</p>
-<p><strong>§10.6 Compression / §10.7 Padding / §10.8 Privacy / §10.9 Remote Timing</strong> ✗
-Not specifically mitigated. HPACK compression-ratio attacks (§10.6) are bounded
-indirectly by the header-size caps; padding (§10.7) is accepted and excluded
-from content-length accounting but not otherwise normalised. <em>Because</em> these are
-defence-in-depth refinements beyond the project's current threat model; they are
-named here so the gap is explicit, not hidden.</p>
-<hr />
-<h2 id="11-appendices">§11 / Appendices<a class="headerlink" href="#11-appendices" title="Permanent link">&para;</a></h2>
-<p><strong>§11 IANA Considerations, Appendix A (cipher list), Appendix B (changes from
-RFC 7540)</strong> — registry and historical material; no implementation surface.</p>
-<hr />
-<h2 id="coverage-summary">Coverage summary<a class="headerlink" href="#coverage-summary" title="Permanent link">&para;</a></h2>
-<p>The denominator below is the <strong>subsections of RFC 9113 that state a server
-requirement or option</strong>, not all ~87.  Excluded (non-normative, no
-implementation surface): §1 (introduction), §2 (document organisation &amp;
-conventions), §5.3.1 (background on deprecated RFC 7540 priority), §8.8
-(illustrative examples), §11 (IANA registries), Appendix A (prohibited
-cipher list), and Appendix B (changes from RFC 7540).  Against that
-denominator:</p>
-<table>
-<thead>
-<tr>
-<th>Of RFC 9113's server requirements &amp; options</th>
-<th>Share (approx.)</th>
-<th>Examples</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>✅ Implemented by BlackBull's own code</td>
-<td>~80%</td>
-<td>Framing (§4.1–4.2), frame definitions (§6), stream state machine (§5.1), flow control (§5.2/§6.9.1), error handling (§5.4, §7), HTTP semantics &amp; server push (§8), Extended CONNECT (§8.5), DoS defences (§10.5), connection setup &amp; ALPN (§3, §9.1)</td>
-</tr>
-<tr>
-<td>✅ Implemented via dependencies</td>
-<td>~8%</td>
-<td>HPACK (§4.3) → the <code>hpack</code> package; TLS 1.2/1.3 features and ciphers (§9.2, Appendix A) → Python's <code>ssl</code> / OpenSSL</td>
-</tr>
-<tr>
-<td>○ Not implemented — all optional</td>
-<td>~12%</td>
-<td>Upgrade-based h2c (§3.1), cookie-crumb compression (§8.2.3), reducing a stream window mid-flight (§6.9.3), the §10.6–10.9 hardening refinements</td>
-</tr>
-</tbody>
-</table>
-<p><strong>No mandatory (MUST) requirement is missing</strong> — every unimplemented item is a
-MAY/SHOULD-level option.  The behaviour that makes a correct, safe server —
-framing, multiplexing, flow control, stream-state and error handling, and the
-§10.5 denial-of-service defences — is fully implemented, and is exercised
-end-to-end by the <a href="../conformance/">conformance suite</a> (h2spec for RFC 9113 and
-HPACK, plus the in-tree security and fuzz tests), not merely asserted on this
-page.  (Prior-knowledge h2c, §3.3, <em>is</em> supported; only the deprecated Upgrade
-bootstrap is not.)</p>
-<p>Every ✅ in the sections above is implemented; the prose notes when a
-requirement is met by a dependency (<code>hpack</code>, the <code>ssl</code> / OpenSSL stack) rather
-than BlackBull's own code — that is the split between the two implemented rows.</p>
-<hr />
-<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="../internals/">Internals</a> — the actor model, hierarchy, and supervisor
-  strategies referenced from §5.4.</li>
-<li><a href="../conformance/">Conformance</a> — the RFC test suites (h2spec, Autobahn) that
-  exercise this surface end-to-end.</li>
-<li><a href="../../guide/http2/">HTTP/2 guide</a> — the user-facing feature surface.</li>
-<li><a href="https://www.rfc-editor.org/rfc/rfc9113">RFC 9113</a> ·
-  <a href="https://www.rfc-editor.org/rfc/rfc8441">RFC 8441</a> (WebSocket over H/2) ·
-  <a href="https://www.rfc-editor.org/rfc/rfc9218">RFC 9218</a> (priorities) ·
-  <a href="https://www.rfc-editor.org/rfc/rfc7541">RFC 7541</a> (HPACK).</li>
-</ul>
+<h1 id="http2-implementation-policies">HTTP/2 implementation policies<a class="headerlink" href="#http2-implementation-policies" title="Permanent link">&para;</a></h1>
+<p>Use <a href="https://www.rfc-editor.org/rfc/rfc9113">RFC 9113</a> for wire requirements.
+This page records constraints that must survive implementation changes;
+<code>tests/conformance/http2/</code> and the <a href="../conformance/">conformance workflow</a>
+provide executable checks.</p>
+<h2 id="connection-setup">Connection setup<a class="headerlink" href="#connection-setup" title="Permanent link">&para;</a></h2>
+<p>Bindings select ALPN or prior-knowledge h2c. Keep preface reads and initial
+SETTINGS in the HTTP/2 binding/actor boundary; connection detection must not
+consume bytes. Upgrade-based h2c and plain CONNECT tunnels are not supported.
+RFC 8441 WebSocket requires explicit enablement.</p>
+<h2 id="hpack-and-field-blocks">HPACK and field blocks<a class="headerlink" href="#hpack-and-field-blocks" title="Permanent link">&para;</a></h2>
+<p>Use one <code>FrameFactory</code> per connection, including pushes and WebSocket
+streams. A second encoder creates a divergent dynamic table.</p>
+<p>Decode every received field block, including one whose stream will be
+refused or whose promise will be discarded. Complete CONTINUATION handling
+before a concurrency refusal; refusing early must not turn legal continuation
+traffic into an unexpected-frame error.</p>
+<p>Encoded field accumulation needs byte and time bounds before decoding.
+A refused or corrupt block affects connection-wide decoder state; it cannot
+be handled by resetting only its stream. Keep other frame types off the
+connection while a field block is open.</p>
+<p>Encode output headers only when their write will happen, after checking
+stream ownership. Mutating the encoder for a block never sent makes later
+sibling blocks undecodable.</p>
+<p>Read <code>blackbull/protocol/frame.py</code>, <code>frame_types.py</code> and
+<code>blackbull/server/http2_actor.py</code>.</p>
+<h2 id="flow-control">Flow control<a class="headerlink" href="#flow-control" title="Permanent link">&para;</a></h2>
+<p>Debit both stream and connection send credit before the first suspension.
+Drain completion is not a credit grant; cancellation must not refund bytes
+that may already have reached the peer. Remove buffered output before
+awaiting its write to avoid duplicate automatic flushes.</p>
+<p>Return receive credit on consumption, not enqueue. Connection credit must
+survive cancellation of the stream consumer; stream credit must not be
+emitted after retirement. Reset, refused DATA and late DATA must return
+the connection credit they consumed, including padding, without resurrecting
+stream ownership. Frame-count limits are still needed for empty DATA.</p>
+<p>Use the existing server/client write-timeout owner for credit waits, not
+another timer. Read <code>HTTP2Sender</code>, <code>ConnectionWindow</code> and <code>HTTP2Recipient</code>.</p>
+<h2 id="stream-lifetime-and-error-scope">Stream lifetime and error scope<a class="headerlink" href="#stream-lifetime-and-error-scope" title="Permanent link">&para;</a></h2>
+<p>Request END_STREAM ends input only. Application and response work stay live
+until completion or reset. Retire all per-stream owners through one
+idempotent transition; task-spawn failure must unwind prepared state.</p>
+<p>Closed identifiers need bounded history and separate odd peer-stream and even
+push-stream high-water marks. A priority-only node or reset of an unopened
+future identifier must not imply that lower identifiers were opened.</p>
+<p>Delayed WINDOW_UPDATE can cross terminal output. Preserve that legal timing
+race; do not manufacture a failure for a completed response. Peer GOAWAY
+stops new work while permitting accepted responses to drain. Connection errors
+retire output owners and pending credit work before closing.</p>
+<p>Preserve RFC connection-versus-stream error scope when validating fixed-size
+control frames. Unknown frame types are ignored only outside an open field
+block. Read <code>HTTP2Actor</code> and control responders in <code>blackbull/server/response.py</code>.</p>
+<h2 id="message-validation">Message validation<a class="headerlink" href="#message-validation" title="Permanent link">&para;</a></h2>
+<p>Use the same HTTP field grammar across transports. HTTP/2 additionally
+refuses uppercase names and leading/trailing field whitespace. Validate
+pseudo-header order and uniqueness, method tokens, URI schemes, target and
+authority before dispatch. Normalize the scheme before host and ws/wss
+decisions; <code>:authority</code> becomes the application's host header.</p>
+<p>Malformed trailers are malformed field sections, not successful request
+completion. Content-Length counts payload bytes, excluding padding.
+Response heads and trailers leave the send boundary with lowercase names.</p>
+<p>Read <code>blackbull/server/parser.py</code>, <code>blackbull/protocol/field_grammar.py</code>
+and the HTTP/2 response-validation tests under <code>tests/unit/client/</code>.</p>
+<h2 id="priority-and-push">Priority and push<a class="headerlink" href="#priority-and-push" title="Permanent link">&para;</a></h2>
+<p>Validate and discard deprecated PRIORITY dependencies without creating
+persistent nodes. RFC 9218 hints may precede requests but must remain bounded
+by concurrent-stream capacity.</p>
+<p>Push permission is connection state and must be checked again at send time.
+Reserve ownership before the promise write can suspend, then recheck before
+dispatch. A reset or cancellation during that write must retire the promised
+stream without changing siblings. Push metadata describes a request and
+bypasses response middleware.</p>
+<h2 id="resource-limits">Resource limits<a class="headerlink" href="#resource-limits" title="Permanent link">&para;</a></h2>
+<p>Byte, count and time limits answer different inputs. Meter empty/control
+frames and both inbound and server-emitted resets before their work occurs.
+Probe idle connections with PING rather than closing responsive idle peers.</p>
+<p>Use <a href="../../reference/env-vars/">Environment variables</a> for defaults and
+<a href="../security-model/">Security model</a> for scope. Passing h2spec does not
+establish complete server or client conformance.</p>
 
 
 

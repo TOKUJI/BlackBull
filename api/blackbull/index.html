@@ -8057,43 +8057,10 @@
 
     <div class="doc doc-contents first">
 
-        <p>BlackBull — async ASGI 3.0 web framework.</p>
-<p><strong>Early Alpha</strong> — API may break between MINOR versions; see
-<code>KNOWN_LIMITATIONS.md</code> before building production-shape work on top.</p>
-<p>Public API exports — <code>__all__</code> at the foot of this module is the complete
-and authoritative list; the notes below cover the ones worth a sentence:</p>
-<ul>
-<li><code>BlackBull</code>: the main application object; wraps routing, middleware, and lifespan hooks.</li>
-<li><code>AppConfig</code>: declarative, immutable holder for the startup settings <code>run()</code> accepts (port, TLS, workers, …).</li>
-<li><code>serve</code>: synchronous entry point that runs any ASGI 3.0 callable (also used by the <code>blackbull</code> console script).</li>
-<li><code>Response</code>, <code>JSONResponse</code>, <code>RedirectResponse</code>, <code>StreamingResponse</code>, <code>EventSourceResponse</code>, <code>WebSocketResponse</code>: response helpers.</li>
-<li><code>RouteInfo</code>: immutable <code>(method, path, name)</code> snapshot returned by <code>app.get_routes()</code>.</li>
-<li><code>QUERY</code>: the HTTP QUERY method (RFC 10008) as a plain string — <code>http.HTTPMethod</code> lacks the member until Python ≥3.16.</li>
-<li><code>UnprocessableQuery</code>: raise from a QUERY handler for <code>422</code> when the (accepted) request media type carries a semantically unprocessable query (RFC 10008).</li>
-<li><code>Headers</code>: case-insensitive, ordered, multi-valued HTTP header store.</li>
-<li><code>Connection</code>: the typed internal request representation; the handler context object exposing <code>method</code>/<code>path</code>/<code>raw_path</code>/<code>query_string</code>/<code>headers</code>/<code>cookies</code>/<code>query</code>/<code>query_list</code>/<code>path_params</code>/<code>state</code> and <code>body()</code>/<code>json()</code>/<code>text()</code>/<code>form()</code>. The ASGI <code>scope</code> is a derived view (<code>Connection.as_scope()</code>).</li>
-<li><code>Request</code>: <strong>deprecated</strong> alias of <code>Connection</code>. Accessing <code>blackbull.Request</code> emits a <code>DeprecationWarning</code>; replace <code>request: Request</code> handler params with <code>conn: Connection</code> (identical API). Removal no earlier than 2027-08-01.</li>
-<li><code>WebSocket</code>: the high-level WebSocket handler object — <code>await ws.accept()</code>, <code>async for message in ws</code>, <code>ws.send_text()</code>/<code>send_bytes()</code>/<code>send_json()</code>, <code>await ws.close()</code>. Declare <code>async def handler(ws: WebSocket)</code> on a <code>Scheme.websocket</code> route to receive it; the raw <code>(conn, receive, send)</code> form keeps working unchanged.</li>
-<li><code>WebSocketDisconnect</code>: raised by <code>ws.receive()</code> when the peer closes; carries <code>code</code> and <code>reason</code>. <code>async for</code> ends the loop instead of raising.</li>
-<li><code>Depends</code>: per-request provider injection for simplified handlers (async-generator providers get teardown after the response is sent).</li>
-<li><code>cookie_header</code>: builds a <code>Set-Cookie</code> header tuple.</li>
-<li><code>read_body</code>: reads and buffers the full request body from the ASGI receive channel.</li>
-<li><code>read_json</code>: reads the body and parses it as JSON (<code>None</code> on empty/invalid).</li>
-<li><code>read_text</code>: reads the body and decodes it as text.</li>
-<li><code>parse_cookies</code>: parses the <code>Cookie</code> header into a plain <code>dict</code>.</li>
-<li><code>CORS</code>: adds <code>Access-Control-*</code> headers; handles preflight OPTIONS requests.</li>
-<li><code>as_middleware</code>: decorator that marks an async function or class as middleware; normalises <code>send</code> so inner wrappers see only ASGI event dicts.</li>
-<li><code>TrustedProxy</code>: rewrites <code>scope['client']</code> / <code>scope['scheme']</code> from proxy headers.</li>
-</ul>
-<p>Importing this package loads the server stack (<code>blackbull.server.*</code>) as a
-side effect: <code>blackbull.app</code> imports <code>RawBinding</code> from
-<code>blackbull.server.protocol_registry</code>, and <code>blackbull/server/__init__.py</code>
-re-exports <code>ASGIServer</code>, so the whole of it is resolved before <code>BlackBull</code>
-itself is bound.  Use <code>ASGIServer</code> from <code>blackbull.server</code> to embed
-BlackBull's own server;
-otherwise pass the <code>BlackBull</code> instance to any external ASGI server
-(uvicorn, hypercorn, granian, …) since <code>BlackBull.__call__</code> is ASGI 3.0
-compliant.</p>
+        <p>BlackBull public API. MINOR releases may change contracts.</p>
+<p>Importing blackbull loads the server stack. Use blackbull.server.ASGIServer
+to embed it, or pass a BlackBull instance to an external ASGI host.
+Request is a deprecated Connection alias; new code should use Connection.</p>
 
 
 
@@ -8594,25 +8561,9 @@ boundary in both directions.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Register an extension and return it (for decorator chaining).</p>
-<p><em>ext</em> is any object exposing <code>init_app(app)</code>; subclassing
-<a class="autorefs autorefs-internal" href="extension/#blackbull.extension.Extension"><code>Extension</code></a> is optional.  <code>init_app</code> is called immediately to wire the
-extension's routes / middleware / protocol handlers / events through
-the public <code>app.*</code> API.  Optional async <code>startup(app)</code> /
-<code>shutdown(app)</code> methods are wired into the <code>app_startup</code> /
-<code>app_shutdown</code> lifespan events.</p>
-<p>This is the <strong>only</strong> extension- or protocol-registration entry point on
-the core class; protocol support (e.g. an MQTT broker) is added by
-passing the relevant extension here, never by editing this class::</p>
-<pre><code>from blackbull.mqtt import MQTTExtension, Message
-
-mqtt = app.add_extension(MQTTExtension(port=1883))
-
-@mqtt.on_message(topic='sensors/+/temperature')
-async def on_temp(msg: Message):
-    ...
-</code></pre>
-<p>Returns <em>ext</em> so it can be captured and configured further.</p>
+        <p>Call ext.init_app(app) immediately and return ext.</p>
+<p>Subclassing Extension is optional. Optional async startup(app)/shutdown(app)
+methods are registered as lifespan hooks.</p>
 
 
     </div>
@@ -8655,15 +8606,9 @@ Nothing is cancelled; call again with a longer budget.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serve unary gRPC calls from <em>registry</em> over the HTTP/2 layer.</p>
-<p>gRPC is HTTP/2 with <code>content-type: application/grpc</code>; once enabled,
-such requests are dispatched to the registry's handlers (returning
-<code>grpc-status</code> trailers) instead of the HTTP router, while REST and
-WebSocket traffic on the same port is unaffected.</p>
-<p><code>registry</code> is a <a class="autorefs autorefs-internal" title="GrpcServiceRegistry" href="grpc/#blackbull.grpc.GrpcServiceRegistry"><code>blackbull.grpc.GrpcServiceRegistry</code></a>.  gRPC
-requires HTTP/2, so run the app with TLS+ALPN (or h2c) for real
-clients.  Protobuf is not pulled in — handlers exchange raw message
-bytes; see <code>blackbull.grpc</code> for the handler contract.</p>
+        <p>Serve all four gRPC call shapes from registry over HTTP/2.</p>
+<p>Handlers exchange raw message bytes without a protobuf dependency. Use
+TLS+ALPN or h2c; status is sent in trailers. HTTP routes remain available.</p>
 
 
     </div>
@@ -8681,26 +8626,9 @@ bytes; see <code>blackbull.grpc</code> for the handler contract.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Auto-publish an OpenAPI 3.1 spec and Swagger UI for the app.</p>
-<p>Registers two routes:</p>
-<ul>
-<li><code>spec_path</code> (default <code>/openapi.json</code>) returns the spec as JSON.
-  The spec is regenerated on every request so new routes added after
-  this call are reflected.</li>
-<li><code>docs_path</code> (default <code>/docs</code>) returns an HTML page hosting
-  Swagger UI pointed at <code>spec_path</code>.  Pass <code>docs_path=None</code> to
-  skip the UI route and serve only the JSON spec.</li>
-</ul>
-<p>Call once, after the rest of the app's routes have been registered.</p>
-<p>This is a thin convenience wrapper around <code>OpenAPIExtension</code>,
-which is the reference implementation of the <code>init_app(app)</code>
-extension convention (see the Extensions guide).  External
-callers may also instantiate the extension class directly when they
-want to keep a handle on it after registration::</p>
-<pre><code>from blackbull.openapi import OpenAPIExtension
-ext = OpenAPIExtension(app, title='My API')
-assert app.extensions['openapi'] is ext
-</code></pre>
+        <p>Publish OpenAPI JSON at spec_path and Swagger UI at docs_path.</p>
+<p>Call once. The spec is regenerated per request to include new routes.
+docs_path=None disables the UI; see docs/guide/openapi.md.</p>
 
 
     </div>
@@ -8718,15 +8646,8 @@ assert app.extensions['openapi'] is ext
 
     <div class="doc doc-contents ">
 
-        <p>Return a snapshot of all registered routes.</p>
-<p>Each entry is a <a class="autorefs autorefs-internal" href="router/#blackbull.router.RouteInfo"><code>RouteInfo</code></a> named tuple
-<code>(method, path, name)</code>.  Routes are returned in registration
-order, one entry per HTTP method.  The list is a shallow copy and
-may be freely sorted, filtered, or mutated without affecting the
-live router.</p>
-<p>This is the public, stable alternative to reaching into the
-internal <code>app._router._route_info</code> attribute — use it for
-dashboards, OpenAPI generators, admin panels, and debug endpoints.</p>
+        <p>Return a shallow snapshot in registration order, one RouteInfo per HTTP method.</p>
+<p>Changing the returned list cannot mutate the live router.</p>
 
 
     </div>
@@ -8762,83 +8683,9 @@ dashboards, OpenAPI generators, admin panels, and debug endpoints.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Decorate a handler to intercept <code>event_name</code> synchronously.</p>
-<p>The handler is awaited in registration order when the event fires.
-Exceptions propagate to the emitter and abort subsequent interceptors
-registered for the same event.</p>
+        <p>Await interceptors in registration order; return the handler unchanged.</p>
+<p>Exceptions propagate and abort subsequent interceptors for that event.</p>
 
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>event_name</code>
-            </td>
-            <td>
-                  <code><span title="str">str</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Name of the event to intercept (e.g. <code>'app_startup'</code>).</p>
-              </div>
-            </td>
-            <td>
-                <em>required</em>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[[<span title="blackbull.event.EventHandler">EventHandler</span>], <span title="blackbull.event.EventHandler">EventHandler</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>A decorator that registers the wrapped coroutine and returns it</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[[<span title="blackbull.event.EventHandler">EventHandler</span>], <span title="blackbull.event.EventHandler">EventHandler</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>unchanged.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-<details class="example" open>
-  <summary>Example</summary>
-  <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">intercept</span><span class="p">(</span><span class="s1">'app_startup'</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
-    <span class="k">await</span> <span class="n">setup</span><span class="p">()</span>
-</code></pre></div>
-</details>
 
     </div>
 
@@ -8855,114 +8702,12 @@ registered for the same event.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Decorate a handler to observe <code>event_name</code>.</p>
-<p>With <code>blocking=False</code> (the default) the handler is scheduled as an
-independent <code>asyncio.Task</code> each time the event fires — fire-and-forget,
-never delaying the emitter.  Use it for telemetry that must not add
-latency to the hot path.</p>
-<p>With <code>blocking=True</code> the handler is <em>awaited</em> in registration order
-before the emit completes, so a side effect is guaranteed to finish
-within the event's lifetime.  Use it for resource cleanup keyed to an
-event's completion — most notably <code>scope_completed</code> (close a
-per-request DB session, delete a temp file).</p>
-<p>Either way the handler's exceptions are isolated: they are caught and
-logged and never propagate to the emitter or affect other handlers.
-(For a hook that <em>may</em> affect the request, use <a class="autorefs autorefs-internal" title="intercept(event_name)" href="app/#blackbull.app.BlackBull.intercept"><code>intercept</code></a>.)</p>
+        <p>Observe an event; the decorated coroutine is returned unchanged.</p>
+<p>The default schedules a detached task. blocking=True awaits observers in
+registration order; cancellation can still interrupt them. Ordinary observer
+exceptions are logged and isolated. Use intercept for hooks that may change
+the request, and see docs/guide/events.md for event lifetimes.</p>
 
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>event_name</code>
-            </td>
-            <td>
-                  <code><span title="str">str</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Name of the event to observe (e.g. <code>'scope_completed'</code>).</p>
-              </div>
-            </td>
-            <td>
-                <em>required</em>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>blocking</code>
-            </td>
-            <td>
-                  <code><span title="bool">bool</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Await the handler before emit returns (default <code>False</code>).</p>
-              </div>
-            </td>
-            <td>
-                  <code>False</code>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[[<span title="blackbull.event.EventHandler">EventHandler</span>], <span title="blackbull.event.EventHandler">EventHandler</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>A decorator that registers the wrapped coroutine and returns it</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[[<span title="blackbull.event.EventHandler">EventHandler</span>], <span title="blackbull.event.EventHandler">EventHandler</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>unchanged.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-<details class="example" open>
-  <summary>Example</summary>
-  <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'request_completed'</span><span class="p">)</span>            <span class="c1"># detached telemetry</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">log_it</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
-    <span class="n">metrics</span><span class="o">.</span><span class="n">record</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">)</span>
-
-<span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'scope_completed'</span><span class="p">,</span> <span class="n">blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>   <span class="c1"># awaited cleanup</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">close_session</span><span class="p">(</span><span class="n">event</span><span class="p">:</span> <span class="n">Event</span><span class="p">):</span>
-    <span class="n">session</span> <span class="o">=</span> <span class="n">event</span><span class="o">.</span><span class="n">detail</span><span class="p">[</span><span class="s1">'conn'</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'state'</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'db'</span><span class="p">)</span>
-    <span class="k">if</span> <span class="n">session</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="k">await</span> <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</code></pre></div>
-</details>
 
     </div>
 
@@ -8979,27 +8724,10 @@ logged and never propagate to the emitter or affect other handlers.
 
     <div class="doc doc-contents ">
 
-        <p>Register a custom error handler for an HTTPStatus or exception class.</p>
-<p><code>key</code> may be an <code>HTTPStatus</code>, a plain <code>int</code> status code
-(coerced to <code>HTTPStatus</code>), or an exception class.</p>
-<p>Usage::</p>
-<pre><code>@app.on_error(HTTPStatus.FORBIDDEN)
-async def handle_403(conn, receive, send):
-    ...
-
-@app.on_error(403)            # int shorthand
-async def handle_403(conn, receive, send):
-    ...
-
-@app.on_error(ValueError)
-async def handle_value_error(conn, receive, send):
-    ...
-</code></pre>
-<p>The handler receives (conn, receive, send).
-conn.state contains:
-  - 'error_status'    : HTTPStatus
-  - 'error_exception' : exception instance (when triggered by an exception)
-  - 'allowed_methods' : allowed method names (for 405)</p>
+        <p>Register a (conn, receive, send) handler for a status or exception class.</p>
+<p>An int key is converted to HTTPStatus. conn.state supplies error_status,
+error_exception when an exception triggered it, and allowed_methods for 405.
+See docs/guide/error-handling.md for exception-class precedence.</p>
 
 
     </div>
@@ -9017,83 +8745,10 @@ conn.state contains:
 
     <div class="doc doc-contents ">
 
-        <p>Register a zero-argument coroutine to run at lifespan shutdown.</p>
-<p>Handlers run in registration order, before the ASGI server receives
-the <code>lifespan.shutdown.complete</code> acknowledgement.  An exception
-aborts the remaining handlers.</p>
+        <p>Register a zero-argument coroutine; return it unchanged.</p>
+<p>Run in registration order before shutdown.complete. An exception aborts
+remaining hooks.</p>
 
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>fn</code>
-            </td>
-            <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[[], <span title="collections.abc.Awaitable">Awaitable</span>[None]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Async callable that takes no arguments.</p>
-              </div>
-            </td>
-            <td>
-                <em>required</em>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[[], <span title="collections.abc.Awaitable">Awaitable</span>[None]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>fn unchanged, so the decorator can be stacked or the function</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[[], <span title="collections.abc.Awaitable">Awaitable</span>[None]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>used normally after registration.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-<details class="example" open>
-  <summary>Example</summary>
-  <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on_shutdown</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">close_db</span><span class="p">():</span>
-    <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">disconnect</span><span class="p">()</span>
-</code></pre></div>
-</details>
 
     </div>
 
@@ -9110,83 +8765,10 @@ aborts the remaining handlers.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Register a zero-argument coroutine to run at lifespan startup.</p>
-<p>Handlers run in registration order, before the ASGI server receives
-the <code>lifespan.startup.complete</code> acknowledgement.  An exception aborts
-the remaining handlers and withholds that acknowledgement.</p>
+        <p>Register a zero-argument coroutine; return it unchanged.</p>
+<p>Run in registration order before startup.complete. An exception aborts
+remaining hooks and withholds the acknowledgement.</p>
 
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>fn</code>
-            </td>
-            <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[[], <span title="collections.abc.Awaitable">Awaitable</span>[None]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Async callable that takes no arguments.</p>
-              </div>
-            </td>
-            <td>
-                <em>required</em>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[[], <span title="collections.abc.Awaitable">Awaitable</span>[None]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>fn unchanged, so the decorator can be stacked or the function</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="collections.abc.Callable">Callable</span>[[], <span title="collections.abc.Awaitable">Awaitable</span>[None]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>used normally after registration.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-<details class="example" open>
-  <summary>Example</summary>
-  <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on_startup</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">open_db</span><span class="p">():</span>
-    <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>
-</code></pre></div>
-</details>
 
     </div>
 
@@ -9268,24 +8850,10 @@ async def echo(reader, writer, ctx):
 
     <div class="doc doc-contents ">
 
-        <p>Teach simplified handlers to return values of a custom <em>type_</em>.</p>
-<p>A simplified handler may already return <code>str</code>, <code>bytes</code>, <code>dict</code>,
-<code>list</code>, a dataclass, a <code>Response</code>, or <code>None</code>.  Register a
-converter to extend that set — e.g. so a handler can
-<code>return my_orm_object</code> and have it serialised automatically.  The
-converter receives the returned value and must return a <em>natively
-supported</em> sendable (a <code>Response</code>, <code>str</code>/<code>bytes</code>, <code>None</code>, or a
-JSON-able <code>dict</code>/<code>list</code>/dataclass).</p>
-<p>Direct form::</p>
-<pre><code>app.register_converter(MyOrmObject, lambda o: o.to_dict())
-</code></pre>
-<p>Decorator form (omit <em>converter</em>)::</p>
-<pre><code>@app.register_converter(MyOrmObject)
-def _(o):
-    return o.to_dict()
-</code></pre>
-<p>Registration order does not matter: a converter registered after a
-route is still honoured by that route's handler.</p>
+        <p>Convert a custom simplified-handler return type to a supported sendable.</p>
+<p>The converter must return Response, str, bytes, None, or a JSON-able
+mapping, list or dataclass. Pass it directly or omit it to get a decorator.
+Converters registered after a route still apply to that route.</p>
 
 
     </div>
@@ -9500,34 +9068,11 @@ methods on the same route still receive the <code>Accept-Query</code> header.</p
 
     <div class="doc doc-contents ">
 
-        <p>Run the app under BlackBull's own server (single- or multi-worker).</p>
-<p>This is the synchronous, fire-and-forget entry point — callers
-write <code>app.run(port=8000)</code>, not <code>asyncio.run(app.run(...))</code>.
-For <code>workers &gt; 1</code> <em>or</em> <code>reload=True</code> the master pre-binds
-sockets, forks workers, and blocks until SIGTERM / SIGINT.</p>
-<p>An argument left unset falls back to a <code>BLACKBULL_*</code> environment
-variable, then to a <code>.env</code> file, then to the bound
-<a class="autorefs autorefs-internal" title="AppConfig
-
-
-  
-      dataclass
-  " href="#blackbull.AppConfig"><code>AppConfig</code></a>; the Configuration guide gives the order
-in full and names every variable.  Server-tuning knobs keep their
-<code>BB_*</code> names — <code>BLACKBULL_*</code> is the deployment namespace.  The
-provenance of each non-default setting is logged once at startup on
-the <code>blackbull.config</code> logger.</p>
-<p>For embedded use under an existing event loop, or for pre-binding
-a socket before forking a test subprocess, instantiate
-<code>blackbull.server.ASGIServer</code> directly.  Any external
-ASGI server (uvicorn / hypercorn / granian / …) can drive the
-<a class="autorefs autorefs-internal" href="app/#blackbull.app.BlackBull"><code>BlackBull</code></a> instance via its ASGI 3.0 <code>__call__</code>.</p>
-<p>Example::</p>
-<pre><code>app.run(port=8000)
-app.run(port=8443, certfile='cert.pem', keyfile='key.pem', workers=4)
-app.run(port=8443, certfile='cert.pem', keyfile='key.pem', reload=True)
-app.run(unix_path='/run/blackbull.sock')
-</code></pre>
+        <p>Run synchronously; do not wrap in asyncio.run.</p>
+<p>Unset options resolve through BLACKBULL_<em> environment variables, .env,
+AppConfig and defaults. BB_</em> controls server tuning. Multiple workers or
+reload use a blocking supervisor. External ASGI hosts can call the app;
+embedded event-loop use requires ASGIServer. See the Configuration guide.</p>
 
 
     </div>
@@ -9545,25 +9090,10 @@ app.run(unix_path='/run/blackbull.sock')
 
     <div class="doc doc-contents ">
 
-        <p>Serve static files from <em>root_dir</em> under <em>url_prefix</em> as a route.</p>
-<p><code>cache</code> (default <code>False</code>): when <code>True</code>, file bodies are
-held in-memory for fast cache-hit serving.  Useful for
-standalone deployments where BlackBull terminates static
-traffic directly.  Most production deployments place nginx /
-a CDN in front of the framework for static traffic and don't
-need the in-process cache; the default off is calibrated to
-that majority.  See <code>docs/guide/static-files.md</code> for the
-full discussion.</p>
-<p><code>index</code> (default <code>None</code> — off): a filename (e.g.
-<code>'index.html'</code>) served when a request resolves to a directory.</p>
-<p><code>conditional</code> (default <code>True</code>): emit <code>ETag</code> / <code>Last-Modified</code>
-validators and answer <code>If-None-Match</code> / <code>If-Modified-Since</code> with
-a 304.  Set <code>False</code> to disable conditional responses.</p>
-<p>Registered as a <strong>route</strong>, not global middleware, so a request that
-is not for a static path never enters this code: it resolves in the
-router's exact-match dict and never reaches the parametrised scan.
-This is also what every peer framework does — Starlette, Sanic,
-aiohttp, Flask and Django all mount static as a route.</p>
+        <p>Mount static GET/HEAD routes under url_prefix.</p>
+<p>cache=True retains file bodies in memory. index names a directory index;
+None disables it. conditional=False disables ETag/Last-Modified and 304
+responses. See docs/guide/static-files.md for cache and traversal limits.</p>
 
 
     </div>
@@ -9645,22 +9175,9 @@ it the app is wired for BlackBull's own native server.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Invoke this app in-process <em>n</em> times with a <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="connection/#blackbull.connection.Connection"><code>Connection</code></a> to
-warm the request path.</p>
-<p>A warm-up primitive: drives the full <strong>native</strong> <code>__call__</code> →
-middleware → <code>_dispatch</code> chain (HTTP, gRPC, whatever <em>conn</em> routes to)
-with a synthetic <code>receive</code> that yields <em>body</em> once and a <code>send</code> that
-discards output.  Faults in code pages and trips PEP 659 specialization
-on the dispatch + handler + codec — no socket, no wire I/O.  Intended
-for use from an <a class="autorefs autorefs-internal" title="on_warmup(fn)" href="app/#blackbull.app.BlackBull.on_warmup"><code>on_warmup</code></a> hook; safe to call anytime.</p>
-<p>Each iteration runs on a fresh copy of <em>conn</em> (its own body cache,
-<code>state</code> and receive binding), so the one template drives all <em>n</em> runs
-cleanly.</p>
+        <p>Invoke the native app n times without sockets, discarding output.</p>
+<p>Each iteration copies conn with independent body/state/receive bindings.
+The synthetic receive yields body once. Intended for on_warmup hooks.</p>
 
 
     </div>
@@ -10042,9 +9559,7 @@ where it may live on a <code>scope</code> dict instead.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Matched URL path params, set by the router (values are converter-
-coerced, hence <code>Any</code>). The backing dict is created lazily on first
-access so no-param routes allocate nothing.</p>
+        <p>Router-assigned parameters with converter-coerced values.</p>
 
     </div>
 
@@ -10093,16 +9608,7 @@ answers a malformed value with 400 rather than a silent fallback).</p>
 
     <div class="doc doc-contents ">
 
-        <p>Query params keeping <strong>every</strong> value, parsed once and cached.</p>
-<p>The full <code>parse_qsl</code> result: <code>?tag=a&amp;tag=b</code> gives
-<code>{'tag': ['a', 'b']}</code>.  Unlike <a class="autorefs autorefs-internal" title="query
-
-  
-      property
-  " href="connection/#blackbull.connection.Connection.query"><code>query</code></a>, which folds repeats to
-the last value, this is what list-valued keys need.  The backing dict
-is created lazily on first access, so handlers that never read a query
-param allocate nothing.</p>
+        <p>Return all query values per key, parsed once; query keeps only the last value.</p>
 
     </div>
 
@@ -10124,11 +9630,7 @@ param allocate nothing.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The client-offered WebSocket subprotocols (ASGI websocket scope's
-<code>subprotocols</code>), parsed from the <code>Sec-WebSocket-Protocol</code> request
-header. Empty on HTTP requests and on a WS handshake that offered none.
-Derived — not stored — so it needs no ASGI round-trip and the header
-stays the single source of truth.</p>
+        <p>Return client-offered WebSocket subprotocols; empty for HTTP or no offer.</p>
 
     </div>
 
@@ -10300,36 +9802,8 @@ fall back to the field defaults.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Yield the request body one chunk at a time, draining <code>receive</code> once.</p>
-<p>The streaming counterpart to <a class="autorefs autorefs-internal" title="body()
-
-  
-      async
-  " href="connection/#blackbull.connection.Connection.body"><code>body</code></a>.  Use it when the handler only
-needs to <em>process</em> the body incrementally — count/hash/forward a large
-upload — so the working set stays one chunk instead of the whole
-payload::</p>
-<pre><code>total = 0
-async for chunk in conn.stream():
-    total += len(chunk)
-</code></pre>
-<p>Mutually exclusive with <a class="autorefs autorefs-internal" title="body()
-
-  
-      async
-  " href="connection/#blackbull.connection.Connection.body"><code>body</code></a>/<a class="autorefs autorefs-internal" title="json()
-
-  
-      async
-  " href="connection/#blackbull.connection.Connection.json"><code>json</code></a>/<a class="autorefs autorefs-internal" title="text(encoding='utf-8')
-
-  
-      async
-  " href="connection/#blackbull.connection.Connection.text"><code>text</code></a>, which
-buffer: the body is a single-drain stream, so mixing the two on one
-request raises <code>RuntimeError</code> rather than silently returning a
-partial or empty body.  A mid-body disconnect raises
-<a class="autorefs autorefs-internal" href="request/#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a>.</p>
+        <p>Yield body chunks once; mutually exclusive with body/json/text buffering.</p>
+<p>Mixing modes raises RuntimeError; mid-body disconnect raises ClientDisconnected.</p>
 
 
     </div>
@@ -10369,48 +9843,10 @@ partial or empty body.  A mid-body disconnect raises
 
     <div class="doc doc-contents ">
 
-        <p>Materialize the ASGI scope the dispatch pipeline consumes, with this
-typed <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="connection/#blackbull.connection.Connection"><code>Connection</code></a> stashed on it for zero-reconversion reads.</p>
-<p>The single canonical <em>Connection → dispatch-ready scope</em> bridge shared
-by the H/1.1 <code>run()</code> and H/2 <code>_conn_to_scope</code> seams, which would
-otherwise each hand-roll the same five steps:</p>
-<ol>
-<li>derive the ASGI scope via <a class="autorefs autorefs-internal" title="as_scope()" href="connection/#blackbull.connection.Connection.as_scope"><code>as_scope</code></a> (the one native→ASGI point);</li>
-<li>when <code>force_asgi</code> (the §4.3 <code>BB_FORCE_ASGI_SCOPE</code> dual-path lane),
-   round-trip through <a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
-
-  
-      classmethod
-  " href="connection/#blackbull.connection.Connection.from_scope"><code>from_scope</code></a> so both the derived scope <em>and</em>
-   the Connection the consumers read are rebuilt from scratch on every
-   request, keeping the compat conversion from bitrotting.  <code>_asterisk_form</code>
-   is Connection-only (not in the scope), so carry it across the rebuild;</li>
-<li>restore <code>scope['headers']</code> to the rich <a class="autorefs autorefs-internal" href="headers/#blackbull.headers.Headers"><code>Headers</code></a> object
-   (<code>as_scope</code> emits the ASGI <code>list[tuple]</code> form; internal <code>.get()</code>
-   callers want the object);</li>
-<li>re-expose the H/1.1 <code>_asterisk_form</code> OPTIONS marker on the envelope;</li>
-<li>stash the Connection under <code>CONNECTION_STASH_KEY</code>.</li>
-</ol>
-<p>Protocol-specific augmentation (the websocket-only <code>subprotocols</code> key)
-is layered on by the caller <em>after</em> this returns — it is not a
-<a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="connection/#blackbull.connection.Connection"><code>Connection</code></a> field (proposal §2.1).</p>
-<p>The default (<code>force_asgi=False</code>) native path builds
-the scope by <strong>direct attribute access</strong>, placing the rich <code>Headers</code>
-object straight in (no <code>list(headers)</code> that the old code computed via
-the registry and then immediately discarded), and skips the per-field
-function-call indirection of <code>as_scope()</code>. The <code>force_asgi</code> dual-path
-conformance lane (§4.3) keeps the full <code>as_scope</code> → <code>from_scope</code> →
-<code>as_scope</code> round-trip so the compat conversion is still exercised.</p>
+        <p>Build the compatibility scope with its native Connection stashed.</p>
+<p>force_asgi exercises both conversions. Preserve Connection-only OPTIONS
+state across that rebuild. The caller adds protocol-specific fields afterward;
+state and extensions remain shared for late updates.</p>
 
 
     </div>
@@ -10440,90 +9876,12 @@ conformance lane (§4.3) keeps the full <code>as_scope</code> → <code>from_sco
 
 
 
-        <p>Declare a per-request provider for one simplified-handler parameter.</p>
-<p>Use as the parameter's <em>default value</em>: <code>db=Depends(get_db)</code>.</p>
-<p>Provider forms (detected once, here):</p>
-<ul>
-<li><strong>async generator</strong> — yields the injected value exactly once; the code
-  after <code>yield</code> (or the <code>finally</code> block) runs after the response has
-  been sent, LIFO when several providers are active.</li>
-<li><strong>async function</strong> — awaited for the value; no cleanup.</li>
-<li><strong>sync function</strong> — called for the value; no cleanup.</li>
-</ul>
-
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>provider</code>
-            </td>
-            <td>
-                  <code><span title="typing.Callable">Callable</span>[[], <span title="typing.Any">Any</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Zero-parameter callable in one of the three forms above.</p>
-              </div>
-            </td>
-            <td>
-                <em>required</em>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>use_cache</code>
-            </td>
-            <td>
-                  <code><span title="bool">bool</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>When <code>True</code> (default), parameters of one handler that
-name the <em>same</em> provider share a single instance per request;
-<code>use_cache=False</code> calls the provider once per parameter.</p>
-              </div>
-            </td>
-            <td>
-                  <code>True</code>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-
-
-<p><span class="doc-section-title">Raises:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="TypeError">TypeError</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>At construction, when <em>provider</em> is not callable, takes
-parameters (including a nested <code>Depends</code> default — not
-supported in v1), or is a sync generator function.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
+        <p>Inject a zero-argument provider with a default such as db=Depends(get_db).</p>
+<p>Async generators yield exactly once and finalize after response sending,
+LIFO across providers; put cleanup in finally so exceptions cannot skip it.
+Async functions are awaited; sync functions are called without cleanup.
+use_cache=True shares one value per provider per request. False invokes it
+per parameter. Sync generators and nested Depends parameters are rejected.</p>
 
 
 
@@ -10657,27 +10015,9 @@ supported in v1), or is a sync generator function.</p>
 
 
 
-        <p>Stream a Server-Sent Events response from an async iterator.</p>
-<p>Yields are formatted per WHATWG §9.2.6 (the EventSource spec).  Each
-item produced by <em>content</em> may be a <code>str</code> (bare data), <code>bytes</code>
-(bare data, UTF-8), or a <code>Mapping</code> with optional <code>data</code> /
-<code>event</code> / <code>id</code> / <code>retry</code> keys.</p>
-<p>CR, LF, and CRLF in data become equivalent logical line breaks.  Metadata
-remains one field: CR/LF in <code>event</code> or <code>id</code>, and NUL in <code>id</code>, raise
-<code>ValueError</code> when that item is encoded.</p>
-<p>The content-type is forced to <code>text/event-stream</code> and
-<code>Cache-Control: no-cache</code> is auto-emitted; both are overridable
-via the <em>headers</em> argument if a deployment knows what it's doing.</p>
-<p>Usage::</p>
-<pre><code>async def tokens():
-    yield {'event': 'token', 'data': 'hello'}
-    yield {'event': 'token', 'data': 'world'}
-    yield {'event': 'done',  'data': ''}
-
-@app.route(path='/sse')
-async def stream():
-    return EventSourceResponse(tokens())
-</code></pre>
+        <p>Format str, UTF-8 bytes or data/event/id/retry mappings as SSE.</p>
+<p>Data line endings are normalized. Reject CR/LF in event/id and NUL in id.
+Defaults to text/event-stream and Cache-Control: no-cache; headers may override.</p>
 
 
 
@@ -10776,33 +10116,10 @@ human-readable message surfaced in development-mode error pages.</p>
 
 
 
-        <p>Ordered multi-valued HTTP header store.</p>
-<p>Satisfies the ASGI <code>Iterable[[byte string, byte string]]</code> contract
-while also providing O(1) dict-like lookup.</p>
-<p><strong>Invariants</strong>:</p>
-<ul>
-<li>Header names and values are always <code>bytes</code> (per ASGI spec).</li>
-<li>Lookups are case-insensitive: the internal index is keyed on
-  <code>name.lower()</code> (RFC 7230 §3.2 — header field names are case-insensitive).
-  <code>__contains__</code>, <code>__getitem__</code>, <code>getlist</code>, and <code>get</code> accept any
-  casing; iteration preserves the original casing of the input.</li>
-<li>Insertion order of duplicate names is preserved (RFC 7230 §3.2.2).</li>
-</ul>
-<p>Examples::</p>
-<pre><code>headers = Headers([(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')])
-
-list(headers)
-# [(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')]   # ASGI iteration
-
-headers.getlist(b'set-cookie')
-# [(b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')]
-
-headers.getlist(b'missing')
-# []
-
-headers.get(b'host')          # first value, or default
-# b'localhost:8000'
-</code></pre>
+        <p>Ordered multi-valued headers with bytes names and values.</p>
+<p>Lookups ignore name casing; iteration preserves input casing and duplicate
+order. get returns the first value or its default; getlist returns all
+matching (name, value) pairs, or an empty list.</p>
 
 
 
@@ -10917,20 +10234,9 @@ One-argument form: <code>append(pairs)</code> — adds every pair in the iterabl
 
     <div class="doc doc-contents ">
 
-        <p>Build from pairs whose names are <strong>already lowercase</strong>.</p>
-<p>The caller must guarantee that; nothing here checks it, and a name
-containing uppercase would be indexed unreachably (every accessor
-lowercases before its fallback probe, so the field would be
-invisible to lookup while still appearing in iteration).</p>
-<p>Two callers can guarantee it.  <code>http1_actor._parse</code> lowercases
-each name while validating it, so re-lowercasing in <code>__init__</code>
-recomputes a known answer.  HTTP/2 field names are lowercase by
-protocol — RFC 9113 §8.2.1 makes an uppercase name malformed, and
-<code>HeadersFrame.parse_payload</code> rejects the frame before any pair
-reaches the header list.</p>
-<p>Takes ownership of <em>pairs</em> rather than copying it; the parser
-builds a throwaway list per request, and the copy is the point of
-the shortcut.  Do not pass a list you intend to keep mutating.</p>
+        <p>Adopt pairs whose names the caller guarantees are lowercase.</p>
+<p>Uppercase names would become unreachable through lookup. Do not mutate the
+list after handing it over; this path takes ownership instead of copying.</p>
 
 
     </div>
@@ -11145,11 +10451,7 @@ listener continuous across an auto-reload.</p>
 
 
 
-        <p>HTTP response with JSON-serialised body and <code>application/json</code> content-type.</p>
-<p>Pass directly to the ASGI <code>send</code> callable when using BlackBull::</p>
-<pre><code>await send(JSONResponse({'ok': True}))
-await send(JSONResponse({'error': 'Not found'}, status=HTTPStatus.NOT_FOUND))
-</code></pre>
+        <p>JSON response; return from a handler or pass to BlackBull send.</p>
 
 
 
@@ -11256,17 +10558,8 @@ scatter with it.  Pass it explicitly to override.</p>
 
 
 
-        <p>HTTP redirect response carrying a <code>Location</code> header.</p>
-<p>Completes the <code>Response</code> convenience family alongside <code>JSONResponse</code>.
-The body is empty; <em>url</em> becomes the <code>Location</code> header value and <em>status</em>
-a 3xx redirect code (default <code>302 Found</code> — the safer general-purpose
-default, since it does not force the client to preserve the request method).</p>
-<p>Pass directly to the ASGI <code>send</code> callable, or return it from a handler::</p>
-<pre><code>await send(RedirectResponse('/new-url'))
-return RedirectResponse('/permanent', status=HTTPStatus.MOVED_PERMANENTLY)
-</code></pre>
-<p><em>url</em> must be ASCII (RFC 9110 §10.2.2 — the Location field value is a
-URI-reference); percent-encode non-ASCII URLs before passing them in.</p>
+        <p>Redirect with an empty body and Location; default status is 302.</p>
+<p>url must be ASCII; percent-encode non-ASCII characters first.</p>
 
 
 
@@ -11312,11 +10605,8 @@ URI-reference); percent-encode non-ASCII URLs before passing them in.</p>
 
 
 
-        <p>HTTP response object carrying body, status, and headers.</p>
-<p>Pass directly to the ASGI <code>send</code> callable when using BlackBull::</p>
-<pre><code>await send(Response('&lt;h1&gt;Hello&lt;/h1&gt;'))
-await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
-</code></pre>
+        <p>HTTP body, status and headers; return from a handler or pass to BlackBull send.</p>
+<p>An arbitrary ASGI host's raw send does not accept Response objects.</p>
 
 
 
@@ -11354,13 +10644,8 @@ await send(Response(b'data', status=HTTPStatus.NOT_FOUND))
 
     <div class="doc doc-contents ">
 
-        <p>Drive this response as an ASGI app: emit <code>start</code> then <code>body</code>.</p>
-<p>Mirrors <a class="autorefs autorefs-internal" href="response/#blackbull.response.StreamingResponse"><code>StreamingResponse</code></a> so every BlackBull response type
-shares one protocol — <code>await response(conn, receive, send)</code> —
-whether returned from a simplified handler, invoked explicitly by a
-full-form handler, or normalised by <code>_wrap_send_native</code>.  Keeping the
-start/body serialisation here means there is a single source of truth
-for turning a Response into ASGI events.</p>
+        <p>Send a complete native response when invoked directly.</p>
+<p>Normalized Response sends use to_native and bypass this method.</p>
 
 
     </div>
@@ -11607,17 +10892,8 @@ response types drive themselves and are not converted here.</p>
 
 
 
-        <p>Stream a response body from an async generator.</p>
-<p>Usage::</p>
-<pre><code>async def lines():
-    for i in range(10):
-        yield f'line {i}\n'.encode()
-        await asyncio.sleep(0.1)
-
-@app.route(path='/stream')
-async def handler(conn, receive, send):
-    await StreamingResponse(lines())(conn, receive, send)
-</code></pre>
+        <p>Stream from an async iterator; finalize the generator on completion or cancellation.</p>
+<p>Return from a handler, pass to BlackBull send, or invoke as (conn, receive, send).</p>
 
 
 
@@ -11715,55 +10991,11 @@ binding.</p>
 
 
 
-        <p>Rewrite <code>conn['client']</code> and <code>conn['scheme']</code> from proxy headers.</p>
-<p>Applied only when the direct TCP peer matches the configured trusted set.
-Trusted proxies must append their observed peer or overwrite the chain;
-standalone proto/prefix assertions must replace client-supplied values.</p>
-<p>Supported headers (in precedence order):</p>
-<ol>
-<li>RFC 7239 <code>Forwarded</code> — <code>for=&lt;ip&gt;; proto=&lt;scheme&gt;</code></li>
-<li><code>X-Forwarded-For</code> — walk right to left to the first untrusted IP</li>
-<li><code>X-Forwarded-Proto</code> — rewrite <code>conn['scheme']</code></li>
-</ol>
-
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Type</th>
-          <th>Description</th>
-          <th>Default</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                <code>trusted_proxies</code>
-            </td>
-            <td>
-                  <code><span title="list">list</span>[<span title="str">str</span>] | <span title="str">str</span> | None</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>IP addresses or CIDR strings (IPv4 or IPv6).  Accepts a
-single string or a list.  Defaults to loopback (<code>'127.0.0.1'</code>, <code>'::1'</code>).</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-      </tbody>
-    </table>
-        <p>Usage::</p>
-<pre><code>app = BlackBull(trusted_proxies=['127.0.0.1', '10.0.0.0/8'])
-
-# or register explicitly for more control:
-from blackbull import TrustedProxyMiddleware
-app.use(TrustedProxyMiddleware(['127.0.0.1', '::1']))
-</code></pre>
+        <p>Rewrite conn.client and conn.scheme only behind configured trusted peers.</p>
+<p>Proxies must append the observed peer or overwrite the chain. Standalone
+proto/prefix assertions must replace client-supplied values. Forwarded takes
+precedence over X-Forwarded-For/Proto; walk right to left to the first
+untrusted IP. Trust defaults to loopback. See the reverse-proxy guide.</p>
 
 
 
@@ -12585,19 +11817,7 @@ none.  <code>reason</code> is its optional UTF-8 explanation.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Lazy, deprecated attribute access — <code>blackbull.Request</code>.</p>
-<p><code>Request</code> was the opt-in HTTP context object; it has been merged
-into <a class="autorefs autorefs-internal" title="Connection
-
-
-  
-      dataclass
-  " href="connection/#blackbull.connection.Connection"><code>Connection</code></a> and the name demoted to an alias. Resolving it
-through the module <code>__getattr__</code> (PEP 562) means the <code>DeprecationWarning</code>
-fires only if code actually touches <code>Request</code> — importing the package
-stays warning-free — and the alias still evaluates to <code>Connection</code> so
-existing <code>request: Request</code> handler signatures keep working unchanged
-during the migration window (removal no earlier than 2027-08-01).</p>
+        <p>Deprecated Request alias for Connection; removal no earlier than 2027-08-01.</p>
 
 
     </div>
@@ -12615,33 +11835,11 @@ during the migration window (removal no earlier than 2027-08-01).</p>
 
     <div class="doc doc-contents ">
 
-        <p>Decorator that marks an async function <strong>or</strong> class as BlackBull middleware.</p>
-<p>Wraps <code>call_next</code> so any <code>send</code> callable the middleware passes to it is
-automatically normalised — Response/JSONResponse objects are converted to
-NativeResponse before reaching the middleware's inner <code>send</code> wrapper.
-The wrapper therefore only ever sees the native representation
-(<code>NativeResponse</code> on the HTTP path — H1 and H2).</p>
-<p>Applied to an async function (signature <code>(conn, receive, send, call_next)</code>)::</p>
-<pre><code>@as_middleware
-async def timing_mw(conn, receive, send, call_next):
-    async def timed_send(event):
-        # event is a NativeResponse on the HTTP path
-        await send(event)
-    await call_next(conn, receive, timed_send)
-</code></pre>
-<p>Applied to a class whose <code>__call__</code> is the middleware coroutine::</p>
-<pre><code>@as_middleware
-class Cache:
-    async def __call__(self, conn, receive, send, call_next):
-        async def cap_send(event):
-            # event is a NativeResponse on the HTTP path
-            ...
-        await call_next(conn, receive, cap_send)
-</code></pre>
-<p>Power users who need to handle raw <code>send</code> arguments (e.g. because their
-middleware is used in a context where no simplified handlers are registered)
-should omit this decorator — their <code>call_next</code> is then wired directly to
-the next handler with no extra wrapping.</p>
+        <p>Decorate a function or class with (conn, receive, send, call_next) middleware.</p>
+<p>Normalize downstream HTTP sends to NativeResponse before the middleware's
+send wrapper. A first request parameter named scope opts into ASGI scope
+and event dictionaries at both edges, including WebSocket events.
+Omit the decorator to handle raw downstream send arguments.</p>
 
 
     </div>
@@ -12857,30 +12055,11 @@ returned as if it were the complete text.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Synchronous entry point for any ASGI 3.0 callable.</p>
-<p>Works for a <a class="autorefs autorefs-internal" href="app/#blackbull.app.BlackBull"><code>BlackBull</code></a> instance <em>and</em> for any plain ASGI
-callable (uvicorn/hypercorn-style <code>async def app(scope, receive,
-send): …</code>).  This is what the <code>blackbull</code> console script calls
-after resolving <code>module:attr</code>; <a class="autorefs autorefs-internal" title="run(certfile=None, keyfile=None, port=None, unix_path=None, inherited_fd=None, listeners=None, workers=None, max_connections=None, stream_queue_depth=None, ws_queue_depth=None, reload=None, reload_paths=None)" href="app/#blackbull.app.BlackBull.run"><code>BlackBull.run</code></a> is a thin
-shim around it.</p>
-<p>For <code>workers=1</code> without reload the server runs in the current
-process via <code>asyncio.run</code>.  For <code>workers &gt; 1</code> <em>or</em>
-<code>reload=True</code> the master pre-binds sockets, forks workers, and
-blocks until SIGTERM / SIGINT — or in reload mode, until a
-watched file changes (master then re-execs itself, see
-<a class="autorefs autorefs-internal" href="server/reload/#blackbull.server.reload"><code>blackbull.server.reload</code></a>).</p>
-<p><em>listeners</em> states the sockets directly — one
-<a class="autorefs autorefs-internal" title="Listener
-
-
-  
-      dataclass
-  " href="server/listener/#blackbull.server.listener.Listener"><code>Listener</code></a> each, saying where it is,
-what speaks there and whether TLS terminates there.  It replaces <em>port</em>,
-<em>unix_path</em> and <em>inherited_fd</em> rather than joining them, so passing both
-is refused.</p>
-<p>All integer parameters default to their corresponding <code>BB_*</code>
-environment variables (see <a class="autorefs autorefs-internal" href="env/#blackbull.env"><code>blackbull.env</code></a>).</p>
+        <p>Run a BlackBull instance or ASGI 3.0 callable synchronously.</p>
+<p>One worker without reload runs in this process; multiple workers or reload
+use a blocking supervisor. listeners replaces port/unix_path/inherited_fd;
+passing both is refused. Unset workers, max_connections and queue depths
+use BB_<em> settings. Deployment options do not resolve BLACKBULL_</em> here.</p>
 
 
     </div>

@@ -6132,15 +6132,9 @@ frames in the same message keep <code>rsv1=False</code>.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Encode just the <strong>unmasked</strong> 2-to-10-byte WebSocket frame header
-(server → client, RFC 6455 §5.1/§5.2).</p>
-<p>Server frames MUST NOT be masked, so this never sets the mask bit and
-takes no masking key.  Callers that already hold the payload separately
-(e.g. <code>WebSocketSender</code>) write <code>(header, payload)</code> as a vectored
-<code>writelines</code> — avoiding the header+payload concatenation copy that
-<code>encode_frame</code> would otherwise allocate on every send.</p>
-<p><code>rsv1</code> (RFC 7692 §7) marks the FIRST frame of a permessage-deflate
-compressed message.</p>
+        <p>Encode an unmasked, final server-to-client frame header (RFC 6455 §5.2).</p>
+<p>RSV1 belongs only on the first frame of a compressed message. Pass header
+and payload parts to the sender; its shared size gate chooses the write.</p>
 
 
     </div>

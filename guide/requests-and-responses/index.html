@@ -6432,12 +6432,10 @@ as one canonical field.</p>
 <p>Response header names are sent lowercase on both transports, whatever
 case the application wrote: names are case-insensitive (RFC 9110 §5.1),
 and HTTP/2 requires lowercase (RFC 9113 §8.2.2).</p>
-<p>On the native path a <code>Response</code> (or subclass) is serialised via
-<code>Response.to_native()</code>.  A subclass that overrides <code>__call__</code> to emit a
-custom event sequence is honoured on the WebSocket / external-host
-lanes but not on the native HTTP path — keep the wire behaviour in
-<code>__call__</code> (shared by both lanes via the normalisers) or override
-<code>to_native()</code> to control the native serialisation.</p>
+<p>Sending a Response through the normalizers uses to_native(), bypassing
+a subclass's <strong>call</strong> override. Override to_native() to customize that
+serialization. Calling the response directly invokes <strong>call</strong>; test the
+entry point your application actually uses.</p>
 </div>
 <h3 id="response"><code>Response</code><a class="headerlink" href="#response" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">Response</span>
@@ -6503,13 +6501,6 @@ RFC-defined field needs <code>obs-text</code>. Empty values and repeated fields 
 <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">'ok'</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span> <span class="n">headers</span><span class="o">=</span><span class="p">[</span><span class="n">hdr</span><span class="p">]))</span>
 </code></pre></div>
 <p>Signature: <code>cookie_header(name, value, path='/', http_only=True)</code>.</p>
-<div class="admonition note">
-<p class="admonition-title">Cookies vs. tokens for SPA clients</p>
-<p>Browsers may not reliably forward <code>HttpOnly</code> cookies set by a
-<code>fetch()</code> response on the next page navigation.  For
-single-page apps, store the session token in <code>sessionStorage</code>
-and send it as <code>Authorization: Bearer &lt;token&gt;</code> instead.</p>
-</div>
 <h2 id="http-trailers">HTTP trailers<a class="headerlink" href="#http-trailers" title="Permanent link">&para;</a></h2>
 <p>HTTP/1.1 chunked responses can carry trailing headers after the
 body.  Use the <code>http.response.trailers</code> event after the last
@@ -6579,7 +6570,7 @@ without buffering the whole body in memory.  The class calls
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/stream'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">handler</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="k">await</span> <span class="n">StreamingResponse</span><span class="p">(</span><span class="n">countdown</span><span class="p">())(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">StreamingResponse</span><span class="p">(</span><span class="n">countdown</span><span class="p">())(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span>
 </code></pre></div>
 <p><code>StreamingResponse.__init__</code> accepts:</p>
 <table>
@@ -6640,58 +6631,11 @@ keep-alive connection.</p>
 trailers, <code>END_STREAM</code> maps to <code>more_body=False</code>; with declared trailers it
 belongs to the trailing HEADERS block.</p>
 <h3 id="writing-streaming-safe-middleware">Writing streaming-safe middleware<a class="headerlink" href="#writing-streaming-safe-middleware" title="Permanent link">&para;</a></h3>
-<p>Any middleware that wraps the <code>send</code> callable and collects body
-parts will silently buffer a streaming response, defeating
-<code>more_body=True</code>.</p>
-<p>For function-based middleware, the safest approach is to pass
-body events through immediately rather than accumulating them:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
-
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">prefix_mw</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="n">call_next</span><span class="p">):</span>
-    <span class="n">captured_start</span> <span class="o">=</span> <span class="kc">None</span>
-
-    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">capturing_send</span><span class="p">(</span><span class="n">event</span><span class="p">):</span>
-        <span class="k">nonlocal</span> <span class="n">captured_start</span>
-        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="n">NativeResponse</span><span class="p">):</span>
-            <span class="c1"># BlackBull's own HTTP server (H1 + H2) threads native response</span>
-            <span class="c1"># objects — see the middleware guide for the contract.  A single</span>
-            <span class="c1"># object may carry header + body together.</span>
-            <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">body</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">event</span><span class="o">.</span><span class="n">more_body</span><span class="p">:</span>
-                <span class="c1"># Non-streaming — transform the terminal body</span>
-                <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">NativeResponse</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="n">event</span><span class="o">.</span><span class="n">status</span><span class="p">,</span>
-                                          <span class="n">header</span><span class="o">=</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">event</span><span class="o">.</span><span class="n">header</span><span class="p">)</span>
-                                                  <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">header</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
-                                                  <span class="k">else</span> <span class="kc">None</span><span class="p">),</span>
-                                          <span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">'[prefix] '</span> <span class="o">+</span> <span class="n">event</span><span class="o">.</span><span class="n">body</span><span class="p">))</span>
-            <span class="k">else</span><span class="p">:</span>
-                <span class="c1"># Streaming (or header-only) — pass through without buffering</span>
-                <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
-        <span class="k">elif</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'type'</span><span class="p">)</span> <span class="o">==</span> <span class="s1">'http.response.start'</span><span class="p">:</span>
-            <span class="n">captured_start</span> <span class="o">=</span> <span class="n">event</span>
-        <span class="k">elif</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'type'</span><span class="p">)</span> <span class="o">==</span> <span class="s1">'http.response.body'</span><span class="p">:</span>
-            <span class="k">if</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'more_body'</span><span class="p">):</span>
-                <span class="c1"># Streaming response — pass through without buffering</span>
-                <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">captured_start</span><span class="p">)</span>
-                <span class="n">captured_start</span> <span class="o">=</span> <span class="kc">None</span>
-                <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
-            <span class="k">else</span><span class="p">:</span>
-                <span class="c1"># Non-streaming — transform the body</span>
-                <span class="n">body</span> <span class="o">=</span> <span class="sa">b</span><span class="s1">'[prefix] '</span> <span class="o">+</span> <span class="n">event</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'body'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">''</span><span class="p">)</span>
-                <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">captured_start</span><span class="p">)</span>
-                <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="o">**</span><span class="n">event</span><span class="p">,</span> <span class="s1">'body'</span><span class="p">:</span> <span class="n">body</span><span class="p">})</span>
-        <span class="k">else</span><span class="p">:</span>
-            <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
-
-    <span class="k">await</span> <span class="n">call_next</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">capturing_send</span><span class="p">)</span>
-</code></pre></div>
-<p>The two branches are the same policy on two wire shapes: the native object
-arm transforms only terminal bodies (so <code>more_body=True</code> chunks stream
-through untouched), and the dict arm keeps the original start/body
-sequencing for the WebSocket / external-host lanes (where the wire contract
-stays ASGI).</p>
-<p>For most use cases (header injection, logging) the middleware
-does not touch the body at all and streaming safety is not a
-concern.</p>
+<p>Forward streaming heads and chunks as they arrive. A terminal chunk can be
+the end of an earlier stream, so more_body=False alone does not prove the
+body is a complete response. If changing payload length, update or remove
+Content-Length before sending the head. See <a href="../middleware/">Middleware</a> for
+native and ASGI send shapes.</p>
 <h2 id="detecting-client-disconnection">Detecting client disconnection<a class="headerlink" href="#detecting-client-disconnection" title="Permanent link">&para;</a></h2>
 <p>When the remote side closes the connection, <code>receive()</code> returns
 <code>{'type': 'http.disconnect'}</code>.  This is useful for long-polling

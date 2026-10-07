@@ -5723,12 +5723,12 @@ prefer the explicit two-step style:</p>
 <span class="n">docs</span> <span class="o">=</span> <span class="n">OpenAPIExtension</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s1">'Items API'</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="s1">'1.0.0'</span><span class="p">)</span>
 <span class="n">docs</span><span class="o">.</span><span class="n">init_app</span><span class="p">(</span><span class="n">app</span><span class="p">)</span>
 
-<span class="c1"># Or eager — wire on construction.</span>
-<span class="n">OpenAPIExtension</span><span class="p">(</span><span class="n">app</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s1">'Items API'</span><span class="p">,</span> <span class="n">version</span><span class="o">=</span><span class="s1">'1.0.0'</span><span class="p">)</span>
-
-<span class="c1"># Either way, the extension is reachable as a registry entry:</span>
+<span class="c1"># The extension is reachable as a registry entry:</span>
 <span class="k">assert</span> <span class="n">app</span><span class="o">.</span><span class="n">extensions</span><span class="p">[</span><span class="s1">'openapi'</span><span class="p">]</span> <span class="ow">is</span> <span class="n">docs</span>
 </code></pre></div>
+<p>Alternatively, initialize a fresh app eagerly with
+<code>docs = OpenAPIExtension(app, title='Items API', version='1.0.0')</code>.
+Choose one style; do not register two instances on the same app.</p>
 <p>Why use the class form?</p>
 <ul>
 <li>Mounting more than once on the same app raises <code>RuntimeError</code>

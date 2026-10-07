@@ -6496,11 +6496,7 @@ claiming the same type is a <code>ValueError</code> at import.</p>
 
 
 
-        <p>Common base for all HTTP/2 frame flag enums.</p>
-<p>Inheriting from this empty base allows type annotations to reference
-<code>FrameFlags</code> instead of listing every concrete flag enum.  Because
-<code>FrameFlags</code> itself has no members, Python's restriction on subclassing
-a non-empty <code>IntEnum</code> does not apply.</p>
+        <p>Common annotation base for frame flag enums.</p>
 
 
 
@@ -6531,10 +6527,7 @@ a non-empty <code>IntEnum</code> does not apply.</p>
 
 
 
-        <p>A frame the RFC calls malformed, carrying the code its own section names.</p>
-<p>A parser that raises a bare <code>Exception</code> leaves the caller to guess the
-error code from the message, and the guess is the thing the peer acts on.
-<code>ValueError</code> because that is what the padding checks already raised.</p>
+        <p>Malformed frame with its RFC-defined error code.</p>
 
 
 
@@ -7458,16 +7451,8 @@ and a value is the same value on either transport.</p>
 
     <div class="doc doc-contents ">
 
-        <p>The refusal for a header frame that cannot name its connection's codec.</p>
-<p>HPACK state is connection-wide and the peer keeps exactly one table for it
-(RFC 7541 §2.3, RFC 9113 §4.3), so a substitute codec is never a weaker
-version of the right one — it is a different table.  Both directions fail
-the same way and silently: a private encoder writes indices the peer
-resolves against entries someone else inserted, and a block that never
-reaches the connection's decoder leaves it behind its peer for good.
-Valid-looking bytes, wrong fields, no exception on either side.</p>
-<p>The message has to send the reader to the connection rather than to the
-signature, because "missing argument" is answered by passing <em>any</em> codec.</p>
+        <p>Refuse header framing without the connection-owned shared HPACK context.</p>
+<p>Never substitute a private encoder or decoder (RFC 7541 §2.3, RFC 9113 §4.3).</p>
 
 
     </div>

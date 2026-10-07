@@ -2615,17 +2615,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.h2_server--quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick start
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.h2_server.H2FaultServer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5545,17 +5534,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.h2_server--quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick start
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.h2_server.H2FaultServer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5667,38 +5645,9 @@
 
     <div class="doc doc-contents first">
 
-        <p>Programmable HTTP/2 server that emits deliberate misbehaviour.</p>
-<p><a class="autorefs autorefs-internal" href="#blackbull.fault_injection.h2_server.H2FaultServer"><code>H2FaultServer</code></a> listens on <code>127.0.0.1:&lt;random&gt;</code>, accepts one
-HTTP/2 (h2c plaintext) connection at a time, and walks a
-<a class="autorefs autorefs-internal" title="ScenarioH2
-
-
-  
-      dataclass
-  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.ScenarioH2"><code>ScenarioH2</code></a> against it.
-It is designed for client-library / proxy / security-research test
-suites that need to exercise a client against a server that
-<strong>deliberately</strong> does the wrong thing — half-closed streams, exhausted
-flow-control windows, illegal SETTINGS, weird frame sequences.</p>
-<p>The server is an opt-in testing instrument: it refuses to start when
-<code>BLACKBULL_ENV=production</code> or <code>BB_PRODUCTION</code> is set, and refuses a
-non-loopback bind without <code>allow_remote=True</code>.</p>
-<p>Tutorial: <code>docs/guide/fault_injection.md</code>.</p>
-<h4 id="blackbull.fault_injection.h2_server--quick-start">Quick start<a class="headerlink" href="#blackbull.fault_injection.h2_server--quick-start" title="Permanent link">&para;</a></h4>
-<pre><code>import pytest
-from blackbull.fault_injection import H2FaultServer
-from blackbull.fault_injection.catalogue import half_closed_stream_no_data
-
-@pytest.fixture
-async def fault_server():
-    async with H2FaultServer(scenario=half_closed_stream_no_data()) as srv:
-        yield srv
-
-async def test_client_times_out_on_stalled_stream(fault_server):
-    client = MyH2Client(fault_server.url)
-    with pytest.raises(TimeoutError):
-        await client.get('/', timeout=1.0)
-</code></pre>
+        <p>Programmable malformed HTTP/2 server.</p>
+<p>Production mode is refused; non-loopback binds require allow_remote=True.
+Use raw-byte steps when normal frame encoding cannot express a fault.</p>
 
 
 

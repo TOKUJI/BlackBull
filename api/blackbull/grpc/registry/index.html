@@ -5689,38 +5689,11 @@
 
     <div class="doc doc-contents first">
 
-        <p>gRPC service registry — maps <code>/package.Service/Method</code> to a handler.</p>
-<p>This is the gRPC analogue of <a class="autorefs autorefs-internal" title="Router" href="../../router/#blackbull.router.Router"><code>blackbull.router.Router</code></a>: it holds the
-table of method paths and the coroutine that serves each one.</p>
-<p>A <strong>unary</strong> handler is::</p>
-<pre><code>async def handler(request: bytes, context: GrpcContext) -&gt; bytes
-</code></pre>
-<p>A <strong>server-streaming</strong> handler is an async generator that yields zero or more
-response messages::</p>
-<pre><code>async def handler(request: bytes, context: GrpcContext):
-    yield b'...'
-    yield b'...'
-</code></pre>
-<p>In both cases <code>request</code> is the (already de-framed) request message body and
-the yielded / returned value is a response message body.  Protobuf
-(de)serialisation is the handler's responsibility — the framework stays
-dependency-free.  Handlers signal a non-OK result by raising
-<a class="autorefs autorefs-internal" href="../status/#blackbull.grpc.status.GrpcError"><code>GrpcError</code></a> or calling <code>context.abort(...)</code>.</p>
-<p>A <strong>client-streaming</strong> or <strong>bidirectional</strong> handler takes an async iterator of
-request messages instead of a single <code>request</code>::</p>
-<pre><code>async def handler(request_iter, context) -&gt; bytes:   # client-streaming
-    async for message in request_iter:
-        ...
-
-async def handler(request_iter, context):            # bidirectional
-    async for message in request_iter:
-        yield ...
-</code></pre>
-<p>Response-streaming is detected automatically at registration via
-<code>inspect.isasyncgenfunction</code>; request-streaming is detected from the first
-parameter name (<code>request_iter</code> / <code>requests</code> / <code>request_iterator</code> /
-<code>request_stream</code>).  Pass <code>streaming=</code> / <code>client_streaming=</code> explicitly to
-override when a decorator hides the handler's nature.</p>
+        <p>gRPC method registration.</p>
+<p>Response streaming is inferred from async-generator functions; request
+streaming from request_iter, request_iterator, requests or request_stream.
+Use explicit flags when a decorator hides these forms. Handler messages are
+bytes; raise GrpcError or call context.abort for non-OK status.</p>
 
 
 
@@ -5758,16 +5731,9 @@ override when a decorator hides the handler's nature.</p>
 
 
 
-        <p>A registered method: its <em>handler</em> and the two streaming axes.</p>
-<p><em>streaming</em> is the <strong>response</strong> axis (the handler is an async generator that
-yields response messages); <em>client_streaming</em> is the <strong>request</strong> axis (the
-handler takes an async iterator of request messages instead of a single
-<code>request: bytes</code>).  The four combinations are unary, server-streaming,
-client-streaming, and bidirectional.</p>
-<p><em>handler</em> is annotated as a bare <code>Callable</code> and
-not <code>GrpcHandler</code>, which would break the runtime NamedTuple field
-check: a response-streaming handler is an async generator function, so
-calling it returns an async iterator rather than an <code>Awaitable</code>.</p>
+        <p>Registered handler with request and response streaming flags.</p>
+<p>client_streaming receives an async message iterator; streaming returns one.
+The four flag combinations select unary, server, client or bidirectional calls.</p>
 
 
 
