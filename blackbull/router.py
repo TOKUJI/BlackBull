@@ -1890,12 +1890,20 @@ class ErrorRouter:
     def __getitem__(
         self, key: HTTPStatus | Type[BaseException] | BaseException
     ) -> Callable | None:
-        """Return the registered handler for *key*, or None if not found.
+        return self.resolve(key)
+
+    def resolve(
+        self, key: HTTPStatus | Type[BaseException] | BaseException,
+        status: HTTPStatus | None = None,
+    ) -> Callable | None:
+        """Resolve explicit exception MRO, then status, then the default.
 
         Accepts:
           - HTTPStatus           → exact match
           - exception class      → MRO walk
           - exception instance   → MRO walk on type(key)
+
+        For an exception, *status* supplies the fallback after the MRO miss.
         """
         if isinstance(key, HTTPStatus):
             return self._status_handlers.get(key, self._default)
@@ -1907,7 +1915,7 @@ class ErrorRouter:
         for cls in exc_class.__mro__:
             if cls in self._exc_handlers:
                 return self._exc_handlers[cls]
-        return self._default
+        return self._status_handlers.get(status, self._default)
 
     def __contains__(self, key: HTTPStatus | Type[BaseException] | BaseException) -> bool:
         return self[key] is not None
