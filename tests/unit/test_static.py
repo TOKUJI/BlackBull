@@ -292,6 +292,7 @@ class TestStaticFilesRangeRequests:
         pytest.param('bytes=20-999', 416, id='start-at-eof-oversized-end'),
         pytest.param('bytes=100-', 416, id='start-beyond-eof-open-end'),
         pytest.param('bytes=100-200', 416, id='out-of-range-416'),
+        pytest.param('bytes=-0', 416, id='zero-suffix'),
     ])
     async def test_out_of_range_returns_416(self, static_dir, rng, expected):
         from blackbull.middleware.static import StaticFiles
@@ -300,6 +301,19 @@ class TestStaticFilesRangeRequests:
             app, _scope(path='/hello.txt', headers={'Range': rng})
         )
         assert start['status'] == expected
+
+    @pytest.mark.parametrize('rng,expected', [
+        pytest.param('bytes=-5', 200, id='suffix-ignored'),
+        pytest.param('bytes=0-0', 416, id='int-range-unsatisfiable'),
+    ])
+    async def test_range_on_empty_file(self, tmp_path, rng, expected):
+        from blackbull.middleware.static import StaticFiles
+        (tmp_path / 'empty.txt').write_bytes(b'')
+        app = StaticFiles(directory=str(tmp_path))
+        start, body = await _collect(
+            app, _scope(path='/empty.txt', headers={'Range': rng}))
+        assert start['status'] == expected
+        assert body == b''
 
     async def test_no_range_returns_full_file(self, static_dir):
         """Without a Range header the full file must be served with status 200."""
@@ -657,6 +671,10 @@ class TestStaticFilesMalformedRange:
         'bytes=',
         'items=0-3',          # non-bytes unit
         'bytes=0-1,5-9',      # multi-range (we don't emit multipart/byteranges)
+        'bytes=5-3',          # last-pos before first-pos: invalid, RFC 9110 §14.1.1
+        'bytes=+2-5',         # positions are 1*DIGIT: no sign ...
+        'bytes=--5',
+        'bytes=1_0-12',       # ... and no underscore
     ])
     async def test_malformed_range_serves_full_200(self, static_dir, bad_range):
         from blackbull.middleware.static import StaticFiles
@@ -670,7 +688,6 @@ class TestStaticFilesMalformedRange:
         assert body == self.FILE
 
     @pytest.mark.parametrize('bad_range', [
-        'bytes=--5',          # int('-5') suffix → unsatisfiable
         'bytes=-',
         'bytes= - ',
         'bytes=9999999999999999999999-',

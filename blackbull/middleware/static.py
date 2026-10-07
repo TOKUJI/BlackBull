@@ -34,16 +34,12 @@ del _ext, _mime
 
 
 def _parse_byte_range(range_hdr: str, size: int) -> tuple[int, int] | None:
-    """Parse a single ``bytes=`` Range header into an inclusive ``(start, end)``.
+    """Parse a single ``bytes=`` Range header into an inclusive ``(start, end)``
+    with ``end`` clipped to ``size - 1``; ``start >= size`` means unsatisfiable.
 
-    Returns ``None`` for anything we do not answer with a partial response —
-    a non-``bytes`` unit, a multi-range set (we don't emit
-    ``multipart/byteranges``), or a syntactically malformed range.  Per
-    RFC 9110 §14.2 an unparseable/ignored Range is served as a normal 200,
-    so the caller treats ``None`` as "serve the whole file".  Never raises:
-    a bare ``int()`` here 500s on
-    ``Range: bytes=abc-def``.  The caller answers 416 when start >= size
-    and clips end to size - 1.
+    Returns ``None`` — serve the whole file — for a Range to ignore: a
+    non-``bytes`` unit, a multi-range set, an invalid range-spec, or a suffix
+    range on an empty file.  Never raises.
     """
     if not range_hdr.startswith('bytes='):
         return None
@@ -54,18 +50,24 @@ def _parse_byte_range(range_hdr: str, size: int) -> tuple[int, int] | None:
     if not sep:
         return None
     start_s, end_s = start_s.strip(), end_s.strip()
+    if not all(s.isascii() and s.isdigit() for s in (start_s, end_s) if s):
+        return None
     try:
         if start_s == '':
             # Suffix range: bytes=-N → the last N bytes.
             if end_s == '':
                 return None
             n = int(end_s)
+            if size == 0 and n > 0:
+                return None
             return (max(0, size - n), size - 1)
         start = int(start_s)
         end = int(end_s) if end_s else size - 1
-    except ValueError:
+    except ValueError:  # beyond int()'s digit limit
         return None
-    return (start, end)
+    if end_s and end < start:
+        return None
+    return (start, min(end, size - 1))
 
 
 def _not_modified(headers, etag: bytes, mtime_ns: int) -> bool:
@@ -411,11 +413,10 @@ class StaticFiles:
             # ``None`` → unparseable/multi-range → ignore and serve full 200.
             if parsed is not None:
                 start, end = parsed
-                if start >= size or start > end:
+                if start >= size:
                     await self._respond(send, HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
                         [(b'content-range', f'bytes */{size}'.encode())])
                     return
-                end = min(end, size - 1)
                 status = HTTPStatus.PARTIAL_CONTENT
                 extra_headers.append(
                     (b'content-range', f'bytes {start}-{end}/{size}'.encode()))
