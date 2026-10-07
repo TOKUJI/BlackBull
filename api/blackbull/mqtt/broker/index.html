@@ -6390,8 +6390,11 @@ than assuming the send succeeded.</p>
 
 
 
-        <p>The client's PUBREC for an outbound QoS 2 message; the broker answers
-with PUBREL for the same packet id.</p>
+        <p>The client's PUBREC for an outbound QoS 2 message.</p>
+<p>A <code>reason_code</code> below 0x80 is answered with PUBREL and the flow waits
+for PUBCOMP (§4.3.3-4); an error code (§2.4) ends the exchange — no
+PUBREL, and the packet identifier and window slot are released (§2.2.1,
+§4.9). A successful PUBREC keeps its window slot until PUBCOMP.</p>
 
 
 

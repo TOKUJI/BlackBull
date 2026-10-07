@@ -5874,7 +5874,7 @@ conformance matrix:</p>
 </tr>
 <tr>
 <td>Flow control</td>
-<td>the client's <code>Receive Maximum</code> (§3.1.2.11.3) is enforced in the outbound direction; the broker's own is advertised in CONNACK as a promise to conforming clients</td>
+<td>the client's <code>Receive Maximum</code> (§3.1.2.11.3) is enforced in the outbound direction, per Network Connection; the broker's own is advertised in CONNACK as a promise to conforming clients</td>
 </tr>
 <tr>
 <td>Resource limits</td>
@@ -6023,6 +6023,19 @@ input closes silently before CONNECT admission; afterward it receives DISCONNECT
 packet-assembly time; zero disables that idle check.</p>
 <p>The QoS backlog keeps older promised messages and refuses the newest when
 full. It is separate from writer mailboxes and retained storage.</p>
+<p><strong>The send quota belongs to the connection, and retransmissions spend it
+too.</strong> Every CONNECT re-declares the client's <code>Receive Maximum</code>; an omitted
+property means 65535, and a declared zero is a Protocol Error (<code>0x82</code>). That
+window is shared by live deliveries and the <code>DUP=1</code> retransmissions of a
+resumed session (§4.4), which go first, in the order the originals were sent
+(MQTT-4.4.0-2). A matching PUBACK, PUBCOMP, or error PUBREC frees one slot;
+a successful PUBREC keeps its slot until PUBCOMP. How many unacknowledged
+messages the <em>session</em> holds is never the quota. If all 65535 packet identifiers
+are still in use, new QoS&gt;0 deliveries wait in the bounded outbound queue
+until an exchange completes, even when this connection has quota available.
+Control packets (PUBREL and
+the acknowledgements of the client's own publishes) flow even when the window
+is full.</p>
 <p><strong>Retained messages are capped by topic count, and correction is always
 allowed.</strong> At the cap, a retained publish to a <em>new</em> topic is refused, but
 updating or deleting an already-retained topic still works. A client locked out
