@@ -563,14 +563,13 @@ def _decode_json_body(cls: Any, raw: bytes, handler_name: str) -> Any:
         ) from exc
 
 
-def _lookup_converter(converters: dict, result_type: type):
-    """Find a converter by exact return type, then MRO; return None on a miss.
-    """
-    fn = converters.get(result_type)
+def _lookup_mro(handlers: dict, target_type: type):
+    """Find the most specific registered handler, or None."""
+    fn = handlers.get(target_type)
     if fn is not None:
         return fn
-    for base in result_type.__mro__[1:]:
-        fn = converters.get(base)
+    for base in target_type.__mro__[1:]:
+        fn = handlers.get(base)
         if fn is not None:
             return fn
     return None
@@ -626,7 +625,7 @@ async def _finish_result(result, conn, receive, send, converters, fn_name: str) 
     """
     if await _send_native(result, conn, receive, send):
         return
-    if converters and (conv := _lookup_converter(converters, type(result))) is not None:
+    if converters and (conv := _lookup_mro(converters, type(result))) is not None:
         await _send_converted(conv(result), conn, receive, send)
         return
     raise TypeError(
@@ -1182,7 +1181,7 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
 
         if await _send_native(result, conn, receive, send):
             return
-        if converters and (conv := _lookup_converter(converters, type(result))) is not None:
+        if converters and (conv := _lookup_mro(converters, type(result))) is not None:
             await _send_converted(conv(result), conn, receive, send)
             return
         raise TypeError(
@@ -1848,16 +1847,9 @@ class Router:
 
 
 class ErrorRouter:
-    """Map HTTPStatus values and exception classes to error handlers.
-
-    Status lookup is exact. Exception instances or classes use MRO lookup;
-    a miss returns the configured default, which may be None.
-    """
+    """Resolve error handlers by exception MRO, status, then default."""
 
     def __init__(self, default: Callable | None = None):
-        """*default* is returned on any lookup miss instead of ``None``.  It is
-        not written into either registry, so those keep answering which
-        statuses and exceptions have handlers of their own."""
         self._status_handlers: dict[HTTPStatus, Callable] = {}
         self._exc_handlers: dict[Type[BaseException], Callable] = {}
         self._default = default
@@ -1888,26 +1880,25 @@ class ErrorRouter:
         return decorator
 
     def __getitem__(
-        self, key: HTTPStatus | Type[BaseException] | BaseException
+        self, key: HTTPStatus | Type[BaseException] | BaseException,
     ) -> Callable | None:
-        """Return the registered handler for *key*, or None if not found.
-
-        Accepts:
-          - HTTPStatus           → exact match
-          - exception class      → MRO walk
-          - exception instance   → MRO walk on type(key)
-        """
         if isinstance(key, HTTPStatus):
             return self._status_handlers.get(key, self._default)
+        return self.resolve(key if isinstance(key, type) else type(key))
 
-        exc_class = key if isinstance(key, type) else type(key)
+    def resolve(
+        self, exc_class: Type[BaseException],
+        status: HTTPStatus | None = None,
+    ) -> Callable | None:
+        """Use *status* after an exception MRO miss, before the default."""
         if not issubclass(exc_class, BaseException):
-            raise TypeError(f"Key must be HTTPStatus or exception class/instance, got {key!r}")
+            raise TypeError(f"Expected an exception class, got {exc_class!r}")
 
-        for cls in exc_class.__mro__:
-            if cls in self._exc_handlers:
-                return self._exc_handlers[cls]
-        return self._default
+        if self._exc_handlers and (handler := _lookup_mro(self._exc_handlers, exc_class)) is not None:
+            return handler
+        if status is None:
+            return self._default
+        return self._status_handlers.get(status, self._default)
 
     def __contains__(self, key: HTTPStatus | Type[BaseException] | BaseException) -> bool:
         return self[key] is not None

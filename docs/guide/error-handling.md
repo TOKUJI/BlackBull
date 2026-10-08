@@ -1,7 +1,7 @@
 # Error handling
 
-BlackBull installs a default handler for every HTTP error status
-plus the `Exception` base class, so unhandled errors always produce
+BlackBull supplies a default handler for HTTP error statuses
+and exceptions, so unhandled errors always produce
 a response (no naked connection drops).  You can override any of
 them with `@app.on_error(...)`.
 
@@ -92,10 +92,14 @@ async def handle_value_error(conn, receive, send):
                             status=HTTPStatus.BAD_REQUEST))
 ```
 
-Exception handlers use MRO walk: a handler registered for
-`Exception` catches all unhandled subclasses.  More specific
-handlers (e.g. `ValueError`) take priority over base-class
-handlers.
+Exceptions, including validation errors and route guards, select:
+
+1. The most specific explicitly registered exception handler along the MRO.
+2. A handler for the resolved status.
+3. The framework default.
+
+An explicit `@app.on_error(Exception)` takes priority over status handlers.
+Route lookup 404/405 uses status handlers directly.
 
 ## What's in `conn.state`
 
@@ -118,17 +122,16 @@ PROD-mode minimal page, register a handler for the status code
 you want to override:
 
 ```python
+from blackbull import Response
+
 @app.on_error(HTTPStatus.INTERNAL_SERVER_ERROR)
 async def custom_500(conn, receive, send):
-    exc = conn.state.get('error_exception')
-    # ... your rendering ...
-    await send(Response(body, status=HTTPStatus.INTERNAL_SERVER_ERROR,
+    await send(Response(b'<h1>Something went wrong</h1>',
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
                         content_type='text/html'))
 ```
 
-The default handler is only used when no custom one is registered.
-Per-status registration overrides only that status; other errors
-keep the default behaviour.
+This handles exceptions resolving to 500 unless an exception handler takes priority.
 
 ## Next
 

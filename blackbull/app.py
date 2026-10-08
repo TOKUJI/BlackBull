@@ -553,16 +553,14 @@ class BlackBull:
             try:
                 guard(conn)
             except HTTPException as e:
-                # Rejected before dispatch — routed by status like a 404/405, so
-                # @app.on_error(status) is honoured; no handler, no lifecycle
-                # events.
+                # Rejected before the handler: no handler lifecycle events.
                 self._logger.info('%s on %s %s: %s', int(e.status),
                                   conn.method, path, e.detail or e)
                 conn.state.update({
                     'error_status': e.status,
                     'error_exception': e,
                 })
-                handler = self._error_router[e.status]
+                handler = self._error_router.resolve(type(e), e.status)
                 if handler is not None:
                     await handler(conn, receive, send)
                 return
@@ -614,7 +612,7 @@ class BlackBull:
                 'error_status': err_status,
                 'error_exception': exc_caught,
             })
-            handler = self._error_router[exc_caught]
+            handler = self._error_router.resolve(type(exc_caught), err_status)
             if handler is not None:
                 await handler(conn, receive, send)
 

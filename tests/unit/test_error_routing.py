@@ -499,3 +499,151 @@ class TestBlackBullErrorDispatch:
         assert send.status == 405, (
             f"Expected 405 for unknown method NOTEXIST, got {send.status}"
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('boundary', ['native', 'asgi'])
+@pytest.mark.parametrize('registration', ['status', 'specific', 'exception', 'default'])
+@pytest.mark.parametrize('failure,status', [
+    ('exception', HTTPStatus.INTERNAL_SERVER_ERROR),
+    ('http', HTTPStatus.BAD_REQUEST),
+    ('query', HTTPStatus.BAD_REQUEST),
+    ('body', HTTPStatus.BAD_REQUEST),
+    ('missing', HTTPStatus.NOT_FOUND),
+    ('method', HTTPStatus.METHOD_NOT_ALLOWED),
+    ('guard', HTTPStatus.UNSUPPORTED_MEDIA_TYPE),
+])
+async def test_error_handler_precedence_at_request_boundary(boundary, registration, failure, status):
+    from dataclasses import dataclass
+    from blackbull import Response
+    from blackbull.connection import Connection
+    from blackbull.router import HTTPException
+
+    app = BlackBull(asgi=boundary == 'asgi')
+    selected = []
+    lifecycle = []
+
+    for name in ('request_received', 'before_handler', 'after_handler', 'request_completed'):
+        async def observe(event, name=name):
+            lifecycle.append(name)
+        app.on(name, blocking=True)(observe)
+
+    async def status_handler(conn, receive, send):
+        selected.append(('status', dict(conn.state)))
+        await send(Response(b'status', status=status))
+
+    async def exception_handler(conn, receive, send):
+        selected.append(('exception', dict(conn.state)))
+        await send(Response(b'exception', status=status))
+
+    if registration != 'default':
+        app.on_error(status)(status_handler)
+    exception_type = ValueError if failure == 'exception' else HTTPException
+    if registration == 'specific':
+        app.on_error(Exception)(status_handler)
+        app.on_error(exception_type)(exception_handler)
+    elif registration == 'exception':
+        app.on_error(Exception)(exception_handler)
+
+    class CustomValueError(ValueError):
+        pass
+
+    @dataclass
+    class Payload:
+        value: int
+
+    if failure == 'query':
+        async def endpoint(value: int):
+            return str(value)
+    elif failure == 'body':
+        async def endpoint(body: Payload):
+            return str(body.value)
+    else:
+        async def endpoint():
+            if failure == 'exception':
+                raise CustomValueError('broken')
+            if failure == 'http':
+                raise HTTPException(status, 'bad request')
+            return 'ok'
+
+    method = 'QUERY' if failure == 'guard' else 'GET'
+    app.route(path='/', methods=[method],
+              accept_query=['application/json'] if failure == 'guard' else None)(endpoint)
+    scope = {
+        'type': 'http', 'method': 'POST' if failure == 'method' else method,
+        'path': '/missing' if failure == 'missing' else '/',
+        'scheme': 'http', 'http_version': '1.1', 'query_string': b'value=bad',
+        'headers': [(b'content-type', b'text/plain' if failure == 'guard' else b'application/json')],
+        'state': {},
+    }
+    conn = Connection.from_scope(scope) if boundary == 'native' else scope
+
+    async def receive():
+        return {'type': 'http.request', 'body': b'{invalid', 'more_body': False}
+
+    send = _CaptureSend()
+    await app(conn, receive, send)
+    assert send.status == status
+    routed_exception = failure not in ('missing', 'method')
+    expected = ('exception' if routed_exception and registration in ('specific', 'exception')
+                else 'status')
+    if registration == 'default':
+        assert selected == []
+    else:
+        assert send.body == expected.encode()
+        assert len(selected) == 1
+        name, state = selected[0]
+        assert name == expected
+        assert state['error_status'] == status
+        assert isinstance(state.get('error_exception'), exception_type) == routed_exception
+        if failure == 'method':
+            assert 'GET' in state['allowed_methods']
+    assert lifecycle == ((['request_received'] if failure in ('missing', 'method', 'guard')
+                         else ['request_received', 'before_handler', 'after_handler']) + ['request_completed'])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('boundary', ['native', 'asgi'])
+@pytest.mark.parametrize('late_error', [False, True])
+async def test_status_handler_preserves_normal_and_started_response(boundary, late_error):
+    from blackbull import Response
+
+    app = BlackBull(asgi=boundary == 'asgi')
+    selected = []
+
+    @app.on_error(HTTPStatus.INTERNAL_SERVER_ERROR)
+    async def custom(conn, receive, send):
+        selected.append(conn.state['error_exception'])
+        await send(Response(b'custom', status=HTTPStatus.INTERNAL_SERVER_ERROR))
+
+    @app.route(path='/')
+    async def endpoint(conn, receive, send):
+        await send(Response(b'original', status=HTTPStatus.OK))
+        if late_error:
+            raise ValueError('late failure')
+
+    capture = _CaptureSend()
+
+    async def send(message):
+        from blackbull.native import NativeResponse
+        events = message.to_asgi() if isinstance(message, NativeResponse) else [message]
+        for event in events:
+            if event['type'] == 'http.response.start' and capture.status is not None:
+                raise RuntimeError('response already started')
+            await capture(event)
+
+    conn = _make_scope() if boundary == 'native' else {
+        'type': 'http', 'method': 'GET', 'path': '/', 'scheme': 'http',
+        'headers': [], 'state': {},
+    }
+    if late_error:
+        with pytest.raises(RuntimeError, match='response already started'):
+            await app(conn, None, send)
+        assert len(selected) == 1
+        assert isinstance(selected[0], ValueError)
+    else:
+        await app(conn, None, send)
+        assert selected == []
+    assert capture.status == HTTPStatus.OK
+    assert capture.body == b'original'
+    assert sum(e['type'] == 'http.response.start' for e in capture.events) == 1

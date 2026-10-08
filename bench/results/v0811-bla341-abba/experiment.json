@@ -1,0 +1,63 @@
+{
+  "baseline_commit": "1faf0d57c66d58570b8f48a5a3fd1374b2fe11d8",
+  "original_pr_commit": "827a6013f3de84895a2163c2e4e73e95c9844ed2",
+  "final_commit": "65fb979429ce19db2b9f9b1d948449f9b6aec728",
+  "runtime": "CPython3.14 (same venv for all arms), BB_UVLOOP=0, BB_WORKERS=1, BB_ACCESS_LOG=0, BLACKBULL_ENV=production",
+  "micro": {
+    "cpu": 0,
+    "rounds_per_phase": 6,
+    "phases": [
+      "null identical treatment",
+      "real base/treatment"
+    ],
+    "order": "alternating ABBA/BAAB",
+    "lookup_number": 100000,
+    "lookup_repeats": 5,
+    "warmup_lookups": 10000,
+    "dispatch_number": 5000,
+    "dispatch_repeats": 5
+  },
+  "wire": {
+    "server_cpu": 1,
+    "load_cpus": [
+      4,
+      5
+    ],
+    "tool": "h2load1.59.0 (both protocols)",
+    "warmup": 1000,
+    "requests_per_sample": 10000,
+    "connections": 16,
+    "threads": 2,
+    "h1_max_streams": 1,
+    "h2_max_streams": 8,
+    "rounds_per_phase": 3,
+    "phases": [
+      "null identical treatment",
+      "real base/treatment"
+    ],
+    "order": "ABBA,BAAB,ABBA",
+    "h1_requests_per_sample": 10000,
+    "h1_warmup_requests": 1000
+  },
+  "confidence": "paired round deltas, two-sided Student t 95%; six rounds micro (df5), three rounds wire (df2); descriptive local sensitivity, not formal equivalence",
+  "invalid_runs": [
+    "wire (h2load 4xx gate incorrectly treated application rejection as transport failure)",
+    "wire-final/wire-final3 (stopped before code improvements)",
+    "wire-final4 (wrk null control reports 16 timeout errors, rejected whole session)"
+  ],
+  "limits": [
+    "local pinned CPU tests, no cloud benchmark",
+    "micro dispatch_guard changes selected handler across baseline and fix and is not an equivalent-workload performance claim",
+    "small effects within local control/CI resolution cannot be excluded"
+  ],
+  "source_hashes": {
+    "/tmp/blackbull-bla341-base": {
+      "app.py": "099f3b05303ee5584382d83e4ab0e5564c87b832a16f10de9ade35280c83b0a0",
+      "router.py": "49c0ce2f011cfe52466fbe14336007487886e0d1b6ff329c3a1d41fbfbf307b9"
+    },
+    "/tmp/blackbull-bla341": {
+      "app.py": "f686ea51de152e132a5905aa28b9eec7fa47e96c387e1faa38b6ba861ed0541b",
+      "router.py": "261e3ad718df61a7a7d5d8147514ce38debd3bb7bc68bb41af8945e115943ac9"
+    }
+  }
+}
