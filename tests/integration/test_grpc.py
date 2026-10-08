@@ -42,6 +42,50 @@ pytestmark = pytest.mark.integration
 _SERVER_STARTUP_WAIT_SECONDS = 0.15
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('force_asgi', [False, True])
+@pytest.mark.parametrize('shape', ['unary', 'server-streaming', 'client-streaming', 'bidi'])
+async def test_oversize_prefix_and_following_rpc_share_h2_connection(monkeypatch, force_asgi, shape):
+    import struct
+    import blackbull.grpc.asgi as grpc_asgi
+
+    monkeypatch.setattr(grpc_asgi, 'MAX_MESSAGE_SIZE', 16)
+    monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', '1' if force_asgi else '0')
+    app, registry = _make_grpc_app()
+    seen = []
+
+    async def unary(request, context):
+        seen.append(request)
+        return b'ok'
+
+    async def server_stream(request, context):
+        seen.append(request)
+        yield b'ok'
+
+    async def client_stream(request_iter, context):
+        async for request in request_iter:
+            seen.append(request)
+        return b'ok'
+
+    async def bidi(request_iter, context):
+        async for request in request_iter:
+            seen.append(request)
+        yield b'ok'
+
+    registry.add_method('/svc/M', {
+        'unary': unary, 'server-streaming': server_stream,
+        'client-streaming': client_stream, 'bidi': bidi}[shape])
+    app.enable_grpc(registry)
+    async with _serve(app) as port:
+        async with HTTP2Client('127.0.0.1', port) as client:
+            for body, status in [(struct.pack('>BI', 0, 17), '8'),
+                                 (encode_message(b'x' * 16), '0')]:
+                response = await client.request('POST', '/svc/M', body=body,
+                    headers=[('content-type', 'application/grpc')])
+                assert _grpc_status(response) == status
+    assert seen == [b'x' * 16]
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -208,7 +252,7 @@ class TestGrpcErrorDispatch:
         app.enable_grpc(reg)
 
         async with _serve(app) as port:
-            res = await _grpc_call(port, '/svc/Valid', b'not a valid grpc frame')
+            res = await _grpc_call(port, '/svc/Valid', encode_message(b'incomplete')[:-1])
         assert res.status == 200
         assert _grpc_status(res) == str(int(GrpcStatus.INTERNAL))
 

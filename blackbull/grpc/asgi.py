@@ -10,12 +10,11 @@ import base64
 import binascii
 import logging
 import os
-import struct
 
 from ..native import NativeResponse
-from ..request import read_body, ClientDisconnected
+from ..request import stream_body, ClientDisconnected
 from . import compression
-from .codec import decode_messages, encode_message, GrpcDecodeError, MAX_MESSAGE_LENGTH
+from .codec import encode_message, MAX_MESSAGE_LENGTH, _PREFIX, _PREFIX_LEN
 from .registry import GrpcServiceRegistry
 from .status import GrpcError, GrpcStatus
 
@@ -442,89 +441,72 @@ async def _send_trailers_only(send, status: GrpcStatus, details: str,
 
 
 async def _read_unary_request(receive, encoding: bytes) -> bytes:
-    """Read the request body and return the single de-framed request message.
-
-    Server-streaming still takes exactly one request message (only the response
-    streams), so unary and server-streaming share this.  A compressed message
-    (Compressed-Flag = 1) is decompressed with the request's *encoding* (the
-    ``grpc-encoding`` header); the per-message size limit applies to the
-    decompressed output.  Raises [`GrpcError`][] on a malformed /
-    multi-message / unsupported-encoding / oversized request."""
+    """Validate the complete input before invoking a single-request handler."""
+    messages = _iter_request_messages(receive, encoding, single=True)
+    request = None
     try:
-        body = await read_body(receive)
-    except ClientDisconnected as exc:
-        # RST_STREAM / client disconnect before the request finished — the
-        # canonical gRPC mapping is CANCELLED, not a fabricated INTERNAL over
-        # a truncated body.
-        raise GrpcError(
-            GrpcStatus.CANCELLED,
-            'client disconnected before sending the request') from exc
-    try:
-        messages = decode_messages(body)
-    except GrpcDecodeError as exc:
-        raise GrpcError(GrpcStatus.INTERNAL, f'malformed request: {exc}')
-    if len(messages) != 1:
+        async for request in messages:
+            pass
+    finally:
+        await messages.aclose()
+    if request is None:
         raise GrpcError(
             GrpcStatus.UNIMPLEMENTED,
-            f'method expects exactly 1 request message, got {len(messages)}')
-    compressed, request = messages[0]
-    if compressed:
-        request = _decompress_message(request, encoding)
-    if len(request) > MAX_MESSAGE_SIZE:
-        raise GrpcError(
-            GrpcStatus.RESOURCE_EXHAUSTED,
-            f'request message ({len(request)} bytes) larger than the '
-            f'{MAX_MESSAGE_SIZE}-byte limit')
+            'method expects exactly 1 request message, got 0')
     return request
 
 
-# 1-byte compressed flag + 4-byte big-endian length (gRPC LPM prefix).
-_LPM_PREFIX = struct.Struct('>BI')
-_PREFIX_LEN = _LPM_PREFIX.size
-
-
-async def _iter_request_messages(receive, encoding: bytes):
-    """Yield de-framed request messages as they arrive (client-/bidi-streaming).
-
-    Reassembles Length-Prefixed-Messages across ``http.request`` events — gRPC
-    messages don't align to DATA-frame boundaries, so a message may straddle
-    several events or several messages may share one.  A residual buffer holds
-    the partial tail between events.  A compressed message (Compressed-Flag = 1)
-    is decompressed with the request's *encoding*.  Raises [`GrpcError`][] on
-    an oversized / unsupported-encoding / truncated message, matching
-    ``_read_unary_request`` (RESOURCE_EXHAUSTED / UNIMPLEMENTED / INTERNAL)."""
+async def _iter_request_messages(receive, encoding: bytes, *, single: bool = False):
+    """Bound each message before buffering its body; transport chunks stay borrowed."""
     buf = bytearray()
-    more = True
-    while more:
-        event = await receive()
-        if event.get('type') == 'http.disconnect':
-            raise GrpcError(GrpcStatus.CANCELLED, 'client disconnected mid-stream')
-        chunk = event.get('body', b'')
-        if chunk:
-            buf.extend(chunk)
-        more = event.get('more_body', False)
-        # Drain every complete message currently buffered.
-        while len(buf) >= _PREFIX_LEN:
-            flag, length = _LPM_PREFIX.unpack_from(buf, 0)
-            # For an uncompressed frame the prefixed length *is* the message
-            # size, so the per-message limit applies directly.  A compressed
-            # frame's length is the *compressed* transfer size (which may
-            # inflate); it is bounded only by the codec safety floor here, and
-            # the real per-message limit is enforced on the decompressed output
-            # by _decompress_message.
-            limit = MAX_MESSAGE_LENGTH if flag else MAX_MESSAGE_SIZE
-            if length > limit:
-                raise GrpcError(
-                    GrpcStatus.RESOURCE_EXHAUSTED,
-                    f'request message ({length} bytes) larger than the '
-                    f'{limit}-byte limit')
-            if len(buf) - _PREFIX_LEN < length:
-                break  # body not fully arrived yet
-            message = bytes(buf[_PREFIX_LEN:_PREFIX_LEN + length])
-            del buf[:_PREFIX_LEN + length]
-            if flag:
-                message = _decompress_message(message, encoding)
-            yield message
+    seen = False
+    try:
+        async for chunk in stream_body(receive):
+            offset = 0
+            while offset < len(chunk):
+                if len(buf) < _PREFIX_LEN:
+                    if not buf and len(chunk) - offset >= _PREFIX_LEN:
+                        flag, length = _PREFIX.unpack_from(chunk, offset)
+                        prefix_end = offset + _PREFIX_LEN
+                    else:
+                        end = min(len(chunk), offset + _PREFIX_LEN - len(buf))
+                        buf.extend(memoryview(chunk)[offset:end])
+                        offset = end
+                        if len(buf) < _PREFIX_LEN:
+                            break
+                        flag, length = _PREFIX.unpack_from(buf)
+                        prefix_end = offset
+                    if single and seen:
+                        raise GrpcError(
+                            GrpcStatus.UNIMPLEMENTED,
+                            'method expects exactly 1 request message, got more')
+                    limit = (MAX_MESSAGE_LENGTH if flag
+                             else min(MAX_MESSAGE_SIZE, MAX_MESSAGE_LENGTH))
+                    if length > limit:
+                        raise GrpcError(
+                            GrpcStatus.RESOURCE_EXHAUSTED,
+                            f'request message ({length} bytes) larger than the '
+                            f'{limit}-byte limit')
+                    if not buf and len(chunk) - prefix_end >= length:
+                        message = chunk[prefix_end:prefix_end + length]
+                        offset = prefix_end + length
+                        seen = True
+                        yield _decompress_message(message, encoding) if flag else message
+                        continue
+                    if not buf:
+                        buf.extend(memoryview(chunk)[offset:prefix_end])
+                    offset = prefix_end
+                end = min(len(chunk), offset + _PREFIX_LEN + length - len(buf))
+                buf.extend(memoryview(chunk)[offset:end])
+                offset = end
+                if len(buf) < _PREFIX_LEN + length:
+                    break
+                message = bytes(memoryview(buf)[_PREFIX_LEN:])
+                buf.clear()
+                seen = True
+                yield _decompress_message(message, encoding) if flag else message
+    except ClientDisconnected as exc:
+        raise GrpcError(GrpcStatus.CANCELLED, 'client disconnected mid-stream') from exc
     if buf:
         raise GrpcError(
             GrpcStatus.INTERNAL,
@@ -804,7 +786,7 @@ async def serve_grpc(registry: GrpcServiceRegistry, conn, receive, send) -> None
     # context.send_initial_metadata / time_remaining before any bytes go out.
     context._bind(send, content_type, response_encoding, deadline)
 
-    # Request axis.  Request-unary reads + de-frames the whole body up front, so
+    # Request axis.  Request-unary validates the complete input up front, so
     # a framing error precedes any response bytes (clean Trailers-Only).
     # Request-streaming hands the handler a lazy async iterator; its framing
     # errors surface while the handler runs and are reported by the serve

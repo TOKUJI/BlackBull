@@ -1,0 +1,71 @@
+{
+  "baseline_commit": "3025eb9545304ebee95f694c19a555202f8d5ee5",
+  "runtime": "3.14.6",
+  "head_source_sha256": "012479d9a2cf8c9b6413ee0c4ee03f251a9f921e123e23c5126d20a1b312e461",
+  "micro": {
+    "rounds": 6,
+    "order": "alternating ABBA/BAAB",
+    "samples_per_arm_per_round": 2,
+    "calls_per_sample": 4000,
+    "warmup": 500,
+    "entry": "serve_grpc",
+    "shapes": [
+      "unary",
+      "client-streaming"
+    ],
+    "receive_lanes": [
+      "ASGI",
+      "next_chunk"
+    ],
+    "payload_bytes": [
+      16,
+      4096,
+      65536
+    ]
+  },
+  "wire": {
+    "rounds": 3,
+    "phases": [
+      "head/head null control",
+      "base/head"
+    ],
+    "order": "ABBA/BAAB/ABBA",
+    "requests_per_sample": 5000,
+    "warmup_requests": 500,
+    "connections": 8,
+    "max_concurrent_streams": 8,
+    "lanes": [
+      "native",
+      "forced ASGI"
+    ],
+    "payload_bytes": [
+      16
+    ],
+    "tool": "h2load",
+    "server_env": {
+      "BLACKBULL_ENV": "production",
+      "BB_ACCESS_LOG": "0",
+      "BB_UVLOOP": "0",
+      "BB_WORKERS": "1"
+    },
+    "interval": "paired round percent deltas, two-sided Student-t 95%, df=2",
+    "phases_run_as_separate_bounded_jobs": true,
+    "requests_total": 480000,
+    "warmup_requests_total": 48000,
+    "http_errors": 0
+  },
+  "limits": [
+    "local CPU-pinned tests; no cloud benchmark",
+    "micro excludes socket and protocol costs",
+    "wire intervals are paired round deltas with Student-t(df2), not an equivalence guarantee",
+    "h2load checks HTTP success; gRPC statuses tested separately in integration"
+  ],
+  "invalid_runs": [
+    "Combined 16B/64KiB wire session stopped: large-message samples took too long for the bounded job; incomplete data excluded"
+  ],
+  "cpu_placement": {
+    "micro": "minimum allowed CPU",
+    "wire_server": "minimum allowed CPU",
+    "wire_load": "second allowed CPU"
+  }
+}
