@@ -265,9 +265,34 @@ class TestStaticFilesRangeRequests:
             f'Expected last 5 bytes {self.FILE[-5:]!r}; got {body!r}'
         )
 
+    @pytest.mark.parametrize('cache', [False, True])
+    @pytest.mark.parametrize('first', [0, 7, 19])
+    @pytest.mark.parametrize('last', [20, 999])
+    async def test_range_end_beyond_file_serves_remainder(
+            self, static_dir, cache, first, last):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir), cache=cache)
+        if cache:
+            await _collect(app, _scope(path='/hello.txt'))
+
+        start, body = await _collect(
+            app, _scope(path='/hello.txt',
+                        headers={'Range': f'bytes={first}-{last}'})
+        )
+
+        assert start['status'] == 206
+        assert body == self.FILE[first:]
+        headers = dict(start['headers'])
+        assert headers[b'content-range'] == f'bytes {first}-19/20'.encode()
+        assert headers[b'content-length'] == str(len(body)).encode()
+
     @pytest.mark.parametrize('rng,expected', [
         pytest.param('bytes=0-3', 206, id='in-range-206'),
+        pytest.param('bytes=20-20', 416, id='start-at-eof'),
+        pytest.param('bytes=20-999', 416, id='start-at-eof-oversized-end'),
+        pytest.param('bytes=100-', 416, id='start-beyond-eof-open-end'),
         pytest.param('bytes=100-200', 416, id='out-of-range-416'),
+        pytest.param('bytes=-0', 416, id='zero-suffix'),
     ])
     async def test_out_of_range_returns_416(self, static_dir, rng, expected):
         from blackbull.middleware.static import StaticFiles
@@ -276,6 +301,19 @@ class TestStaticFilesRangeRequests:
             app, _scope(path='/hello.txt', headers={'Range': rng})
         )
         assert start['status'] == expected
+
+    @pytest.mark.parametrize('rng,expected', [
+        pytest.param('bytes=-5', 200, id='suffix-ignored'),
+        pytest.param('bytes=0-0', 416, id='int-range-unsatisfiable'),
+    ])
+    async def test_range_on_empty_file(self, tmp_path, rng, expected):
+        from blackbull.middleware.static import StaticFiles
+        (tmp_path / 'empty.txt').write_bytes(b'')
+        app = StaticFiles(directory=str(tmp_path))
+        start, body = await _collect(
+            app, _scope(path='/empty.txt', headers={'Range': rng}))
+        assert start['status'] == expected
+        assert body == b''
 
     async def test_no_range_returns_full_file(self, static_dir):
         """Without a Range header the full file must be served with status 200."""
@@ -526,6 +564,28 @@ def _scope_with_pathsend(path: str, headers: dict | None = None) -> 'Connection'
 
 @pytest.mark.asyncio
 class TestStaticFilesPathsend:
+    async def test_range_end_beyond_large_file_streams_remainder(self, large_dir):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(large_dir))
+        size = (large_dir / 'big.bin').stat().st_size
+        first = size - 100
+        events = []
+
+        await app(
+            _scope_with_pathsend('/big.bin',
+                                 headers={'Range': f'bytes={first}-{size + 100}'}),
+            _noop_receive, _native_collecting_send(events))
+
+        start = next(e for e in events if e['type'] == 'http.response.start')
+        assert start['status'] == 206
+        headers = dict(start['headers'])
+        assert headers[b'content-range'] == f'bytes {first}-{size - 1}/{size}'.encode()
+        assert headers[b'content-length'] == b'100'
+        assert all(e['type'] != 'http.response.pathsend' for e in events)
+        chunks = [e for e in events if e['type'] == 'http.response.body']
+        assert b''.join(e['body'] for e in chunks) == b'L' * 100
+        assert chunks[-1]['more_body'] is False
+
     async def test_emits_pathsend_when_extension_advertised(self, large_dir):
         """Above-cache file + cleartext H1 scope → pathsend event."""
         from blackbull.middleware.static import StaticFiles
@@ -611,6 +671,11 @@ class TestStaticFilesMalformedRange:
         'bytes=',
         'items=0-3',          # non-bytes unit
         'bytes=0-1,5-9',      # multi-range (we don't emit multipart/byteranges)
+        'bytes=5-3',          # last-pos before first-pos: invalid, RFC 9110 §14.1.1
+        'bytes=+2-5',         # positions are 1*DIGIT: no sign ...
+        'bytes=--5',
+        'bytes=1_0-12',       # ... no underscore ...
+        'bytes=2 - 5',        # ... and no whitespace inside a range-spec
     ])
     async def test_malformed_range_serves_full_200(self, static_dir, bad_range):
         from blackbull.middleware.static import StaticFiles
@@ -624,7 +689,6 @@ class TestStaticFilesMalformedRange:
         assert body == self.FILE
 
     @pytest.mark.parametrize('bad_range', [
-        'bytes=--5',          # int('-5') suffix → unsatisfiable
         'bytes=-',
         'bytes= - ',
         'bytes=9999999999999999999999-',
@@ -641,6 +705,17 @@ class TestStaticFilesMalformedRange:
         assert start['status'] in (200, 416), (
             f'{bad_range!r} must not 500; got {start["status"]}'
         )
+
+    async def test_non_utf8_range_is_ignored(self, static_dir):
+        """obs-text is legal in a field value; it is not a range-spec."""
+        from blackbull.connection import Connection
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        conn = Connection(method='GET', path='/hello.txt', raw_path=b'/hello.txt',
+                          headers=Headers([(b'range', b'bytes=\xff-1')]), type='http')
+        start, body = await _collect(app, conn)
+        assert start['status'] == 200
+        assert body == self.FILE
 
     async def test_unsatisfiable_range_still_416(self, static_dir):
         """A well-formed but out-of-bounds range stays a 416 (not 200/500)."""

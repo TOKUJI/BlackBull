@@ -179,7 +179,7 @@ is memoised after the first lookup (the file set is deterministic
 for the lifetime of the server).  When `cache=False`, sibling
 existence is rechecked on every request.
 
-### Range requests (RFC 7233)
+### Range requests (RFC 9110 §14)
 
 `StaticFiles` supports `Range` requests:
 
@@ -196,11 +196,15 @@ Content-Range: bytes 0-1023/4096000
 Content-Length: 1024
 ```
 
-A syntactically **unsatisfiable** range (start past the end of the
+An end at or past the file's length is clipped to the last byte; the
+response is still `206` and its headers describe the bytes sent.
+
+An **unsatisfiable** range (start at or past the end of the
 file) returns `416 Range Not Satisfiable`.  A **malformed** or
-unsupported `Range` header — a bad byte spec (`bytes=abc-def`), a
-non-`bytes` unit, or a multi-range set — is ignored and the full file
-is served with `200 OK` (RFC 9110 §14.2); it never fails the request.
+unsupported `Range` header — a bad byte spec (`bytes=abc-def`), an end
+before the start (`bytes=5-3`), a non-`bytes` unit, a multi-range set, or a
+suffix range on an empty file — is ignored and the full file is served with
+`200 OK` (RFC 9110 §14.2); it never fails the request.
 
 ### Conditional requests (ETag / Last-Modified)
 
