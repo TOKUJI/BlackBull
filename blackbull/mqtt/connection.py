@@ -24,7 +24,7 @@ from .messages import (
     MQTTSubscribe, MQTTUnsubscribe, MQTTPingreq,
     MQTTDisconnect, MQTTAuth, MQTTMessage,
     IncompletePacket, MQTTDecodeError, ReasonCode, _read_vbi_at,
-    decode_packet, decode_variable_byte_integer,
+    decode_packet,
 )
 from ..server.cap_log import log_cap_hit
 from .mailbox import Mailbox, MailboxClosed, MailboxTooLarge
