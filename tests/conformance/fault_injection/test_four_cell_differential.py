@@ -32,6 +32,7 @@ import asyncio
 import hashlib
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
@@ -40,7 +41,9 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.asyncio
+#: One worker runs the module under `-n auto`, so a run starts one nginx, not
+#: one per worker racing the Docker Desktop port relay.
+pytestmark = [pytest.mark.asyncio, pytest.mark.xdist_group('nginx_peer')]
 
 httpx = pytest.importorskip('httpx')
 
@@ -124,6 +127,64 @@ _RECORD_OWNER = os.environ.get('USER') or os.environ.get('USERNAME') or 'user'
 _NGINX_BUILD_FAILED = (Path(tempfile.gettempdir())
                        / f'{_NGINX_IMAGE.replace(":", "-")}-'
                          f'{_RECORD_OWNER}-{_RUN_ID}.failed')
+
+
+#: A peer outlives no run: it stops itself even when its worker is killed
+#: before teardown.
+_NGINX_PEER_LIFETIME = 1800
+
+
+class _PeerStartError(Exception):
+    """`docker run` refused to start the peer on the requested port."""
+
+
+#: IANA's dynamic range, where Windows allocates and reserves its own ports.
+_DYNAMIC_PORTS_START = 49152
+
+
+def _free_wsl_port() -> int:
+    """A registered-range port nothing in WSL holds now.
+
+    Docker Desktop relays a published port into WSL only if WSL does not hold
+    it when the container starts, and WSL's ephemeral range is 1024-65535, so
+    the port is chosen here rather than left to `-P`.
+    """
+    for _ in range(64):
+        with _bind_probe(0) as sock:
+            port = sock.getsockname()[1]
+        if port < _DYNAMIC_PORTS_START:
+            return port
+    pytest.skip(f'no free port below {_DYNAMIC_PORTS_START}: check '
+                f'net.ipv4.ip_local_port_range')
+
+
+def _bind_probe(port: int) -> socket.socket:
+    """Bind *port* on both families, so a holder of either one conflicts.
+
+    No SO_REUSEADDR: it would loosen the very conflict check this relies on.
+    """
+    dual = socket.has_dualstack_ipv6()
+    sock = socket.socket(socket.AF_INET6 if dual else socket.AF_INET)
+    try:
+        if dual:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        sock.bind(('::' if dual else '0.0.0.0', port))
+    except BaseException:
+        sock.close()
+        raise
+    return sock
+
+
+def _start_nginx_peer(port: int, lifetime: int = _NGINX_PEER_LIFETIME) -> str:
+    """Start the reference server on *port* and return its container id."""
+    run = subprocess.run(
+        ['docker', 'run', '-d', '--rm', '-p', f'{port}:80',
+         '--label', f'bb-fault-run={_RUN_ID}',
+         _NGINX_IMAGE, 'timeout', str(lifetime), 'nginx', '-g', 'daemon off;'],
+        capture_output=True, timeout=120)
+    if run.returncode != 0:
+        raise _PeerStartError(run.stderr.decode(errors='replace')[:200])
+    return run.stdout.decode().strip()
 
 
 def _require_docker() -> None:
@@ -387,6 +448,133 @@ async def test_the_failure_record_is_scoped_to_this_run(monkeypatch,
     assert _recorded_build_failure() == 'registry was down last night'
 
 
+@pytest.mark.parametrize('family,address,v6only', [
+    pytest.param(socket.AF_INET, '127.0.0.1', None, id='ipv4-loopback'),
+    pytest.param(socket.AF_INET6, '::1', 1, id='ipv6-only'),
+])
+async def test_the_port_probe_sees_holders_of_either_family(family, address, v6only):
+    """Either kind of holder blocks the Docker Desktop relay."""
+    if family == socket.AF_INET6 and not socket.has_dualstack_ipv6():
+        pytest.skip('no dual-stack IPv6')
+    with socket.socket(family) as holder:
+        if v6only is not None:
+            holder.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, v6only)
+        holder.bind((address, 0))
+        holder.listen(1)
+        with pytest.raises(OSError):
+            _bind_probe(holder.getsockname()[1]).close()
+
+
+async def test_a_chosen_port_stays_out_of_the_dynamic_range():
+    """Windows allocates and reserves its own ports from 49152 up."""
+    assert all(_free_wsl_port() < _DYNAMIC_PORTS_START for _ in range(200))
+
+
+async def test_a_host_with_only_dynamic_ports_skips(monkeypatch):
+    class _Probe:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def getsockname(self):
+            return ('::', _DYNAMIC_PORTS_START)
+
+    monkeypatch.setitem(globals(), '_bind_probe', lambda port: _Probe())
+    with pytest.raises(pytest.skip.Exception, match='ip_local_port_range'):
+        _free_wsl_port()
+
+
+def _fake_peers(monkeypatch, *, start=None, wait=None):
+    """Ports 1000, 1001, ...; a started peer is named after its port."""
+    ports = iter(range(1000, 1100))
+    started, removed = [], []
+
+    def fake_start(port, lifetime=_NGINX_PEER_LIFETIME):
+        if start is not None:
+            start(port)
+        started.append(f'c{port}')
+        return started[-1]
+
+    def fake_run(argv, **kwargs):
+        removed.append(argv[-1])
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setitem(globals(), '_free_wsl_port', lambda: next(ports))
+    monkeypatch.setitem(globals(), '_start_nginx_peer', fake_start)
+    monkeypatch.setitem(globals(), '_wait_for_port', wait or (lambda *a, **k: None))
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    return started, removed
+
+
+async def test_a_port_windows_refuses_is_replaced(monkeypatch):
+    """`docker run` fails outright on a port Windows holds or excludes."""
+    def start(port):
+        if port == 1000:
+            raise _PeerStartError('port is already allocated')
+
+    started, removed = _fake_peers(monkeypatch, start=start)
+    assert _answering_nginx_peer() == ('c1001', 1001)
+    assert (started, removed) == (['c1001'], [])
+
+
+async def test_a_peer_that_never_answers_is_replaced(monkeypatch):
+    """WSL took the port between our check and the relay: the port refuses
+    for the container's life, so a new port is the cure."""
+    def wait(host, port, timeout):
+        if port == 1000:
+            raise RuntimeError('nginx never answered')
+
+    started, removed = _fake_peers(monkeypatch, wait=wait)
+    assert _answering_nginx_peer() == ('c1001', 1001)
+    assert removed == ['c1000']
+
+
+@pytest.mark.parametrize('failure,expected,attempts', [
+    pytest.param(RuntimeError('nginx never answered'), RuntimeError, 3,
+                 id='never-answers'),
+    pytest.param(OSError('relay error'), OSError, 1, id='other-error'),
+])
+async def test_every_peer_that_is_not_returned_is_removed(
+        monkeypatch, failure, expected, attempts):
+    """Bounded retries, and no container outlives a failed start."""
+    def wait(*args, **kwargs):
+        raise failure
+
+    started, removed = _fake_peers(monkeypatch, wait=wait)
+    with pytest.raises(expected):
+        _answering_nginx_peer()
+    assert removed == started
+    assert len(started) == attempts
+
+
+async def test_peers_that_cannot_start_skip(monkeypatch):
+    def start(port):
+        raise _PeerStartError('docker daemon unreachable')
+
+    _fake_peers(monkeypatch, start=start)
+    with pytest.raises(pytest.skip.Exception, match='daemon unreachable'):
+        _answering_nginx_peer()
+
+
+@pytest.mark.timeout(_NGINX_PEER_BUDGET)
+async def test_a_peer_container_ends_without_its_teardown(request):
+    """A worker killed before teardown must not leave the peer running."""
+    _require_docker()
+    _require_nginx_image({item.name for item in request.session.items})
+    container, _port = _answering_nginx_peer(lifetime=5)
+    deadline = time.monotonic() + 60
+    try:
+        while subprocess.run(['docker', 'ps', '-q', '--filter', f'id={container}'],
+                             capture_output=True, timeout=60).stdout.strip():
+            assert time.monotonic() < deadline, f'{container} outlived its lifetime'
+            time.sleep(1)
+    finally:
+        subprocess.run(['docker', 'rm', '-f', container],
+                       capture_output=True, timeout=120)
+
+
 @pytest.mark.timeout(_NGINX_BUILD_BUDGET)
 async def test_the_reference_image_is_prepared_for_this_context():
     """Pay for the build here, once, under a budget that admits it is a build."""
@@ -419,31 +607,49 @@ def nginx_peer(request):
     _require_docker()
     _require_nginx_image({item.name for item in request.session.items})
 
-    run = subprocess.run(
-        ['docker', 'run', '-d', '--rm', '-P', _NGINX_IMAGE],
-        capture_output=True, timeout=120)
-    if run.returncode != 0:
-        pytest.skip(f'could not start the reference server: '
-                    f'{run.stderr.decode(errors="replace")[:200]}')
-    container = run.stdout.decode().strip()
-
+    container, port = _answering_nginx_peer()
     try:
-        port_out = subprocess.run(
-            ['docker', 'port', container, '80/tcp'],
-            capture_output=True, timeout=60, check=True)
-        # "0.0.0.0:49154" (and possibly an IPv6 line after it).
-        port = int(port_out.stdout.decode().splitlines()[0].rsplit(':', 1)[1])
-        _wait_for_port('127.0.0.1', port)
         yield '127.0.0.1', port
     finally:
-        subprocess.run(['docker', 'stop', container],
+        subprocess.run(['docker', 'rm', '-f', container],
                        capture_output=True, timeout=120)
+
+
+#: A healthy peer answers within about a second, even under `-n auto`.
+_PEER_ANSWER_TIMEOUT = 10.0
+_PEER_ATTEMPTS = 3
+
+
+def _answering_nginx_peer(lifetime: int = _NGINX_PEER_LIFETIME
+                          ) -> tuple[str, int]:
+    """Start peers on fresh free ports until one answers.
+
+    A port can still be taken in WSL between the check and the relay, or be
+    refused by Windows; either way the next attempt uses another port.
+    """
+    for attempt in range(_PEER_ATTEMPTS):
+        last = attempt == _PEER_ATTEMPTS - 1
+        port = _free_wsl_port()
+        try:
+            container = _start_nginx_peer(port, lifetime)
+        except _PeerStartError as exc:
+            if last:
+                pytest.skip(f'could not start the reference server: {exc}')
+            continue
+        try:
+            _wait_for_port('127.0.0.1', port, timeout=_PEER_ANSWER_TIMEOUT)
+            return container, port
+        except BaseException as exc:
+            subprocess.run(['docker', 'rm', '-f', container],
+                           capture_output=True, timeout=120)
+            if not isinstance(exc, RuntimeError) or last:
+                raise
 
 
 def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
     """Wait until nginx answers, not merely until something accepts.
 
-    ``docker run -P`` publishes the host port as soon as the container exists,
+    ``docker run -p`` publishes the host port as soon as the container exists,
     so docker-proxy completes the TCP handshake while nginx inside is still
     starting.  A probe that stops at connect therefore returns early and the
     first real connection is reset before nginx speaks.
@@ -457,8 +663,6 @@ def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
     The same listener serves HTTP/1.1 and h2c, so one HTTP/1.1 exchange proves
     a worker is accepting and answering.
     """
-    import socket
-
     deadline = time.monotonic() + timeout
     last = None
     while time.monotonic() < deadline:
