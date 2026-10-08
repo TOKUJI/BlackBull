@@ -5613,8 +5613,8 @@
 
 
 <h1 id="error-handling">Error handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h1>
-<p>BlackBull installs a default handler for every HTTP error status
-plus the <code>Exception</code> base class, so unhandled errors always produce
+<p>BlackBull supplies a default handler for HTTP error statuses
+and exceptions, so unhandled errors always produce
 a response (no naked connection drops).  You can override any of
 them with <code>@app.on_error(...)</code>.</p>
 <h2 id="default-behaviour">Default behaviour<a class="headerlink" href="#default-behaviour" title="Permanent link">&para;</a></h2>
@@ -5702,10 +5702,14 @@ code or exception type:</p>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">JSONResponse</span><span class="p">({</span><span class="s1">'error'</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="p">)},</span>
                             <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">BAD_REQUEST</span><span class="p">))</span>
 </code></pre></div>
-<p>Exception handlers use MRO walk: a handler registered for
-<code>Exception</code> catches all unhandled subclasses.  More specific
-handlers (e.g. <code>ValueError</code>) take priority over base-class
-handlers.</p>
+<p>Exceptions, including validation errors and route guards, select:</p>
+<ol>
+<li>The most specific explicitly registered exception handler along the MRO.</li>
+<li>A handler for the resolved status.</li>
+<li>The framework default.</li>
+</ol>
+<p>An explicit <code>@app.on_error(Exception)</code> takes priority over status handlers.
+Route lookup 404/405 uses status handlers directly.</p>
 <h2 id="whats-in-connstate">What's in <code>conn.state</code><a class="headerlink" href="#whats-in-connstate" title="Permanent link">&para;</a></h2>
 <p>The framework populates <code>conn.state</code> with information about
 the error before calling your handler:</p>
@@ -5741,16 +5745,15 @@ matches the framework's view of what failed.</p>
 <p>To customize the look of the DEV-mode traceback page or the
 PROD-mode minimal page, register a handler for the status code
 you want to override:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on_error</span><span class="p">(</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">INTERNAL_SERVER_ERROR</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">Response</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">on_error</span><span class="p">(</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">INTERNAL_SERVER_ERROR</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">custom_500</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">exc</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">'error_exception'</span><span class="p">)</span>
-    <span class="c1"># ... your rendering ...</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="n">body</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">INTERNAL_SERVER_ERROR</span><span class="p">,</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">'&lt;h1&gt;Something went wrong&lt;/h1&gt;'</span><span class="p">,</span>
+                        <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">INTERNAL_SERVER_ERROR</span><span class="p">,</span>
                         <span class="n">content_type</span><span class="o">=</span><span class="s1">'text/html'</span><span class="p">))</span>
 </code></pre></div>
-<p>The default handler is only used when no custom one is registered.
-Per-status registration overrides only that status; other errors
-keep the default behaviour.</p>
+<p>This handles exceptions resolving to 500 unless an exception handler takes priority.</p>
 <h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../events/">Events</a> — <code>before_handler</code> / <code>after_handler</code> /

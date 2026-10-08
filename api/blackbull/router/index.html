@@ -4090,32 +4090,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.router.ErrorRouter.__getitem__" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        __getitem__
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.ErrorRouter.__init__" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        __init__
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.router.ErrorRouter.__setitem__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __setitem__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.router.ErrorRouter.resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve
       
     </span>
   </a>
@@ -5781,32 +5770,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.router.ErrorRouter.__getitem__" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        __getitem__
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.router.ErrorRouter.__init__" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        __init__
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.router.ErrorRouter.__setitem__" class="md-nav__link">
     <span class="md-ellipsis">
       
         __setitem__
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.router.ErrorRouter.resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        resolve
       
     </span>
   </a>
@@ -6154,9 +6132,7 @@ registered with it need no migration.</p>
 
 
 
-        <p>Map HTTPStatus values and exception classes to error handlers.</p>
-<p>Status lookup is exact. Exception instances or classes use MRO lookup;
-a miss returns the configured default, which may be None.</p>
+        <p>Resolve error handlers by exception MRO, status, then default.</p>
 
 
 
@@ -6200,53 +6176,6 @@ a miss returns the configured default, which may be None.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.router.ErrorRouter.__getitem__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__getitem__</span><span class="p">(</span><span class="n">key</span><span class="p">)</span></code>
-
-<a href="#blackbull.router.ErrorRouter.__getitem__" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Return the registered handler for <em>key</em>, or None if not found.</p>
-
-
-<details class="accepts" open>
-  <summary>Accepts</summary>
-  <ul>
-<li>HTTPStatus           → exact match</li>
-<li>exception class      → MRO walk</li>
-<li>exception instance   → MRO walk on type(key)</li>
-</ul>
-</details>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.router.ErrorRouter.__init__" class="doc doc-heading">
-            <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
-
-<a href="#blackbull.router.ErrorRouter.__init__" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p><em>default</em> is returned on any lookup miss instead of <code>None</code>.  It is
-not written into either registry, so those keep answering which
-statuses and exceptions have handlers of their own.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
 <h4 id="blackbull.router.ErrorRouter.__setitem__" class="doc doc-heading">
             <code class="highlight language-python"><span class="fm">__setitem__</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">fn</span><span class="p">)</span></code>
 
@@ -6259,6 +6188,24 @@ statuses and exceptions have handlers of their own.</p>
 <p>The status must be 4xx or 5xx: the annotation admits any
 <code>HTTPStatus</code>, but registering a handler for, say, <code>200</code> raises
 <code>ValueError</code>.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.router.ErrorRouter.resolve" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">resolve</span><span class="p">(</span><span class="n">exc_class</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.router.ErrorRouter.resolve" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Use <em>status</em> after an exception MRO miss, before the default.</p>
 
 
     </div>
