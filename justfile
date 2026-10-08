@@ -37,38 +37,41 @@ ab-verify:
 httparena-bench:
     scripts/run-httparena-bench.sh
 
-# BLA-526 local robustness probe target (loopback only).
-# PID and log live in /tmp; see docs/security/fixture-app.md.
+# BLA-526 probe target (loopback only): HTTP/1.1 on 8000 and TLS+ALPN h2 on 8443 in one process; PID, log, and the generated TLS cert live under /tmp — see docs/security/fixture-app.md
 vuln-target-up:
     #!/usr/bin/env bash
     set -euo pipefail
     pid_file=/tmp/bb-vuln-target.pid
     log=/tmp/bb-vuln-target.log
-    url=http://127.0.0.1:8000
     healthy() {
-        .venv/bin/python -c 'import sys, urllib.request; sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:8000/", timeout=2).read() == b"ok" else 1)' 2>/dev/null
+        .venv/bin/python tools/security/fixture_app.py --health >/dev/null 2>&1
+    }
+    port_held() {
+        (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
     }
     if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
         if healthy; then
-            echo "vuln-target already running (pid $(cat "$pid_file")): $url"
+            echo "vuln-target already running (pid $(cat "$pid_file")): http://127.0.0.1:8000 + https://127.0.0.1:8443"
             exit 0
         fi
-        echo "vuln-target: pid $(cat "$pid_file") is alive but $url/ does not serve the fixture; refusing" >&2
+        echo "vuln-target: pid $(cat "$pid_file") is alive but the fixture does not serve both lanes; refusing" >&2
         exit 1
     fi
-    if healthy || (exec 3<>"/dev/tcp/127.0.0.1/8000") 2>/dev/null; then
-        exec 3>&- 2>/dev/null || true
-        echo "vuln-target: port 8000 is already in use by another process; refusing to start" >&2
-        exit 1
-    fi
+    for port in 8000 8443; do
+        if port_held "$port"; then
+            exec 3>&- 2>/dev/null || true
+            echo "vuln-target: port $port is already in use by another process; refusing to start" >&2
+            exit 1
+        fi
+    done
     uv sync --all-extras
     # Not `uv run`: uv spawns the interpreter as a child, and the PID file
     # must name the server process itself.
-    nohup .venv/bin/python tools/security/fixture_app.py --port 8000 >>"$log" 2>&1 &
+    nohup .venv/bin/python tools/security/fixture_app.py --port 8000 --tls-port 8443 >>"$log" 2>&1 &
     echo "$!" >"$pid_file"
     for _ in $(seq 1 50); do
         if healthy; then
-            echo "vuln-target up (pid $(cat "$pid_file")): $url"
+            echo "vuln-target up (pid $(cat "$pid_file")): http://127.0.0.1:8000 + https://127.0.0.1:8443"
             exit 0
         fi
         if ! kill -0 "$(cat "$pid_file")" 2>/dev/null; then
@@ -76,7 +79,7 @@ vuln-target-up:
         fi
         sleep 0.2
     done
-    echo "vuln-target did not serve GET / = ok on $url within 10s; last log lines:" >&2
+    echo "vuln-target did not serve both lanes within 10s; last log lines:" >&2
     tail -n 20 "$log" >&2 || true
     kill "$(cat "$pid_file")" 2>/dev/null || true
     rm -f "$pid_file"
@@ -110,16 +113,19 @@ vuln-target-down:
         fi
     fi
     rm -f "$pid_file"
-    if (exec 3<>"/dev/tcp/127.0.0.1/8000") 2>/dev/null; then
-        exec 3>&- || true
-        echo "vuln-target: port 8000 is still accepting connections" >&2
-        exit 1
-    fi
-    echo "vuln-target down; port 8000 free"
+    rm -rf /tmp/bb-vuln-target-tls
+    for port in 8000 8443; do
+        if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+            exec 3>&- || true
+            echo "vuln-target: port $port is still accepting connections" >&2
+            exit 1
+        fi
+    done
+    echo "vuln-target down; ports 8000 and 8443 free"
 
-# Run the BLA-526 local robustness probe against a running target
-vuln-check base_url="http://127.0.0.1:8000":
-    uv run python tools/security/probe.py --base-url "{{base_url}}"
+# Run the BLA-526 robustness probe against running targets (both lanes)
+vuln-check base_url="http://127.0.0.1:8000" h2_url="https://127.0.0.1:8443" lane="all":
+    uv run python tools/security/probe.py --base-url "{{base_url}}" --h2-url "{{h2_url}}" --lane "{{lane}}"
 
 # YouTrack REST access. Credentials are read only by scripts/youtrack.sh.
 yt-search query='project: BLA #Unresolved':

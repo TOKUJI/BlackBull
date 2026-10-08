@@ -100,22 +100,41 @@ Mirroring the CVSS base metrics (AV/AC/PR/UI/S/CIA):
 - **OWASP** (ASVS / risk rating): used for web-impact vocabulary when writing up
   exploit scenarios.
 
-## Defaults for the M1 probe checks
+## Defaults for the probe checks
 
 The severity recorded in probe output is the rank a **failure** of that check
-would carry:
+would carry. The convention throughout: a hang or crash is **High**
+(remotely triggered hard unavailability), whatever the base rank — the probe's
+"or High if crash/hang" escalation.
 
 | Check | Rank if it fails | CWE |
 |---|---|---|
-| BASELINE-001/002/003 | High (availability: server down or crashed) | CWE-400 |
+| BASELINE-001/002/003, H2-BASE-001/002 | High (availability: server down or crashed) | CWE-400 |
 | H1-ROBUST-001 (unknown method) | Info, or High if crash/hang | CWE-755 |
 | H1-ROBUST-002 (oversized header) | Medium, or High if crash/hang | CWE-400 |
 | H1-ROBUST-003 (garbage request line) | Info, or High if crash/hang | CWE-755 |
 | H1-ROBUST-004 (CRLF in header value) | High | CWE-113 |
 | H1-ROBUST-005 (truncated body) | Info, or High if crash/hang | CWE-755 |
+| H1-ROBUST-006 (whitespace in field name) | Medium (latent intermediary desync), or High if crash/hang | CWE-444 |
+| H1-ROBUST-007 (obs-fold) | Medium (latent intermediary desync), or High if crash/hang | CWE-444 |
+| H1-ROBUST-008 (missing Host) | Low, or High if crash/hang | CWE-755 |
+| H1-ROBUST-009 (absolute-form) | Info, or High if crash/hang | CWE-755 |
+| H1-ROBUST-010 (NUL/overlong path) | High (path confusion can reach another resource) | CWE-158 |
+| H1-ROBUST-011 (slow-send lite) | Medium (bounded availability), or High if crash/hang | CWE-400 |
 | SMUGGLE-001 (CL and TE together) | High | CWE-444 |
+| SMUGGLE-002 (obfuscated/duplicated TE) | High | CWE-444 |
+| SMUGGLE-003 (duplicate Content-Length) | High | CWE-444 |
+| CHUNK-001 (chunk extensions) | Medium (framing ambiguity / latent intermediary desync), or High if crash/hang | CWE-444 |
+| CHUNK-002 (malformed chunk sizes) | Medium (framing ambiguity / latent intermediary desync), or High if crash/hang | CWE-444 |
+| STATE-001 (state contamination) | High (desync primitive) | CWE-444 |
 | STATIC-001 (path traversal) | High | CWE-22 |
 | HDR-001 (internal detail leak) | Low | CWE-200 |
+| H2-ROBUST-001 (bad pseudo-headers) | Medium (malformed request dispatched to the app), or High if crash/hang | CWE-444 |
+| H2-ROBUST-002 (DATA on idle/0 stream) | Medium (framing violation), or High if crash/hang | CWE-444 |
+| H2-ROBUST-003 (unknown frame not ignored) | Low, or High if crash/hang | CWE-755 |
+| H2-ROBUST-004 (oversized header list) | Medium (bounded availability), or High if crash/hang | CWE-400 |
+| H2-ROBUST-005 (PRIORITY self-dependency) | Low, or High if crash/hang | CWE-755 |
+| TLS-001 (TLS floor / ALPN) | Medium (weak crypto accepted or h2 not negotiable) | CWE-326 |
 
 ## Reporting policy
 
