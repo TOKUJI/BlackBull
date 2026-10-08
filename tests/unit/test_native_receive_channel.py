@@ -27,7 +27,7 @@ import pytest
 from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.protocol.frame_types import Data, DataFrameFlags, FrameTypes
-from blackbull.request import ClientDisconnected
+from blackbull.request import ClientDisconnected, stream_body
 from blackbull.server.recipient import (
     AbstractReader, AsyncioReader, HTTP1Recipient, HTTP2Recipient,
     IncompleteReadError,
@@ -91,6 +91,36 @@ async def _drain_asgi(recipient) -> list[dict]:
         out.append(event)
         if event['type'] == 'http.disconnect' or not event.get('more_body'):
             return out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('protocol', ['http1-length', 'http1-chunked', 'http2'])
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('truncated', [False, True])
+async def test_stream_body_recipient_contract(protocol, native, truncated):
+    if protocol == 'http1-length':
+        recipient = _h1(b'hello', [(b'content-length', b'8' if truncated else b'5')])
+    elif protocol == 'http1-chunked':
+        wire = b'5\r\nhello\r\n' + (b'' if truncated else b'0\r\n\r\n')
+        recipient = _h1(wire, [(b'transfer-encoding', b'chunked')])
+    else:
+        recipient = HTTP2Recipient()
+        assert recipient.put_DATAFrame(_data(b'hello', end=not truncated))
+        if truncated:
+            recipient.put_disconnect()
+
+    async def receive():
+        return await recipient()
+
+    chunks = []
+    disconnected = False
+    try:
+        async for chunk in stream_body(recipient if native else receive):
+            chunks.append(chunk)
+    except ClientDisconnected:
+        disconnected = True
+    assert b''.join(chunks) == b'hello'
+    assert disconnected == truncated
 
 
 # ---------------------------------------------------------------------------

@@ -6,10 +6,15 @@ set -euo pipefail
 
 base="${YOUTRACK_URL%/}"
 api() {
+  if [[ ${1:-} == --multipart ]]; then
+    shift
+  else
+    set -- -H 'Content-Type: application/json' "$@"
+  fi
   curl --fail-with-body -sS \
     -H "Authorization: Bearer ${YOUTRACK_TOKEN}" \
     -H 'Accept: application/json' \
-    -H 'Content-Type: application/json' "$@"
+    "$@"
 }
 
 case "${1:-}" in
@@ -59,7 +64,7 @@ case "${1:-}" in
   show)
     [[ $# -eq 2 ]] || { echo 'usage: just yt-show ISSUE' >&2; exit 2; }
     api "${base}/api/issues/$2" \
-      --get --data-urlencode 'fields=idReadable,summary,description,customFields(name,value(name)),comments(text,author(login),created),links(direction,linkType(name),issues(idReadable))' | jq .
+      --get --data-urlencode 'fields=idReadable,summary,description,customFields(name,value(name)),comments(text,author(login),created),attachments(id,name,size),links(direction,linkType(name),issues(idReadable))' | jq .
     ;;
   create)
     [[ $# -ge 3 ]] || { echo 'usage: just yt-create SUMMARY DESCRIPTION' >&2; exit 2; }
@@ -77,6 +82,14 @@ case "${1:-}" in
     [[ -f "$3" ]] || { echo "no such file: $3" >&2; exit 2; }
     jq -n --rawfile description "$3" '{description:$description}' |
       api -X POST "${base}/api/issues/$2?fields=idReadable,summary" --data-binary @- | jq .
+    ;;
+  attach)
+    [[ $# -eq 3 ]] || { echo 'usage: just yt-attach ISSUE FILE' >&2; exit 2; }
+    [[ -f "$3" ]] || { echo "no such file: $3" >&2; exit 2; }
+    upload_path=${3//\\/\\\\}
+    upload_path=${upload_path//\"/\\\"}
+    api --multipart -X POST "${base}/api/issues/$2/attachments?fields=id,name,size" \
+      -F "upload=@\"$upload_path\"" | jq .
     ;;
   article)
     # The Knowledge Base is a second namespace, not a second project: articles
@@ -119,7 +132,7 @@ case "${1:-}" in
     exec "$0" command "$2" 'State Fixed'
     ;;
   *)
-    echo 'usage: just yt-version NAME | yt-version-release NAME YYYY-MM-DD | yt-search [QUERY] | yt-show ISSUE | yt-create SUMMARY DESCRIPTION | yt-comment ISSUE TEXT | yt-update ISSUE DESCRIPTION_FILE | yt-article [ARTICLE] | yt-article-update ARTICLE CONTENT_FILE | yt-command ISSUE COMMAND... | yt-close ISSUE' >&2
+    echo 'usage: just yt-version NAME | yt-version-release NAME YYYY-MM-DD | yt-search [QUERY] | yt-show ISSUE | yt-create SUMMARY DESCRIPTION | yt-comment ISSUE TEXT | yt-attach ISSUE FILE | yt-update ISSUE DESCRIPTION_FILE | yt-article [ARTICLE] | yt-article-update ARTICLE CONTENT_FILE | yt-command ISSUE COMMAND... | yt-close ISSUE' >&2
     exit 2
     ;;
 esac

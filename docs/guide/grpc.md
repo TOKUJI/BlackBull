@@ -288,6 +288,11 @@ users will actually use.
 
 - **All four RPC shapes are served**: unary, server-streaming,
   client-streaming, and bidirectional (see above).
+- `BB_GRPC_MAX_MESSAGE_SIZE` (default 4 MiB) bounds each decoded request and
+  response message. Incoming encoded messages also have a 16 MiB safety cap.
+  Declared oversize is rejected at the prefix. Unary and server-streaming
+  accept one request message. Streaming caps apply per message; transport body
+  and time limits still apply.
 - **gzip message compression** is supported (`grpc-encoding: gzip` /
   `identity`); a compressed request in any other coding is rejected with
   `UNIMPLEMENTED`, and the response advertises
