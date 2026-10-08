@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 from dataclasses import dataclass
 import math
 from datetime import datetime, timezone
@@ -303,6 +304,49 @@ class Probe:
         ctx.check_hostname = False
         return ctx
 
+    # ---- WebSocket handshake (raw TCP) --------------------------------
+
+    def ws_attempt(self, name: str, head: bytes, *,
+                   follow: bytes | None = None) -> 'WsAttempt':
+        """One bounded raw WebSocket upgrade exchange.
+
+        The WebSocket lane is an HTTP/1.1 upgrade on the h1 target (or a TLS
+        upgrade on an https one), so the request is written verbatim and the
+        answer read raw: the scenario vocabulary parses HTTP responses, not
+        post-upgrade frames.  Same loopback target, same session bound, one
+        budget slot.  With *follow* set, those frame bytes are sent after a
+        ``101`` and whatever the peer answers is scanned as server frames.
+        """
+        ctx = self._client_tls_context()
+
+        async def _go() -> WsAttempt:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(
+                    self.target.host, self.target.port, ssl=ctx,
+                    server_hostname=self.target.host if ctx is not None else None),
+                _CONNECT_TIMEOUT_S)
+            try:
+                writer.write(head)
+                await writer.drain()
+                raw = await _read_until_crlf2(reader, _WS_MAX_HEAD)
+                status, accept = ws_head_parse(raw)
+                rest = b''
+                closed = False
+                timed_out = False
+                if follow is not None and status == 101:
+                    writer.write(follow)
+                    await writer.drain()
+                    rest, closed, timed_out = await _read_quiet(
+                        reader, _WS_MAX_TAIL, min(_TAIL_TIMEOUT_S,
+                                                  self.effective_timeout))
+                return WsAttempt(name=name, status=status, accept=accept,
+                                 head=raw, frames=rest, closed=closed,
+                                 timed_out=timed_out)
+            finally:
+                writer.close()
+
+        return self._bounded(_go)
+
     # ---- shared bounds -------------------------------------------------
 
     def _session_bound(self) -> float:
@@ -398,20 +442,24 @@ def _stop_reason(result: ScenarioResult) -> str:
 
 
 def _exchange(probe: Probe, label: str, abuse: bytes, *,
-              half_close: bool = False) -> tuple[tuple[tuple[int, bytes], ...], str]:
-    """One pipelined exchange: *abuse* then a keep-alive ``GET /``, one connection.
+              half_close: bool = False, follow: bytes | None = None,
+              read_steps: int = 3) -> tuple[tuple[tuple[int, bytes], ...], str]:
+    """One pipelined exchange: *abuse* then a keep-alive follow-up (``GET /``
+    unless *follow* says otherwise), one connection.
 
     Returns the parsed responses in wire order and the stop reason.  The
-    three read steps bound "how many answers came back": any response to the
-    abusive request, exactly one to the pipelined ``GET /``, and a short tail
-    read that must find nothing more.
+    read steps bound "how many answers came back": any response to the
+    abusive request, exactly one to the pipelined follow-up, and a short tail
+    read that must find nothing more.  *read_steps* adds room for an
+    informational ``100 Continue`` ahead of the final answers (EXPECT-001).
     """
-    steps: list = [SendRawBytes(abuse + _get_keepalive('/'))]
+    steps: list = [SendRawBytes(abuse + (follow if follow is not None
+                                        else _get_keepalive('/')))]
     if half_close:
         steps.append(HalfClose())
-    steps += [ReadResponse(timeout=probe.effective_timeout),
-              ReadResponse(timeout=probe.effective_timeout),
-              ReadResponse(timeout=min(_TAIL_TIMEOUT_S, probe.effective_timeout))]
+    steps += [ReadResponse(timeout=probe.effective_timeout)
+              for _ in range(max(2, read_steps - 1))]
+    steps.append(ReadResponse(timeout=min(_TAIL_TIMEOUT_S, probe.effective_timeout)))
     result = probe.scenario(label, *steps)
     responses = tuple(
         (r.status, bytes(r.body))
@@ -1253,6 +1301,751 @@ def _tls_001(probe: Probe) -> Verdict:
 
 
 # ------------------------------------------------------------------
+# M4 checks — researched vulnerability classes (docs/security/probe.md)
+# ------------------------------------------------------------------
+
+# ---- WebSocket raw-exchange helpers ---------------------------------
+
+#: RFC 6455 §4.2.2 handshake magic (not used to compute the accept hash —
+#: the fixture never echoes the key).
+_WS_MAX_HEAD = 65_536
+_WS_MAX_TAIL = 65_536
+
+
+async def _read_until_crlf2(reader, limit: int) -> bytes:
+    """Read an HTTP head (through the blank line) or *limit* bytes."""
+    buf = bytearray()
+    while b'\r\n\r\n' not in buf and len(buf) < limit:
+        chunk = await reader.read(4096)
+        if not chunk:
+            break
+        buf += chunk
+    return bytes(buf)
+
+
+async def _read_quiet(reader, limit: int,
+                      quiet: float) -> tuple[bytes, bool, bool]:
+    """Read until EOF, *limit* bytes, or *quiet* seconds of silence.
+
+    Returns ``(bytes, closed, timed_out)``; *closed* is peer EOF and
+    *timed_out* silence while the peer held the connection open.
+    """
+    buf = bytearray()
+    closed = False
+    timed_out = False
+    while len(buf) < limit:
+        try:
+            chunk = await asyncio.wait_for(reader.read(4096), quiet)
+        except (TimeoutError, asyncio.TimeoutError):
+            timed_out = True
+            break
+        if not chunk:
+            closed = True
+            break
+        buf += chunk
+    return bytes(buf), closed, timed_out
+
+
+@dataclass(frozen=True)
+class WsAttempt:
+    """One raw WebSocket upgrade exchange, reduced to oracle facts."""
+    name: str
+    status: int | None
+    accept: bytes
+    head: bytes
+    frames: bytes
+    closed: bool
+    timed_out: bool
+
+
+def ws_head_parse(head: bytes) -> tuple[int | None, bytes]:
+    """Return ``(status, sec-websocket-accept value)`` of a handshake head."""
+    line = head.split(b'\r\n', 1)[0]
+    parts = line.split(b' ')
+    try:
+        status = int(parts[1]) if len(parts) > 1 else None
+    except ValueError:
+        status = None
+    accept = b''
+    for raw in head.split(b'\r\n')[1:]:
+        name, sep, value = raw.partition(b':')
+        if sep and name.strip().lower() == b'sec-websocket-accept':
+            accept = value.strip()
+    return status, accept
+
+
+def ws_scan_frames(frames: bytes) -> tuple[tuple[int, ...], bool, bool]:
+    """Walk server-to-client frames: ``(close_codes, echoed_probe, masked)``.
+
+    Server frames are unmasked (RFC 6455 §5.1); a masked one and a data
+    frame echoing the probe payload are both outcomes the WS-001 oracle
+    judges.  A truncated tail is ignored — the close code, if any, arrives
+    in its own frame before the peer hangs up.
+    """
+    close_codes: list[int] = []
+    echoed = False
+    masked = False
+    i = 0
+    while i + 2 <= len(frames):
+        b0, b1 = frames[i], frames[i + 1]
+        opcode = b0 & 0x0F
+        has_mask = bool(b1 & 0x80)
+        length = b1 & 0x7F
+        j = i + 2
+        if length == 126:
+            if j + 2 > len(frames):
+                break
+            length = int.from_bytes(frames[j:j + 2], 'big')
+            j += 2
+        elif length == 127:
+            if j + 8 > len(frames):
+                break
+            length = int.from_bytes(frames[j:j + 8], 'big')
+            j += 8
+        if has_mask:
+            masked = True
+            j += 4
+        if j + length > len(frames):
+            break
+        payload = frames[j:j + length]
+        if opcode == 0x8 and length >= 2:
+            close_codes.append(int.from_bytes(payload[:2], 'big'))
+        elif opcode == 0x1 and payload == b'X':
+            echoed = True
+        i = j + length
+    return tuple(close_codes), echoed, masked
+
+
+def _ws_handshake(path: str, *, key: bytes, version: bytes,
+                  extra: bytes = b'') -> bytes:
+    return (b'GET ' + path.encode('ascii') + b' HTTP/1.1\r\n'
+            b'Host: probe\r\n'
+            b'Upgrade: websocket\r\n'
+            b'Connection: Upgrade\r\n'
+            b'Sec-WebSocket-Key: ' + key + b'\r\n'
+            b'Sec-WebSocket-Version: ' + version + b'\r\n'
+            + extra + b'\r\n')
+
+
+_WS_KEY = base64.b64encode(b'0123456789abcdef')
+#: A masked TEXT frame carrying "X" (RFC 6455 §5.3): the masking-violation
+#: twin of the unmasked ``0x81 0x01 0x58`` the probe sends.
+_WS_MASKED_X = b'\x81\x81\x37\xfa\x21\x3d\x7f'
+_WS_UNMASKED_X = b'\x81\x01X'
+
+
+def ws_verdict(attempts: Sequence[tuple[str, WsAttempt, Verdict]]) -> Verdict:
+    """Combine labelled sub-verdicts worst-first (see [`_combine`][])."""
+    return _combine([Verdict(v.verdict, f'{label}: {v.detail}')
+                     for label, _attempt, v in attempts])
+
+
+def ws_bad_handshake_verdict(attempt: WsAttempt, timeout: float,
+                             *, allow: frozenset[int]) -> Verdict:
+    """A malformed upgrade must be refused — never answered ``101``."""
+    if attempt.status == 101:
+        return Verdict(FAIL, 'upgraded to WebSocket with 101')
+    return _abuse_oracle(_FakeResult(attempt), timeout, allow, '4xx')
+
+
+def ws_flood_verdict(attempt: WsAttempt, timeout: float) -> Verdict:
+    """A handshake the server may accept or refuse — but never die on."""
+    if attempt.timed_out and not attempt.closed and attempt.status is None:
+        return Verdict(TIMEOUT, f'no handshake answer within {timeout:g}s')
+    if attempt.status is None:
+        return Verdict(PASS, 'rejected by connection close')
+    if attempt.status in _ACCEPT_4XX or attempt.status == 101:
+        return Verdict(PASS, f'answered {attempt.status}')
+    return Verdict(FAIL, f'answered {attempt.status} (expected 101 or 4xx)')
+
+
+def ws_mask_verdict(attempt: WsAttempt, timeout: float) -> Verdict:
+    """Unmasked client data must earn a protocol-error close (RFC 6455 §5.1)."""
+    if attempt.status != 101:
+        return Verdict(FAIL, f'handshake answered {attempt.status}, masking untested')
+    close_codes, echoed, masked = ws_scan_frames(attempt.frames)
+    if echoed:
+        return Verdict(FAIL, 'unmasked data frame accepted and echoed (RFC 6455 §5.1)')
+    if masked:
+        return Verdict(FAIL, 'server frame was masked (RFC 6455 §5.1)')
+    if close_codes and all(code == 1002 for code in close_codes):
+        return Verdict(PASS, 'closed with 1002 (protocol error)')
+    if close_codes:
+        return Verdict(FAIL, f'closed with {close_codes} (expected 1002)')
+    if attempt.closed:
+        return Verdict(PASS, 'connection closed without accepting the frame')
+    return Verdict(FAIL, 'unmasked frame neither refused nor accepted '
+                         '(connection left open)')
+
+
+class _FakeResult:
+    """Adapts a [`WsAttempt`][] to the `ScenarioResult` shape oracles read."""
+    def __init__(self, attempt: WsAttempt) -> None:
+        self.timed_out = attempt.timed_out and attempt.status is None
+        self.response = (type('R', (), {'status': attempt.status,
+                                        'body': b'', 'headers': ()})()
+                         if attempt.status is not None else None)
+        self.exception = None
+
+
+def _ws_001(probe: Probe) -> Verdict:
+    """WS-001 — WebSocket upgrade validation and frame masking.
+
+    Four bounded raw exchanges against the fixture's ``/ws`` echo route:
+    a bad key and a wrong version must be refused; a flooded handshake
+    (header-count and subprotocol-list classes) must be answered 101/4xx
+    without a hang; and an unmasked client data frame must be refused with
+    close 1002 (or a bare close), never accepted (RFC 6455 §5.1/§5.3).
+    """
+    timeout = probe.effective_timeout
+    attempts: list[tuple[str, WsAttempt, Verdict]] = []
+
+    bad_key = probe.ws_attempt(
+        'ws-001/bad-key', _ws_handshake('/ws', key=b'not-base64!!', version=b'13'))
+    attempts.append(('bad-key', bad_key,
+                     ws_bad_handshake_verdict(bad_key, timeout,
+                                              allow=frozenset({400, 426}))))
+
+    bad_version = probe.ws_attempt(
+        'ws-001/bad-version', _ws_handshake('/ws', key=_WS_KEY, version=b'12'))
+    attempts.append(('bad-version', bad_version,
+                     ws_bad_handshake_verdict(bad_version, timeout,
+                                              allow=frozenset({400, 426}))))
+
+    proto_list = b'Sec-WebSocket-Protocol: ' + b', '.join(
+        f'p{i}'.encode() for i in range(100)) + b'\r\n'
+    flood_extra = proto_list + b''.join(
+        f'X-Extra-{i}: v\r\n'.encode() for i in range(200))
+    flood = probe.ws_attempt(
+        'ws-001/flood-hs',
+        _ws_handshake('/ws', key=_WS_KEY, version=b'13', extra=flood_extra))
+    attempts.append(('flood-hs', flood, ws_flood_verdict(flood, timeout)))
+
+    unmasked = probe.ws_attempt(
+        'ws-001/unmasked',
+        _ws_handshake('/ws', key=_WS_KEY, version=b'13'), follow=_WS_UNMASKED_X)
+    mask_v = ws_mask_verdict(unmasked, timeout)
+    if unmasked.status == 101 and ws_head_parse(unmasked.head)[1] == b'':
+        mask_v = Verdict(FAIL, '101 without Sec-WebSocket-Accept')
+    elif unmasked.status == 101:
+        mask_v = Verdict(mask_v.verdict, mask_v.detail)
+    attempts.append(('unmasked', unmasked, mask_v))
+    return ws_verdict(attempts)
+
+
+# ---- H1 M4 judges and checks ----------------------------------------
+
+#: Follow-up shape for TRAILER-001's smuggle probe: the trailer section must
+#: never become a field line of the next pipelined request.
+_TRAILER_FOLLOW = _get_keepalive('/echo-headers')
+
+
+def trailer_followup_verdict(responses: tuple[tuple[int, bytes], ...],
+                             stop: str) -> Verdict:
+    """STATE-style oracle on a ``GET /echo-headers`` follow-up.
+
+    The pipelined request's echoed field list must carry no smuggled trailer
+    name and no CR/LF-bearing value; one clean answer or a closed connection,
+    nothing else.
+    """
+    n = len(responses)
+    if stop.startswith('error:'):
+        return Verdict(FAIL, f'garbled response bytes ({stop[6:]})')
+    if n > 2:
+        return Verdict(FAIL, f'{n} responses to 2 pipelined requests (desync)')
+    if n == 2:
+        status, body = responses[1]
+        if status != 200:
+            return Verdict(FAIL, f'follow-up answered {status}')
+        try:
+            echoed = _echoed_headers(body)
+        except (ValueError, KeyError, TypeError):
+            return Verdict(FAIL, 'follow-up body is not a header list')
+        if any(name.lower() == 'x-smuggle' for name, _ in echoed):
+            return Verdict(FAIL, 'trailer field smuggled into the follow-up '
+                                 'request (CWE-444)')
+        if any('\r' in value or '\n' in value for _, value in echoed):
+            return Verdict(FAIL, 'follow-up echo kept CR/LF')
+        return Verdict(PASS, 'trailer not smuggled into the follow-up')
+    if n == 1:
+        if stop == _STOP_CLOSED:
+            return Verdict(PASS, 'connection closed after the abusive exchange')
+        return Verdict(FAIL, 'follow-up unanswered while the connection stayed open')
+    if stop == _STOP_CLOSED:
+        return Verdict(PASS, 'connection closed without a response')
+    return Verdict(TIMEOUT, 'no response at all within the bound')
+
+
+def _trailer_001(probe: Probe) -> Verdict:
+    """TRAILER-001 — chunked trailer sections must not smuggle.
+
+    Forbidden trailer fields (RFC 9110 §6.5.1 / RFC 9112 §7.1.2) are 400 or
+    close; a permitted custom trailer is ignored safely, proven by an exact
+    body echo and a clean pipelined follow-up whose echoed field list must
+    not contain the trailer (CVE-2023-46589 / CVE-2025-53643 class).
+    """
+    verdicts = []
+    for label, trailer in (('forbidden-cl', b'Content-Length: 4\r\n'),
+                           ('forbidden-te', b'Transfer-Encoding: chunked\r\n'),
+                           ('forbidden-host', b'Host: evil\r\n')):
+        raw = (b'POST /echo-body HTTP/1.1\r\nHost: probe\r\n'
+               b'Transfer-Encoding: chunked\r\n\r\n'
+               b'1\r\nZ\r\n0\r\n' + trailer + b'\r\n')
+        responses, stop = _exchange(probe, f'trailer-001/{label}', raw)
+        abuse = abuse_accept_verdict(responses, stop, accept=_ACCEPT_400,
+                                     expected='400')
+        state = state_verdict(responses, stop)
+        verdicts.append(Verdict(_combine((abuse, state)).verdict,
+                                f'{label}: {abuse.detail}; {state.detail}'))
+    raw = (b'POST /echo-body HTTP/1.1\r\nHost: probe\r\n'
+           b'Transfer-Encoding: chunked\r\n\r\n'
+           b'1\r\nZ\r\n0\r\nX-Smuggle: 1\r\n\r\n')
+    responses, stop = _exchange(probe, 'trailer-001/smuggle-followup', raw,
+                                follow=_TRAILER_FOLLOW)
+    abuse = abuse_accept_verdict(responses, stop, accept=frozenset({200, 400}),
+                                 expected='400', ok_200_body=b'Z')
+    state = trailer_followup_verdict(responses, stop)
+    verdicts.append(Verdict(_combine((abuse, state)).verdict,
+                            f'smuggle-followup: {abuse.detail}; {state.detail}'))
+    return _combine(verdicts)
+
+
+_RANGE_PATH = '/static/hello.txt'
+#: file served at [`_RANGE_PATH`][] — the size every range is judged against.
+_RANGE_SIZE = len(_HELLO_BODY)
+
+
+def range_verdict(status: int | None, headers: list[tuple[bytes, bytes]],
+                  body: bytes, *, size: int, closed: bool,
+                  timed_out: bool) -> Verdict:
+    """RANGE-001 oracle: 200/206/416 with the right shapes, nothing else.
+
+    206 must be the requested bytes (single range) or a bounded
+    multipart/byteranges answer; 200 must be the whole file (an ignored
+    Range is legal); 416 is always acceptable (its Content-Range, when
+    present, must use the unsatisfied form).  No response, a 5xx, or a
+    deadline overrun is a FAIL/TIMEOUT — a Range header is legal input the
+    server must answer (CVE-2011-3192 class).
+    """
+    if timed_out:
+        return Verdict(TIMEOUT, 'no response within the bound')
+    if status is None:
+        why = 'closed without a response' if closed else 'no response'
+        return Verdict(FAIL, f'{why} (expected 200/206/416)')
+    headers_l = [(n.lower(), v) for n, v in headers]
+    ctype = b''.join(v for n, v in headers_l if n == b'content-type')
+    crange = b''.join(v for n, v in headers_l if n == b'content-range')
+    if status == 200:
+        if body == _HELLO_BODY:
+            return Verdict(PASS, '200 with the whole file (Range ignored)')
+        return Verdict(FAIL, f'200 with wrong body {body[:32]!r}')
+    if status == 416:
+        want = f'bytes */{size}'.encode()
+        if crange and crange != want:
+            return Verdict(FAIL, f'416 with content-range {crange!r} '
+                                 f'(expected {want!r})')
+        return Verdict(PASS, '416 Range Not Satisfiable')
+    if status == 206:
+        if b'multipart/byteranges' in ctype:
+            return Verdict(PASS, '206 multipart/byteranges (bounded set)')
+        match = re.fullmatch(rb'bytes (\d+)-(\d+)/(\d+)', crange)
+        if not match:
+            return Verdict(FAIL, f'206 with content-range {crange!r}')
+        start, end, total = (int(x) for x in match.groups())
+        if not (0 <= start <= end < total == size):
+            return Verdict(FAIL, f'206 content-range {crange!r} outside the file')
+        if len(body) != end - start + 1:
+            return Verdict(FAIL, f'206 body is {len(body)} bytes, '
+                                 f'content-range promises {end - start + 1}')
+        return Verdict(PASS, f'206 {crange.decode()}')
+    return Verdict(FAIL, f'answered {status} (expected 200/206/416)')
+
+
+_RANGE_VARIANTS = (
+    ('overlap-mixed', b'bytes=0-0,-1,1-99999999999'),
+    ('inverted', b'bytes=10-5'),
+    ('suffix-zero', b'bytes=-0'),
+    ('junk', b'bytes=--3'),
+    ('many-small', b'bytes=' + b','.join(f'{i}-{i}'.encode() for i in range(15))),
+)
+
+
+def _range_001(probe: Probe) -> Verdict:
+    """RANGE-001 — overlapping/negative/multipart Range abuse on the static
+    fixture (≤ 20 ranges per request): 200/206/416 only, no crash, no hang."""
+    verdicts = []
+    for label, spec in _RANGE_VARIANTS:
+        raw = (b'GET ' + _RANGE_PATH.encode('ascii') + b' HTTP/1.1\r\n'
+               b'Host: probe\r\nRange: ' + spec +
+               b'\r\nConnection: close\r\n\r\n')
+        result = probe.raw_request(f'range-001/{label}', raw)
+        resp = result.response
+        verdict = range_verdict(
+            resp.status if resp is not None else None,
+            list(resp.headers) if resp is not None else [],
+            bytes(resp.body) if resp is not None else b'',
+            size=_RANGE_SIZE, closed=resp is None and not result.timed_out,
+            timed_out=result.timed_out)
+        verdicts.append(Verdict(verdict.verdict, f'{label}: {verdict.detail}'))
+    return _combine(verdicts)
+
+
+def split_interims(responses: Sequence[tuple[int, bytes]],
+                   ) -> tuple[tuple[tuple[int, bytes], ...],
+                              tuple[tuple[int, bytes], ...]]:
+    """Split wire responses into (informational 1xx, final) answers."""
+    interims = tuple(r for r in responses if 0 < r[0] < 200)
+    finals = tuple(r for r in responses if r[0] >= 200)
+    return interims, finals
+
+
+def expect_verdict(responses: tuple[tuple[int, bytes], ...], stop: str,
+                   *, ok_body: bytes) -> Verdict:
+    """EXPECT-001 oracle over the pipelined exchange.
+
+    Informationals must be ``100 Continue`` (or absent — RFC 9112 §10.1.1
+    lets a server omit it); the abusive request earns 200 with the exact
+    body echo, 417, or 400; the pipelined ``GET /`` must then be one clean
+    ``200 ok`` or the connection must close.  A stalled exchange is the
+    per-check deadline's row; any other answer is a FAIL.
+    """
+    interims, finals = split_interims(responses)
+    for status, _ in interims:
+        if status != 100:
+            return Verdict(FAIL, f'informational {status} (expected 100 at most)')
+    abuse = abuse_accept_verdict(finals, stop,
+                                 accept=frozenset({200, 400, 417}),
+                                 expected='417 or a 200 echo',
+                                 ok_200_body=ok_body)
+    state = state_verdict(finals, stop)
+    seen = '100-then-' if interims else 'no 100, '
+    return Verdict(_combine((abuse, state)).verdict,
+                   f'{seen}{abuse.detail}; {state.detail}')
+
+
+_EXPECT_BODY = b'hello'
+
+
+def _expect_001(probe: Probe) -> Verdict:
+    """EXPECT-001 — ``Expect: 100-continue`` handling (RFC 9112 §10.1.1).
+
+    The body is sent without waiting for the interim; a bogus
+    ``Expect: 100-continue, x`` is the unmet-expectation case.  Both are
+    pipelined with ``GET /`` so a misframed exchange shows up as STATE
+    contamination (CVE-2024-24791 / CVE-2020-10705 class).
+    """
+    variants = (
+        ('immediate-body', b'Expect: 100-continue\r\n'),
+        ('bogus-expect', b'Expect: 100-continue, x\r\n'),
+    )
+    verdicts = []
+    for label, expect_field in variants:
+        raw = (b'POST /echo-body HTTP/1.1\r\nHost: probe\r\n' + expect_field +
+               b'Content-Length: 5\r\n\r\n' + _EXPECT_BODY)
+        responses, stop = _exchange(probe, f'expect-001/{label}', raw,
+                                    read_steps=4)
+        verdict = expect_verdict(responses, stop, ok_body=_EXPECT_BODY)
+        verdicts.append(Verdict(verdict.verdict, f'{label}: {verdict.detail}'))
+    return _combine(verdicts)
+
+
+_HOST_VARIANTS = (
+    ('dup-same', b'Host: probe\r\nHost: probe\r\n'),
+    ('dup-conflict', b'Host: a\r\nHost: b\r\n'),
+    ('empty', b'Host: \r\n'),
+)
+
+
+def _host_001(probe: Probe) -> Verdict:
+    """HOST-001 — duplicate or empty Host fields (RFC 9112 §3.2): 400 or
+    close, then the STATE-001 pipelined follow-up (host-confusion class:
+    CVE-2026-71554, CVE-2026-34525)."""
+    verdicts = []
+    for label, host_field in _HOST_VARIANTS:
+        raw = b'GET / HTTP/1.1\r\n' + host_field + b'\r\n'
+        responses, stop = _exchange(probe, f'host-001/{label}', raw)
+        abuse = abuse_accept_verdict(responses, stop, accept=_ACCEPT_400,
+                                     expected='400')
+        state = state_verdict(responses, stop)
+        verdicts.append(Verdict(_combine((abuse, state)).verdict,
+                                f'{label}: {abuse.detail}; {state.detail}'))
+    return _combine(verdicts)
+
+
+# ---- H2 M4 judges and checks ----------------------------------------
+
+def h2_settings(infos: Sequence[H2Info]) -> dict[int, int]:
+    """Parse advertised SETTINGS parameters out of received frames."""
+    out: dict[int, int] = {}
+    for info in infos:
+        if info.kind != 'SETTINGS':
+            continue
+        data = info.body
+        for i in range(0, len(data) - 5, 6):
+            out[int.from_bytes(data[i:i + 2], 'big')] = \
+                int.from_bytes(data[i + 2:i + 6], 'big')
+    return out
+
+
+def h2_recover_verdict(infos: Sequence[H2Info], stream_id: int, *,
+                       accept_codes: frozenset[int],
+                       accept_statuses: frozenset[int],
+                       expected: str) -> Verdict:
+    """PASS on bounded completion **or** bounded refusal, FAIL otherwise.
+
+    The flood-shaped M4 checks accept both outcomes: finishing the request
+    is correct handling of legal frames; refusing it with an accept-set
+    error code is correct flood defense.  Anything else — an unexpected
+    status, an error code outside the set, a crash — is a FAIL; a silent
+    close is accepted as rejection.
+    """
+    for info in infos:
+        if info.kind == 'HEADERS' and info.stream_id == stream_id \
+                and info.status is not None:
+            if info.status in accept_statuses:
+                return Verdict(PASS, f'completed with {info.status}')
+            return Verdict(FAIL, f'answered {info.status} (expected {expected})')
+    for info in infos:
+        if info.kind in ('GOAWAY', 'RST_STREAM'):
+            if info.error_code in accept_codes:
+                return Verdict(PASS, f'refused with {info.kind} '
+                                     f'{_error_name(info.error_code)}')
+            return Verdict(FAIL, f'{info.kind} {_error_name(info.error_code)} '
+                                 f'(expected {expected})')
+    if any(info.kind == 'EOF' for info in infos):
+        return Verdict(PASS, 'rejected by connection close')
+    return Verdict(TIMEOUT, f'no completion or refusal within the bound '
+                            f'(expected {expected})')
+
+
+def rapid_reset_verdict(infos: Sequence[H2Info], fresh_id: int,
+                        burst: int) -> Verdict:
+    """H2-ROBUST-006 oracle over one bounded burst.
+
+    The burst is legal traffic — HEADERS then an immediate CANCEL reset on
+    each stream — so only these error frames are acceptable handling:
+    ``NO_ERROR``/``CANCEL`` (acknowledging the resets or closing gracefully),
+    ``REFUSED_STREAM``/``ENHANCE_YOUR_CALM`` (flood defense).  A
+    ``PROTOCOL_ERROR``/``INTERNAL_ERROR`` over legal frames is a FAIL.  The
+    fresh request must survive; its own verdict is [`h2_ok_verdict`][].
+    """
+    acceptable = frozenset({
+        int(ErrorCodes.NO_ERROR), int(ErrorCodes.CANCEL),
+        int(ErrorCodes.REFUSED_STREAM), int(ErrorCodes.ENHANCE_YOUR_CALM)})
+    for info in infos:
+        if info.kind in ('GOAWAY', 'RST_STREAM'):
+            if info.error_code not in acceptable:
+                return Verdict(FAIL, f'{info.kind} {_error_name(info.error_code)} '
+                                     f'over a legal RST burst (expected NO_ERROR/'
+                                     f'CANCEL/REFUSED_STREAM/ENHANCE_YOUR_CALM)')
+    return Verdict(PASS, f'{burst} streams reset cleanly')
+
+
+_H2_BOMB_NAME = 'x-bomb'
+_H2_BOMB_VALUE = 'A' * 4058
+#: Indexed references in the bomb block: decoded size must stay ≤ 4 MiB.
+_H2_BOMB_REFS = 1000
+_H2_BOMB_CAP = 4 * 2**20
+#: Acceptable flood-defense codes: ENHANCE_YOUR_CALM (RFC 9113 §7), the
+#: stream refusals, and PROTOCOL_ERROR — a header-block limit may signal it
+#: (§4.3) even over legal frames.  COMPRESSION_ERROR joins for the HPACK
+#: bomb, where a decoder expansion cap may legitimately trip it.
+_H2_BOMB_CODES = frozenset({
+    int(ErrorCodes.ENHANCE_YOUR_CALM), int(ErrorCodes.REFUSED_STREAM),
+    int(ErrorCodes.PROTOCOL_ERROR), int(ErrorCodes.NO_ERROR),
+    int(ErrorCodes.COMPRESSION_ERROR)})
+_H2_CONT_CODES = frozenset({
+    int(ErrorCodes.ENHANCE_YOUR_CALM), int(ErrorCodes.REFUSED_STREAM),
+    int(ErrorCodes.PROTOCOL_ERROR), int(ErrorCodes.NO_ERROR)})
+
+
+def _h2_wait_exchange(probe: Probe, label: str, abuse: Sequence,
+                      stream_id: int) -> list[H2Info]:
+    """Handshake, send *abuse*, then drain until the stream's HEADERS or the
+    deadline — every skipped frame is still recorded for the judges."""
+    steps = (*_h2_prefix(), *abuse,
+             h2s.WaitForServerFrame(
+                 match={'type': 'HEADERS', 'stream_id': stream_id},
+                 timeout=probe.effective_timeout),
+             h2s.WaitForServerFrame(
+                 match={'type': 'DATA', 'stream_id': stream_id},
+                 timeout=min(_TAIL_TIMEOUT_S, probe.effective_timeout)))
+    return h2_infos(probe.h2_scenario(label, *steps))
+
+
+def _h2_robust_006(probe: Probe) -> Verdict:
+    """H2-ROBUST-006 — bounded Rapid Reset (CVE-2023-44487 class).
+
+    Exactly 20 streams, each opened and RST_CANCELled one at a time (so the
+    advertised MAX_CONCURRENT_STREAMS is never exceeded), then one fresh
+    request must still be served.  PASS/FAIL is about handling semantics
+    and survival, not capacity; the burst count is fixed and tiny.
+    """
+    burst = 20
+    steps: list = []
+    stream = 1
+    for _ in range(burst):
+        steps.append(_h2_request(probe, stream_id=stream))
+        steps.append(h2s.SendFrame(
+            FrameTypes.RST_STREAM, stream_id=stream,
+            data=(int(ErrorCodes.CANCEL)).to_bytes(4, 'big')))
+        stream += 2
+    fresh_id = stream
+    steps.append(_h2_request(probe, stream_id=fresh_id))
+    infos = _h2_wait_exchange(probe, 'h2-robust-006', steps, fresh_id)
+    semantics = rapid_reset_verdict(infos, fresh_id, burst)
+    settings = h2_settings(infos)
+    mcs = settings.get(0x3)
+    mcs_note = (f'advertised MAX_CONCURRENT_STREAMS={mcs}'
+                if mcs is not None else 'no MAX_CONCURRENT_STREAMS advertised')
+    fresh = h2_ok_verdict(infos, stream_id=fresh_id)
+    if fresh.verdict == PASS:
+        return Verdict(PASS, f'{semantics.detail}; fresh request served '
+                             f'after the burst; {mcs_note}')
+    if any(info.kind == 'EOF' for info in infos):
+        infos2 = _h2_wait_exchange(probe, 'h2-robust-006/fresh',
+                                   [_h2_request(probe, stream_id=1)], 1)
+        fresh2 = h2_ok_verdict(infos2, stream_id=1)
+        return Verdict(fresh2.verdict,
+                       f'{semantics.detail}; burst connection closed, fresh '
+                       f'connection: {fresh2.detail}; {mcs_note}')
+    return Verdict(fresh.verdict, f'{semantics.detail}; fresh request: '
+                                  f'{fresh.detail}; {mcs_note}')
+
+
+def _h2_continuation_steps(probe: Probe, stream_id: int,
+                           continuations: int) -> list:
+    """One HEADERS block cut into 1 + *continuations* CONTINUATION frames."""
+    fields = ((':method', 'GET'), (':path', '/'),
+              (':scheme', probe.target.scheme),
+              (':authority', f'{probe.target.host}:{probe.target.port}'),
+              ('x-pad', 'p' * 48))
+    block = hpack.Encoder().encode(list(fields))
+    parts = continuations + 1
+    if len(block) < parts:
+        raise ValueError(f'block too short to cut into {parts} fragments')
+    k, m = divmod(len(block), parts)
+    frags = [block[i * k + min(i, m):(i + 1) * k + min(i + 1, m)]
+             for i in range(parts)]
+    steps = [h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
+        FrameTypes.HEADERS, flags=0x01, stream_id=stream_id, data=frags[0])))]
+    for frag in frags[1:-1]:
+        steps.append(h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
+            FrameTypes.CONTINUATION, flags=0x00, stream_id=stream_id,
+            data=frag))))
+    steps.append(h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
+        FrameTypes.CONTINUATION, flags=0x04, stream_id=stream_id,
+        data=frags[-1]))))
+    return steps
+
+
+def _h2_robust_007(probe: Probe) -> Verdict:
+    """H2-ROBUST-007 — CONTINUATION flood lite (CVE-2023-45288 class).
+
+    One legal header block cut into 30 CONTINUATION frames then END_HEADERS:
+    the request either completes or is refused with a flood-defense code;
+    anything else, or a deadline overrun, is the finding.  Bounded by
+    construction — 30 tiny frames, one stream.
+    """
+    steps = _h2_continuation_steps(probe, stream_id=1, continuations=30)
+    infos = _h2_wait_exchange(probe, 'h2-robust-007', steps, 1)
+    verdict = h2_recover_verdict(
+        infos, 1, accept_codes=_H2_CONT_CODES,
+        accept_statuses=frozenset(set(range(200, 500))),
+        expected='completion or a bounded refusal')
+    return Verdict(verdict.verdict, f'30 CONTINUATION frames: {verdict.detail}')
+
+
+def _h2_robust_008(probe: Probe) -> Verdict:
+    """H2-ROBUST-008 — HPACK bomb lite (CVE-2016-6581 class).
+
+    A ~3 KiB seed block fills the dynamic table with one big entry; the
+    bomb block is 1000 indexed references to it (~4 KiB encoded, decoded
+    size bounded to ≤ 4 MiB by [`_H2_BOMB_REFS`][]).  Bounded completion or
+    refusal passes; a crash or a wrong error code is the finding.
+    """
+    decoded = _H2_BOMB_REFS * (len(_H2_BOMB_NAME) + len(_H2_BOMB_VALUE))
+    if decoded > _H2_BOMB_CAP:
+        return Verdict(FAIL, f'probe bug: bomb decodes to {decoded} bytes '
+                             f'> {_H2_BOMB_CAP} cap')
+    fields = ((':method', 'GET'), (':path', '/'),
+              (':scheme', probe.target.scheme),
+              (':authority', f'{probe.target.host}:{probe.target.port}'))
+    enc = hpack.Encoder()
+    seed = enc.encode(list(fields) + [(_H2_BOMB_NAME, _H2_BOMB_VALUE)])
+    bomb = enc.encode(list(fields)
+                      + [(_H2_BOMB_NAME, _H2_BOMB_VALUE)] * _H2_BOMB_REFS)
+    steps = [h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
+                 FrameTypes.HEADERS, flags=0x05, stream_id=1, data=seed))),
+             h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
+                 FrameTypes.HEADERS, flags=0x05, stream_id=3, data=bomb)))]
+    infos = _h2_wait_exchange(probe, 'h2-robust-008', steps, 3)
+    verdict = h2_recover_verdict(
+        infos, 3, accept_codes=_H2_BOMB_CODES,
+        accept_statuses=frozenset(set(range(200, 500))),
+        expected='bounded completion or refusal')
+    return Verdict(verdict.verdict,
+                   f'{len(bomb)} encoded bytes decode to ~{decoded // 1024} KiB: '
+                   f'{verdict.detail}')
+
+
+# ---- SYMLINK-001 ----------------------------------------------------
+
+_ESCAPE_LINK = '/static/escape-link.txt'
+_INSIDE_LINK = '/static/hello-link.txt'
+
+
+def _symlink_001(probe: Probe) -> Verdict:
+    """SYMLINK-001 — a symlink inside the served root must not escape it
+    (CVE-2024-23334 / CVE-2024-42367 class).
+
+    ``escape-link.txt`` points outside the root: 400/403/404 or close,
+    never 200.  ``hello-link.txt`` points at a file inside the root: 200
+    with that file or a safe refusal — either design is acceptable.
+    """
+    timeout = probe.effective_timeout
+    details = []
+    verdict = PASS
+
+    result = probe.raw_request('symlink-001/escape', _get_request(_ESCAPE_LINK))
+    early = _reject_or_timeout(result, timeout)
+    if early is not None:
+        return Verdict(early.verdict, f'{_ESCAPE_LINK}: {early.detail}')
+    resp = result.response
+    if resp is None:
+        details.append(f'{_ESCAPE_LINK}: closed without a response')
+    elif resp.status in (400, 403, 404):
+        details.append(f'{_ESCAPE_LINK}: refused with {resp.status}')
+    elif resp.status == 200:
+        verdict = FAIL
+        details.append(f'{_ESCAPE_LINK}: 200 served the link target '
+                       f'{bytes(resp.body)[:32]!r} (CWE-59)')
+    else:
+        verdict = FAIL
+        details.append(f'{_ESCAPE_LINK}: unexpected status {resp.status}')
+
+    result = probe.raw_request('symlink-001/inside', _get_request(_INSIDE_LINK))
+    early = _reject_or_timeout(result, timeout)
+    if early is not None:
+        return Verdict(early.verdict, f'{_INSIDE_LINK}: {early.detail}')
+    resp = result.response
+    if resp is None:
+        details.append(f'{_INSIDE_LINK}: closed without a response')
+    elif resp.status in (400, 403, 404):
+        details.append(f'{_INSIDE_LINK}: refused with {resp.status} (safe)')
+    elif resp.status == 200 and bytes(resp.body) == _HELLO_BODY:
+        details.append(f'{_INSIDE_LINK}: served the in-root target (200)')
+    elif resp.status == 200:
+        verdict = FAIL
+        details.append(f'{_INSIDE_LINK}: 200 with unexpected body '
+                       f'{bytes(resp.body)[:32]!r}')
+    else:
+        verdict = FAIL
+        details.append(f'{_INSIDE_LINK}: unexpected status {resp.status}')
+    return Verdict(verdict, '; '.join(details))
+
+
+# ------------------------------------------------------------------
 # Registry
 # ------------------------------------------------------------------
 
@@ -1274,9 +2067,15 @@ CHECKS: tuple[Check, ...] = (
     Check('SMUGGLE-003', 'duplicate Content-Length with different values rejected, pipelined GET / clean (RFC 9112 §6.3)', 'High', 'CWE-444', _smuggle_003, 'h1'),
     Check('CHUNK-001', 'chunk extensions do not corrupt framing: exact body echo or 400, pipelined GET / clean', 'Medium', 'CWE-444', _chunk_001, 'h1', 'High'),
     Check('CHUNK-002', 'malformed chunk sizes rejected (RFC 9112 §7.1), pipelined GET / clean', 'Medium', 'CWE-444', _chunk_002, 'h1', 'High'),
+    Check('TRAILER-001', 'chunked trailers must not smuggle: forbidden trailer fields 400/close, custom trailer ignored (RFC 9112 §7.1.2)', 'High', 'CWE-444', _trailer_001, 'h1'),
     Check('STATE-001', 'each abusive exchange leaves a pipelined GET / exactly one clean 200 "ok" or a closed connection', 'High', 'CWE-444', _state_001, 'h1'),
     Check('H1-ROBUST-011', 'partial request line held open: bounded hold, 408/close/no-answer only', 'Medium', 'CWE-400', _h1_robust_011, 'h1', 'High'),
+    Check('RANGE-001', 'overlapping/negative/multi Range answered 200/206/416 only, no crash/hang (CVE-2011-3192 class)', 'Medium', 'CWE-400', _range_001, 'h1', 'High'),
+    Check('EXPECT-001', 'Expect: 100-continue answered 100-then-200 or 417, pipelined GET / clean (RFC 9112 §10.1.1)', 'Medium', 'CWE-444', _expect_001, 'h1', 'High'),
+    Check('HOST-001', 'duplicate/empty Host answered 400 or close, pipelined GET / clean (RFC 9112 §3.2)', 'Medium', 'CWE-444', _host_001, 'h1', 'High'),
     Check('STATIC-001', 'traversal via /static/../ and %2e%2e/ never serves files outside the root', 'High', 'CWE-22', _static_001, 'h1'),
+    Check('SYMLINK-001', 'symlink in the static root must not escape it (CVE-2024-23334 class)', 'Critical', 'CWE-59', _symlink_001, 'h1'),
+    Check('WS-001', 'WebSocket handshake refused on bad key/version; unmasked data frame closed with 1002 (RFC 6455 §5.1)', 'Medium', 'CWE-444', _ws_001, 'h1', 'High'),
     Check('HDR-001', 'server: header carries no filesystem path or Python version', 'Low', 'CWE-200', _hdr_001, 'h1'),
     Check('BASELINE-003', 'GET / still returns 200 after every probe', 'High', 'CWE-400', _baseline_003, 'h1'),
     Check('H2-BASE-001', 'GET / over HTTP/2 returns 200 with body "ok"', 'High', 'CWE-400', _h2_base_001, 'h2'),
@@ -1285,6 +2084,9 @@ CHECKS: tuple[Check, ...] = (
     Check('H2-ROBUST-003', 'unknown frame type with reserved bit clear ignored, connection keeps working (RFC 9113 §4.1)', 'Low', 'CWE-755', _h2_robust_003, 'h2', 'High'),
     Check('H2-ROBUST-004', '128 KiB header list answered 431 or REFUSED_STREAM/ENHANCE_YOUR_CALM', 'Medium', 'CWE-400', _h2_robust_004, 'h2', 'High'),
     Check('H2-ROBUST-005', 'PRIORITY self-dependency answered PROTOCOL_ERROR (RFC 9113 §5.3.1)', 'Low', 'CWE-755', _h2_robust_005, 'h2', 'High'),
+    Check('H2-ROBUST-006', 'bounded Rapid Reset burst: 20 streams RST-cancelled, fresh request still served (CVE-2023-44487 class)', 'Medium', 'CWE-400', _h2_robust_006, 'h2', 'High'),
+    Check('H2-ROBUST-007', '30 CONTINUATION frames complete or are refused without crash (CVE-2023-45288 class)', 'Medium', 'CWE-400', _h2_robust_007, 'h2', 'High'),
+    Check('H2-ROBUST-008', 'HPACK bomb lite (decoded ≤ 4 MiB) completes or is refused without crash (CVE-2016-6581 class)', 'Medium', 'CWE-409', _h2_robust_008, 'h2', 'High'),
     Check('H2-BASE-002', 'a fresh HTTP/2 request after all h2 abuse returns 200 with body "ok"', 'High', 'CWE-400', _h2_base_002, 'h2'),
     Check('TLS-001', 'TLS 1.0/1.1 refused; TLS 1.2/1.3 handshake negotiates ALPN h2', 'Medium', 'CWE-326', _tls_001, 'h2'),
 )

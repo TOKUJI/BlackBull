@@ -67,12 +67,18 @@ fixture pins `minimum_version = TLSv1_2`; ALPN advertises `h2` then
 | `POST /echo-body` | `200`, `application/octet-stream`, request body echoed | request-body framing: H1-ROBUST-005, SMUGGLE-*, CHUNK-* |
 | `GET /square/{n:int}` | `200`, `{"n": n, "square": n*n}` | path parameters and type coercion |
 | `QUERY /search` | `200`, `{"echo": "<request body>"}` | QUERY-method surface with a request body (RFC 10008) |
+| `WS /ws` | WebSocket echo: accept, then echo every message | upgrade handshake and frame conformance: WS-001 |
 | `GET`/`HEAD` `/static/<path>` | file under `tools/security/static/` | path traversal: STATIC-001 |
 | 404 handler | `404`, `{"error": "not found"}` | stable not-found oracle |
 | 500 handler | `500`, `{"error": "internal server error"}` | stable server-error oracle |
 
-`tools/security/static/hello.txt` (one line) is the only static file; it is
-the "inside the root" reference the traversal check contrasts against.
+`tools/security/static/` holds the static-check inputs: `hello.txt` (one
+line) is the "inside the root" reference the traversal check contrasts
+against; `hello-link.txt` is a symlink to it (in-root, served or safely
+refused); `escape-link.txt` is a symlink to
+`tools/security/fixture_secret.txt` — one level **outside** the static
+root — for SYMLINK-001's escape oracle. All are committed read-only inputs;
+no check writes anything.
 
 ## Running it
 

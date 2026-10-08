@@ -13,30 +13,43 @@ import pytest
 from tools.security.probe import (
     ALLOWED_HOSTS,
     CHECKS,
+    FAIL,
     LANES,
     PASS,
     SEVERITIES,
     TIMEOUT,
-    FAIL,
     Check,
     CheckResult,
     H2Info,
     Lane,
     UnsafeTargetError,
     Verdict,
+    WsAttempt,
     abuse_accept_verdict,
     checks_for,
     exit_code,
+    expect_verdict,
     h2_error_verdict,
     h2_info,
     h2_ok_verdict,
+    h2_recover_verdict,
+    h2_settings,
     main,
     parse_target,
+    rapid_reset_verdict,
+    range_verdict,
     render_markdown,
     render_table,
     run_checks,
+    split_interims,
     state_verdict,
     tls_verdict,
+    trailer_followup_verdict,
+    ws_bad_handshake_verdict,
+    ws_flood_verdict,
+    ws_head_parse,
+    ws_mask_verdict,
+    ws_scan_frames,
     write_report,
 )
 
@@ -374,3 +387,244 @@ def test_tls_verdict_requires_old_failures_and_new_h2():
     dead = [('TLS1.0', False, 'SSLError'), ('TLS1.1', False, 'SSLError'),
             ('TLS1.2', False, 'SSLError'), ('TLS1.3', False, 'SSLError')]
     assert tls_verdict(dead).verdict == FAIL
+
+
+# ------------------------------------------------------------------
+# M4 judges — WebSocket
+# ------------------------------------------------------------------
+
+
+def _ws_attempt(status=101, frames=b'', closed=True, timed_out=False):
+    return WsAttempt(name='t', status=status, accept=b'a', head=b'', frames=frames,
+                     closed=closed, timed_out=timed_out)
+
+
+def test_ws_head_parse_status_and_accept():
+    head = (b'HTTP/1.1 101 Switching Protocols\r\n'
+            b'Upgrade: websocket\r\nSec-WebSocket-Accept: xyz==\r\n\r\n')
+    assert ws_head_parse(head) == (101, b'xyz==')
+    assert ws_head_parse(b'HTTP/1.1 400 Bad Request\r\n\r\n') == (400, b'')
+    assert ws_head_parse(b'garbage') == (None, b'')
+
+
+def test_ws_scan_frames_reads_close_codes_and_echo():
+    close1002 = b'\x88\x02\x03\xea'
+    echo = b'\x81\x01X'
+    assert ws_scan_frames(close1002) == ((1002,), False, False)
+    assert ws_scan_frames(echo) == ((), True, False)
+    assert ws_scan_frames(b'\x88\x02\x03\xe8') == ((1000,), False, False)
+    assert ws_scan_frames(b'\x81\x81\x37\xfa\x21\x3d\x7f') == ((), False, True)
+    assert ws_scan_frames(b'\x81') == ((), False, False)  # truncated tail ignored
+
+
+def test_ws_mask_verdict_oracles():
+    assert ws_mask_verdict(_ws_attempt(frames=b'\x88\x02\x03\xea'), 5.0).verdict == PASS
+    assert ws_mask_verdict(_ws_attempt(closed=True), 5.0).verdict == PASS
+    echoed = ws_mask_verdict(_ws_attempt(frames=b'\x81\x01X'), 5.0)
+    assert echoed.verdict == FAIL and 'echoed' in echoed.detail
+    wrong = ws_mask_verdict(_ws_attempt(frames=b'\x88\x02\x03\xe8'), 5.0)
+    assert wrong.verdict == FAIL and '1000' in wrong.detail
+    untested = ws_mask_verdict(_ws_attempt(status=400), 5.0)
+    assert untested.verdict == FAIL and 'untested' in untested.detail
+    open_conn = ws_mask_verdict(_ws_attempt(closed=False), 5.0)
+    assert open_conn.verdict == FAIL
+
+
+def test_ws_bad_handshake_verdict_rejects_101():
+    ok = ws_bad_handshake_verdict(_ws_attempt(status=400), 5.0,
+                                  allow=frozenset({400, 426}))
+    assert ok.verdict == PASS
+    assert ws_bad_handshake_verdict(_ws_attempt(status=101), 5.0,
+                                    allow=frozenset({400})).verdict == FAIL
+    closed = ws_bad_handshake_verdict(_ws_attempt(status=None), 5.0,
+                                      allow=frozenset({400}))
+    assert closed.verdict == PASS
+
+
+def test_ws_flood_verdict_accepts_upgrade_or_refusal():
+    assert ws_flood_verdict(_ws_attempt(status=101), 5.0).verdict == PASS
+    assert ws_flood_verdict(_ws_attempt(status=431), 5.0).verdict == PASS
+    assert ws_flood_verdict(_ws_attempt(status=None), 5.0).verdict == PASS
+    assert ws_flood_verdict(_ws_attempt(status=500), 5.0).verdict == FAIL
+    stalled = ws_flood_verdict(_ws_attempt(status=None, closed=False,
+                                           timed_out=True), 5.0)
+    assert stalled.verdict == TIMEOUT
+
+
+# ------------------------------------------------------------------
+# M4 judges — H1 trailers / Range / Expect
+# ------------------------------------------------------------------
+
+
+def test_trailer_followup_verdict_detects_smuggling():
+    ok_body = b'{"headers": [["host", "probe"]]}'
+    clean = trailer_followup_verdict(((200, b'Z'), (200, ok_body)), 'timeout')
+    assert clean.verdict == PASS
+    smuggled = trailer_followup_verdict(
+        ((200, b'Z'), (200, b'{"headers": [["x-smuggle", "1"]]}')), 'timeout')
+    assert smuggled.verdict == FAIL and 'smuggled' in smuggled.detail
+    assert trailer_followup_verdict(((200, b'Z'), (500, b'x')), 'timeout').verdict == FAIL
+    assert trailer_followup_verdict(((200, b'Z'), (200, b'Z'), (200, ok_body)),
+                                    'timeout').verdict == FAIL
+    assert trailer_followup_verdict(((200, b'Z'),), 'closed').verdict == PASS
+    assert trailer_followup_verdict((), 'timeout').verdict == TIMEOUT
+    assert trailer_followup_verdict(((200, b'Z'),), 'timeout').verdict == FAIL
+
+
+def test_range_verdict_shapes():
+    hello = b'hello from the BlackBull static fixture\n'
+    size = len(hello)
+    full = range_verdict(200, [], hello, size=size, closed=False, timed_out=False)
+    assert full.verdict == PASS
+    wrong_body = range_verdict(200, [], b'nope', size=size, closed=False,
+                               timed_out=False)
+    assert wrong_body.verdict == FAIL
+    ok206 = range_verdict(
+        206, [(b'content-range', b'bytes 1-3/40'), (b'content-type', b'text/plain')],
+        b'ell', size=size, closed=False, timed_out=False)
+    assert ok206.verdict == PASS
+    bad_len = range_verdict(
+        206, [(b'content-range', b'bytes 1-3/40')], b'el', size=size,
+        closed=False, timed_out=False)
+    assert bad_len.verdict == FAIL
+    out_of_file = range_verdict(
+        206, [(b'content-range', b'bytes 1-3/99')], b'ell', size=size,
+        closed=False, timed_out=False)
+    assert out_of_file.verdict == FAIL
+    multipart = range_verdict(
+        206, [(b'content-type', b'multipart/byteranges; boundary=x')],
+        b'--x', size=size, closed=False, timed_out=False)
+    assert multipart.verdict == PASS
+    ok416 = range_verdict(416, [], b'', size=size, closed=False, timed_out=False)
+    assert ok416.verdict == PASS
+    bad416 = range_verdict(416, [(b'content-range', b'bytes 0-1/40')], b'',
+                           size=size, closed=False, timed_out=False)
+    assert bad416.verdict == FAIL
+    assert range_verdict(500, [], b'', size=size, closed=False,
+                         timed_out=False).verdict == FAIL
+    assert range_verdict(None, [], b'', size=size, closed=True,
+                         timed_out=False).verdict == FAIL
+    assert range_verdict(None, [], b'', size=size, closed=False,
+                         timed_out=True).verdict == TIMEOUT
+
+
+def test_split_interims_and_expect_verdict():
+    assert split_interims([(100, b''), (200, b'hello'), (200, b'ok')]) == (
+        ((100, b''),), ((200, b'hello'), (200, b'ok')))
+    good = expect_verdict(((100, b''), (200, b'hello'), (200, b'ok')), 'timeout',
+                          ok_body=b'hello')
+    assert good.verdict == PASS and '100-then' in good.detail
+    no_interim = expect_verdict(((200, b'hello'), (200, b'ok')), 'timeout',
+                                ok_body=b'hello')
+    assert no_interim.verdict == PASS and 'no 100' in no_interim.detail
+    rejected = expect_verdict(((417, b'x'), (200, b'ok')), 'timeout',
+                              ok_body=b'hello')
+    assert rejected.verdict == PASS
+    weird_interim = expect_verdict(((103, b''), (200, b'hello')), 'timeout',
+                                   ok_body=b'hello')
+    assert weird_interim.verdict == FAIL
+    wrong_body = expect_verdict(((200, b'wrong'), (200, b'ok')), 'timeout',
+                                ok_body=b'hello')
+    assert wrong_body.verdict == FAIL
+    dropped = expect_verdict(((200, b'ok'),), 'timeout', ok_body=b'hello')
+    assert dropped.verdict == FAIL
+
+
+# ------------------------------------------------------------------
+# M4 judges — H2
+# ------------------------------------------------------------------
+
+
+def _h2_fake(frame_type, stream_id=None, error_code=None, body=b''):
+    return H2Info(kind=frame_type, stream_id=stream_id, error_code=error_code,
+                  body=body)
+
+
+def test_h2_settings_parses_advertised_parameters():
+    payload = (3).to_bytes(2, 'big') + (100).to_bytes(4, 'big')
+    payload += (5).to_bytes(2, 'big') + (16384).to_bytes(4, 'big')
+    settings = h2_settings([_h2_fake('SETTINGS', 0, body=payload),
+                            _h2_fake('SETTINGS', 0)])
+    assert settings == {3: 100, 5: 16384}
+    assert h2_settings([_h2_fake('HEADERS', 1)]) == {}
+
+
+def test_h2_recover_verdict_accepts_completion_or_refusal():
+    done = [_h2_fake('HEADERS', 3, body=b''), ]
+    done[0] = H2Info(kind='HEADERS', stream_id=3, status=200)
+    assert h2_recover_verdict(done, 3, accept_codes=frozenset(),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == PASS
+    refused = [_h2_fake('GOAWAY', 0, error_code=11)]
+    assert h2_recover_verdict(refused, 3, accept_codes=frozenset({11}),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == PASS
+    wrong_code = [_h2_fake('GOAWAY', 0, error_code=2)]
+    assert h2_recover_verdict(wrong_code, 3, accept_codes=frozenset({11}),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == FAIL
+    bad_status = [H2Info(kind='HEADERS', stream_id=3, status=500)]
+    assert h2_recover_verdict(bad_status, 3, accept_codes=frozenset({11}),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == FAIL
+    assert h2_recover_verdict([_h2_fake('EOF')], 3, accept_codes=frozenset({11}),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == PASS
+    assert h2_recover_verdict([], 3, accept_codes=frozenset({11}),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == TIMEOUT
+
+
+def test_rapid_reset_verdict_flags_illegal_error_codes():
+    ok = [_h2_fake('RST_STREAM', 1, error_code=8), _h2_fake('GOAWAY', 0, error_code=0)]
+    assert rapid_reset_verdict(ok, 41, 20).verdict == PASS
+    bad = [_h2_fake('GOAWAY', 0, error_code=1)]
+    verdict = rapid_reset_verdict(bad, 41, 20)
+    assert verdict.verdict == FAIL and 'PROTOCOL_ERROR' in verdict.detail
+    assert rapid_reset_verdict([], 41, 20).verdict == PASS
+
+
+def test_h2_bomb_stays_within_its_declared_cap():
+    import hpack
+    from tools.security.probe import (
+        _H2_BOMB_CAP, _H2_BOMB_NAME, _H2_BOMB_REFS, _H2_BOMB_VALUE)
+    enc = hpack.Encoder()
+    fields = ((':method', 'GET'), (':path', '/'),
+              (':scheme', 'http'), (':authority', '127.0.0.1:8443'))
+    enc.encode(list(fields) + [(_H2_BOMB_NAME, _H2_BOMB_VALUE)])
+    bomb = enc.encode(list(fields) + [(_H2_BOMB_NAME, _H2_BOMB_VALUE)] * _H2_BOMB_REFS)
+    decoded = hpack.Decoder(max_header_list_size=_H2_BOMB_CAP + 1).decode(bomb)
+    total = sum(len(n) + len(v) for n, v in decoded)
+    assert len(bomb) < 8192
+    assert total <= _H2_BOMB_CAP
+
+
+def test_h2_continuation_steps_cut_one_block_into_thirty_one():
+    from tools.security.probe import Probe, Target, _h2_continuation_steps
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8443), 5.0)
+    steps = _h2_continuation_steps(probe, stream_id=1, continuations=30)
+    assert len(steps) == 31
+    kinds = []
+    for step in steps:
+        raw = step.data
+        frame_type, flags = raw[3], raw[4]
+        stream = int.from_bytes(raw[5:9], 'big')
+        assert stream == 1
+        kinds.append((frame_type, flags))
+    assert kinds[0] == (0x01, 0x01)            # HEADERS, END_STREAM
+    assert all(t == 0x09 and f == 0x00 for t, f in kinds[1:-1])
+    assert kinds[-1] == (0x09, 0x04)           # CONTINUATION, END_HEADERS
+    import hpack
+    block = b''.join(s.data[9:9 + int.from_bytes(s.data[0:3], 'big')]
+                     for s in steps)
+    fields = hpack.Decoder().decode(block)
+    assert (':method', 'GET') in fields
+
+
+def test_m4_checks_escalate_hangs_to_high():
+    by_id = {check.check_id: check for check in CHECKS}
+    for check_id in ('RANGE-001', 'EXPECT-001', 'HOST-001', 'WS-001',
+                     'H2-ROBUST-006', 'H2-ROBUST-007', 'H2-ROBUST-008'):
+        assert by_id[check_id].timeout_severity() == 'High'
+    assert by_id['SYMLINK-001'].severity == 'Critical'
+    assert by_id['TRAILER-001'].timeout_severity() == 'High'

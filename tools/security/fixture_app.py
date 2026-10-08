@@ -20,7 +20,9 @@ if __package__ in (None, ''):
 
 from blackbull import (
     BlackBull, Connection, JSONResponse, Listener, QUERY, Response, Tcp,
+    WebSocket,
 )
+from blackbull.utils import Scheme
 
 app = BlackBull()
 
@@ -69,6 +71,13 @@ async def square(n: int) -> JSONResponse:
 @app.route(path='/search', methods=[QUERY])
 async def search(body: bytes) -> JSONResponse:
     return JSONResponse({'echo': body.decode('utf-8', 'replace')})
+
+
+@app.route(path='/ws', scheme=Scheme.websocket)
+async def ws_echo(ws: WebSocket) -> None:
+    await ws.accept()
+    async for message in ws:
+        await ws.send(message)
 
 
 app.static('/static', _STATIC_DIR)

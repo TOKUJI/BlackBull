@@ -134,6 +134,15 @@ would carry. The convention throughout: a hang or crash is **High**
 | H2-ROBUST-003 (unknown frame not ignored) | Low, or High if crash/hang | CWE-755 |
 | H2-ROBUST-004 (oversized header list) | Medium (bounded availability), or High if crash/hang | CWE-400 |
 | H2-ROBUST-005 (PRIORITY self-dependency) | Low, or High if crash/hang | CWE-755 |
+| TRAILER-001 (chunked trailers) | High (desync/smuggling primitive) | CWE-444 |
+| RANGE-001 (Range abuse) | Medium (bounded amplification class), or High if crash/hang | CWE-400 |
+| EXPECT-001 (100-continue) | Medium (bounded availability / latent desync), or High if crash/hang | CWE-444 |
+| HOST-001 (duplicate/empty Host) | Medium (host confusion / latent intermediary desync), or High if crash/hang | CWE-444 |
+| SYMLINK-001 (symlink escape) | Critical (arbitrary file read outside the served root — the base rank is kept on timeout, since a hang here outranks plain availability) | CWE-59 |
+| WS-001 (WebSocket handshake/masking) | Medium (protocol-confusion and cache-poisoning primitive via unmasked frames or a weak handshake), or High if crash/hang | CWE-444 |
+| H2-ROBUST-006 (Rapid Reset lite) | Medium (bounded availability semantics), or High if crash/hang | CWE-400 |
+| H2-ROBUST-007 (CONTINUATION flood lite) | Medium (bounded availability), or High if crash/hang | CWE-400 |
+| H2-ROBUST-008 (HPACK bomb lite) | Medium (bounded amplification), or High if crash/hang | CWE-409 |
 | TLS-001 (TLS floor / ALPN) | Medium (weak crypto accepted or h2 not negotiable) | CWE-326 |
 
 ## Reporting policy
