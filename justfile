@@ -56,6 +56,9 @@ yt-create summary description:
 yt-comment issue text:
     scripts/youtrack.sh comment "{{issue}}" "{{text}}"
 
+yt-attach issue file:
+    scripts/youtrack.sh attach "{{issue}}" "{{file}}"
+
 # Replace an issue's description with the contents of a file
 yt-update issue description_file:
     scripts/youtrack.sh update "{{issue}}" "{{description_file}}"
