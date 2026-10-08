@@ -92,17 +92,14 @@ async def handle_value_error(conn, receive, send):
                             status=HTTPStatus.BAD_REQUEST))
 ```
 
-Exception handlers use MRO walk: a handler registered for
-`Exception` catches all unhandled subclasses.  More specific
-handlers (e.g. `ValueError`) take priority over base-class
-handlers.
+Exceptions, including validation errors and route guards, select:
 
-For an exception, BlackBull first looks for an explicitly registered
-exception handler along its MRO, then a handler for the resolved status,
-then the default handler. An explicit `@app.on_error(Exception)` therefore
-takes priority over status handlers. This also applies to query/body
-validation errors and route guards. A 404 or 405 caused by route lookup
-uses its status handler directly because no application exception is raised.
+1. The most specific explicitly registered exception handler along the MRO.
+2. A handler for the resolved status.
+3. The framework default.
+
+An explicit `@app.on_error(Exception)` takes priority over status handlers.
+Route lookup 404/405 uses status handlers directly.
 
 ## What's in `conn.state`
 
@@ -134,9 +131,7 @@ async def custom_500(conn, receive, send):
                         content_type='text/html'))
 ```
 
-The default handler is only used when no custom one is registered.
-Per-status registration overrides only that status; other errors
-keep the default behaviour.
+This handles exceptions resolving to 500 unless an exception handler takes priority.
 
 ## Next
 

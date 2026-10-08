@@ -92,3 +92,21 @@ def test_unregistered_type_is_a_server_error() -> None:
         r = client.get('/w')
     assert r.status_code == 500
 
+
+
+def test_converter_mro_prefers_specific_registration() -> None:
+    class SpecializedWidget(Widget):
+        pass
+
+    app = BlackBull()
+    app.register_converter(object, lambda value: b'base')
+    app.register_converter(Widget, lambda value: b'widget')
+
+    @app.route(path='/w')
+    async def get_widget():
+        return SpecializedWidget('inherited')
+
+    with TestClient(app) as client:
+        assert client.get('/w').content == b'widget'
+        app.register_converter(SpecializedWidget, lambda value: b'exact')
+        assert client.get('/w').content == b'exact'

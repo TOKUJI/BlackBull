@@ -560,7 +560,7 @@ class BlackBull:
                     'error_status': e.status,
                     'error_exception': e,
                 })
-                handler = self._error_router.resolve(e, e.status)
+                handler = self._error_router.resolve(type(e), e.status)
                 if handler is not None:
                     await handler(conn, receive, send)
                 return
@@ -612,7 +612,7 @@ class BlackBull:
                 'error_status': err_status,
                 'error_exception': exc_caught,
             })
-            handler = self._error_router.resolve(exc_caught, err_status)
+            handler = self._error_router.resolve(type(exc_caught), err_status)
             if handler is not None:
                 await handler(conn, receive, send)
 
