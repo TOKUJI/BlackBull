@@ -290,10 +290,9 @@ users will actually use.
   client-streaming, and bidirectional (see above).
 - `BB_GRPC_MAX_MESSAGE_SIZE` (default 4 MiB) bounds each decoded request and
   response message. Incoming encoded messages also have a 16 MiB safety cap.
-  Oversized declared lengths are rejected before reading the message body;
-  unary and server-streaming accept exactly one request message. Streaming
-  requests have no aggregate message-size cap; transport body and time limits
-  still apply.
+  Declared oversize is rejected at the prefix. Unary and server-streaming
+  accept one request message. Streaming caps apply per message; transport body
+  and time limits still apply.
 - **gzip message compression** is supported (`grpc-encoding: gzip` /
   `identity`); a compressed request in any other coding is rejected with
   `UNIMPLEMENTED`, and the response advertises

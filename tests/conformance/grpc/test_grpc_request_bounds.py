@@ -180,6 +180,16 @@ async def test_caller_cancellation_escapes(shape, native):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('shape', SHAPES)
+@pytest.mark.parametrize('native', [False, True])
+async def test_complete_message_before_disconnect_is_not_a_complete_rpc(shape, native):
+    status, seen, _ = await _call([
+        (encode_message(b'ok'), True), {'type': 'http.disconnect'}], shape, native=native)
+    assert status == b'1'
+    assert seen == ([b'ok'] if shape in SHAPES[2:] else [])
+
+
+@pytest.mark.asyncio
 async def test_unary_does_not_copy_the_rest_of_an_extra_message():
     chunk = encode_message(b'ok') + encode_message(b'x' * (512 * 1024))
     tracemalloc.start()

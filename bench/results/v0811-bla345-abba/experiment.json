@@ -67,5 +67,6 @@
     "micro": "minimum allowed CPU",
     "wire_server": "minimum allowed CPU",
     "wire_load": "second allowed CPU"
-  }
+  },
+  "head_commit": "76e432cf81059afe61f64c90ba7d0e8f768c4add"
 }

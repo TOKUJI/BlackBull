@@ -444,11 +444,8 @@ async def _read_unary_request(receive, encoding: bytes) -> bytes:
     """Validate the complete input before invoking a single-request handler."""
     messages = _iter_request_messages(receive, encoding, single=True)
     request = None
-    try:
-        async for request in messages:
-            pass
-    finally:
-        await messages.aclose()
+    async for request in messages:
+        pass
     if request is None:
         raise GrpcError(
             GrpcStatus.UNIMPLEMENTED,
@@ -490,19 +487,18 @@ async def _iter_request_messages(receive, encoding: bytes, *, single: bool = Fal
                     if not buf and len(chunk) - prefix_end >= length:
                         message = chunk[prefix_end:prefix_end + length]
                         offset = prefix_end + length
-                        seen = True
-                        yield _decompress_message(message, encoding) if flag else message
-                        continue
-                    if not buf:
-                        buf.extend(memoryview(chunk)[offset:prefix_end])
-                    offset = prefix_end
-                end = min(len(chunk), offset + _PREFIX_LEN + length - len(buf))
-                buf.extend(memoryview(chunk)[offset:end])
-                offset = end
-                if len(buf) < _PREFIX_LEN + length:
-                    break
-                message = bytes(memoryview(buf)[_PREFIX_LEN:])
-                buf.clear()
+                    else:
+                        if not buf:
+                            buf.extend(memoryview(chunk)[offset:prefix_end])
+                        offset = prefix_end
+                if buf:
+                    end = min(len(chunk), offset + _PREFIX_LEN + length - len(buf))
+                    buf.extend(memoryview(chunk)[offset:end])
+                    offset = end
+                    if len(buf) < _PREFIX_LEN + length:
+                        break
+                    message = bytes(memoryview(buf)[_PREFIX_LEN:])
+                    buf.clear()
                 seen = True
                 yield _decompress_message(message, encoding) if flag else message
     except ClientDisconnected as exc:

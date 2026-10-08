@@ -2,7 +2,7 @@
 
 Baseline: `3025eb95`. Both arms use the same CPython 3.14 environment. A is baseline; B is the bounded common request parser. Positive throughput deltas favor B; positive micro time deltas mean more time.
 
-The public bridge micro comparison shows about 1 microsecond of additional work on small unary calls. Borrowing complete messages instead of copying whole transport chunks improves large streaming inputs. Wire measurements have limited precision; intervals crossing zero do not establish equivalence.
+The public bridge micro comparison shows about 1 microsecond of additional work on small unary calls. Slicing complete messages directly from transport chunks avoids an intermediate buffer and improves large streaming inputs. Wire measurements have limited precision; intervals crossing zero do not establish equivalence.
 
 ## Public bridge micro comparison
 

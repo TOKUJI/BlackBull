@@ -1,0 +1,20 @@
+{
+  "baseline_commit": "76e432cf81059afe61f64c90ba7d0e8f768c4add",
+  "source_sha256": {
+    "blackbull/grpc/asgi.py": "0ca83f4c17477bcf6c77661e013625b6be454ea581efe1b276aec8ddd1d3117c",
+    "blackbull/grpc/codec.py": "93bb17a88d27febbf2c5b34e1a8004fbc79db8758f59f004a9bb0923de4e7f0f"
+  },
+  "python": "3.14.6",
+  "rounds": 6,
+  "order": "ABBA/BAAB alternating",
+  "calls_per_sample": 8000,
+  "warmup_calls": 1000,
+  "scope": "serve_grpc, no sockets",
+  "response": "same no-op collector",
+  "cpu": "minimum allowed CPU",
+  "limits": [
+    "Comparison against initial PR, not release baseline",
+    "Original wire samples do not cover follow-up",
+    "Small streaming differences cannot be excluded"
+  ]
+}
