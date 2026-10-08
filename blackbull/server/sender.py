@@ -34,7 +34,7 @@ from ..asgi import (
     WebSocketSendEvent,
 )
 from ..headers import (
-    Headers, HeaderList, _MinimalResponseHeaders, _minimal_response_headers)
+    HeaderList, _MinimalResponseHeaders, _minimal_response_headers)
 from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
 
 from ..logger import debug_gate  # noqa: E402
@@ -102,8 +102,8 @@ def _http_date() -> bytes:
 
 
 # The two builders below must stay byte-for-byte equivalent to the frame-object
-# path they replace — ``protocol.frame_types.Headers.save()``, not this module's
-# field-collection ``Headers`` — including how the shared HPACK dynamic table
+# path they replace — ``protocol.frame_types.Headers.save()`` — including how
+# the shared HPACK dynamic table
 # evolves; ``tests/conformance/http2/test_headers_fastpath_builder.py`` asserts
 # both.  ``status_fast_bytes`` is static-indexed, so it never touches that table
 # (RFC 7541 §6.1).
