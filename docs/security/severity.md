@@ -109,7 +109,11 @@ would carry. The convention throughout: a hang or crash is **High**
 
 | Check | Rank if it fails | CWE |
 |---|---|---|
-| BASELINE-001/002/003, H2-BASE-001/002 | High (availability: server down or crashed) | CWE-400 |
+| BASELINE-001 | High (availability: server down or crashed) | CWE-400 |
+| BASELINE-002 | High (availability: server down or crashed) | CWE-400 |
+| BASELINE-003 | High (availability: server down or crashed) | CWE-400 |
+| H2-BASE-001 | High (availability: server down or crashed) | CWE-400 |
+| H2-BASE-002 | High (availability: server down or crashed) | CWE-400 |
 | H1-ROBUST-001 (unknown method) | Info, or High if crash/hang | CWE-755 |
 | H1-ROBUST-002 (oversized header) | Medium, or High if crash/hang | CWE-400 |
 | H1-ROBUST-003 (garbage request line) | Info, or High if crash/hang | CWE-755 |

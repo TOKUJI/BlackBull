@@ -7,6 +7,8 @@ run under pytest; pytest.ini keeps tools/ out of collection entirely.
 from __future__ import annotations
 
 import ipaddress
+from pathlib import Path
+import re
 import time
 
 import pytest
@@ -281,6 +283,22 @@ def test_long_tier_budget_overrides_the_check_timeout():
     assert run_checks(quick, stub, deadline=time.monotonic() + 10)[0].detail == 'effective 5'
     long = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0, tier='long')
     assert run_checks(long, stub, deadline=time.monotonic() + 30)[0].detail == 'effective 16'
+
+
+def test_registry_checks_all_appear_in_the_documented_tables():
+    root = Path(__file__).resolve().parents[2]
+    docs = {name: (root / 'docs' / 'security' / name).read_text(encoding='utf-8')
+            for name in ('probe.md', 'severity.md', 'sufficiency.md')}
+    registry_ids = {check.check_id for check in CHECKS}
+    for name, text in docs.items():
+        missing = sorted(cid for cid in registry_ids if cid not in text)
+        assert not missing, f'{name} misses registry checks: {missing}'
+    cited = set(re.findall(
+        r'\b(?:BASELINE|H1-ROBUST|SMUGGLE|CHUNK|TRAILER|STATE|RANGE|EXPECT|HOST'
+        r'|STATIC|SYMLINK|WS|HDR|H2-BASE|H2-ROBUST|TLS|LANE)-\d{3}\b',
+        docs['sufficiency.md']))
+    unknown = sorted(cited - registry_ids)
+    assert not unknown, f'sufficiency.md cites unknown checks: {unknown}'
 
 
 def test_hang_escalates_h1_robust_checks_to_high():

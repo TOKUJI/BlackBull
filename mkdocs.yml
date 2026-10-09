@@ -83,6 +83,7 @@ nav:
     - Severity criteria: security/severity.md
     - Minimal fixture app: security/fixture-app.md
     - Local robustness probe: security/probe.md
+    - Sufficiency population tables: security/sufficiency.md
   - About:
     - Architecture: about/architecture.md
     - Conformance: about/conformance.md
