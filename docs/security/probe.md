@@ -107,6 +107,33 @@ process that vanishes mid-check marks the row FAIL (High) as well.
 socket must show residuals on every row (4/4 rows marked), while the
 fixture shows zero residual across the quick tier.
 
+## Container tier (G2-4)
+
+`just vuln-container` runs the same quick tier against a server confined by
+`--memory` (default 64m) and `--pids-limit` (default 256): the fixture runs
+in a container and the probe runs in a *sibling* container sharing the
+server's network and PID namespaces (`--network container:… --pid
+container:…`), with no published ports — so /proc observation (G2-3) works
+unchanged. The image is `bb-vuln`, built from
+`tools/security/container.Dockerfile` (base `bb-multiport`): it copies this
+worktree's `blackbull/` sources over the base's pinned installation, so the
+container tier probes the code under review.
+
+Recorded per run (`bench/results/security/container-*.{json,txt}`):
+memory.events `oom_kill`, pids.events `max`, `memory.peak`, `pids.peak`
+(read from the container's cgroup), and `docker inspect`'s OOMKilled and
+ExitCode (the fallback when the server was killed). The run is a pass only
+when all of these are zero/absent, the probe reports no FAIL, the container
+verdicts are identical to a fresh native run (38 rows), and no labelled
+container is left behind. Any breach — oom_kill, pids max, OOMKilled, a
+server exit, or verdict drift — makes it exit non-zero.
+
+`just vuln-container-oom` is the detector verification: with `--memory 12m`
+the kernel OOM-kills the fixture and the tool must *detect* it (verified:
+`OOMKilled=True` recorded via the docker-inspect fallback). Containers are
+self-expiring (`timeout 600` inside the server command) and carry
+`bb-vuln`/`bb-vuln.run` labels; every failure path removes them.
+
 ## Configuration matrix (G7)
 
 `just vuln-matrix` runs the quick tier across the configuration matrix —

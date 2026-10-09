@@ -400,6 +400,17 @@ def test_run_checks_marks_residuals_on_the_row():
     assert 'residual connections after settle: fd 10->11' in results[0].detail
 
 
+def test_container_metrics_parsers():
+    from tools.security.container_run import parse_cgroup_counters, parse_verdicts
+    events = 'low 0 high 0 max 0 oom 0 oom_kill 2 oom_group_kill 0\n'
+    assert parse_cgroup_counters(events)['oom_kill'] == 2
+    assert parse_cgroup_counters('max 1\n')['max'] == 1
+    table = ('check  severity  verdict  detail\n'
+             'BASELINE-001  High  PASS  200, body "ok"\n'
+             'TLS-001  Medium  SKIP  not exercised\n')
+    assert parse_verdicts(table) == {'BASELINE-001': 'PASS', 'TLS-001': 'SKIP'}
+
+
 def test_registry_checks_all_appear_in_the_documented_tables():
     root = Path(__file__).resolve().parents[2]
     docs = {name: (root / 'docs' / 'security' / name).read_text(encoding='utf-8')

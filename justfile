@@ -143,6 +143,32 @@ vuln-canary-gate:
 vuln-proc-gate:
     uv run python tools/security/silent_stub.py --proc-gate
 
+# G2-4: container tier — limited server container + sibling probe container
+# (shared net/pid namespaces, no published ports), verdict parity with native
+vuln-container:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=bench/results/security
+    mkdir -p "$out"
+    uv run python tools/security/container_run.py --verdicts-out "$out/container.verdicts"
+    just vuln-target-up >/dev/null
+    just vuln-check > "$out/container-native.txt" 2>&1 || true
+    just vuln-target-down >/dev/null
+    grep -E '^(BASELINE|H1-|SMUGGLE|CHUNK|TRAILER|STATE|RANGE|EXPECT|HOST|STATIC|SYMLINK|WS|HDR|H2-|TLS)' \
+        "$out/container-native.txt" | awk '{print $1 "=" $3}' | sort > "$out/container-native.verdicts"
+    if diff -q "$out/container-native.verdicts" "$out/container.verdicts" >/dev/null; then
+        echo "G2-4 OK: container verdicts match the native run ($(wc -l < "$out/container.verdicts") rows)"
+    else
+        echo "G2-4 DIFF: container vs native verdicts:"
+        diff "$out/container-native.verdicts" "$out/container.verdicts" || true
+        exit 1
+    fi
+
+# G2-4 detector verification: a tiny --memory must be detected as an OOM
+# (24m already serves the fixture at rest; 12m makes the kernel OOM-kill it)
+vuln-container-oom mem="12m":
+    uv run python tools/security/container_run.py --expect-oom --memory {{mem}}
+
 # G7: quick tier across the configuration matrix (uvloop on/off x 1/2 workers)
 # plus the explicit-caps operational config; verdicts must agree (G7-1/G7-2).
 vuln-matrix:
