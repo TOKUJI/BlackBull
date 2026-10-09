@@ -8,13 +8,27 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass
+import urllib.parse
 
-from ..grpc import GrpcStatus, decode_messages, encode_message
+from ..grpc import GrpcDecodeError, GrpcStatus, decode_messages, encode_message
 from ..server.server import ASGIServer
 
 #: Long enough for the accept loop to bind before the first call.  The
 #: framework's own gRPC integration tests use the same figure.
 _STARTUP_WAIT_S = 0.15
+
+#: gRPC's http-grpc-status-mapping.md, for a response with no grpc-status;
+#: every other HTTP status maps to UNKNOWN.
+_HTTP_STATUS_TO_GRPC = {
+    400: GrpcStatus.INTERNAL,
+    401: GrpcStatus.UNAUTHENTICATED,
+    403: GrpcStatus.PERMISSION_DENIED,
+    404: GrpcStatus.UNIMPLEMENTED,
+    429: GrpcStatus.UNAVAILABLE,
+    502: GrpcStatus.UNAVAILABLE,
+    503: GrpcStatus.UNAVAILABLE,
+    504: GrpcStatus.UNAVAILABLE,
+}
 
 
 @dataclass(frozen=True)
@@ -25,16 +39,22 @@ class GrpcReply:
     the whole reason this seam exists — reading them off the response
     object is what an app developer would otherwise have to work out.
     """
-    #: The ``grpc-status`` trailer, as the enum.
+    #: The call's status: the server's ``grpc-status``, or one synthesized
+    #: for a malformed response (see ``violation``).  Never ``OK`` for a
+    #: malformed response.
     status: GrpcStatus
     #: The first response message, or ``b''`` when the call carried none.
     message: bytes
     #: Every response message, for server-streaming calls.
     messages: tuple[bytes, ...]
-    #: The ``grpc-message`` trailer — the human-readable detail.
+    #: The ``grpc-message`` trailer, percent-decoded — the human-readable detail.
     grpc_message: str
     #: The raw response, for anything this dataclass does not surface.
     response: object
+    #: ``None`` for a well-formed gRPC response; otherwise what was wrong
+    #: with it.  ``status`` is then synthesized, except that a valid non-OK
+    #: ``grpc-status`` from the server is kept.
+    violation: str | None = None
 
 
 class GrpcTestServer:
@@ -88,37 +108,85 @@ class GrpcTestServer:
                 client.request('POST', method, headers=headers,
                                body=encode_message(request)),
                 timeout=timeout)
-        return _read_reply(response)
+        registry = getattr(self._app, '_grpc_registry', None)
+        shape = registry.lookup_method(method) if registry is not None else None
+        return _read_reply(response,
+                           unary=None if shape is None else not shape.streaming)
 
 
-def _read_reply(response) -> GrpcReply:
-    """Collect a reply; this helper defaults a missing grpc-status to OK.
+def _read_reply(response, *, unary: bool | None = None) -> GrpcReply:
+    """Judge *response* as the reply to one gRPC call (PROTOCOL-HTTP2.md).
 
-    That fallback is a test-helper limitation, not a gRPC guarantee. Tests for
-    missing status must inspect the actual headers/trailers.
+    *unary* is the call's response shape when known: a unary ``OK`` reply
+    must carry exactly one message.  ``None`` skips that check.
     """
-    # gRPC puts these in the trailer section. A Trailers-Only response — one
-    # from a path that fails before the handler runs — has only the head, so
-    # its status travels there instead.
-    raw_status = (response.trailers.get(b'grpc-status', b'')
-                  or response.headers.get(b'grpc-status', b''))
-    status = GrpcStatus(int(raw_status)) if raw_status else GrpcStatus.OK
-    message_text = (response.trailers.get(b'grpc-message', b'')
-                    or response.headers.get(b'grpc-message', b'')).decode()
-    body = getattr(response, 'body', b'') or b''
+    # A Trailers-Only response carries its status in the head; any other
+    # response carries it only in the trailer section.
+    trailers_only = not response.trailers and not response.body
+    section = response.headers if trailers_only else response.trailers
+    status_values = [value for _, value in section.getlist(b'grpc-status')]
+    server_status, status_problem = _parse_status(status_values)
+
+    transport: list[str] = []
+    if response.status != 200:
+        transport.append(f'HTTP status {response.status} (expected 200)')
+    content_type = response.headers.get(b'content-type', b'').lower()
+    if content_type != b'application/grpc' \
+            and not content_type.startswith(b'application/grpc+'):
+        transport.append(f'content-type {content_type!r} is not application/grpc')
+
+    content: list[str] = []
+    messages: tuple[bytes, ...] = ()
     try:
-        # ``decode_messages`` yields ``(compressed, payload)``; the flag is
-        # the transport's business, and a servicer test asserts on payloads.
-        messages = tuple(payload for _compressed, payload
-                         in decode_messages(body))
-    except Exception:
-        # A truncated or unframed body is itself a finding; hand back what
-        # arrived rather than raising out of a test helper.
-        messages = ()
+        frames = decode_messages(response.body)
+    except GrpcDecodeError as exc:
+        content.append(f'message framing: {exc}')
+    else:
+        messages = tuple(payload for _, payload in frames)
+        if any(compressed for compressed, _ in frames):
+            # This client announces no grpc-accept-encoding (compression.md).
+            content.append('a compressed message, but the call accepts '
+                           'identity only')
+        elif unary and server_status is GrpcStatus.OK and len(messages) != 1:
+            content.append(f'a unary reply carried {len(messages)} messages '
+                           f'(expected 1)')
+
+    if server_status is None:
+        # The HTTP mapping covers only a missing grpc-status.
+        status = (GrpcStatus.UNKNOWN if status_values
+                  else _HTTP_STATUS_TO_GRPC.get(response.status, GrpcStatus.UNKNOWN))
+    elif server_status is not GrpcStatus.OK or not (transport or content):
+        status = server_status
+    elif transport:
+        status = _HTTP_STATUS_TO_GRPC.get(response.status, GrpcStatus.UNKNOWN)
+    else:
+        status = GrpcStatus.INTERNAL
+    problems = ([status_problem] if status_problem else []) + transport + content
+    raw_message = section.get(b'grpc-message', b'')
     return GrpcReply(
         status=status,
         message=messages[0] if messages else b'',
         messages=messages,
-        grpc_message=message_text,
+        # Invalid %-encodings stay as they are (PROTOCOL-HTTP2.md).
+        grpc_message=urllib.parse.unquote_to_bytes(raw_message).decode(
+            'utf-8', 'replace'),
         response=response,
+        violation='; '.join(problems) or None,
     )
+
+
+def _parse_status(values: list[bytes]) -> tuple[GrpcStatus | None, str | None]:
+    """Return ``(status, None)`` for one valid ``grpc-status`` field value,
+    or ``(None, problem)``."""
+    if not values:
+        return None, 'no grpc-status'
+    if len(values) > 1:
+        return None, f'{len(values)} grpc-status fields'
+    raw = values[0]
+    # 1*DIGIT without leading zeros; bytes.isdigit() is ASCII-only.
+    if not raw.isdigit() or (len(raw) > 1 and raw.startswith(b'0')):
+        return None, f'grpc-status {raw!r} is not a decimal code'
+    try:
+        return GrpcStatus(int(raw)), None
+    except ValueError:
+        return None, f'grpc-status {raw.decode()} is not a defined code'
