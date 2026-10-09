@@ -139,6 +139,41 @@ vuln-stub-gate:
 vuln-canary-gate:
     uv run python tools/security/silent_stub.py --dying
 
+# G7: quick tier across the configuration matrix (uvloop on/off x 1/2 workers)
+# plus the explicit-caps operational config; verdicts must agree (G7-1/G7-2).
+vuln-matrix:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=bench/results/security
+    mkdir -p "$out"
+    run_cfg() {
+        local cfg="$1"; shift
+        env "$@" just vuln-target-up >/dev/null
+        just vuln-check > "$out/matrix-$cfg.txt" 2>&1 || true
+        just vuln-target-down >/dev/null
+        grep -E '^(BASELINE|LANE|H1-|SMUGGLE|CHUNK|TRAILER|STATE|RANGE|EXPECT|HOST|STATIC|SYMLINK|WS|HDR|H2-|TLS)' \
+            "$out/matrix-$cfg.txt" | awk '{print $1 "=" $3}' | sort > "$out/matrix-$cfg.verdicts"
+        echo "matrix $cfg: $(wc -l < "$out/matrix-$cfg.verdicts") verdict rows"
+    }
+    run_cfg uvloop0-workers1 BB_UVLOOP=0 BB_WORKERS=1
+    run_cfg uvloop1-workers1 BB_UVLOOP=1 BB_WORKERS=1
+    run_cfg uvloop0-workers2 BB_UVLOOP=0 BB_WORKERS=2
+    run_cfg uvloop1-workers2 BB_UVLOOP=1 BB_WORKERS=2
+    # G7-2: operational config with explicit caps — record the result
+    run_cfg explicit-caps BB_MAX_CONNECTIONS=8 BB_REQUEST_TIMEOUT=30
+    base="$out/matrix-uvloop0-workers1.verdicts"
+    status=0
+    for cfg in uvloop1-workers1 uvloop0-workers2 uvloop1-workers2; do
+        if diff -q "$base" "$out/matrix-$cfg.verdicts" >/dev/null; then
+            echo "G7-1 OK: $cfg matches uvloop0-workers1"
+        else
+            echo "G7-1 DIFF ($cfg vs uvloop0-workers1):"
+            diff "$base" "$out/matrix-$cfg.verdicts" || true
+            status=1
+        fi
+    done
+    exit $status
+
 # YouTrack REST access. Credentials are read only by scripts/youtrack.sh.
 yt-search query='project: BLA #Unresolved':
     scripts/youtrack.sh search "{{query}}"

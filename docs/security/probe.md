@@ -90,6 +90,15 @@ in the header. Silence is never a verdict's evidence (G2-1): a verdict of
 PASS always names an observed answer or close — `just vuln-stub-gate` proves
 it by running every check against a do-nothing peer and requiring 0 PASS.
 
+## Configuration matrix (G7)
+
+`just vuln-matrix` runs the quick tier across the configuration matrix —
+uvloop on/off x 1/2 workers (G7-1) — and requires identical verdicts in
+every configuration; it then runs an operational configuration with
+explicit caps (`BB_MAX_CONNECTIONS=8`, `BB_REQUEST_TIMEOUT=30`) and records
+the result (G7-2). Per-config tables and verdict lists land in
+`bench/results/security/matrix-*`.
+
 ## Verdicts and severity
 
 `PASS` — the check's mechanical oracle held. `FAIL` — the oracle was
