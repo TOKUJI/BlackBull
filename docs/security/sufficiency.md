@@ -44,6 +44,7 @@ machinery — see the gate). Check IDs are validated against the registry by
 | TLS versions below 1.2 refused; ALPN negotiates h2 on the h2 lane | TLS-001 (RFC 7301; RFC 9113 §9.2) |
 | WebSocket handshake validation (key, version) | WS-001 (RFC 6455 §4.2.2) |
 | Client WebSocket frames must be masked | WS-001 (RFC 6455 §5.1) |
+| Each lane negotiates exactly its protocol (ALPN/preface) | LANE-001, LANE-002 |
 | Positive baselines: GET / on HTTP/1.1 and h2 | BASELINE-001, BASELINE-002, H2-BASE-001, H2-BASE-002 |
 | Liveness after every probe | BASELINE-003, per-check canary (G2-2) |
 | gRPC message bounds (RESOURCE_EXHAUSTED on oversize) | Unsupported list: gRPC lanes arrive with G4-3/G4-4 |

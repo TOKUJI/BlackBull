@@ -109,6 +109,8 @@ would carry. The convention throughout: a hang or crash is **High**
 
 | Check | Rank if it fails | CWE |
 |---|---|---|
+| LANE-001 | High (availability: the lane did not negotiate its protocol) | CWE-444 |
+| LANE-002 | High (availability: the lane did not negotiate its protocol) | CWE-444 |
 | BASELINE-001 | High (availability: server down or crashed) | CWE-400 |
 | BASELINE-002 | High (availability: server down or crashed) | CWE-400 |
 | BASELINE-003 | High (availability: server down or crashed) | CWE-400 |

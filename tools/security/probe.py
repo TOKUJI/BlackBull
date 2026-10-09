@@ -78,7 +78,14 @@ SEVERITIES = ('Critical', 'High', 'Medium', 'Low', 'Info')
 
 #: Lane names, in run order.  ``h1`` is HTTP/1.1 over cleartext; ``h2`` is
 #: HTTP/2 over TLS (or h2c when its target URL is ``http``).
-LANES = ('h1', 'h2')
+#: Lane instances (G4-1): each family of checks runs over every transport
+#: where its semantics are meaningful.  h1 = cleartext HTTP/1.1, https1 =
+#: HTTP/1.1 over TLS (ALPN http/1.1), h2 = HTTP/2 over TLS (ALPN h2), h2c =
+#: HTTP/2 prior knowledge over cleartext.
+LANES = ('h1', 'https1', 'h2', 'h2c')
+
+#: Lane instance -> check family.
+_LANE_FAMILY = {'h1': 'h1', 'https1': 'h1', 'h2': 'h2', 'h2c': 'h2'}
 
 _CONNECT_TIMEOUT_S = 2.0
 #: Per-check wall-clock margin over ``--check-timeout``.  The whole client
@@ -345,6 +352,9 @@ class Check:
     lane: str
     #: Rank a hang/crash carries — High per severity.md's defaults table.
     severity_on_timeout: str | None = None
+    #: Lane instances that skip this check (G4-2); the reason lives in
+    #: docs/security/probe.md's lane applicability table.
+    skip_lanes: frozenset[str] = frozenset()
     #: Tiers that run this check; long-only checks wait out documented
     #: default defence timeouts in real time (G2-5).
     tiers: frozenset[str] = frozenset({'quick', 'long'})
@@ -403,8 +413,9 @@ class Probe:
     def __init__(self, target: Target, check_timeout: float,
                  tls_ca: str | None = None,
                  budget: ConnectionBudget | None = None,
-                 tier: str = 'quick') -> None:
+                 tier: str = 'quick', lane: str = 'h1') -> None:
         self.target = target
+        self.lane = lane
         self.check_timeout = check_timeout
         self.tls_ca = tls_ca
         self.tier = tier
@@ -422,6 +433,14 @@ class Probe:
 
     # ---- HTTP/1.1 ------------------------------------------------------
 
+    def _http1_kwargs(self) -> dict:
+        """Connect kwargs for HTTP/1.1 sessions (TLS on the https1 lane)."""
+        if self.target.scheme != 'https':
+            return {}
+        ctx = self._client_tls_context()
+        ctx.set_alpn_protocols(['http/1.1'])
+        return {'ssl': ctx}
+
     def scenario(self, name: str, *steps) -> ScenarioResult:
         steps = (*steps, Abort())
 
@@ -430,7 +449,8 @@ class Probe:
                 async with HTTP1Client(
                         self.target.peer, self.target.port,
                         connect_timeout=min(_CONNECT_TIMEOUT_S,
-                                            self.effective_timeout)) as client:
+                                            self.effective_timeout),
+                        **self._http1_kwargs()) as client:
                     return await client.execute_scenario(
                         Scenario(name=name, steps=steps))
 
@@ -449,7 +469,8 @@ class Probe:
             async with HTTP1Client(
                     self.target.peer, self.target.port,
                     connect_timeout=min(_CONNECT_TIMEOUT_S,
-                                        self.effective_timeout)) as client:
+                                        self.effective_timeout),
+                    **self._http1_kwargs()) as client:
                 return await client.execute_scenario(
                     Scenario(name=name, steps=(*steps, Abort())))
 
@@ -487,7 +508,8 @@ class Probe:
         return self._bounded(_go)
 
     def tls_attempt(self, min_version: ssl.TLSVersion,
-                    max_version: ssl.TLSVersion) -> tuple[str, str]:
+                    max_version: ssl.TLSVersion,
+                    alpn: Sequence[str] = ('h2',)) -> tuple[str, str]:
         """One bounded TLS handshake attempt.
 
         Returns ``(state, detail)`` with *state* one of ``ok``, ``refused``
@@ -505,7 +527,7 @@ class Probe:
             warnings.simplefilter('ignore', DeprecationWarning)
             ctx.minimum_version = min_version
             ctx.maximum_version = max_version
-        ctx.set_alpn_protocols(['h2'])
+        ctx.set_alpn_protocols(list(alpn))
 
         async def _go():
             async with asyncio.timeout(self._session_bound()):
@@ -608,7 +630,8 @@ class Probe:
             async with HTTP1Client(
                     self.target.peer, self.target.port,
                     connect_timeout=min(_CONNECT_TIMEOUT_S,
-                                        self.effective_timeout)) as client:
+                                        self.effective_timeout),
+                    **self._http1_kwargs()) as client:
                 result = await client.execute_scenario(Scenario(
                     name='canary',
                     steps=(SendRawBytes(_get_request('/')),
@@ -826,6 +849,62 @@ def _combine(verdicts: Sequence[Verdict]) -> Verdict:
 # ------------------------------------------------------------------
 # M1 checks (oracles unchanged)
 # ------------------------------------------------------------------
+
+def _lane_001(probe: Probe) -> Verdict:
+    """LANE-001 (G4-1): the h1-family lane must negotiate HTTP/1.1.
+
+    On https1 that means the TLS handshake selects exactly ALPN http/1.1 —
+    any other protocol succeeding is FAIL.  On the cleartext lane the
+    request itself must be answered as HTTP/1.1.
+    """
+    if probe.lane == 'https1':
+        state, detail = probe.tls_attempt(
+            ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3,
+            alpn=('http/1.1',))
+        if state == 'not-exercised':
+            return Verdict(SKIP, f'no negotiation: {detail}')
+        if state != 'ok':
+            return Verdict(FAIL, f'https1 did not negotiate: {detail}')
+        if 'alpn=http/1.1' not in detail:
+            return Verdict(FAIL,
+                           f'expected ALPN http/1.1, negotiated: {detail}')
+        return Verdict(PASS, f'negotiated {detail}')
+    if probe.target.scheme != 'http':
+        return Verdict(SKIP, 'h1 lane needs a cleartext target')
+    result = probe.raw_request('lane-001', _get_request('/'))
+    early = _reject_or_timeout(result, probe.effective_timeout)
+    if early is not None:
+        return early
+    if result.response is not None and result.response.status == 200:
+        return Verdict(PASS, 'HTTP/1.1 answered 200')
+    return Verdict(FAIL, _describe(result, probe.effective_timeout))
+
+
+def _lane_002(probe: Probe) -> Verdict:
+    """LANE-002 (G4-1): the h2-family lane must negotiate HTTP/2.
+
+    On h2 that means ALPN h2 on the TLS handshake; on h2c it means the
+    prior-knowledge preface is accepted (the server sends SETTINGS) over
+    cleartext.
+    """
+    if probe.lane == 'h2':
+        state, detail = probe.tls_attempt(
+            ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3, alpn=('h2',))
+        if state == 'not-exercised':
+            return Verdict(SKIP, f'no negotiation: {detail}')
+        if state != 'ok':
+            return Verdict(FAIL, f'h2 did not negotiate: {detail}')
+        if 'alpn=h2' not in detail:
+            return Verdict(FAIL, f'expected ALPN h2, negotiated: {detail}')
+        return Verdict(PASS, f'negotiated {detail}')
+    if probe.target.scheme != 'http':
+        return Verdict(SKIP, 'h2c lane needs a cleartext target')
+    infos = _h2_exchange(probe, 'lane-002', [])
+    if any('SETTINGS' in i.kind.upper() for i in infos):
+        return Verdict(PASS, 'h2c preface accepted: server SETTINGS received')
+    kinds = ', '.join(i.kind for i in infos)
+    return Verdict(FAIL, f'no h2c negotiation (frames: {kinds or "none"})')
+
 
 def _baseline_001(probe: Probe) -> Verdict:
     result = probe.raw_request('baseline-001', _get_request('/'))
@@ -2387,13 +2466,15 @@ def _symlink_001(probe: Probe) -> Verdict:
 # ------------------------------------------------------------------
 
 CHECKS: tuple[Check, ...] = (
+    Check('LANE-001', 'the h1-family lane negotiates HTTP/1.1 (exactly ALPN http/1.1 on https1)', 'High', 'CWE-444', _lane_001, 'h1'),
+    Check('LANE-002', 'the h2-family lane negotiates HTTP/2 (ALPN h2 on h2; preface accepted on h2c)', 'High', 'CWE-444', _lane_002, 'h2'),
     Check('BASELINE-001', 'GET / returns 200 with body "ok"', 'High', 'CWE-400', _baseline_001, 'h1'),
     Check('BASELINE-002', 'GET /json returns 200 with JSON {"ok": true}', 'High', 'CWE-400', _baseline_002, 'h1'),
     Check('H1-ROBUST-001', 'unknown method FOO answered with 4xx/501 or close', 'Info', 'CWE-755', _h1_robust_001, 'h1', 'High'),
     Check('H1-ROBUST-002', '100 KiB header value answered with 4xx or close', 'Medium', 'CWE-400', _h1_robust_002, 'h1', 'High'),
     Check('H1-ROBUST-003', 'garbage request-line bytes answered with 400 or close', 'Info', 'CWE-755', _h1_robust_003, 'h1', 'High'),
     Check('H1-ROBUST-004', 'CRLF in a header value rejected, sanitized, or kept opaque (RFC 9110 §5.5)', 'High', 'CWE-113', _h1_robust_004, 'h1'),
-    Check('H1-ROBUST-005', 'Content-Length with truncated body then FIN answered with 4xx/408 or close', 'Info', 'CWE-755', _h1_robust_005, 'h1', 'High'),
+    Check('H1-ROBUST-005', 'Content-Length with truncated body then FIN answered with 4xx/408 or close', 'Info', 'CWE-755', _h1_robust_005, 'h1', 'High', skip_lanes=frozenset({'https1'})),
     Check('H1-ROBUST-006', 'field name with whitespace answered with 400 or close (RFC 9112 §5.1)', 'Medium', 'CWE-444', _h1_robust_006, 'h1', 'High'),
     Check('H1-ROBUST-007', 'obs-fold answered with 400 or safe coalescing, never injection (RFC 9112 §5.2)', 'Medium', 'CWE-444', _h1_robust_007, 'h1', 'High'),
     Check('H1-ROBUST-008', 'HTTP/1.1 request without Host answered with 400 or close (RFC 9112 §3.2)', 'Low', 'CWE-755', _h1_robust_008, 'h1', 'High'),
@@ -2403,9 +2484,9 @@ CHECKS: tuple[Check, ...] = (
     Check('SMUGGLE-002', 'CL with obfuscated/duplicated TE rejected, pipelined GET / clean (RFC 9112 §6.1/§6.3)', 'High', 'CWE-444', _smuggle_002, 'h1'),
     Check('SMUGGLE-003', 'duplicate Content-Length with different values rejected, pipelined GET / clean (RFC 9112 §6.3)', 'High', 'CWE-444', _smuggle_003, 'h1'),
     Check('CHUNK-001', 'chunk extensions do not corrupt framing: exact body echo or 400, pipelined GET / clean', 'Medium', 'CWE-444', _chunk_001, 'h1', 'High'),
-    Check('CHUNK-002', 'malformed chunk sizes rejected (RFC 9112 §7.1), pipelined GET / clean', 'Medium', 'CWE-444', _chunk_002, 'h1', 'High'),
+    Check('CHUNK-002', 'malformed chunk sizes rejected (RFC 9112 §7.1), pipelined GET / clean', 'Medium', 'CWE-444', _chunk_002, 'h1', 'High', skip_lanes=frozenset({'https1'})),
     Check('TRAILER-001', 'chunked trailers must not smuggle: forbidden trailer fields 400/close, custom trailer ignored (RFC 9112 §7.1.2)', 'High', 'CWE-444', _trailer_001, 'h1'),
-    Check('STATE-001', 'each abusive exchange leaves a pipelined GET / exactly one clean 200 "ok" or a closed connection', 'High', 'CWE-444', _state_001, 'h1'),
+    Check('STATE-001', 'each abusive exchange leaves a pipelined GET / exactly one clean 200 "ok" or a closed connection', 'High', 'CWE-444', _state_001, 'h1', skip_lanes=frozenset({'https1'})),
     Check('H1-ROBUST-011', 'partial request line held open: defence must answer a refusal or close within the default header timeout', 'Medium', 'CWE-400', _h1_robust_011, 'h1', 'High', tiers=frozenset({'long'}), timeout_long=16.0),
     Check('RANGE-001', 'overlapping/negative/multi Range answered 200/206/416 only, no crash/hang (CVE-2011-3192 class)', 'Medium', 'CWE-400', _range_001, 'h1', 'High'),
     Check('EXPECT-001', 'Expect: 100-continue answered 100-then-200 or 417, pipelined GET / clean (RFC 9112 §10.1.1)', 'Medium', 'CWE-444', _expect_001, 'h1', 'High'),
@@ -2425,12 +2506,16 @@ CHECKS: tuple[Check, ...] = (
     Check('H2-ROBUST-007', '30 CONTINUATION frames complete or are refused without crash (CVE-2023-45288 class)', 'Medium', 'CWE-400', _h2_robust_007, 'h2', 'High'),
     Check('H2-ROBUST-008', 'HPACK bomb lite (decoded ≤ 4 MiB) completes or is refused without crash (CVE-2016-6581 class)', 'Medium', 'CWE-409', _h2_robust_008, 'h2', 'High'),
     Check('H2-BASE-002', 'a fresh HTTP/2 request after all h2 abuse returns 200 with body "ok"', 'High', 'CWE-400', _h2_base_002, 'h2'),
-    Check('TLS-001', 'TLS 1.0/1.1 refused; TLS 1.2/1.3 handshake negotiates ALPN h2', 'Medium', 'CWE-326', _tls_001, 'h2'),
+    Check('TLS-001', 'TLS 1.0/1.1 refused; TLS 1.2/1.3 handshake negotiates ALPN h2', 'Medium', 'CWE-326', _tls_001, 'h2', skip_lanes=frozenset({'h2c'})),
 )
 
 
 def checks_for(lane: str, tier: str | None = None) -> tuple[Check, ...]:
-    return tuple(check for check in CHECKS if check.lane == lane
+    """Checks applying to lane instance *lane* (G4-2): the family's checks
+    minus that instance's documented exclusions, filtered by tier."""
+    family = _LANE_FAMILY[lane]
+    return tuple(check for check in CHECKS
+                 if check.lane == family and lane not in check.skip_lanes
                  and (tier is None or tier in check.tiers))
 
 
@@ -2559,7 +2644,9 @@ def render_markdown(lanes: Sequence[Lane], *,
         f'# BLA-526 robustness probe — {timestamp}',
         '',
         f'- Bounds: check timeout {check_timeout:g}s, run cap {run_timeout:g}s, '
-        f'connections {MAX_CONCURRENT_CONNECTIONS} concurrent / {MAX_TOTAL_CONNECTIONS} per run',
+        f'connections {MAX_CONCURRENT_CONNECTIONS} concurrent / '
+        f'{MAX_TOTAL_CONNECTIONS * len(lanes)} per run '
+        f'({MAX_TOTAL_CONNECTIONS} x {len(lanes)} lanes, one shared budget)',
         f'- Tier: {tier} — '
         + ', '.join(f'{lane.name} {len(lane.results)} checks '
                     f'in {sum(r.elapsed_s for r in lane.results):.1f}s'
@@ -2653,17 +2740,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # The gate covers both lane URLs regardless of --lane: a URL the CLI
     # names is a URL the run is accountable for.
+    lane_url = {'h1': 'base', 'https1': 'tls', 'h2': 'tls', 'h2c': 'base'}
     gated = {}
     try:
-        for lane, url in (('h1', args.base_url), ('h2', args.h2_url)):
-            gated[lane] = (url, parse_target(url))
+        for key, url in (('base', args.base_url), ('tls', args.h2_url)):
+            gated[key] = (url, parse_target(url))
     except UnsafeTargetError as exc:
         print(f'probe: {exc}', file=sys.stderr)
         return 2
 
     lane_names = LANES if args.lane == 'all' else (args.lane,)
     for lane in lane_names:
-        if gated[lane][1].scheme == 'https' and not Path(args.tls_ca).is_file():
+        if gated[lane_url[lane]][1].scheme == 'https' \
+                and not Path(args.tls_ca).is_file():
             print(f'probe: refused: {lane} lane is https but --tls-ca '
                   f'{args.tls_ca} does not exist; refusing to skip TLS '
                   f'verification', file=sys.stderr)
@@ -2672,13 +2761,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     started = datetime.now(timezone.utc)
     timestamp = started.strftime('%Y%m%dT%H%M%SZ')
     deadline = time.monotonic() + args.run_timeout
-    # One budget for the whole run: the report header's "per run" cap is literal.
-    budget = ConnectionBudget()
+    # One budget for the whole run: the report header's "per run" cap is
+    # literal.  With four lane instances (G4-1) the cap scales with the lane
+    # population — 96 connections per lane instance — and stays one shared
+    # budget, so no lane can multiply it further.
+    budget = ConnectionBudget(
+        max_concurrent=MAX_CONCURRENT_CONNECTIONS,
+        max_total=MAX_TOTAL_CONNECTIONS * len(lane_names))
     lanes: list[Lane] = []
     for lane in lane_names:
-        url, target = gated[lane]
+        url, target = gated[lane_url[lane]]
         probe = Probe(target, args.check_timeout, tls_ca=args.tls_ca,
-                      budget=budget, tier=args.tier)
+                      budget=budget, tier=args.tier, lane=lane)
         results = run_checks(probe, checks_for(lane, args.tier), deadline,
                              lane=lane, canary=Probe.canary, observer=observer,
                              observe_settle=args.observe_settle)

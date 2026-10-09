@@ -90,6 +90,38 @@ in the header. Silence is never a verdict's evidence (G2-1): a verdict of
 PASS always names an observed answer or close — `just vuln-stub-gate` proves
 it by running every check against a do-nothing peer and requiring 0 PASS.
 
+## Lanes (G4-1/G4-2)
+
+The harness runs each check family over every transport where its
+semantics are meaningful:
+
+| Lane | Transport | Checks | Baseline (negotiation) |
+|---|---|---|---|
+| `h1` | cleartext HTTP/1.1 | the h1 family | LANE-001: answered as HTTP/1.1 |
+| `https1` | TLS, ALPN `http/1.1` | the h1 family | LANE-001: exactly ALPN `http/1.1` |
+| `h2` | TLS, ALPN `h2` | the h2 family | LANE-002: exactly ALPN `h2` |
+| `h2c` | HTTP/2 prior knowledge, cleartext | the h2 family | LANE-002: preface accepted (SETTINGS) |
+
+`--base-url` serves `h1` and `h2c`; `--h2-url` serves `https1` and `h2`.
+A lane's baseline must negotiate exactly its protocol — any other
+protocol succeeding is FAIL. A lane whose URL scheme contradicts its
+transport records SKIP (`h2c` needs a cleartext `--base-url`; `https1`
+needs a TLS `--h2-url`).
+
+Exclusions with reasons (G4-2):
+
+| Check | Not on | Reason |
+|---|---|---|
+| TLS-001 | `h2c` | endpoint-level TLS check; h2c has no TLS. The `https1` lane shares the same TLS listener as `h2`, so the endpoint check stays on `h2` alone. |
+| H1-ROBUST-005 | `https1` | the check ends its truncated body with a TCP half-close (FIN); TLS has no half-close for the probe to express, so the server's defence cannot be observed. Covered on `h1`. |
+| CHUNK-002 | `https1` | same half-close step as H1-ROBUST-005 (chunk-size overflow). Covered on `h1`. |
+| STATE-001 | `https1` | its truncated-body case uses the same half-close step. Covered on `h1`. |
+| H1-ROBUST-011 | quick tier | documented default defence waits; run in the long tier (G2-5). |
+
+gRPC rides on the h2 family's transports (h2 and h2c); its baselines are
+the gRPC lanes of M5-4's fixture work — see the unsupported list until
+those land.
+
 ## Process observation (G2-3)
 
 With `--server-pid PID` the probe samples the server's `/proc` before and
@@ -161,6 +193,7 @@ open.
 
 | Check | Oracle (mechanical) |
 |---|---|
+| LANE-001 | negotiation baseline: the h1-family lane speaks HTTP/1.1; on `https1` the handshake must select exactly ALPN `http/1.1` (another protocol succeeding = FAIL) |
 | BASELINE-001/003 | `GET /` → 200 and body exactly `ok` (003 runs after all abuse) |
 | BASELINE-002 | `GET /json` → 200 and body is exactly `{"ok": true}` JSON |
 | H1-ROBUST-001 | request line `FOO / HTTP/1.1` → 4xx or 501/505 or connection close; 2xx/3xx and other 5xx = FAIL |
@@ -193,6 +226,7 @@ open.
 
 | Check | Oracle (mechanical) |
 |---|---|
+| LANE-002 | negotiation baseline: the h2-family lane speaks HTTP/2 — on `h2` exactly ALPN `h2`; on `h2c` the prior-knowledge preface is accepted (SETTINGS received) |
 | H2-BASE-001 | `GET /` over HTTP/2 (TLS + ALPN `h2`) → 200 and body exactly `ok` |
 | H2-ROBUST-001 | HEADERS with a missing pseudo-header, or pseudo-headers after a regular field (RFC 9113 §8.1/§8.3) → `RST_STREAM`/`GOAWAY` carrying `PROTOCOL_ERROR`, or close; a dispatched request or any other error code = FAIL |
 | H2-ROBUST-002 | DATA on an idle stream, or DATA on stream 0 (RFC 9113 §6.1) → connection error: `GOAWAY` carrying `PROTOCOL_ERROR`, or close. A stream error (`RST_STREAM`) is FAIL — the RFC requires a connection error. |

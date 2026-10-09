@@ -400,6 +400,34 @@ def test_run_checks_marks_residuals_on_the_row():
     assert 'residual connections after settle: fd 10->11' in results[0].detail
 
 
+def test_lane_instances_run_the_family_minus_documented_exclusions():
+    from tools.security.probe import _LANE_FAMILY, checks_for
+    assert set(_LANE_FAMILY) == set(LANES)
+    for lane in LANES:
+        family = _LANE_FAMILY[lane]
+        for check in checks_for(lane):
+            assert check.lane == family
+            assert lane not in check.skip_lanes
+    # the h1 family on both transports, minus the half-close checks on TLS
+    h1 = {c.check_id for c in checks_for('h1')}
+    https1 = {c.check_id for c in checks_for('https1')}
+    assert h1 - https1 == {'H1-ROBUST-005', 'CHUNK-002', 'STATE-001'}
+    assert h1 >= https1
+    # the h2 family minus TLS-001 on the cleartext lane
+    assert 'TLS-001' in {c.check_id for c in checks_for('h2')}
+    assert 'TLS-001' not in {c.check_id for c in checks_for('h2c')}
+
+
+def test_every_skipped_lane_is_documented_with_its_reason():
+    root = Path(__file__).resolve().parents[2]
+    text = (root / 'docs' / 'security' / 'probe.md').read_text(encoding='utf-8')
+    for check in CHECKS:
+        for lane in check.skip_lanes:
+            assert any(check.check_id in line and lane in line
+                       for line in text.splitlines()), \
+                f'{check.check_id} skip on {lane} has no documented reason'
+
+
 def test_container_metrics_parsers():
     from tools.security.container_run import parse_cgroup_counters, parse_verdicts
     events = 'low 0 high 0 max 0 oom 0 oom_kill 2 oom_group_kill 0\n'
