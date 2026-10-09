@@ -20,6 +20,7 @@ from tools.security.probe import (
     SEVERITIES,
     SKIP,
     TIMEOUT,
+    Canary,
     Check,
     CheckResult,
     H2Info,
@@ -28,6 +29,7 @@ from tools.security.probe import (
     Verdict,
     WsAttempt,
     abuse_accept_verdict,
+    apply_canary,
     checks_for,
     exit_code,
     expect_verdict,
@@ -218,6 +220,42 @@ def test_quick_tier_excludes_long_only_checks():
     assert 'H1-ROBUST-011' in long
     assert quick < long
     assert len(checks_for('h1')) == len(long)
+
+
+def test_canary_failure_marks_the_previous_check_fail_high():
+    rows = _results()
+    healthy = apply_canary(rows[0], Canary(True, 0.003, '200 "ok"'))
+    assert healthy.verdict == PASS and healthy.canary == 'ok 3ms'
+    dead = apply_canary(rows[0], Canary(False, 0.5, 'ConnectionRefusedError'))
+    assert dead.verdict == FAIL
+    assert dead.severity == 'High'
+    assert 'canary FAILED 500ms' in dead.detail
+    already_failing = apply_canary(rows[1], Canary(False, 0.5, 'refused'))
+    assert already_failing.verdict == FAIL
+    assert already_failing.severity == 'High'  # the row's own failure rank
+    assert 'canary FAILED' in already_failing.detail
+    timed_out = apply_canary(rows[2], Canary(False, 0.5, 'refused'))
+    assert timed_out.verdict == TIMEOUT  # keeps its own verdict, gains the note
+
+
+def test_run_checks_runs_the_canary_on_every_row():
+    seen: list[str] = []
+
+    def fake_canary(probe, lane):
+        seen.append(lane)
+        return Canary(len(seen) < 2, 0.001, '200 "ok"' if len(seen) < 2 else 'refused')
+
+    stub = tuple(Check(f'STUB-C{i}', 'stub', 'Low', 'CWE-400',
+                       lambda p: Verdict(PASS, 'stub ok'), 'h1')
+                 for i in range(3))
+    from tools.security.probe import Probe, Target
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    results = run_checks(probe, stub, deadline=time.monotonic() + 10,
+                         lane='h1', canary=fake_canary)
+    assert seen == ['h1', 'h1', 'h1']
+    assert [r.verdict for r in results] == [PASS, FAIL, FAIL]
+    assert results[0].canary.startswith('ok')
+    assert all(r.severity == 'High' for r in results[1:])
 
 
 def test_run_checks_records_elapsed_seconds():

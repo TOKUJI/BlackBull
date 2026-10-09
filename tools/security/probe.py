@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import ipaddress
 import math
 from datetime import datetime, timezone
@@ -62,6 +62,9 @@ ALLOWED_HOSTS = frozenset({'127.0.0.1', '::1', 'localhost'})
 ALLOWED_SCHEMES = frozenset({'http', 'https'})
 
 MAX_CONCURRENT_CONNECTIONS = 4
+#: Canary connections (G2-2) get their own bounded budget per run.
+MAX_CANARY_CONCURRENT = 2
+MAX_CANARY_TOTAL = 512
 MAX_TOTAL_CONNECTIONS = 96
 
 PASS, FAIL, TIMEOUT = 'PASS', 'FAIL', 'TIMEOUT'
@@ -88,6 +91,8 @@ _SCENARIO_SLACK_S = 5.0
 _TAIL_TIMEOUT_S = 1.0
 #: Floor for a session bound once the check deadline has almost elapsed.
 _MIN_SESSION_BOUND_S = 0.05
+#: Canary tail drain: response frames after SETTINGS land within this on loopback.
+_CANARY_DRAIN_S = 0.5
 #: Long tier waits out the documented default header-idle defence (10s)
 #: plus margin in real time before judging a stalled exchange (G2-5).
 _LONG_DEFENCE_WAIT_S = 12.0
@@ -185,6 +190,14 @@ class Verdict:
 
 
 @dataclass(frozen=True)
+class Canary:
+    """One lane-liveness probe (G2-2): GET / on the check's lane."""
+    ok: bool
+    latency_s: float
+    detail: str
+
+
+@dataclass(frozen=True)
 class CheckResult:
     check_id: str
     description: str
@@ -194,6 +207,8 @@ class CheckResult:
     cwe: str
     #: Wall-clock seconds the check took (G2-5's per-tier timing record).
     elapsed_s: float = 0.0
+    #: Post-check canary outcome (G2-2), e.g. ``ok 3ms`` / ``FAILED 501ms``.
+    canary: str = ''
 
 
 @dataclass(frozen=True)
@@ -271,6 +286,10 @@ class Probe:
         self.tier = tier
         #: Shared across lanes when the runner owns one budget (L1).
         self.budget = budget if budget is not None else ConnectionBudget()
+        #: Canary probes (G2-2) spend their own capped budget, never the
+        #: checks' slots.
+        self.canary_budget = ConnectionBudget(
+            max_concurrent=MAX_CANARY_CONCURRENT, max_total=MAX_CANARY_TOTAL)
         #: Narrowed per check by the runner against the run budget.
         self.effective_timeout = check_timeout
         #: One absolute deadline per check, set by the runner; every session
@@ -441,6 +460,56 @@ class Probe:
 
         return self._bounded(_go)
 
+    # ---- canary (G2-2) ------------------------------------------------
+
+    def canary(self, lane: str) -> 'Canary':
+        """One bounded liveness probe: GET / on *lane*, expecting 200 ``ok``.
+
+        Runs after every check on the canary's own capped budget; a failure
+        marks the preceding check FAIL (High) — the run cannot claim a pass
+        over a dead server.
+        """
+        started = time.monotonic()
+        try:
+            if lane == 'h2':
+                ok, detail = self._bounded(self._canary_h2, budget=self.canary_budget)
+            else:
+                ok, detail = self._bounded(self._canary_h1, budget=self.canary_budget)
+        except Exception as exc:  # noqa: BLE001 — a canary failure is an outcome
+            return Canary(False, time.monotonic() - started, f'{type(exc).__name__}: {exc}')
+        return Canary(ok, time.monotonic() - started, detail)
+
+    async def _canary_h1(self):
+        async with asyncio.timeout(self._session_bound()):
+            async with HTTP1Client(
+                    self.target.peer, self.target.port,
+                    connect_timeout=min(_CONNECT_TIMEOUT_S,
+                                        self.effective_timeout)) as client:
+                result = await client.execute_scenario(Scenario(
+                    name='canary',
+                    steps=(SendRawBytes(_get_request('/')),
+                           ReadResponse(timeout=self.effective_timeout), Abort())))
+        resp = result.response
+        ok = (resp is not None and resp.status == 200
+              and bytes(resp.body) == b'ok')
+        return ok, '200 "ok"' if ok else _describe(result, self.effective_timeout)
+
+    async def _canary_h2(self):
+        async with asyncio.timeout(self._session_bound()):
+            async with HTTP2Client(
+                    self.target.peer, self.target.port,
+                    ssl=self._client_tls_context(),
+                    connect_timeout=min(_CONNECT_TIMEOUT_S,
+                                        self.effective_timeout),
+                    scenario_mode=True) as client:
+                result = await client.execute_scenario(h2s.ScenarioH2Client(
+                    name='canary',
+                    steps=(*_h2_prefix(), _h2_request(self),
+                           *_h2_reads(self, tails=3, tail_timeout=_CANARY_DRAIN_S),
+                           h2s.Abort())))
+        verdict = h2_ok_verdict(h2_infos(result), stream_id=1)
+        return verdict.verdict == PASS, verdict.detail
+
     # ---- shared bounds -------------------------------------------------
 
     def _session_bound(self) -> float:
@@ -448,14 +517,16 @@ class Probe:
             return max(_MIN_SESSION_BOUND_S, self.check_deadline - time.monotonic())
         return (self.effective_timeout + _CONNECT_TIMEOUT_S + _SCENARIO_SLACK_S)
 
-    def _bounded(self, go, *, slots: int = 1):
+    def _bounded(self, go, *, slots: int = 1,
+                 budget: ConnectionBudget | None = None):
+        budget = budget if budget is not None else self.budget
         for _ in range(slots):
-            self.budget.acquire()
+            budget.acquire()
         try:
             return asyncio.run(go())
         finally:
             for _ in range(slots):
-                self.budget.release()
+                budget.release()
 
 
 # ------------------------------------------------------------------
@@ -1272,12 +1343,21 @@ def _h2_raw_headers(fields: Sequence[tuple[str, str]], stream_id: int = 1,
     return steps
 
 
+def _h2_reads(probe: Probe, *, tails: int = 3,
+              tail_timeout: float = _TAIL_TIMEOUT_S) -> list:
+    """The read sequence that drains a response after the request.
+
+    The server's SETTINGS, the response HEADERS and the response DATA can
+    land in separate batches, so a response oracle must read several times.
+    """
+    return [h2s.ReadResponse(timeout=probe.effective_timeout)] + \
+        [h2s.ReadResponse(timeout=min(tail_timeout, probe.effective_timeout))
+         for _ in range(tails)]
+
+
 def _h2_exchange(probe: Probe, label: str, abuse: Sequence) -> list[H2Info]:
     """Handshake, send *abuse* steps, then read whatever comes back."""
-    reads = [h2s.ReadResponse(timeout=probe.effective_timeout)] + \
-        [h2s.ReadResponse(timeout=min(_TAIL_TIMEOUT_S, probe.effective_timeout))
-         for _ in range(3)]
-    result = probe.h2_scenario(label, *_h2_prefix(), *abuse, *reads)
+    result = probe.h2_scenario(label, *_h2_prefix(), *abuse, *_h2_reads(probe))
     return h2_infos(result)
 
 
@@ -2234,8 +2314,28 @@ def checks_for(lane: str, tier: str | None = None) -> tuple[Check, ...]:
 # Runner and reporting
 # ------------------------------------------------------------------
 
+def apply_canary(row: CheckResult, canary: Canary) -> CheckResult:
+    """G2-2: record the canary; a canary failure marks the row FAIL (High).
+
+    A row that was already FAIL/TIMEOUT keeps its verdict (it is not the
+    canary's news) but gains the note.
+    """
+    note = f'{"ok" if canary.ok else "FAILED"} {canary.latency_s * 1000:.0f}ms'
+    if canary.ok:
+        return replace(row, canary=note)
+    if row.verdict in (FAIL, TIMEOUT):
+        return replace(row, canary=note,
+                       detail=_one_line(f'{row.detail}; canary {note} after check'))
+    return replace(row, verdict=FAIL, severity='High', canary=note,
+                   detail=_one_line(
+                       f'{row.detail}; canary {note} — server did not answer '
+                       f'the post-check canary'))
+
+
 def run_checks(probe: Probe, checks: Sequence[Check],
-               deadline: float) -> list[CheckResult]:
+               deadline: float, *, lane: str = 'h1',
+               canary: Callable[[Probe, str], Canary] | None = None
+               ) -> list[CheckResult]:
     results: list[CheckResult] = []
     for check in checks:
         remaining = deadline - time.monotonic()
@@ -2262,9 +2362,12 @@ def run_checks(probe: Probe, checks: Sequence[Check],
             probe.check_deadline = None
         severity = (check.timeout_severity() if verdict.verdict == TIMEOUT
                     else check.severity)
-        results.append(CheckResult(check.check_id, check.description, severity,
-                                   verdict.verdict, _one_line(verdict.detail),
-                                   check.cwe, time.monotonic() - started))
+        row = CheckResult(check.check_id, check.description, severity,
+                          verdict.verdict, _one_line(verdict.detail),
+                          check.cwe, time.monotonic() - started)
+        if canary is not None:
+            row = apply_canary(row, canary(probe, lane))
+        results.append(row)
     return results
 
 
@@ -2310,6 +2413,9 @@ def render_markdown(lanes: Sequence[Lane], *,
         '- Verdicts: PASS = mechanical oracle held; FAIL = oracle violated; '
         'TIMEOUT = no answer within the bound; SKIP = not exercised by this '
         'client (never counted as a pass).',
+        '- Canary (G2-2): GET / after every check on its own capped budget; '
+        'recorded per row, and a canary failure marks the preceding check '
+        'FAIL (High).',
         '- Severity is the rank a failure of that check carries '
         '(docs/security/severity.md). Recording of findings: docs/security/probe.md.',
         '',
@@ -2318,12 +2424,12 @@ def render_markdown(lanes: Sequence[Lane], *,
         lines += [
             f'## {lane.name} lane — {lane.base_url}',
             '',
-            '| Check | Severity | Verdict | Detail | CWE | Seconds |',
-            '|---|---|---|---|---|---|',
+            '| Check | Severity | Verdict | Detail | CWE | Seconds | Canary |',
+            '|---|---|---|---|---|---|---|',
         ]
         for r in lane.results:
             lines.append(f'| {r.check_id} | {r.severity} | {r.verdict} | {r.detail} '
-                         f'| {r.cwe} | {r.elapsed_s:.1f} |')
+                         f'| {r.cwe} | {r.elapsed_s:.1f} | {r.canary} |')
         lines.append('')
     return '\n'.join(lines)
 
@@ -2406,7 +2512,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         url, target = gated[lane]
         probe = Probe(target, args.check_timeout, tls_ca=args.tls_ca,
                       budget=budget, tier=args.tier)
-        results = run_checks(probe, checks_for(lane, args.tier), deadline)
+        results = run_checks(probe, checks_for(lane, args.tier), deadline,
+                             lane=lane, canary=Probe.canary)
         lanes.append(Lane(lane, url, tuple(results)))
     excluded = tuple(sorted({c.check_id for lane in lane_names
                              for c in checks_for(lane) if args.tier not in c.tiers}))

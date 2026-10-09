@@ -135,6 +135,10 @@ vuln-check base_url="http://127.0.0.1:8000" h2_url="https://127.0.0.1:8443" lane
 vuln-stub-gate:
     uv run python tools/security/silent_stub.py
 
+# G2-2 gate: checks after a mid-run server death must record canary failures
+vuln-canary-gate:
+    uv run python tools/security/silent_stub.py --dying
+
 # YouTrack REST access. Credentials are read only by scripts/youtrack.sh.
 yt-search query='project: BLA #Unresolved':
     scripts/youtrack.sh search "{{query}}"

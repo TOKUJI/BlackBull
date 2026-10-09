@@ -58,6 +58,16 @@ across all lanes.
   (`ConnectionBudget`, one instance shared by every lane of the run), TLS
   handshake attempts included; every connection is closed in a `finally`
   block.
+- **Post-check canary (G2-2).** After every check the runner sends that
+  lane's canary (`GET /` expecting 200 `"ok"`, over HTTP/1.1 or h2) and
+  records its outcome and latency on the check's row. A canary failure marks
+  the preceding check `FAIL` at High — the run cannot claim a pass over a
+  dead server. Canaries spend their own capped budget (2 concurrent /
+  512 per run), never the checks' slots. `just vuln-canary-gate` proves the
+  mapping: a stub that dies mid-run turns every later row into a canary
+  failure. Canary latency includes the exchange plus at most a 0.5 s drain,
+  so degradation is judged as a multiple of a baseline measured the same
+  way.
 - **No real DoS.** H1-ROBUST-011 is slow-send *lite*: 2 connections, one
   bounded hold (at most 12 s, long tier only), then abort. The flood-shaped h2 checks are
   *lite* by construction: H2-ROBUST-006 resets exactly 20 streams one at a
