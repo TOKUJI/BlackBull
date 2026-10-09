@@ -6,6 +6,7 @@ run under pytest; pytest.ini keeps tools/ out of collection entirely.
 """
 from __future__ import annotations
 
+import ipaddress
 import time
 
 import pytest
@@ -17,6 +18,7 @@ from tools.security.probe import (
     LANES,
     PASS,
     SEVERITIES,
+    SKIP,
     TIMEOUT,
     Check,
     CheckResult,
@@ -94,6 +96,83 @@ def test_parse_target_refuses_non_loopback(url):
 def test_parse_target_defaults_ports_per_scheme():
     assert parse_target('http://127.0.0.1').port == 80
     assert parse_target('https://127.0.0.1').port == 443
+
+
+def test_parse_target_resolves_localhost_to_a_loopback_literal():
+    target = parse_target('http://localhost:8000')
+    assert target.host == 'localhost'  # the authority in requests stays a name
+    assert ipaddress.ip_address(target.peer).is_loopback
+    assert parse_target('http://127.0.0.1:8000').peer == '127.0.0.1'
+
+
+def test_parse_target_refuses_non_loopback_resolution(monkeypatch):
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        return [(2, 1, 6, '', ('10.0.0.5', port))]
+
+    monkeypatch.setattr('tools.security.probe.socket.getaddrinfo',
+                        fake_getaddrinfo)
+    with pytest.raises(UnsafeTargetError):
+        parse_target('http://localhost:8000')
+
+
+def test_target_peer_defaults_to_host():
+    from tools.security.probe import Target
+    assert Target(scheme='http', host='127.0.0.1', port=8000).peer == '127.0.0.1'
+
+
+def test_probe_dials_the_literal_address(monkeypatch):
+    from tools.security.probe import Probe, Target
+    dialed = []
+
+    class StubClient:
+        def __init__(self, host, port, **kwargs):
+            dialed.append(host)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def execute_scenario(self, scenario):
+            return 'stub-done'
+
+    monkeypatch.setattr('tools.security.probe.HTTP1Client', StubClient)
+    probe = Probe(parse_target('http://localhost:8000'), 0.2)
+    assert probe.scenario('stub') == 'stub-done'
+    assert dialed and ipaddress.ip_address(dialed[0]).is_loopback
+
+
+def test_probe_shares_the_runners_connection_budget():
+    from tools.security.probe import ConnectionBudget, Probe, Target
+    budget = ConnectionBudget(max_concurrent=1, max_total=2)
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0,
+                  budget=budget)
+    assert probe.budget is budget
+    budget.acquire()
+    with pytest.raises(RuntimeError, match='concurrent'):
+        budget.acquire()
+    budget.release()
+    budget.acquire()
+    with pytest.raises(RuntimeError, match='budget exhausted'):
+        budget.acquire()
+
+
+def test_runtime_dir_is_private_per_user(monkeypatch, tmp_path):
+    from tools.security import paths
+    monkeypatch.setenv('XDG_RUNTIME_DIR', str(tmp_path))
+    directory = paths.runtime_dir()
+    assert directory == tmp_path / 'bb-vuln-target'
+    assert directory.stat().st_mode & 0o077 == 0
+    directory.chmod(0o755)
+    with pytest.raises(paths.UnsafeRuntimeDirError):
+        paths.runtime_dir()
+
+
+def test_default_tls_ca_lives_in_the_private_runtime_dir(monkeypatch, tmp_path):
+    from tools.security.probe import default_tls_ca
+    monkeypatch.setenv('XDG_RUNTIME_DIR', str(tmp_path))
+    assert default_tls_ca() == str(tmp_path / 'bb-vuln-target' / 'tls' / 'cert.pem')
 
 
 def test_main_exits_2_on_refused_target_without_io():
@@ -227,6 +306,37 @@ def test_run_checks_maps_timeout_to_the_escalated_rank():
     results = run_checks(probe, stub, deadline=time.monotonic() + 10)
     assert results[0].verdict == TIMEOUT
     assert results[0].severity == 'High'
+
+
+def test_session_bound_shrinks_with_the_check_deadline():
+    from tools.security.probe import Probe, Target
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    assert probe._session_bound() > 5.0  # effective timeout plus one slack
+    probe.check_deadline = time.monotonic() + 0.3
+    first = probe._session_bound()
+    assert 0 < first <= 0.3
+    probe.check_deadline = time.monotonic() - 1
+    assert probe._session_bound() == pytest.approx(0.05)
+
+
+def test_run_checks_gives_every_session_of_a_check_one_deadline():
+    bounds: list[float | None] = []
+    shrinking: list[bool] = []
+
+    def fake(probe):
+        bounds.append(probe.check_deadline)
+        first = probe._session_bound()
+        time.sleep(0.05)
+        shrinking.append(probe._session_bound() < first)
+        return Verdict(PASS, 'stub ok')
+
+    stub = (Check('STUB-003', 'stub', 'Low', 'CWE-400', fake, 'h1'),)
+    from tools.security.probe import Probe, Target
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 0.5)
+    run_checks(probe, stub, deadline=time.monotonic() + 10)
+    assert bounds[0] is not None          # one absolute deadline per check
+    assert shrinking == [True]            # sessions spend only what remains
+    assert probe.check_deadline is None   # cleared once the check is done
 
 
 # ------------------------------------------------------------------
@@ -372,21 +482,34 @@ def test_h2_error_verdict_close_and_4xx_and_timeout():
 
 
 def test_tls_verdict_requires_old_failures_and_new_h2():
-    good = [('TLS1.0', False, 'SSLError'), ('TLS1.1', False, 'SSLError'),
-            ('TLS1.2', True, 'tls=TLSv1.2 alpn=h2'),
-            ('TLS1.3', True, 'tls=TLSv1.3 alpn=h2')]
+    good = [('TLS1.0', 'refused', 'SSLError: alert'), ('TLS1.1', 'refused', 'SSLError: alert'),
+            ('TLS1.2', 'ok', 'tls=TLSv1.2 alpn=h2'),
+            ('TLS1.3', 'ok', 'tls=TLSv1.3 alpn=h2')]
     assert tls_verdict(good).verdict == PASS
-    weak = [('TLS1.0', True, 'tls=TLSv1.0 alpn=h2'), ('TLS1.1', False, 'SSLError'),
-            ('TLS1.2', True, 'tls=TLSv1.2 alpn=h2'),
-            ('TLS1.3', True, 'tls=TLSv1.3 alpn=h2')]
+    weak = [('TLS1.0', 'ok', 'tls=TLSv1.0 alpn=h2'), ('TLS1.1', 'refused', 'SSLError: alert'),
+            ('TLS1.2', 'ok', 'tls=TLSv1.2 alpn=h2'),
+            ('TLS1.3', 'ok', 'tls=TLSv1.3 alpn=h2')]
     assert tls_verdict(weak).verdict == FAIL
-    no_alpn = [('TLS1.0', False, 'SSLError'), ('TLS1.1', False, 'SSLError'),
-               ('TLS1.2', True, 'tls=TLSv1.2 alpn=None'),
-               ('TLS1.3', True, 'tls=TLSv1.3 alpn=h2')]
+    no_alpn = [('TLS1.0', 'refused', 'SSLError: alert'), ('TLS1.1', 'refused', 'SSLError: alert'),
+               ('TLS1.2', 'ok', 'tls=TLSv1.2 alpn=None'),
+               ('TLS1.3', 'ok', 'tls=TLSv1.3 alpn=h2')]
     assert tls_verdict(no_alpn).verdict == FAIL
-    dead = [('TLS1.0', False, 'SSLError'), ('TLS1.1', False, 'SSLError'),
-            ('TLS1.2', False, 'SSLError'), ('TLS1.3', False, 'SSLError')]
+    dead = [('TLS1.0', 'refused', 'SSLError: alert'), ('TLS1.1', 'refused', 'SSLError: alert'),
+            ('TLS1.2', 'refused', 'SSLError: alert'), ('TLS1.3', 'refused', 'SSLError: alert')]
     assert tls_verdict(dead).verdict == FAIL
+
+
+def test_tls_verdict_never_passes_unexercised_attempts():
+    skip = [('TLS1.0', 'not-exercised', 'SSLError: NO_PROTOCOLS_AVAILABLE'),
+            ('TLS1.1', 'not-exercised', 'SSLError: NO_PROTOCOLS_AVAILABLE'),
+            ('TLS1.2', 'ok', 'tls=TLSv1.2 alpn=h2'),
+            ('TLS1.3', 'ok', 'tls=TLSv1.3 alpn=h2')]
+    assert tls_verdict(skip).verdict == SKIP
+    fail_wins = [('TLS1.0', 'not-exercised', 'SSLError: NO_PROTOCOLS_AVAILABLE'),
+                 ('TLS1.1', 'not-exercised', 'SSLError: NO_PROTOCOLS_AVAILABLE'),
+                 ('TLS1.2', 'ok', 'tls=TLSv1.3 alpn=h2'),
+                 ('TLS1.3', 'ok', 'tls=TLSv1.3 alpn=h2')]
+    assert tls_verdict(fail_wins).verdict == FAIL
 
 
 # ------------------------------------------------------------------

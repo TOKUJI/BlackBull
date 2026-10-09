@@ -17,6 +17,9 @@ if __package__ in (None, ''):
     # By-path invocation: the project is non-packaged (see pyproject.toml),
     # so blackbull is importable only with the repository root on sys.path.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    import paths as _paths
+else:
+    from tools.security import paths as _paths
 
 from blackbull import (
     BlackBull, Connection, JSONResponse, Listener, QUERY, Response, Tcp,
@@ -28,10 +31,10 @@ app = BlackBull()
 
 _STATIC_DIR = Path(__file__).resolve().parent / 'static'
 
-#: Where the well-known probe certificate (public part only) is published
-#: for tools/security/probe.py's TLS verification; see docs/security/fixture-app.md.
-TLS_DIR = Path('/tmp/bb-vuln-target-tls')
-CERT_PATH = TLS_DIR / 'cert.pem'
+#: The well-known probe certificate (public part only) is published inside
+#: the per-user private runtime directory for tools/security/probe.py's TLS
+#: verification; see docs/security/fixture-app.md.
+cert_path = _paths.cert_file
 
 HOST = '127.0.0.1'
 HTTP_PORT = 8000
@@ -100,14 +103,13 @@ def make_tls_context() -> ssl.SSLContext:
     Reuses ``blackbull.fault_injection._tls`` rather than generating a
     certificate here; the helper's key material lives in its own tempdir and
     is removed when the context is collected.  Only the public certificate is
-    copied to [`CERT_PATH`][] so the probe (a different process) can verify
+    copied to [`cert_path`][] so the probe (a different process) can verify
     the handshake without trusting blindly.
     """
     from blackbull.fault_injection._tls import make_self_signed_h2_context
     ctx = make_self_signed_h2_context()
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-    TLS_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(ctx.bb_ca_cert_path, CERT_PATH)
+    shutil.copyfile(ctx.bb_ca_cert_path, cert_path())
     return ctx
 
 
@@ -131,9 +133,9 @@ async def _health(http_port: int, tls_port: int) -> bool:
     if not await loop.run_in_executor(None, _http_ok):
         return False
 
-    if not CERT_PATH.is_file():
+    if not cert_path().is_file():
         return False
-    ctx = ssl.create_default_context(cafile=str(CERT_PATH))
+    ctx = ssl.create_default_context(cafile=str(cert_path()))
     from blackbull.client.http2 import HTTP2Client
     async with HTTP2Client(HOST, tls_port, ssl=ctx, connect_timeout=2.0) as client:
         res = await client.request('GET', '/')

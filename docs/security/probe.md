@@ -27,22 +27,26 @@ across all lanes.
 - **Loopback allow-list.** `parse_target()` refuses any host that is not
   exactly `127.0.0.1`, `::1`, or `localhost` (case-insensitive), and refuses
   schemes other than `http`/`https` and URLs with userinfo — before any
-  socket is opened. Hostnames are matched as strings; DNS is never consulted.
+  socket is opened. A host name is then resolved exactly once; every
+  resolved address must itself be loopback, and the probes dial the literal
+  resolved address (the name stays only in request authorities and TLS SNI).
   The gate covers **both** lane URLs on every run, even when `--lane`
   selects one. A refusal exits with code 2.
 - **TLS verification is never disabled.** The h2 lane verifies the server
-  certificate against `--tls-ca` (default
-  `/tmp/bb-vuln-target-tls/cert.pem`, the fixture's published certificate).
-  An https target without a verifiable CA file is refused (exit 2) rather
-  than probed unverified.
+  certificate against `--tls-ca` (default: the fixture's published
+  certificate in the per-user private runtime directory that
+  `tools/security/paths.py` names — created 0700 with an owner check, so no
+  other local user can substitute the trust anchor). An https target without
+  a verifiable CA file is refused (exit 2) rather than probed unverified.
 - **Timeouts.** Every check is bounded by `--check-timeout` (default 5 s)
-  and the whole run by `--run-timeout` (default 120 s). Each check runs its
-  whole session — connect, exchange, teardown — under one hard asyncio
-  deadline, and every scenario closes with an RST abort so a peer that stops
-  reading cannot trap teardown; a check that hits its deadline records a
-  TIMEOUT verdict and is cancelled. The run cannot hang. The run budget
-  stops later checks from starting; an in-flight check may overshoot it by
-  its connect/teardown slack.
+  and the whole run by `--run-timeout` (default 120 s). Each check gets one
+  absolute asyncio deadline; every session of that check — multi-variant
+  checks included — spends only the time remaining until it, and every
+  scenario closes with an RST abort so a peer that stops reading cannot trap
+  teardown; a check that hits its deadline records a TIMEOUT verdict and is
+  cancelled. The run cannot hang. The run budget stops later checks from
+  starting; an in-flight check may overshoot it by one connect/teardown
+  slack.
 - **WebSocket exchanges are raw TCP against the same gated target.**
   WS-001 writes its upgrade request to the h1 lane's host:port directly (the
   scenario vocabulary parses HTTP responses, not post-upgrade frames) —
@@ -51,8 +55,9 @@ across all lanes.
   route on the fixture, not a new URL form; no other host or port is ever
   contacted.
 - **Connection caps.** At most 4 concurrent and 96 total connections per run
-  (`ConnectionBudget`), TLS handshake attempts included; every connection is
-  closed in a `finally` block.
+  (`ConnectionBudget`, one instance shared by every lane of the run), TLS
+  handshake attempts included; every connection is closed in a `finally`
+  block.
 - **No real DoS.** H1-ROBUST-011 is slow-send *lite*: 2 connections, one
   bounded hold of at most 5 s, then abort. The flood-shaped h2 checks are
   *lite* by construction: H2-ROBUST-006 resets exactly 20 streams one at a
@@ -68,7 +73,9 @@ across all lanes.
 
 `PASS` — the check's mechanical oracle held. `FAIL` — the oracle was
 violated. `TIMEOUT` — no answer within the bound (counts as failure for the
-exit code). The severity column is the rank a *failure* of that check
+exit code). `SKIP` — the check could not be exercised by this client (for
+example its TLS stack refuses to offer the version under test); it is
+recorded, never reported as `PASS`, and does not fail the run. The severity column is the rank a *failure* of that check
 carries, per [severity criteria](severity.md); a hang or crash escalates the
 H1-ROBUST/H2-ROBUST/CHUNK checks to High, as that document's defaults table
 prescribes.
@@ -119,7 +126,7 @@ prescribes.
 | H2-ROBUST-007 | one legal header block cut into 30 CONTINUATION frames then `END_HEADERS` (CVE-2023-45288 / CVE-2024-27316 / CVE-2024-27983 class): the request **completes** (2xx/4xx) **or** is refused (`431`, or `GOAWAY`/`RST_STREAM` carrying `ENHANCE_YOUR_CALM`/`REFUSED_STREAM`/`PROTOCOL_ERROR`/`NO_ERROR` — a header-block limit may signal PROTOCOL_ERROR per RFC 9113 §4.3) or the connection closes; a crash, a wrong error code, or a deadline overrun = FAIL/TIMEOUT |
 | H2-ROBUST-008 | HPACK bomb lite (CVE-2016-6581 / CVE-2022-41723 class): a ~3 KiB seed block fills the dynamic table with one 4 KiB entry, then a ~4 KiB block of 1000 indexed references decodes to ≤ 4 MiB (the cap is asserted in code) on stream 3 of the same connection: bounded **completion** (2xx/4xx) **or** refusal (`431`, `GOAWAY`/`RST_STREAM` with `ENHANCE_YOUR_CALM`/`REFUSED_STREAM`/`PROTOCOL_ERROR`/`COMPRESSION_ERROR`/`NO_ERROR` — a decoder expansion cap may trip COMPRESSION_ERROR) or close; a crash or a wrong error code = FAIL (the observed refusal is recorded verbatim in the detail) |
 | H2-BASE-002 | after all h2 abuse a fresh HTTP/2 request → 200 `ok` (server survived) |
-| TLS-001 | TLS 1.0 and 1.1 handshake attempts must fail; TLS 1.2 and 1.3 must succeed negotiating ALPN `h2` at that version. **Documented caveat:** on this Python/OpenSSL build the client stack refuses to offer TLS 1.0/1.1 outright (`NO_PROTOCOLS_AVAILABLE`), so those attempts fail before reaching the wire; the fixture additionally pins `minimum_version = TLSv1_2` server-side. A server-side refusal oracle would need a hand-rolled ClientHello (open question, below). |
+| TLS-001 | TLS 1.0 and 1.1 handshake attempts must fail; TLS 1.2 and 1.3 must succeed negotiating ALPN `h2` at that version. A client stack that refuses to offer TLS 1.0/1.1 outright (`NO_PROTOCOLS_AVAILABLE`) is reported as **not exercised** — the check then records `SKIP`, never `PASS`, because no ClientHello reached the server (PR #479 review M2). The fixture additionally pins `minimum_version = TLSv1_2` server-side. A server-side refusal oracle would need a hand-rolled ClientHello (open question, below). |
 
 ## Implementation note
 

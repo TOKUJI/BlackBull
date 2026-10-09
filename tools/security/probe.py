@@ -13,11 +13,13 @@ import argparse
 import asyncio
 import base64
 from dataclasses import dataclass
+import ipaddress
 import math
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+import socket
 import ssl
 import sys
 import time
@@ -50,8 +52,10 @@ from blackbull.fault_injection.scenario_h1 import (
 )
 from blackbull.protocol.frame_types import ErrorCodes, FrameTypes
 
-#: The probe may only be pointed at these hosts.  Enforced in
-#: [`parse_target`][] before any socket is opened; never resolve DNS.
+#: The probe may only be pointed at these hosts.  Enforced as a string
+#: allow-list in [`parse_target`][] before any socket is opened; a host name
+#: is then resolved once, every resolved address must be loopback, and the
+#: probes dial the literal address (never the name).
 ALLOWED_HOSTS = frozenset({'127.0.0.1', '::1', 'localhost'})
 
 #: Schemes the runner speaks.  ``https`` carries the HTTP/2 lane (ALPN ``h2``).
@@ -61,6 +65,9 @@ MAX_CONCURRENT_CONNECTIONS = 4
 MAX_TOTAL_CONNECTIONS = 96
 
 PASS, FAIL, TIMEOUT = 'PASS', 'FAIL', 'TIMEOUT'
+#: The check could not be exercised by this client (e.g. its TLS stack
+#: cannot offer the version under test); never reported as PASS.
+SKIP = 'SKIP'
 
 #: Severity ranks exactly as docs/security/severity.md defines them.
 SEVERITIES = ('Critical', 'High', 'Medium', 'Low', 'Info')
@@ -79,13 +86,22 @@ _SCENARIO_SLACK_S = 5.0
 #: exchange.  Long enough for a local answer, short enough that a clean
 #: no-more-responses outcome does not cost a full check timeout.
 _TAIL_TIMEOUT_S = 1.0
+#: Floor for a session bound once the check deadline has almost elapsed.
+_MIN_SESSION_BOUND_S = 0.05
 #: H1-ROBUST-011's total hold; the check is gentle by construction.
 _SLOW_HOLD_MAX_S = 5.0
 
 #: Well-known certificate published by tools/security/fixture_app.py at
-#: startup; the probe verifies the TLS lane against it instead of disabling
-#: certificate checks.
-DEFAULT_TLS_CA = '/tmp/bb-vuln-target-tls/cert.pem'
+#: startup inside the per-user private runtime directory
+#: (tools/security/paths.py); the probe verifies the TLS lane against it
+#: instead of disabling certificate checks.
+def default_tls_ca() -> str:
+    if __package__ in (None, ''):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import paths
+    else:
+        from tools.security import paths
+    return str(paths.cert_file())
 
 _REPORT_DIR = Path(__file__).resolve().parents[2] / 'bench' / 'results' / 'security'
 
@@ -99,6 +115,40 @@ class Target:
     scheme: str
     host: str
     port: int
+    #: Literal loopback address the probes dial; `host` stays the authority
+    #: in request lines and TLS SNI.  Empty means "dial `host`".
+    connect_host: str = ''
+
+    @property
+    def peer(self) -> str:
+        return self.connect_host or self.host
+
+
+def _resolve_loopback(host: str, port: int) -> str:
+    """Resolve *host* once; every answer must be loopback.  Return a literal."""
+    if host != 'localhost':
+        return host  # allow-listed literal already
+    try:
+        infos = socket.getaddrinfo(host, port or 0, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise UnsafeTargetError(f'refused: cannot resolve {host!r}: {exc}') from exc
+    literals = []
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError as exc:
+            raise UnsafeTargetError(
+                f'refused: resolution of {host!r} returned non-address {addr!r}') from exc
+        if not ip.is_loopback:
+            raise UnsafeTargetError(
+                f'refused: resolution of {host!r} returned non-loopback {addr}')
+        literals.append(addr)
+    if not literals:
+        raise UnsafeTargetError(f'refused: resolution of {host!r} returned nothing')
+    # Prefer IPv4: the fixture binds 127.0.0.1 listeners.
+    v4 = [a for a in literals if ipaddress.ip_address(a).version == 4]
+    return v4[0] if v4 else literals[0]
 
 
 def parse_target(base_url: str) -> Target:
@@ -122,8 +172,9 @@ def parse_target(base_url: str) -> Target:
     except ValueError as exc:
         raise UnsafeTargetError(f'refused: bad port in {base_url!r}: {exc}') from exc
     default_port = 443 if parts.scheme == 'https' else 80
-    return Target(scheme=parts.scheme, host=host,
-                  port=port if port is not None else default_port)
+    resolved_port = port if port is not None else default_port
+    return Target(scheme=parts.scheme, host=host, port=resolved_port,
+                  connect_host=_resolve_loopback(host, resolved_port))
 
 
 @dataclass(frozen=True)
@@ -179,6 +230,19 @@ class ConnectionBudget:
         self._live -= 1
 
 
+def _is_client_side_refusal(exc: BaseException) -> bool:
+    """True when this client's TLS stack refused to offer the version locally.
+
+    ``ssl.SSLError: NO_PROTOCOLS_AVAILABLE`` is raised before any byte is
+    written, so the server never saw the attempt and the outcome must not be
+    reported as a server-side refusal.
+    """
+    if isinstance(exc, ssl.SSLError):
+        text = str(exc).upper()
+        return 'NO_PROTOCOLS_AVAILABLE' in text or 'NO PROTOCOLS AVAILABLE' in text
+    return False
+
+
 class Probe:
     """Deadline-bounded connection helpers shared by every check.
 
@@ -190,13 +254,18 @@ class Probe:
     """
 
     def __init__(self, target: Target, check_timeout: float,
-                 tls_ca: str | None = None) -> None:
+                 tls_ca: str | None = None,
+                 budget: ConnectionBudget | None = None) -> None:
         self.target = target
         self.check_timeout = check_timeout
         self.tls_ca = tls_ca
-        self.budget = ConnectionBudget()
+        #: Shared across lanes when the runner owns one budget (L1).
+        self.budget = budget if budget is not None else ConnectionBudget()
         #: Narrowed per check by the runner against the run budget.
         self.effective_timeout = check_timeout
+        #: One absolute deadline per check, set by the runner; every session
+        #: of that check spends only the time remaining until it (M1).
+        self.check_deadline: float | None = None
 
     # ---- HTTP/1.1 ------------------------------------------------------
 
@@ -206,7 +275,7 @@ class Probe:
         async def _go():
             async with asyncio.timeout(self._session_bound()):
                 async with HTTP1Client(
-                        self.target.host, self.target.port,
+                        self.target.peer, self.target.port,
                         connect_timeout=min(_CONNECT_TIMEOUT_S,
                                             self.effective_timeout)) as client:
                     return await client.execute_scenario(
@@ -225,7 +294,7 @@ class Probe:
         """Run several whole scenarios concurrently (one budget slot each)."""
         async def _one(name: str, steps):
             async with HTTP1Client(
-                    self.target.host, self.target.port,
+                    self.target.peer, self.target.port,
                     connect_timeout=min(_CONNECT_TIMEOUT_S,
                                         self.effective_timeout)) as client:
                 return await client.execute_scenario(
@@ -255,7 +324,7 @@ class Probe:
         async def _go():
             async with asyncio.timeout(self._session_bound()):
                 async with HTTP2Client(
-                        self.target.host, self.target.port, ssl=ctx,
+                        self.target.peer, self.target.port, ssl=ctx,
                         connect_timeout=min(_CONNECT_TIMEOUT_S,
                                             self.effective_timeout),
                         scenario_mode=True) as client:
@@ -265,8 +334,15 @@ class Probe:
         return self._bounded(_go)
 
     def tls_attempt(self, min_version: ssl.TLSVersion,
-                    max_version: ssl.TLSVersion) -> tuple[bool, str]:
-        """One bounded TLS handshake attempt; returns (ok, detail)."""
+                    max_version: ssl.TLSVersion) -> tuple[str, str]:
+        """One bounded TLS handshake attempt.
+
+        Returns ``(state, detail)`` with *state* one of ``ok``, ``refused``
+        (the handshake reached the peer and failed — a real outcome) or
+        ``not-exercised`` (this client's own TLS stack refused to offer the
+        version, so no ClientHello ever reached the server — a pass would be
+        false assurance; see review M2 on PR #479).
+        """
         ctx = self._client_tls_context()
         with warnings.catch_warnings():
             # Offering TLS 1.0/1.1 is deprecated by design; the warning is
@@ -277,23 +353,25 @@ class Probe:
         ctx.set_alpn_protocols(['h2'])
 
         async def _go():
-            _, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.target.host, self.target.port,
-                                        ssl=ctx,
-                                        server_hostname=self.target.host),
-                self.effective_timeout + _CONNECT_TIMEOUT_S)
-            try:
-                ss = writer.get_extra_info('ssl_object')
-                return (True,
-                        f'tls={ss.version()} alpn={ss.selected_alpn_protocol()}')
-            finally:
-                writer.close()
+            async with asyncio.timeout(self._session_bound()):
+                _, writer = await asyncio.open_connection(
+                    self.target.peer, self.target.port, ssl=ctx,
+                    server_hostname=self.target.host)
+                try:
+                    ss = writer.get_extra_info('ssl_object')
+                    return ('ok',
+                            f'tls={ss.version()} alpn={ss.selected_alpn_protocol()}')
+                finally:
+                    writer.close()
 
         self.budget.acquire()
         try:
             return asyncio.run(_go())
         except Exception as exc:  # noqa: BLE001 — a failed handshake is an outcome
-            return (False, f'{type(exc).__name__}: {exc}')
+            if _is_client_side_refusal(exc):
+                return ('not-exercised',
+                        f'{type(exc).__name__}: {exc}')
+            return ('refused', f'{type(exc).__name__}: {exc}')
         finally:
             self.budget.release()
 
@@ -320,9 +398,13 @@ class Probe:
         ctx = self._client_tls_context()
 
         async def _go() -> WsAttempt:
+            async with asyncio.timeout(self._session_bound()):
+                return await _attempt()
+
+        async def _attempt() -> WsAttempt:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(
-                    self.target.host, self.target.port, ssl=ctx,
+                    self.target.peer, self.target.port, ssl=ctx,
                     server_hostname=self.target.host if ctx is not None else None),
                 _CONNECT_TIMEOUT_S)
             try:
@@ -350,6 +432,8 @@ class Probe:
     # ---- shared bounds -------------------------------------------------
 
     def _session_bound(self) -> float:
+        if self.check_deadline is not None:
+            return max(_MIN_SESSION_BOUND_S, self.check_deadline - time.monotonic())
         return (self.effective_timeout + _CONNECT_TIMEOUT_S + _SCENARIO_SLACK_S)
 
     def _bounded(self, go, *, slots: int = 1):
@@ -1268,29 +1352,46 @@ _TLS_ATTEMPTS = (
 )
 
 
-def tls_verdict(attempts: Sequence[tuple[str, bool, str]]) -> Verdict:
-    """TLS-001: <1.2 must fail, 1.2/1.3 must succeed with ALPN ``h2``."""
+def tls_verdict(attempts: Sequence[tuple[str, str, str]]) -> Verdict:
+    """TLS-001: <1.2 must fail, 1.2/1.3 must succeed with ALPN ``h2``.
+
+    Attempts are ``(label, state, detail)`` with *state* from
+    [`Probe.tls_attempt`][].  An unexercised attempt (client-side refusal)
+    makes the verdict [`SKIP`][], never [`PASS`][], and a FAIL anywhere wins.
+    """
     details = []
     verdict = PASS
-    by_label = {label: (ok, detail) for label, ok, detail in attempts}
+    by_label = {label: (state, detail) for label, state, detail in attempts}
+    unexercised = []
     for label in ('TLS1.0', 'TLS1.1'):
-        ok, detail = by_label.get(label, (True, 'not attempted'))
-        if ok:
+        state, detail = by_label.get(label, ('not-exercised', 'not attempted'))
+        if state == 'ok':
             verdict = FAIL
             details.append(f'{label}: handshake succeeded ({detail})')
+        elif state == 'not-exercised':
+            unexercised.append(label)
+            details.append(f'{label}: not exercised '
+                           f'({detail.splitlines()[0][:40]})')
         else:
             details.append(f'{label}: refused ({detail.splitlines()[0][:60]})')
     for label, wanted in (('TLS1.2', 'TLSv1.2'), ('TLS1.3', 'TLSv1.3')):
-        ok, detail = by_label.get(label, (False, 'not attempted'))
-        if ok and detail == f'tls={wanted} alpn=h2':
+        state, detail = by_label.get(label, ('not-exercised', 'not attempted'))
+        if state == 'ok' and detail == f'tls={wanted} alpn=h2':
             details.append(f'{label}: {detail}')
-        elif ok:
+        elif state == 'ok':
             verdict = FAIL
             details.append(f'{label}: negotiated {detail} '
                            f'(expected tls={wanted} alpn=h2)')
+        elif state == 'not-exercised':
+            unexercised.append(label)
+            details.append(f'{label}: not exercised '
+                           f'({detail.splitlines()[0][:40]})')
         else:
             verdict = FAIL
             details.append(f'{label}: handshake failed ({detail})')
+    if verdict == PASS and unexercised:
+        verdict = SKIP
+        details.append('not-exercised attempts are not passes (review M2)')
     return Verdict(verdict, '; '.join(details))
 
 
@@ -2111,6 +2212,8 @@ def run_checks(probe: Probe, checks: Sequence[Check],
                                        'run budget exhausted', check.cwe))
             continue
         probe.effective_timeout = min(probe.check_timeout, remaining)
+        probe.check_deadline = (time.monotonic() + probe.effective_timeout
+                                + _SCENARIO_SLACK_S)
         try:
             verdict = check.run(probe)
         except (TimeoutError, asyncio.TimeoutError):
@@ -2118,6 +2221,8 @@ def run_checks(probe: Probe, checks: Sequence[Check],
                               f'no result within {probe.effective_timeout:g}s')
         except Exception as exc:  # noqa: BLE001 — a probe bug must not kill the run
             verdict = Verdict(FAIL, f'probe error: {exc!r}')
+        finally:
+            probe.check_deadline = None
         severity = (check.timeout_severity() if verdict.verdict == TIMEOUT
                     else check.severity)
         results.append(CheckResult(check.check_id, check.description, severity,
@@ -2160,7 +2265,8 @@ def render_markdown(lanes: Sequence[Lane], *,
         f'- Bounds: check timeout {check_timeout:g}s, run cap {run_timeout:g}s, '
         f'connections {MAX_CONCURRENT_CONNECTIONS} concurrent / {MAX_TOTAL_CONNECTIONS} per run',
         '- Verdicts: PASS = mechanical oracle held; FAIL = oracle violated; '
-        'TIMEOUT = no answer within the bound.',
+        'TIMEOUT = no answer within the bound; SKIP = not exercised by this '
+        'client (never counted as a pass).',
         '- Severity is the rank a failure of that check carries '
         '(docs/security/severity.md). Recording of findings: docs/security/probe.md.',
         '',
@@ -2192,7 +2298,8 @@ def write_report(lanes: Sequence[Lane], *, check_timeout: float,
 
 
 def exit_code(lanes: Sequence[Lane]) -> int:
-    return 0 if all(r.verdict == PASS
+    """FAIL/TIMEOUT fail the run; SKIP (not exercised) is visible, not fatal."""
+    return 0 if all(r.verdict not in (FAIL, TIMEOUT)
                     for lane in lanes for r in lane.results) else 1
 
 
@@ -2206,9 +2313,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help='HTTP/2 lane target (loopback hosts only)')
     parser.add_argument('--lane', choices=(*LANES, 'all'), default='all',
                         help='which lane(s) to run (default all)')
-    parser.add_argument('--tls-ca', default=DEFAULT_TLS_CA,
-                        help=f'PEM bundle the TLS lane verifies against '
-                             f'(default {DEFAULT_TLS_CA})')
+    parser.add_argument('--tls-ca', default=None,
+                        help='PEM bundle the TLS lane verifies against '
+                             '(default: the fixture certificate in the '
+                             'per-user runtime directory)')
     parser.add_argument('--check-timeout', type=float, default=5.0,
                         help='per-check timeout in seconds (default 5)')
     parser.add_argument('--run-timeout', type=float, default=120.0,
@@ -2217,6 +2325,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not all(math.isfinite(t) and t > 0
                for t in (args.check_timeout, args.run_timeout)):
         parser.error('timeouts must be finite and positive')
+    if args.tls_ca is None:
+        args.tls_ca = default_tls_ca()
 
     # The gate covers both lane URLs regardless of --lane: a URL the CLI
     # names is a URL the run is accountable for.
@@ -2239,10 +2349,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     started = datetime.now(timezone.utc)
     timestamp = started.strftime('%Y%m%dT%H%M%SZ')
     deadline = time.monotonic() + args.run_timeout
+    # One budget for the whole run: the report header's "per run" cap is literal.
+    budget = ConnectionBudget()
     lanes: list[Lane] = []
     for lane in lane_names:
         url, target = gated[lane]
-        probe = Probe(target, args.check_timeout, tls_ca=args.tls_ca)
+        probe = Probe(target, args.check_timeout, tls_ca=args.tls_ca,
+                      budget=budget)
         results = run_checks(probe, checks_for(lane), deadline)
         lanes.append(Lane(lane, url, tuple(results)))
 

@@ -51,7 +51,8 @@ implementation, not a second — to generate an ephemeral RSA self-signed
 certificate at startup. The key material lives in the helper's own tempdir and
 is removed when the context is collected; it is never written into the
 repository or the shared scratch directory. The **public** certificate is
-copied to `/tmp/bb-vuln-target-tls/cert.pem`, the well-known path the probe
+copied to the per-user private runtime directory (`tools/security/paths.py`
+names it; created 0700 with an owner check) as `tls/cert.pem`, the well-known path the probe
 (`tools/security/probe.py`, `--tls-ca`) loads to verify the TLS lane's
 handshake — so no step of the probe disables certificate verification. The
 fixture pins `minimum_version = TLSv1_2`; ALPN advertises `h2` then
@@ -88,7 +89,8 @@ vuln-target up (pid 12345): http://127.0.0.1:8000 + https://127.0.0.1:8443
 ```
 
 The recipe starts the app in the background on both ports, records the server
-PID in `/tmp/bb-vuln-target.pid` and its output in `/tmp/bb-vuln-target.log`,
+PID in `server.pid` and its output in `server.log` (both in the same
+per-user private runtime directory),
 and waits (bounded, ~10 s) for the fixture's own `--health` oracle to pass:
 `GET /` must answer exactly `ok` on the cleartext lane **and** a verified-TLS
 HTTP/2 `GET /` must answer `200 ok` on the TLS lane. If the target is already

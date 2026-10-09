@@ -37,12 +37,12 @@ ab-verify:
 httparena-bench:
     scripts/run-httparena-bench.sh
 
-# BLA-526 probe target (loopback only): HTTP/1.1 on 8000 and TLS+ALPN h2 on 8443 in one process; PID, log, and the generated TLS cert live under /tmp — see docs/security/fixture-app.md
+# BLA-526 probe target (loopback only): HTTP/1.1 on 8000 and TLS+ALPN h2 on 8443 in one process; PID, log, and the generated TLS cert live in the per-user private runtime dir (tools/security/paths.py) — see docs/security/fixture-app.md
 vuln-target-up:
     #!/usr/bin/env bash
     set -euo pipefail
-    pid_file=/tmp/bb-vuln-target.pid
-    log=/tmp/bb-vuln-target.log
+    pid_file=$(.venv/bin/python tools/security/paths.py pid)
+    log=$(.venv/bin/python tools/security/paths.py log)
     healthy() {
         .venv/bin/python tools/security/fixture_app.py --health >/dev/null 2>&1
     }
@@ -59,12 +59,16 @@ vuln-target-up:
     fi
     for port in 8000 8443; do
         if port_held "$port"; then
-            exec 3>&- 2>/dev/null || true
             echo "vuln-target: port $port is already in use by another process; refusing to start" >&2
             exit 1
         fi
     done
-    uv sync --all-extras
+    # Starting the target must not mutate the environment (review L3): fail
+    # with a clear message instead of re-running `uv sync` behind the user.
+    if ! .venv/bin/python -c 'import blackbull' 2>/dev/null; then
+        echo "vuln-target: .venv is not ready (cannot import blackbull); run 'just install' first" >&2
+        exit 1
+    fi
     # Not `uv run`: uv spawns the interpreter as a child, and the PID file
     # must name the server process itself.
     nohup .venv/bin/python tools/security/fixture_app.py --port 8000 --tls-port 8443 >>"$log" 2>&1 &
@@ -88,7 +92,7 @@ vuln-target-up:
 vuln-target-down:
     #!/usr/bin/env bash
     set -euo pipefail
-    pid_file=/tmp/bb-vuln-target.pid
+    pid_file=$(.venv/bin/python tools/security/paths.py pid)
     if [ ! -f "$pid_file" ]; then
         echo "vuln-target: no PID file; nothing to stop"
         exit 0
@@ -113,7 +117,7 @@ vuln-target-down:
         fi
     fi
     rm -f "$pid_file"
-    rm -rf /tmp/bb-vuln-target-tls
+    rm -rf "$(.venv/bin/python tools/security/paths.py tls)"
     for port in 8000 8443; do
         if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
             exec 3>&- || true
