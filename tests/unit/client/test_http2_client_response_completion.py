@@ -380,6 +380,43 @@ class TestTheCallerSeesTheFinalHead:
         assert [v for _n, v in res.trailers.getlist(b'x-checksum')] == [b'1']
 
 
+class TestTheCallerSeesWhichFrameEndedTheStream:
+    """gRPC's Trailers-Only is the final head carrying END_STREAM; a head
+    followed by an empty DATA frame has the same headers and body but no
+    trailer section, so only the frame that ended the stream tells them apart.
+    """
+
+    async def test_a_final_head_that_ends_the_stream(self):
+        res = _ok(await _call(_Peer().settings()
+                              .headers({PseudoHeaders.STATUS: '200'},
+                                       end_stream=True)))
+        assert res.ended_on_head is True
+
+    async def test_an_interim_head_then_a_final_head_that_ends_the_stream(self):
+        res = _ok(await _call(_Peer().settings()
+                              .headers({PseudoHeaders.STATUS: '103'},
+                                       end_stream=False)
+                              .headers({PseudoHeaders.STATUS: '200'},
+                                       end_stream=True)))
+        assert res.ended_on_head is True
+
+    async def test_an_empty_data_frame_that_ends_the_stream(self):
+        res = _ok(await _call(_Peer().settings()
+                              .headers({PseudoHeaders.STATUS: '200'},
+                                       end_stream=False)
+                              .data(b'', end_stream=True)))
+        assert res.body == b'' and len(res.trailers) == 0
+        assert res.ended_on_head is False
+
+    async def test_a_trailer_section_that_ends_the_stream(self):
+        res = _ok(await _call(_Peer().settings()
+                              .headers({PseudoHeaders.STATUS: '200'},
+                                       end_stream=False)
+                              .headers({}, [(b'x-checksum', b'1')],
+                                       end_stream=True)))
+        assert res.ended_on_head is False
+
+
 # ----------------------------------------------------------------------
 # C5 — the refusal is a stream error
 # ----------------------------------------------------------------------

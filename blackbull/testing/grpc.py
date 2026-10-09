@@ -120,10 +120,9 @@ def _read_reply(response, *, unary: bool | None = None) -> GrpcReply:
     *unary* is the call's response shape when known: a unary ``OK`` reply
     must carry exactly one message.  ``None`` skips that check.
     """
-    # A Trailers-Only response carries its status in the head; any other
-    # response carries it only in the trailer section.
-    trailers_only = not response.trailers and not response.body
-    section = response.headers if trailers_only else response.trailers
+    # A Trailers-Only response (END_STREAM on the head) carries its status in
+    # the head; any other response carries it only in the trailer section.
+    section = response.headers if response.ended_on_head else response.trailers
     status_values = [value for _, value in section.getlist(b'grpc-status')]
     server_status, status_problem = _parse_status(status_values)
 

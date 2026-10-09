@@ -159,12 +159,13 @@ _GRPC_CT = (b'content-type', b'application/grpc')
 
 
 def _response(*, status: int = 200, head=(_GRPC_CT,), body: bytes = b'',
-              trailers=()):
+              trailers=(), ended_on_head: bool = False):
     from blackbull.client.http2 import ClientResponse
     from blackbull.headers import Headers
 
     return ClientResponse(status=status, headers=Headers(list(head)),
-                          body=body, trailers=Headers(list(trailers)))
+                          body=body, trailers=Headers(list(trailers)),
+                          ended_on_head=ended_on_head)
 
 
 def _judge(response, *, unary: bool | None = None):
@@ -209,7 +210,8 @@ class TestAWellFormedReplyIsReportedAsIs:
 
     def test_an_explicit_error_in_a_trailers_only_response(self):
         reply = _judge(_response(head=[_GRPC_CT, _status(b'5'),
-                                       (b'grpc-message', b'no%20such')]),
+                                       (b'grpc-message', b'no%20such')],
+                                 ended_on_head=True),
                        unary=True)
 
         assert reply.status is GrpcStatus.NOT_FOUND
@@ -275,6 +277,13 @@ class TestAMissingStatusIsSynthesizedFromTheHttpStatus:
         assert 'grpc-status' in reply.violation
         assert reply.messages == (b'ok',)
 
+    def test_a_status_in_a_head_that_did_not_end_the_stream_is_not_used(self):
+        """Head, then an empty DATA frame with END_STREAM: no trailers at all."""
+        reply = _judge(_response(head=[_GRPC_CT, _status(b'0')]), unary=False)
+
+        assert reply.status is GrpcStatus.UNKNOWN
+        assert 'grpc-status' in reply.violation
+
     def test_a_status_in_the_head_of_a_reply_with_trailers_is_not_used(self):
         reply = _judge(_response(head=[_GRPC_CT, _status(b'0')],
                                  body=encode_message(b'ok'),
@@ -312,7 +321,8 @@ class TestOkIsNeverReportedForABrokenReply:
         assert '503' in reply.violation
 
     def test_a_non_200_http_status_keeps_an_explicit_error(self):
-        reply = _judge(_response(status=503, head=[_GRPC_CT, _status(b'8')]))
+        reply = _judge(_response(status=503, head=[_GRPC_CT, _status(b'8')],
+                                 ended_on_head=True))
 
         assert reply.status is GrpcStatus.RESOURCE_EXHAUSTED
         assert '503' in reply.violation
@@ -331,7 +341,7 @@ class TestOkIsNeverReportedForABrokenReply:
 
     def test_a_content_type_that_is_not_grpc_keeps_an_explicit_error(self):
         reply = _judge(_response(head=[(b'content-type', b'text/html'),
-                                       _status(b'5')]))
+                                       _status(b'5')], ended_on_head=True))
 
         assert reply.status is GrpcStatus.NOT_FOUND
         assert 'content-type' in reply.violation
@@ -396,7 +406,8 @@ class TestTheStatusMessageIsPercentDecoded:
     ])
     def test_invalid_encodings_are_kept_not_raised(self, raw, text):
         reply = _judge(_response(head=[_GRPC_CT, _status(b'5'),
-                                       (b'grpc-message', raw)]))
+                                       (b'grpc-message', raw)],
+                                 ended_on_head=True))
 
         assert reply.grpc_message == text
 
@@ -450,6 +461,19 @@ class TestAnomaliesAreCaughtThroughTheRealServer:
 
         assert reply.status is GrpcStatus.UNAVAILABLE
         assert reply.violation is not None
+
+    async def test_a_status_in_a_head_that_did_not_end_the_stream(self):
+        """The server sends the head, then an empty DATA frame with END_STREAM."""
+        start = _start()
+        start['headers'].append((b'grpc-status', b'0'))
+        app = _raw_app('/demo.Raw/Call', [start, _body(b'')])
+
+        async with GrpcTestServer(app) as grpc:
+            reply = await grpc.unary('/demo.Raw/Call', b'x')
+
+        assert reply.response.ended_on_head is False
+        assert reply.status is GrpcStatus.UNKNOWN
+        assert 'grpc-status' in reply.violation
 
     async def test_status_zero_after_a_truncated_message(self):
         app = _raw_app('/demo.Raw/Call', [
