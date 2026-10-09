@@ -73,6 +73,11 @@ and Student t 95% intervals (df=5 for bridge, df=2 for wire). A micro delta is
 time; a wire delta is throughput. An interval crossing zero does not establish
 equivalence, and null-label drift limits interpretation of small effects.
 
+Use `--timeout 1S` for a separate bridge comparison with a client deadline.
+For deadline changes, compare both with and without this option; use the same
+header for both arms.
+For wire comparison, add `-H 'grpc-timeout: 1S'` to both warmup and measured runs.
+
 ## Correctness
 
 ```sh

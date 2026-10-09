@@ -10,7 +10,6 @@ import errno
 import logging
 import socket
 import ssl
-import sys
 from dataclasses import replace
 from pathlib import Path
 import time
@@ -30,6 +29,7 @@ from .recipient import (AbstractReader, AsyncioReader,
 from .cap_log import CapHitCounter, log_cap_hit
 from ..asgi import ASGIEvent
 from ..env import FD_RESERVE, DerivedCap, get_settings
+from ..utils import _EAGER_TASKS, create_eager_task
 logger = logging.getLogger(__name__)
 
 
@@ -48,8 +48,6 @@ def _address_of(sock) -> Tcp | Unix:
         return Unix(sockname)
     return Tcp(sockname[1])
 
-# ``eager_start`` landed in 3.12; the supported floor is 3.11.
-_EAGER_TASKS = sys.version_info >= (3, 12)
 _CLEANUP_TIMEOUT = 8.0
 
 
@@ -396,9 +394,9 @@ class _AcceptGate:
             raise
         loop = self._loop or asyncio.get_running_loop()
         if _EAGER_TASKS:
-            task = asyncio.Task(
+            task = create_eager_task(
                 self._connected(loop, conn, protocol, ssl_context, admission),
-                loop=loop, eager_start=True)
+                loop=loop)
         else:
             started: list = []
             task = loop.create_task(self._connected(

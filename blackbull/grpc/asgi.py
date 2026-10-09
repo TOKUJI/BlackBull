@@ -13,12 +13,20 @@ import os
 
 from ..native import NativeResponse
 from ..request import stream_body, ClientDisconnected
+from ..utils import create_eager_task
 from . import compression
 from .codec import encode_message, MAX_MESSAGE_LENGTH, _PREFIX, _PREFIX_LEN
 from .registry import GrpcServiceRegistry
 from .status import GrpcError, GrpcStatus
 
 logger = logging.getLogger(__name__)
+
+_TERMINATION_TIMEOUT = 0.1
+
+
+class _RpcDeadlineExceeded(TimeoutError):
+    pass
+
 
 _GRPC_CONTENT_TYPE = b'application/grpc'
 
@@ -156,7 +164,7 @@ class GrpcContext:
 
     __slots__ = ('conn', 'code', 'details', '_trailing', '_deadline',
                  '_send', '_content_type', '_response_encoding',
-                 '_initial_metadata', '_started')
+                 '_initial_metadata', '_started', '_deadline_expired')
 
     def __init__(self, conn):
         self.conn = conn
@@ -166,6 +174,7 @@ class GrpcContext:
         # Bound by _bind() at dispatch; defaults keep a hand-built context
         # (tests) usable without binding.
         self._deadline: float | None = None          # absolute loop time, or None
+        self._deadline_expired = False
         self._send = None
         self._content_type: bytes = _GRPC_CONTENT_TYPE
         self._response_encoding: bytes | None = None
@@ -174,14 +183,12 @@ class GrpcContext:
 
     def _bind(self, send, content_type: bytes, response_encoding: bytes | None,
               deadline: float | None) -> None:
-        """Wire the response side (called by [`serve_grpc`][]).  *deadline* is
-        a duration in seconds; it is stored as an absolute loop time so
-        [`time_remaining`][] counts down from here."""
+        """Bind the response side and absolute loop-time deadline."""
         self._send = send
         self._content_type = content_type
         self._response_encoding = response_encoding
-        if deadline is not None:
-            self._deadline = asyncio.get_event_loop().time() + deadline
+        self._deadline = deadline
+        self._deadline_expired = False
 
     def metadata(self, name: bytes, default: bytes = b'') -> bytes:
         """Return a request header (call metadata) value, or *default*."""
@@ -220,6 +227,8 @@ class GrpcContext:
         finish in time."""
         if self._deadline is None:
             return None
+        if self._deadline_expired:
+            return 0.0
         return max(0.0, self._deadline - asyncio.get_event_loop().time())
 
     def set_code(self, status: GrpcStatus) -> None:
@@ -260,6 +269,8 @@ class GrpcContext:
         lazy first-message path can't double-send the start event."""
         if self._started:
             return
+        if self._deadline is not None:
+            _check_deadline(self)
         self._started = True
         await self._send(_response_start(
             self._content_type, self._response_encoding, self._initial_metadata))
@@ -553,8 +564,13 @@ def _response_start(content_type: bytes,
         expects_trailers=True)
 
 
+def _check_deadline(context: GrpcContext) -> None:
+    if context._deadline_expired or (context._deadline is not None
+                                    and asyncio.get_running_loop().time() >= context._deadline):
+        raise _RpcDeadlineExceeded('deadline exceeded')
+
+
 async def _serve_unary(handler, request, context, send, content_type,
-                       deadline: float | None,
                        response_encoding: bytes | None = None) -> None:
     """Run a unary handler and emit HEADERS → one DATA → status trailers.
 
@@ -564,26 +580,17 @@ async def _serve_unary(handler, request, context, send, content_type,
     after that rides the trailing HEADERS frame instead — ``_finish_stream_error``
     picks the right shape from ``context._started``."""
     try:
-        if deadline is not None:
-            response = await asyncio.wait_for(
-                handler(request, context), timeout=deadline)
-        else:
-            response = await handler(request, context)
+        if context._deadline is not None:
+            _check_deadline(context)
+        response = await handler(request, context)
         response = _validate_response_message(response)
     except GrpcError as exc:
         await _finish_stream_error(
             send, context, exc.status, exc.details, content_type)
         return
-    except asyncio.TimeoutError:
-        await _finish_stream_error(
-            send, context, GrpcStatus.DEADLINE_EXCEEDED,
-            'deadline exceeded', content_type)
-        return
     except Exception as exc:  # noqa: BLE001 — handler isolation
-        # Isolate handler bugs as INTERNAL.  CancelledError / KeyboardInterrupt /
-        # SystemExit / GeneratorExit derive from BaseException (not Exception),
-        # so they propagate here rather than being masked — task cancellation and
-        # interpreter shutdown must never be turned into a gRPC status.
+        # Handler errors are INTERNAL; task cancellation propagates.
+        _check_deadline(context)
         logger.exception('gRPC unary handler raised')
         await _finish_stream_error(
             send, context, GrpcStatus.INTERNAL, str(exc), content_type)
@@ -601,6 +608,8 @@ async def _serve_unary(handler, request, context, send, content_type,
         return
 
     # END_STREAM belongs on the trailers, not the body (RFC 9113 §8.1).
+    if context._deadline is not None:
+        _check_deadline(context)
     context._started = True
     await send(NativeResponse.with_trailers(
         200,
@@ -610,7 +619,6 @@ async def _serve_unary(handler, request, context, send, content_type,
 
 
 async def _serve_server_streaming(handler, request, context, send, content_type,
-                                  deadline: float | None,
                                   response_encoding: bytes | None = None) -> None:
     """Drive a server-streaming (async-generator) handler.
 
@@ -658,13 +666,16 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     # Unannotated for the per-request-closure reason (see
     # app.py::_wrap_send_native); takes nothing, returns nothing.
     async def _stop_idle_flusher():
-        # Graceful stop so an in-flight flush completes rather than being
-        # cancelled mid-send; the drive/error paths flush any tail themselves.
+        # Cancel blocked writes on expiry; otherwise finish committed flushes.
         nonlocal finished
         finished = True
         flush_wanted.set()
         try:
-            await idle_flusher
+            if asyncio.current_task().cancelling() or context.time_remaining() == 0:
+                idle_flusher.cancel()
+                await asyncio.gather(idle_flusher, return_exceptions=True)
+            else:
+                await idle_flusher
         except Exception:  # noqa: BLE001 — send failures already surfaced
             logger.exception('gRPC stream idle flusher raised')
 
@@ -673,6 +684,8 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     async def _drive():
         it = agen.__aiter__()
         while True:
+            if context._deadline is not None:
+                _check_deadline(context)
             try:
                 msg = await it.__anext__()
             except StopAsyncIteration:
@@ -685,31 +698,16 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
                 flush_wanted.set()
 
     try:
-        if deadline is not None:
-            async with asyncio.timeout(deadline):
-                await _drive()
-        else:
-            await _drive()
+        await _drive()
     except GrpcError as exc:
         # Deliver messages already committed by the generator, then the status.
         await _flush()
         await _finish_stream_error(
             send, context, exc.status, exc.details, content_type)
         return
-    except (asyncio.TimeoutError, TimeoutError):
-        await _flush()
-        await _finish_stream_error(
-            send, context, GrpcStatus.DEADLINE_EXCEEDED,
-            'deadline exceeded', content_type)
-        return
     except Exception as exc:  # noqa: BLE001 — handler isolation
-        # Isolate handler bugs as INTERNAL.  CancelledError / KeyboardInterrupt /
-        # SystemExit / GeneratorExit derive from BaseException (not Exception),
-        # so they propagate here — client cancellation still unwinds the stream
-        # (and finalises the generator via the finally below) instead of being
-        # reported as a gRPC status.  Messages the generator successfully yielded
-        # before the crash are committed and delivered (they'd already be on the
-        # wire without batching); only the failed message is lost.
+        # Preserve messages already yielded before a handler failure.
+        _check_deadline(context)
         await _flush()
         logger.exception('gRPC server-streaming handler raised')
         await _finish_stream_error(
@@ -718,11 +716,17 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     finally:
         # Finish any committed flush before finalizing the generator on every exit.
         # Cleanup must not mask the status already reported.
-        await _stop_idle_flusher()
         try:
-            await agen.aclose()
-        except Exception:  # noqa: BLE001
-            logger.exception('gRPC server-streaming generator aclose() raised')
+            await _stop_idle_flusher()
+        finally:
+            try:
+                if asyncio.current_task().cancelling() or context.time_remaining() == 0:
+                    async with asyncio.timeout(_TERMINATION_TIMEOUT):
+                        await agen.aclose()
+                else:
+                    await agen.aclose()
+            except Exception:  # noqa: BLE001
+                logger.exception('gRPC server-streaming generator aclose() raised')
 
     # Success: flush the final partial batch, then the OK trailer.  For an empty
     # stream (nothing buffered / yielded) _flush is a no-op and the headers are
@@ -750,6 +754,56 @@ async def _finish_stream_error(send, context: GrpcContext, status: GrpcStatus,
                                   context._trailing)
 
 
+async def _serve_call(method, context, receive, send, content_type,
+                     request_encoding, response_encoding):
+    if context._deadline is not None:
+        _check_deadline(context)
+    if method.client_streaming:
+        request = _iter_request_messages(receive, request_encoding)
+    else:
+        try:
+            request = await _read_unary_request(receive, request_encoding)
+        except GrpcError as exc:
+            await _send_trailers_only(send, exc.status, exc.details, content_type)
+            return
+    try:
+        if method.streaming:
+            await _serve_server_streaming(
+                method.handler, request, context, send, content_type, response_encoding)
+        else:
+            await _serve_unary(
+                method.handler, request, context, send, content_type, response_encoding)
+    finally:
+        if method.client_streaming:
+            await request.aclose()
+
+
+async def _serve_with_deadline(call, context):
+    task = create_eager_task(call)
+    if task.done():
+        return task.result()
+    budget = asyncio.timeout_at(context._deadline)
+    try:
+        async with budget:
+            await asyncio.shield(task)
+    except BaseException as failure:
+        if budget.expired():
+            context._deadline_expired = True
+        task.cancel()
+        try:
+            # Shielding lets cancellation cleanup run under its own finite budget.
+            async with asyncio.timeout(_TERMINATION_TIMEOUT):
+                await task
+        except (asyncio.CancelledError, TimeoutError):
+            if asyncio.current_task().cancelling():
+                raise asyncio.CancelledError from None
+        except Exception:  # noqa: BLE001 — preserve the original failure
+            logger.exception('gRPC cancellation cleanup raised')
+        if budget.expired() and isinstance(failure, TimeoutError):
+            raise _RpcDeadlineExceeded from None
+        raise
+
+
 async def serve_grpc(registry: GrpcServiceRegistry, conn, receive, send) -> None:
     """Serve any of the four gRPC call shapes through Connection/receive/send.
 
@@ -768,7 +822,8 @@ async def serve_grpc(registry: GrpcServiceRegistry, conn, receive, send) -> None
         return
 
     # RFC: enforce the client's deadline (grpc-timeout) if it sent one.
-    deadline = _parse_grpc_timeout(context.metadata(b'grpc-timeout'))
+    duration = _parse_grpc_timeout(context.metadata(b'grpc-timeout'))
+    deadline = asyncio.get_running_loop().time() + duration if duration is not None else None
 
     # Compression negotiation.  The request's ``grpc-encoding`` names the coding
     # of its compressed messages; the client's ``grpc-accept-encoding`` says
@@ -780,37 +835,27 @@ async def serve_grpc(registry: GrpcServiceRegistry, conn, receive, send) -> None
 
     # Wire the context's response side now, so the handler can call
     # context.send_initial_metadata / time_remaining before any bytes go out.
-    context._bind(send, content_type, response_encoding, deadline)
+    response_send = send
+    if deadline is not None:
+        async def deadline_send(event):
+            _check_deadline(context)
+            await send(event)
+        response_send = deadline_send
+    context._bind(response_send, content_type, response_encoding, deadline)
 
-    # Request axis.  Request-unary validates the complete input up front, so
-    # a framing error precedes any response bytes (clean Trailers-Only).
-    # Request-streaming hands the handler a lazy async iterator; its framing
-    # errors surface while the handler runs and are reported by the serve
-    # helpers (in trailers if a message already went out, else Trailers-Only).
-    if method.client_streaming:
-        request = _iter_request_messages(receive, request_encoding)
-    else:
-        try:
-            request = await _read_unary_request(receive, request_encoding)
-        except GrpcError as exc:
-            await _send_trailers_only(send, exc.status, exc.details, content_type)
-            return
-
-    # Response axis reuses the same writers for both request kinds: passing the
-    # request iterator where a unary handler takes ``request`` just calls
-    # ``handler(request_iter, context)`` — client-streaming rides _serve_unary,
-    # bidirectional rides _serve_server_streaming.
+    call = _serve_call(method, context, receive, response_send, content_type,
+                       request_encoding, response_encoding)
     try:
-        if method.streaming:
-            await _serve_server_streaming(
-                method.handler, request, context, send, content_type, deadline,
-                response_encoding)
+        if deadline is None:
+            await call
         else:
-            await _serve_unary(
-                method.handler, request, context, send, content_type, deadline,
-                response_encoding)
-    finally:
-        # Finalise the request generator so its cleanup runs even when the
-        # handler returned without draining it (client-/bidi-streaming only).
-        if method.client_streaming:
-            await request.aclose()
+            await _serve_with_deadline(call, context)
+    except _RpcDeadlineExceeded:
+        context._deadline_expired = True
+        try:
+            # Expiry reporting has a separate bounded budget, never renewed RPC work.
+            async with asyncio.timeout(_TERMINATION_TIMEOUT):
+                await _finish_stream_error(send, context, GrpcStatus.DEADLINE_EXCEEDED,
+                                           'deadline exceeded', content_type)
+        except TimeoutError:
+            raise TimeoutError('gRPC deadline notification blocked') from None

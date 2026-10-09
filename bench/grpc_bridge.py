@@ -30,10 +30,12 @@ async def send(event):
     pass
 
 
-async def measure(module, registry, shape, native, size, count, send=send):
+async def measure(module, registry, shape, native, size, count, send=send, timeout=None):
     frame = encode_message(b'x' * size)
     conn = {'type': 'http', 'path': '/svc/' + shape,
             'headers': [(b'content-type', b'application/grpc')]}
+    if timeout is not None:
+        conn['headers'].append((b'grpc-timeout', timeout.encode('ascii')))
 
     async def receive():
         return {'type': 'http.request', 'body': frame, 'more_body': False}
@@ -82,20 +84,23 @@ async def main(args):
                                 if key == b'grpc-status':
                                     status = value
 
-                    await measure(module, registry, shape, native, size, 1, validate)
+                    await measure(module, registry, shape, native, size, 1, validate, args.timeout)
                     if status != b'0':
                         raise RuntimeError(f'{shape}/{native}/{size}: grpc-status={status!r}')
-                    await measure(module, registry, shape, native, size, args.warmup)
+                    await measure(module, registry, shape, native, size, args.warmup,
+                                  timeout=args.timeout)
                 for round_ in range(args.rounds):
                     for arm in ('ABBA' if round_ % 2 == 0 else 'BAAB'):
                         ns = await measure(baseline if arm == 'A' else head,
-                                           registry, shape, native, size, args.calls)
+                                           registry, shape, native, size, args.calls,
+                                           timeout=args.timeout)
                         writer.writerow([shape, native, size, round_, arm, ns])
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline', required=True)
+    parser.add_argument('--timeout', help='grpc-timeout header for each RPC, e.g. 1S')
     parser.add_argument('--rounds', type=int, default=6)
     parser.add_argument('--calls', type=int, default=8000)
     parser.add_argument('--warmup', type=int, default=1000)
