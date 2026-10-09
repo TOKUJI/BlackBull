@@ -12,6 +12,7 @@ canary failure and be marked FAIL (High).
 from __future__ import annotations
 
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -95,6 +96,36 @@ def run_gate(*, check_timeout: float, run_timeout: float,
         srv2.close()
 
 
+def run_proc_gate() -> list[probe.CheckResult]:
+    """G2-3: a stub that holds every accepted socket must show residuals.
+
+    The stub runs as its own process so the /proc observation targets it
+    exactly the way it targets a real server; every stub row opens one
+    connection the stub never releases."""
+    proc = subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve()), '--hold-serve'],
+        stdout=subprocess.PIPE, text=True)
+    try:
+        port = int(proc.stdout.readline().split()[1])
+        observer = probe.ProcObserver(proc.pid)
+        target = probe.parse_target(f'http://127.0.0.1:{port}')
+        runner = probe.Probe(target, 1.0)
+
+        def stub(row: int):
+            def _run(probe_runner):
+                probe.Probe.canary(probe_runner, 'h1')  # held by the stub
+                return probe.Verdict(probe.PASS, f'stub row {row}')
+            return probe.Check(f'STUB-{row:03d}', 'stub', 'Low', 'CWE-400',
+                               _run, 'h1')
+
+        return probe.run_checks(runner, tuple(stub(i) for i in range(1, 5)),
+                                time.monotonic() + 60, lane='h1',
+                                observer=observer, observe_settle=0.3)
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
 def run_dying_gate() -> list[probe.CheckResult]:
     """G2-2: checks after a mid-run server death record canary failures."""
     port, srv, _ = _dying_listener(serves=2)
@@ -117,6 +148,19 @@ def run_dying_gate() -> list[probe.CheckResult]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv and argv[0] == '--hold-serve':
+        port, _, _ = _silent_listener()
+        print(f'port {port}', flush=True)
+        while True:
+            time.sleep(60)
+    if argv and argv[0] == '--proc-gate':
+        rows = run_proc_gate()
+        print(probe.render_table(rows))
+        residual = [r.check_id for r in rows if r.proc.startswith('RESIDUAL')]
+        unmarked = [r.check_id for r in rows if not r.proc.startswith('RESIDUAL')]
+        print(f'G2-3 gate: {len(residual)}/{len(rows)} rows recorded residuals, '
+              f'unmarked: {unmarked}')
+        return 1 if unmarked else 0
     if argv and argv[0] == '--dying':
         rows = run_dying_gate()
         print(probe.render_table(rows))

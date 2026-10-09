@@ -32,6 +32,13 @@ from tools.security.probe import (
     WsAttempt,
     abuse_accept_verdict,
     apply_canary,
+    apply_proc,
+    ProcObserver,
+    ProcSnapshot,
+    parse_net_tcp,
+    parse_proc_stat_cpu,
+    parse_proc_status,
+    proc_residual,
     checks_for,
     exit_code,
     expect_verdict,
@@ -283,6 +290,114 @@ def test_long_tier_budget_overrides_the_check_timeout():
     assert run_checks(quick, stub, deadline=time.monotonic() + 10)[0].detail == 'effective 5'
     long = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0, tier='long')
     assert run_checks(long, stub, deadline=time.monotonic() + 30)[0].detail == 'effective 16'
+
+
+def _snap(pid=1, fds=9, sockets=None, rss=6224, hwm=6432, threads=5,
+          cpu=46):
+    return ProcSnapshot(pid=pid, fds=fds, sockets=sockets or {},
+                        rss_kb=rss, hwm_kb=hwm, threads=threads,
+                        cpu_ticks=cpu)
+
+
+def test_parse_proc_status_reports_rss_hwm_and_threads():
+    text = ('Name:\tfixture_app\nVmHWM:\t    6432 kB\n'
+            'VmRSS:\t    6224 kB\nThreads:\t5\n')
+    assert parse_proc_status(text) == (6224, 6432, 5)
+
+
+def test_parse_proc_stat_cpu_ticks():
+    assert parse_proc_stat_cpu(
+        '123 (fixture app) S 1 1 1 0 -1 0 0 0 0 0 12 34') == 46
+
+
+def test_parse_net_tcp_counts_only_owned_inodes():
+    text = (
+        '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n'
+        '   0: 0100007F:1F40 0100007F:0050 01 00000000:00000000 00:00000000 00000000 0 0 111\n'
+        '   1: 0100007F:0050 0100007F:1F40 08 00000000:00000000 00000000 00000000 0 0 222\n'
+    )
+    assert parse_net_tcp(text, {'111'}) == {'ESTABLISHED': 1}
+    assert parse_net_tcp(text, {'111', '222'}) == {'ESTABLISHED': 1,
+                                                  'CLOSE_WAIT': 1}
+
+
+def test_proc_residual_rejects_leaked_connections():
+    before = _snap(fds=9, sockets={'ESTABLISHED': 0, 'CLOSE_WAIT': 0})
+    clean = _snap(fds=9, sockets={'ESTABLISHED': 0, 'CLOSE_WAIT': 0}, cpu=48)
+    assert proc_residual(before, clean) is None
+    leaky = _snap(fds=12, sockets={'ESTABLISHED': 2, 'CLOSE_WAIT': 1})
+    residual = proc_residual(before, leaky)
+    assert residual is not None
+    assert residual.verdict == FAIL
+    assert 'fd 9->12' in residual.detail
+    assert 'ESTABLISHED 0->2' in residual.detail
+    assert 'CLOSE_WAIT 0->1' in residual.detail
+
+
+def test_proc_residual_allows_counts_that_dropped():
+    before = _snap(fds=9, sockets={'ESTABLISHED': 1})
+    after = _snap(fds=8, sockets={'ESTABLISHED': 0})
+    assert proc_residual(before, after) is None
+
+
+def test_apply_proc_marks_residuals_fail_high():
+    before = _snap(fds=9)
+    leaky = _snap(fds=11, sockets={'ESTABLISHED': 2})
+    row = CheckResult('H1-ROBUST-005', 'd', 'Info', PASS, 'closed', 'CWE-400')
+    marked = apply_proc(row, before, leaky)
+    assert marked.verdict == FAIL
+    assert marked.severity == 'High'
+    assert marked.proc.startswith('RESIDUAL fd 9->11')
+    clean = apply_proc(row, before, _snap(fds=9))
+    assert clean.verdict == PASS
+    assert clean.proc.startswith('fd 9->9')
+
+
+def test_apply_proc_keeps_failing_rows_and_records_the_residual():
+    before = _snap(fds=9)
+    row = CheckResult('X', 'd', 'High', FAIL, 'broke', 'CWE-400')
+    marked = apply_proc(row, before, _snap(fds=13))
+    assert marked.verdict == FAIL
+    assert marked.detail == 'broke; residual connections after settle: fd 9->13'
+    assert marked.proc.startswith('RESIDUAL')
+
+
+def test_run_checks_observes_the_server_process():
+    from tools.security.probe import Probe, Target
+
+    class Observer:
+        def sample(self):
+            return _snap(fds=9)
+
+    stub = tuple(Check(f'STUB-C{i}', 'obs', 'Low', 'CWE-400',
+                       lambda p: Verdict(PASS, 'stub ok'), 'h1')
+                 for i in range(2))
+    runner = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    results = run_checks(runner, stub, deadline=time.monotonic() + 10,
+                         lane='h1', observer=Observer(), observe_settle=0.0)
+    assert [r.verdict for r in results] == [PASS, PASS]
+    assert all(r.proc.startswith('fd 9->9') for r in results)
+
+
+def test_run_checks_marks_residuals_on_the_row():
+    from tools.security.probe import Probe, Target
+
+    class Observer:
+        def __init__(self):
+            self.fds = 9
+
+        def sample(self):
+            self.fds += 1
+            return _snap(fds=self.fds)
+
+    stub = Check('STUB-C0', 'obs', 'Low', 'CWE-400',
+                 lambda p: Verdict(PASS, 'stub ok'), 'h1')
+    runner = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    results = run_checks(runner, [stub], deadline=time.monotonic() + 10,
+                         lane='h1', observer=Observer(), observe_settle=0.0)
+    assert results[0].verdict == FAIL
+    assert results[0].severity == 'High'
+    assert 'residual connections after settle: fd 10->11' in results[0].detail
 
 
 def test_registry_checks_all_appear_in_the_documented_tables():

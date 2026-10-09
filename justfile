@@ -139,6 +139,10 @@ vuln-stub-gate:
 vuln-canary-gate:
     uv run python tools/security/silent_stub.py --dying
 
+# G2-3 gate: a stub that holds every accepted socket must show residuals
+vuln-proc-gate:
+    uv run python tools/security/silent_stub.py --proc-gate
+
 # G7: quick tier across the configuration matrix (uvloop on/off x 1/2 workers)
 # plus the explicit-caps operational config; verdicts must agree (G7-1/G7-2).
 vuln-matrix:

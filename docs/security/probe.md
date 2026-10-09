@@ -90,6 +90,23 @@ in the header. Silence is never a verdict's evidence (G2-1): a verdict of
 PASS always names an observed answer or close — `just vuln-stub-gate` proves
 it by running every check against a do-nothing peer and requiring 0 PASS.
 
+## Process observation (G2-3)
+
+With `--server-pid PID` the probe samples the server's `/proc` before and
+after every check — fd count, sockets owned per state (matched by inode
+against `/proc/PID/net/tcp{,6}`), VmRSS, VmHWM, threads and CPU ticks — and
+waits `--observe-settle` seconds before the second sample. The judgement is
+the residual: fd, ESTABLISHED and CLOSE_WAIT must return to the pre-check
+level after the settle wait; strictly more of any of them marks the row
+FAIL (High) — a connection the server did not release is a leak. Memory and
+CPU are recorded in the report's Proc column, never as thresholds.
+TIME_WAIT never appears: the kernel holds those, not the process. A server
+process that vanishes mid-check marks the row FAIL (High) as well.
+
+`just vuln-proc-gate` is the verification: a stub that holds every accepted
+socket must show residuals on every row (4/4 rows marked), while the
+fixture shows zero residual across the quick tier.
+
 ## Configuration matrix (G7)
 
 `just vuln-matrix` runs the quick tier across the configuration matrix —
@@ -108,7 +125,10 @@ example its TLS stack refuses to offer the version under test); it is
 recorded, never reported as `PASS`, and does not fail the run. The severity column is the rank a *failure* of that check
 carries, per [severity criteria](severity.md); a hang or crash escalates the
 H1-ROBUST/H2-ROBUST/CHUNK checks to High, as that document's defaults table
-prescribes.
+prescribes. A canary failure (G2-2) or a residual (G2-3) marks the row FAIL
+at High, whatever the check's own severity: the row would claim something
+about a server that no longer answered, or that held the check's connection
+open.
 
 ## Checks and oracles — h1 lane
 

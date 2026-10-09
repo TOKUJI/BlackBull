@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 import ipaddress
 import math
 from datetime import datetime, timezone
+import os
 import json
 from pathlib import Path
 import re
@@ -189,6 +190,127 @@ class Verdict:
     detail: str
 
 
+#: TCP states the residual judgement watches (G2-3).  TIME_WAIT is held by
+#: the kernel, not by a process socket, so it never appears here.
+_TCP_STATES = {'01': 'ESTABLISHED', '06': 'TIME_WAIT', '08': 'CLOSE_WAIT',
+               '0A': 'LISTEN'}
+
+
+@dataclass(frozen=True)
+class ProcSnapshot:
+    """One /proc sample of the server process (G2-3)."""
+    pid: int
+    fds: int
+    sockets: dict[str, int]
+    rss_kb: int
+    hwm_kb: int
+    threads: int
+    cpu_ticks: int
+
+
+def parse_proc_status(text: str) -> tuple[int, int, int]:
+    """``(VmRSS, VmHWM, Threads)`` in kB/None from /proc/PID/status."""
+    values: dict[str, int] = {}
+    for line in text.splitlines():
+        key, _, rest = line.partition(':')
+        if key in ('VmRSS', 'VmHWM', 'Threads'):
+            values[key] = int(rest.split()[0])
+    return values.get('VmRSS', 0), values.get('VmHWM', 0), values.get('Threads', 0)
+
+
+def parse_proc_stat_cpu(text: str) -> int:
+    """utime + stime ticks from /proc/PID/stat (comm may contain spaces)."""
+    tail = text[text.rindex(')') + 2:].split()
+    return int(tail[11]) + int(tail[12])  # fields 14/15 overall
+
+
+def parse_net_tcp(text: str, inodes: set[str]) -> dict[str, int]:
+    """State -> count for the /proc/PID/net rows whose socket inode is owned."""
+    counts: dict[str, int] = {}
+    for line in text.splitlines()[1:]:
+        fields = line.split()
+        if len(fields) < 10 or fields[9] not in inodes:
+            continue
+        state = _TCP_STATES.get(fields[3], fields[3])
+        counts[state] = counts.get(state, 0) + 1
+    return counts
+
+
+class ProcObserver:
+    """Samples /proc/PID for the G2-3 residual judgement (Linux procfs)."""
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+
+    def sample(self) -> ProcSnapshot:
+        base = Path(f'/proc/{self.pid}')
+        status = (base / 'status').read_text(encoding='utf-8', errors='replace')
+        stat = (base / 'stat').read_text(encoding='utf-8', errors='replace')
+        fds = 0
+        inodes: set[str] = set()
+        for entry in (base / 'fd').iterdir():
+            fds += 1
+            try:
+                target = os.readlink(entry)
+            except OSError:
+                continue
+            if target.startswith('socket:['):
+                inodes.add(target[len('socket:['):-1])
+        sockets: dict[str, int] = {}
+        for name in ('tcp', 'tcp6'):
+            try:
+                text = (base / 'net' / name).read_text(encoding='utf-8',
+                                                       errors='replace')
+            except OSError:
+                continue
+            for state, count in parse_net_tcp(text, inodes).items():
+                sockets[state] = sockets.get(state, 0) + count
+        rss_kb, hwm_kb, threads = parse_proc_status(status)
+        return ProcSnapshot(pid=self.pid, fds=fds, sockets=sockets,
+                            rss_kb=rss_kb, hwm_kb=hwm_kb, threads=threads,
+                            cpu_ticks=parse_proc_stat_cpu(stat))
+
+
+def proc_residual(before: ProcSnapshot, after: ProcSnapshot) -> Verdict | None:
+    """G2-3: fd/ESTABLISHED/CLOSE_WAIT must return to the pre-check level.
+
+    Strictly more of any of them after the settle wait is a residual
+    connection (a leak).  RSS, HWM and CPU are recorded, never thresholds.
+    """
+    leaks = []
+    if after.fds > before.fds:
+        leaks.append(f'fd {before.fds}->{after.fds}')
+    for state in ('ESTABLISHED', 'CLOSE_WAIT'):
+        b, a = before.sockets.get(state, 0), after.sockets.get(state, 0)
+        if a > b:
+            leaks.append(f'{state} {b}->{a}')
+    if not leaks:
+        return None
+    return Verdict(FAIL, 'residual connections after settle: ' + ', '.join(leaks))
+
+
+def proc_note(before: ProcSnapshot, after: ProcSnapshot) -> str:
+    """The recorded, threshold-free G2-3 metrics line."""
+    return (f'fd {before.fds}->{after.fds} '
+            f'sock {sum(before.sockets.values())}->{sum(after.sockets.values())} '
+            f'rss {after.rss_kb}kB hwm {after.hwm_kb}kB '
+            f'thr {after.threads} cpu {after.cpu_ticks}t')
+
+
+def apply_proc(row: CheckResult, before: ProcSnapshot,
+               after: ProcSnapshot) -> CheckResult:
+    """G2-3: record the sample; a residual marks the row FAIL (High)."""
+    residual = proc_residual(before, after)
+    note = proc_note(before, after)
+    if residual is None:
+        return replace(row, proc=note)
+    if row.verdict in (FAIL, TIMEOUT):
+        return replace(row, proc=f'RESIDUAL {note}',
+                       detail=_one_line(f'{row.detail}; {residual.detail}'))
+    return replace(row, verdict=FAIL, severity='High', proc=f'RESIDUAL {note}',
+                   detail=_one_line(f'{row.detail}; {residual.detail}'))
+
+
 @dataclass(frozen=True)
 class Canary:
     """One lane-liveness probe (G2-2): GET / on the check's lane."""
@@ -209,6 +331,8 @@ class CheckResult:
     elapsed_s: float = 0.0
     #: Post-check canary outcome (G2-2), e.g. ``ok 3ms`` / ``FAILED 501ms``.
     canary: str = ''
+    #: Post-check /proc sample (G2-3), e.g. ``fd 9->9 sock 2->2 ...``.
+    proc: str = ''
 
 
 @dataclass(frozen=True)
@@ -2334,8 +2458,9 @@ def apply_canary(row: CheckResult, canary: Canary) -> CheckResult:
 
 def run_checks(probe: Probe, checks: Sequence[Check],
                deadline: float, *, lane: str = 'h1',
-               canary: Callable[[Probe, str], Canary] | None = None
-               ) -> list[CheckResult]:
+               canary: Callable[[Probe, str], Canary] | None = None,
+               observer: ProcObserver | None = None,
+               observe_settle: float = 0.5) -> list[CheckResult]:
     results: list[CheckResult] = []
     for check in checks:
         remaining = deadline - time.monotonic()
@@ -2349,6 +2474,13 @@ def run_checks(probe: Probe, checks: Sequence[Check],
                     else probe.check_timeout)
         probe.effective_timeout = min(budget_s, remaining)
         started = time.monotonic()
+        before: ProcSnapshot | None = None
+        sample_error: Exception | None = None
+        if observer is not None:
+            try:
+                before = observer.sample()
+            except Exception as exc:  # noqa: BLE001 — recorded, not fatal
+                sample_error = exc
         probe.check_deadline = (time.monotonic() + probe.effective_timeout
                                 + _SCENARIO_SLACK_S)
         try:
@@ -2367,8 +2499,31 @@ def run_checks(probe: Probe, checks: Sequence[Check],
                           check.cwe, time.monotonic() - started)
         if canary is not None:
             row = apply_canary(row, canary(probe, lane))
+        if observer is not None:
+            row = _apply_observation(row, observer, before, sample_error,
+                                     observe_settle)
         results.append(row)
     return results
+
+
+def _apply_observation(row: CheckResult, observer: ProcObserver,
+                       before: ProcSnapshot | None,
+                       sample_error: Exception | None,
+                       settle: float) -> CheckResult:
+    """G2-3: settle, re-sample, and mark residuals (or a vanished server)."""
+    if sample_error is not None or before is None:
+        return replace(row, proc='not sampled',
+                       detail=_one_line(
+                           f'{row.detail}; observer sample failed: {sample_error!r}'))
+    time.sleep(settle)
+    try:
+        after = observer.sample()
+    except Exception as exc:  # noqa: BLE001 — a vanished process is a verdict
+        return replace(row, verdict=FAIL, severity='High', proc='PROCESS GONE',
+                       detail=_one_line(
+                           f'{row.detail}; server process gone during the check: '
+                           f'{type(exc).__name__}'))
+    return apply_proc(row, before, after)
 
 
 def _one_line(text: str) -> str:
@@ -2416,6 +2571,10 @@ def render_markdown(lanes: Sequence[Lane], *,
         '- Canary (G2-2): GET / after every check on its own capped budget; '
         'recorded per row, and a canary failure marks the preceding check '
         'FAIL (High).',
+        '- Process observation (G2-3): with --server-pid, /proc fd/socket/RSS/'
+        'HWM/thread/CPU samples per check; residual fd/ESTABLISHED/CLOSE_WAIT '
+        'after the settle wait marks the row FAIL (High); memory and CPU are '
+        'recorded, never thresholds.',
         '- Severity is the rank a failure of that check carries '
         '(docs/security/severity.md). Recording of findings: docs/security/probe.md.',
         '',
@@ -2424,12 +2583,12 @@ def render_markdown(lanes: Sequence[Lane], *,
         lines += [
             f'## {lane.name} lane — {lane.base_url}',
             '',
-            '| Check | Severity | Verdict | Detail | CWE | Seconds | Canary |',
-            '|---|---|---|---|---|---|---|',
+            '| Check | Severity | Verdict | Detail | CWE | Seconds | Canary | Proc |',
+            '|---|---|---|---|---|---|---|---|',
         ]
         for r in lane.results:
             lines.append(f'| {r.check_id} | {r.severity} | {r.verdict} | {r.detail} '
-                         f'| {r.cwe} | {r.elapsed_s:.1f} | {r.canary} |')
+                         f'| {r.cwe} | {r.elapsed_s:.1f} | {r.canary} | {r.proc} |')
         lines.append('')
     return '\n'.join(lines)
 
@@ -2469,6 +2628,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help='quick: bounded waits for the PR gate (<=60s); '
                              'long: also waits out documented default defence '
                              'timeouts in real time (default quick)')
+    parser.add_argument('--server-pid', type=int, default=None,
+                        help='observe this server process via /proc: per-check '
+                             'samples and a residual (leak) judgement (G2-3)')
+    parser.add_argument('--observe-settle', type=float, default=0.5,
+                        help='seconds to wait after each check before the '
+                             'post-check /proc sample (default 0.5)')
     parser.add_argument('--tls-ca', default=None,
                         help='PEM bundle the TLS lane verifies against '
                              '(default: the fixture certificate in the '
@@ -2479,10 +2644,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help='overall run cap in seconds (default 120)')
     args = parser.parse_args(argv)
     if not all(math.isfinite(t) and t > 0
-               for t in (args.check_timeout, args.run_timeout)):
+               for t in (args.check_timeout, args.run_timeout,
+                         args.observe_settle)):
         parser.error('timeouts must be finite and positive')
     if args.tls_ca is None:
         args.tls_ca = default_tls_ca()
+    observer = ProcObserver(args.server_pid) if args.server_pid else None
 
     # The gate covers both lane URLs regardless of --lane: a URL the CLI
     # names is a URL the run is accountable for.
@@ -2513,7 +2680,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         probe = Probe(target, args.check_timeout, tls_ca=args.tls_ca,
                       budget=budget, tier=args.tier)
         results = run_checks(probe, checks_for(lane, args.tier), deadline,
-                             lane=lane, canary=Probe.canary)
+                             lane=lane, canary=Probe.canary, observer=observer,
+                             observe_settle=args.observe_settle)
         lanes.append(Lane(lane, url, tuple(results)))
     excluded = tuple(sorted({c.check_id for lane in lane_names
                              for c in checks_for(lane) if args.tier not in c.tiers}))
