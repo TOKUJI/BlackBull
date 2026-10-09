@@ -80,8 +80,6 @@ Semantics that match the gRPC spec:
   exactly like a unary failure.
 - `context.set_trailing_metadata(...)` / `set_code(...)` apply to the final
   trailers.
-- The generator is always finalised (its `finally`/cleanup runs) when the client
-  cancels or disconnects mid-stream, so long streams stop producing promptly.
 - One `grpc-timeout` deadline covers input, handler work and response completion
   for all four RPC forms. Expiry cancels the call and reports `DEADLINE_EXCEEDED`;
   a handler's own `TimeoutError` reports `INTERNAL`.

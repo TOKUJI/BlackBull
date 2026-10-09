@@ -164,7 +164,7 @@ class GrpcContext:
 
     __slots__ = ('conn', 'code', 'details', '_trailing', '_deadline',
                  '_send', '_content_type', '_response_encoding',
-                 '_initial_metadata', '_started', '_deadline_expired')
+                 '_initial_metadata', '_started', '_deadline_expired', '_clock')
 
     def __init__(self, conn):
         self.conn = conn
@@ -175,6 +175,7 @@ class GrpcContext:
         # (tests) usable without binding.
         self._deadline: float | None = None          # absolute loop time, or None
         self._deadline_expired = False
+        self._clock = None
         self._send = None
         self._content_type: bytes = _GRPC_CONTENT_TYPE
         self._response_encoding: bytes | None = None
@@ -189,6 +190,7 @@ class GrpcContext:
         self._response_encoding = response_encoding
         self._deadline = deadline
         self._deadline_expired = False
+        self._clock = asyncio.get_running_loop().time if deadline is not None else None
 
     def metadata(self, name: bytes, default: bytes = b'') -> bytes:
         """Return a request header (call metadata) value, or *default*."""
@@ -229,7 +231,7 @@ class GrpcContext:
             return None
         if self._deadline_expired:
             return 0.0
-        return max(0.0, self._deadline - asyncio.get_event_loop().time())
+        return max(0.0, self._deadline - self._clock())
 
     def set_code(self, status: GrpcStatus) -> None:
         # Enum-only, matching grpcio's ServicerContext.set_code (see
@@ -566,7 +568,7 @@ def _response_start(content_type: bytes,
 
 def _check_deadline(context: GrpcContext) -> None:
     if context._deadline_expired or (context._deadline is not None
-                                    and asyncio.get_running_loop().time() >= context._deadline):
+                                    and context._clock() >= context._deadline):
         raise _RpcDeadlineExceeded('deadline exceeded')
 
 
@@ -622,12 +624,9 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
                                   response_encoding: bytes | None = None) -> None:
     """Drive a server-streaming (async-generator) handler.
 
-    Response-Headers are sent lazily, just before the first message, so a
-    handler that errors *before* yielding anything still produces a clean
-    Trailers-Only error (like a unary failure).  Once a message has gone out the
-    status can only ride the trailing HEADERS frame, so a mid-stream error is
-    reported there.  The generator is always finalised (``aclose``) — including
-    on client cancellation — so its ``finally``/cleanup runs."""
+    Headers are lazy; errors before the first message are Trailers-Only.
+    Close the generator on exit; deadline cleanup is bounded.
+    """
     agen = handler(request, context)
     # context._start_response is idempotent after early initial metadata.
     # Buffer already-length-prefixed messages independently of DATA boundaries.
@@ -714,8 +713,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
             send, context, GrpcStatus.INTERNAL, str(exc), content_type)
         return
     finally:
-        # Finish any committed flush before finalizing the generator on every exit.
-        # Cleanup must not mask the status already reported.
+        # Expiry discards buffered messages; cleanup must preserve the reported status.
         try:
             await _stop_idle_flusher()
         finally:
@@ -791,7 +789,7 @@ async def _serve_with_deadline(call, context):
             context._deadline_expired = True
         task.cancel()
         try:
-            # Shielding lets cancellation cleanup run under its own finite budget.
+            # Cancellation cleanup has its own finite budget.
             async with asyncio.timeout(_TERMINATION_TIMEOUT):
                 await task
         except (asyncio.CancelledError, TimeoutError):
