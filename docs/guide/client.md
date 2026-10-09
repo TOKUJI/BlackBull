@@ -165,10 +165,9 @@ section a field came from. The HTTP/1.1 client discards trailers as it reads
 them, so `res.trailers` is always empty there. Informational heads are read
 and discarded, which is what the HTTP/1.1 reader has always done with them.
 `res.ended_on_head` is true when `END_STREAM` arrived on the final head's
-HEADERS frame, so no DATA frame and no trailer section followed. That is
-gRPC's Trailers-Only shape, the one response whose status rides the head.
-A head followed by an empty DATA frame has the same headers and body, but no
-trailer section. `res.ended_on_head` is always false on HTTP/1.1.
+HEADERS frame — gRPC's Trailers-Only shape — and false when an empty DATA
+frame ended the stream, which leaves the same headers and body. It is always
+false on HTTP/1.1.
 
 ## What a call raises
 

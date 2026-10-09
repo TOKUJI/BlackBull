@@ -193,8 +193,6 @@ class _PendingResponse:
     #: HEADERS after it are the trailer section and contribute nothing either.
     final_seen: bool = False
     trailer_seen: bool = False
-    #: END_STREAM rode the final head itself.
-    ended_on_head: bool = False
     #: Informational heads seen for this response.  Each is read and thrown
     #: away, and the count is what stops a peer feeding an unbounded stream
     #: of them where a field byte would have been counted.
@@ -1476,10 +1474,9 @@ class HTTP2Client:
         # response the caller asked for.
         pending.headers = fields
         if frame.end_stream:
-            pending.ended_on_head = True
             if await self._settle_body_rate(frame.stream_id, pending, 0):
                 return
-            await self._complete(frame.stream_id)
+            await self._complete(frame.stream_id, ended_on_head=True)
 
     async def _settle_body_rate(self, stream_id: int,
                                 pending: '_PendingResponse',
@@ -1619,7 +1616,7 @@ class HTTP2Client:
                 self._factory.window_update(0, self._unacked_conn))
             self._unacked_conn = 0
 
-    async def _complete(self, stream_id: int) -> None:
+    async def _complete(self, stream_id: int, *, ended_on_head: bool = False) -> None:
         pending = self._responses.get(stream_id)
         if pending is None:
             return
@@ -1641,7 +1638,7 @@ class HTTP2Client:
             headers=Headers.from_lowered(pending.headers),
             body=b''.join(pending.body_parts),
             trailers=Headers.from_lowered(pending.trailer_fields),
-            ended_on_head=pending.ended_on_head,
+            ended_on_head=ended_on_head,
         )
         pending.future.set_result(response)
 

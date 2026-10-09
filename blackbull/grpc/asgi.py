@@ -21,6 +21,7 @@ from .status import GrpcError, GrpcStatus
 logger = logging.getLogger(__name__)
 
 _GRPC_CONTENT_TYPE = b'application/grpc'
+_GRPC_SUBTYPE_PREFIX = _GRPC_CONTENT_TYPE + b'+'
 
 # Advertised in ``grpc-accept-encoding`` so clients know which message
 # encodings the server can decode (``identity`` + ``gzip``).
@@ -274,9 +275,16 @@ def _resolve_content_type(raw: bytes) -> bytes:
     request subtype (e.g. ``application/grpc+proto``) and tolerating
     surrounding whitespace; falls back to bare ``application/grpc``."""
     ct = (raw or b'').strip()
-    if ct == _GRPC_CONTENT_TYPE or ct.startswith(_GRPC_CONTENT_TYPE + b'+'):
-        return ct
-    return _GRPC_CONTENT_TYPE
+    return ct if _is_grpc_content_type(ct) else _GRPC_CONTENT_TYPE
+
+
+def _is_grpc_content_type(value: bytes) -> bool:
+    """``application/grpc`` or ``application/grpc+<subtype>``, case-sensitive.
+
+    The one grammar for requests the server serves and replies
+    ``blackbull.testing.grpc`` accepts.
+    """
+    return value == _GRPC_CONTENT_TYPE or value.startswith(_GRPC_SUBTYPE_PREFIX)
 
 
 def _normalized_base64(value: bytes) -> bytes | None:

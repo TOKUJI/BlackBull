@@ -378,6 +378,21 @@ class TestOkIsNeverReportedForABrokenReply:
         assert 'compress' in reply.violation
 
 
+@pytest.mark.parametrize('content_type', [
+    b'application/grpc', b'application/grpc+proto', b' application/grpc ',
+    b'application/grpcx', b'Application/grpc', b'application/grpc;x=1',
+    b'text/plain', b''])
+def test_the_helper_accepts_the_content_types_the_server_accepts(content_type):
+    """One grammar on both sides: what the server echoes is what the helper reads."""
+    from blackbull.grpc.asgi import _resolve_content_type
+
+    reply = _judge(_response(head=[(b'content-type', content_type)],
+                             body=encode_message(b'ok'), trailers=[_status(b'0')]))
+
+    server_accepts = _resolve_content_type(content_type) == content_type.strip()
+    assert (reply.violation is None) is server_accepts
+
+
 class TestAUnaryReplyCarriesExactlyOneMessage:
     @pytest.mark.parametrize('body', [b'', encode_message(b'a') + encode_message(b'b')])
     def test_status_zero_with_another_message_count(self, body):
@@ -485,6 +500,18 @@ class TestAnomaliesAreCaughtThroughTheRealServer:
 
         assert reply.status is GrpcStatus.INTERNAL
         assert 'framing' in reply.violation
+
+    async def test_the_status_message_round_trips_through_the_server(self):
+        details = '100% あ\n"quoted"\tend'
+
+        async def _fail(request, context):
+            raise GrpcError(GrpcStatus.NOT_FOUND, details)
+
+        async with GrpcTestServer(_app_with(_fail)) as grpc:
+            reply = await grpc.unary('/demo.Greeter/SayHello', b'x')
+
+        assert reply.status is GrpcStatus.NOT_FOUND
+        assert reply.grpc_message == details
 
     async def test_the_call_shape_comes_from_the_registry(self):
         """A streaming method may answer many messages, a unary one only one."""

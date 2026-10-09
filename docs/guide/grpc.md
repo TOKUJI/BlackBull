@@ -249,32 +249,26 @@ you: pass the message bytes your servicer expects, not an encoded frame.
 
 | Field | |
 |---|---|
-| `status` | the call's status as a `GrpcStatus`: the `grpc-status` trailer, or one synthesized for a malformed response |
-| `grpc_message` | the `grpc-message` trailer, percent-decoded — the human-readable detail |
+| `status` | the `grpc-status`, as a `GrpcStatus` — synthesized for a malformed reply |
+| `grpc_message` | the `grpc-message`, percent-decoded |
 | `message` | the first response message, unframed |
 | `messages` | every response message, for server-streaming calls |
 | `response` | the raw `ClientResponse`, for anything the above does not surface |
-| `violation` | `None` for a well-formed gRPC response; otherwise what was wrong with it |
+| `violation` | `None` for a well-formed reply; otherwise what is wrong with it |
 
-A response that is not a well-formed gRPC reply is never reported as `OK`.
-`GrpcReply` synthesizes its status as a gRPC client must
-([PROTOCOL-HTTP2](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md)):
+A malformed reply is never `OK`. `status` follows what a gRPC client must
+report ([PROTOCOL-HTTP2](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md)):
 
-- **Missing `grpc-status`.** The status is mapped from the HTTP status per
-  [http-grpc-status-mapping](https://grpc.github.io/grpc/core/md_doc_http-grpc-status-mapping.html).
-  For example, HTTP `200` maps to `UNKNOWN` and `503` maps to `UNAVAILABLE`.
-- **Unreadable `grpc-status`.** A repeated, non-decimal or undefined value
-  yields `UNKNOWN`.
-- **A `grpc-status` of `0` on a broken response.** This covers a non-`200`
-  HTTP status or a non-gRPC `content-type`, which map from the HTTP status.
-  It also covers broken message framing, a compressed message (the helper
-  accepts identity only), or a unary reply without exactly one message, which
-  yield `INTERNAL`.
+| Reply | `status` |
+|---|---|
+| no `grpc-status` | from the HTTP status ([mapping](https://grpc.github.io/grpc/core/md_doc_http-grpc-status-mapping.html)): `200` → `UNKNOWN`, `503` → `UNAVAILABLE`, … |
+| a repeated, non-decimal or undefined `grpc-status` | `UNKNOWN` |
+| `grpc-status: 0`, but a non-`200` HTTP status or a non-gRPC `content-type` | from the HTTP status |
+| `grpc-status: 0`, but broken framing, a compressed message, or a unary reply without exactly one message | `INTERNAL` |
+| any other valid `grpc-status` | as sent |
 
-A valid non-`OK` `grpc-status` is the server's explicit error and is kept.
-`violation` still names any problem found alongside it. The call shape is
-read from the app's gRPC registry: a method registered as server-streaming
-may answer any number of messages.
+The helper accepts identity encoding only. Whether a method is unary comes
+from the app's gRPC registry.
 
 An error asserts the same way, because a gRPC error *is* a response:
 
