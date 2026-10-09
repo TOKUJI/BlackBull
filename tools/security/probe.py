@@ -88,8 +88,9 @@ _SCENARIO_SLACK_S = 5.0
 _TAIL_TIMEOUT_S = 1.0
 #: Floor for a session bound once the check deadline has almost elapsed.
 _MIN_SESSION_BOUND_S = 0.05
-#: H1-ROBUST-011's total hold; the check is gentle by construction.
-_SLOW_HOLD_MAX_S = 5.0
+#: Long tier waits out the documented default header-idle defence (10s)
+#: plus margin in real time before judging a stalled exchange (G2-5).
+_LONG_DEFENCE_WAIT_S = 12.0
 
 #: Well-known certificate published by tools/security/fixture_app.py at
 #: startup inside the per-user private runtime directory
@@ -191,6 +192,8 @@ class CheckResult:
     verdict: str
     detail: str
     cwe: str
+    #: Wall-clock seconds the check took (G2-5's per-tier timing record).
+    elapsed_s: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -203,6 +206,11 @@ class Check:
     lane: str
     #: Rank a hang/crash carries — High per severity.md's defaults table.
     severity_on_timeout: str | None = None
+    #: Tiers that run this check; long-only checks wait out documented
+    #: default defence timeouts in real time (G2-5).
+    tiers: frozenset[str] = frozenset({'quick', 'long'})
+    #: Long-tier budget when the check waits out a default defence timeout.
+    timeout_long: float | None = None
 
     def timeout_severity(self) -> str:
         return self.severity_on_timeout or self.severity
@@ -255,10 +263,12 @@ class Probe:
 
     def __init__(self, target: Target, check_timeout: float,
                  tls_ca: str | None = None,
-                 budget: ConnectionBudget | None = None) -> None:
+                 budget: ConnectionBudget | None = None,
+                 tier: str = 'quick') -> None:
         self.target = target
         self.check_timeout = check_timeout
         self.tls_ca = tls_ca
+        self.tier = tier
         #: Shared across lanes when the runner owns one budget (L1).
         self.budget = budget if budget is not None else ConnectionBudget()
         #: Narrowed per check by the runner against the run budget.
@@ -344,6 +354,8 @@ class Probe:
         false assurance; see review M2 on PR #479).
         """
         ctx = self._client_tls_context()
+        if ctx is None:
+            return ('not-exercised', 'target is not https')
         with warnings.catch_warnings():
             # Offering TLS 1.0/1.1 is deprecated by design; the warning is
             # the point of the attempt, not a defect in the probe.
@@ -1035,36 +1047,56 @@ def _h1_robust_010(probe: Probe) -> Verdict:
     return _combine(verdicts)
 
 
-def _h1_robust_011(probe: Probe) -> Verdict:
-    """Bounded slow-send (slowloris-lite): two connections each send a partial
-    request line and hold for ``min(check-timeout, 5s)``.
+def slow_hold_verdict(outcomes: Sequence[tuple[str, int | None, bool]],
+                      hold: float) -> Verdict:
+    """G2-1: a stalled exchange must earn an answer or a close.
 
-    Gentle by construction — two connections, one bounded hold, then abort.
-    The oracle: the exchange must complete inside the check deadline with no
-    response (the server is entitled to wait) or a 408; anything else, or a
-    deadline overrun, fails.  Server survival is BASELINE-003's row.
+    *outcomes* are ``(name, status, timed_out)`` where *status* is ``None``
+    for a peer close.  Silence (no answer, no close, deadline spent) is
+    never a pass — so a do-nothing peer earns zero passes — and a peer that
+    treats the stalled bytes as a complete request (2xx/3xx) fails.
     """
-    hold = min(probe.effective_timeout, _SLOW_HOLD_MAX_S)
-    partial = b'GET / HT'
-    steps = (SendRawBytes(partial), Sleep(hold),
-             ReadResponse(timeout=min(_TAIL_TIMEOUT_S, probe.effective_timeout)))
-    results = probe.scenarios_parallel(
-        ('h1-robust-011/a', steps), ('h1-robust-011/b', steps))
     details = []
     verdict = PASS
-    for name, result in zip(('a', 'b'), results):
-        if result.timed_out:
-            details.append(f'{name}: no response while holding (expected)')
-        elif result.response is None:
-            details.append(f'{name}: connection closed (expected)')
-        elif result.response.status == 408:
-            details.append(f'{name}: answered 408 (expected)')
+    for name, status, timed_out in outcomes:
+        if timed_out:
+            verdict = FAIL
+            details.append(f'{name}: no response and no close within {hold:g}s '
+                           f'(silence is not a pass)')
+        elif status is None:
+            details.append(f'{name}: connection closed (defence acted)')
+        elif 400 <= status < 600:
+            details.append(f'{name}: answered {status} (defence acted)')
         else:
             verdict = FAIL
-            details.append(f'{name}: answered {result.response.status} to a partial '
-                           f'request line')
-    details.append(f'held {hold:g}s on 2 connections; server survival: BASELINE-003')
+            details.append(f'{name}: answered {status} to a partial request line')
     return Verdict(verdict, '; '.join(details))
+
+
+def _h1_robust_011(probe: Probe) -> Verdict:
+    """Slow-send hold: two connections each send a partial request line and
+    hold without completing the request.
+
+    Long tier only (G2-5): the hold waits out the documented default
+    header-idle defence (10s) plus margin in real time.  The oracle is
+    [`slow_hold_verdict`][] — silence is never a pass (G2-1).  Server
+    survival is BASELINE-003's row.
+    """
+    hold = min(_LONG_DEFENCE_WAIT_S,
+               max(probe.effective_timeout - 2 * _TAIL_TIMEOUT_S, 1.0))
+    partial = b'GET / HT'
+    steps = (SendRawBytes(partial), Sleep(hold),
+             ReadResponse(timeout=min(2 * _TAIL_TIMEOUT_S,
+                                      probe.effective_timeout)))
+    results = probe.scenarios_parallel(
+        ('h1-robust-011/a', steps), ('h1-robust-011/b', steps))
+    outcomes = [(name, None if r.response is None else r.response.status,
+                 r.timed_out)
+                for name, r in zip(('a', 'b'), results)]
+    verdict = slow_hold_verdict(outcomes, hold)
+    return Verdict(verdict.verdict,
+                   f'{verdict.detail}; held {hold:g}s on 2 connections; '
+                   f'server survival: BASELINE-003')
 
 
 def _state_001(probe: Probe) -> Verdict:
@@ -2170,7 +2202,7 @@ CHECKS: tuple[Check, ...] = (
     Check('CHUNK-002', 'malformed chunk sizes rejected (RFC 9112 §7.1), pipelined GET / clean', 'Medium', 'CWE-444', _chunk_002, 'h1', 'High'),
     Check('TRAILER-001', 'chunked trailers must not smuggle: forbidden trailer fields 400/close, custom trailer ignored (RFC 9112 §7.1.2)', 'High', 'CWE-444', _trailer_001, 'h1'),
     Check('STATE-001', 'each abusive exchange leaves a pipelined GET / exactly one clean 200 "ok" or a closed connection', 'High', 'CWE-444', _state_001, 'h1'),
-    Check('H1-ROBUST-011', 'partial request line held open: bounded hold, 408/close/no-answer only', 'Medium', 'CWE-400', _h1_robust_011, 'h1', 'High'),
+    Check('H1-ROBUST-011', 'partial request line held open: defence must answer a refusal or close within the default header timeout', 'Medium', 'CWE-400', _h1_robust_011, 'h1', 'High', tiers=frozenset({'long'}), timeout_long=16.0),
     Check('RANGE-001', 'overlapping/negative/multi Range answered 200/206/416 only, no crash/hang (CVE-2011-3192 class)', 'Medium', 'CWE-400', _range_001, 'h1', 'High'),
     Check('EXPECT-001', 'Expect: 100-continue answered 100-then-200 or 417, pipelined GET / clean (RFC 9112 §10.1.1)', 'Medium', 'CWE-444', _expect_001, 'h1', 'High'),
     Check('HOST-001', 'duplicate/empty Host answered 400 or close, pipelined GET / clean (RFC 9112 §3.2)', 'Medium', 'CWE-444', _host_001, 'h1', 'High'),
@@ -2193,8 +2225,9 @@ CHECKS: tuple[Check, ...] = (
 )
 
 
-def checks_for(lane: str) -> tuple[Check, ...]:
-    return tuple(check for check in CHECKS if check.lane == lane)
+def checks_for(lane: str, tier: str | None = None) -> tuple[Check, ...]:
+    return tuple(check for check in CHECKS if check.lane == lane
+                 and (tier is None or tier in check.tiers))
 
 
 # ------------------------------------------------------------------
@@ -2211,7 +2244,11 @@ def run_checks(probe: Probe, checks: Sequence[Check],
                                        check.timeout_severity(), TIMEOUT,
                                        'run budget exhausted', check.cwe))
             continue
-        probe.effective_timeout = min(probe.check_timeout, remaining)
+        budget_s = (check.timeout_long
+                    if probe.tier == 'long' and check.timeout_long
+                    else probe.check_timeout)
+        probe.effective_timeout = min(budget_s, remaining)
+        started = time.monotonic()
         probe.check_deadline = (time.monotonic() + probe.effective_timeout
                                 + _SCENARIO_SLACK_S)
         try:
@@ -2227,7 +2264,7 @@ def run_checks(probe: Probe, checks: Sequence[Check],
                     else check.severity)
         results.append(CheckResult(check.check_id, check.description, severity,
                                    verdict.verdict, _one_line(verdict.detail),
-                                   check.cwe))
+                                   check.cwe, time.monotonic() - started))
     return results
 
 
@@ -2258,12 +2295,18 @@ def render_table(results: Sequence[CheckResult]) -> str:
 
 def render_markdown(lanes: Sequence[Lane], *,
                     check_timeout: float, run_timeout: float,
-                    timestamp: str) -> str:
+                    timestamp: str, tier: str = 'quick',
+                    excluded: Sequence[str] = ()) -> str:
     lines = [
         f'# BLA-526 robustness probe — {timestamp}',
         '',
         f'- Bounds: check timeout {check_timeout:g}s, run cap {run_timeout:g}s, '
         f'connections {MAX_CONCURRENT_CONNECTIONS} concurrent / {MAX_TOTAL_CONNECTIONS} per run',
+        f'- Tier: {tier} — '
+        + ', '.join(f'{lane.name} {len(lane.results)} checks '
+                    f'in {sum(r.elapsed_s for r in lane.results):.1f}s'
+                    for lane in lanes)
+        + (f' (not in this tier: {", ".join(excluded)})' if excluded else ''),
         '- Verdicts: PASS = mechanical oracle held; FAIL = oracle violated; '
         'TIMEOUT = no answer within the bound; SKIP = not exercised by this '
         'client (never counted as a pass).',
@@ -2275,24 +2318,27 @@ def render_markdown(lanes: Sequence[Lane], *,
         lines += [
             f'## {lane.name} lane — {lane.base_url}',
             '',
-            '| Check | Severity | Verdict | Detail | CWE |',
-            '|---|---|---|---|---|',
+            '| Check | Severity | Verdict | Detail | CWE | Seconds |',
+            '|---|---|---|---|---|---|',
         ]
         for r in lane.results:
-            lines.append(f'| {r.check_id} | {r.severity} | {r.verdict} | {r.detail} | {r.cwe} |')
+            lines.append(f'| {r.check_id} | {r.severity} | {r.verdict} | {r.detail} '
+                         f'| {r.cwe} | {r.elapsed_s:.1f} |')
         lines.append('')
     return '\n'.join(lines)
 
 
 def write_report(lanes: Sequence[Lane], *, check_timeout: float,
                  run_timeout: float, timestamp: str,
-                 out_dir: Path | None = None) -> Path:
+                 out_dir: Path | None = None, tier: str = 'quick',
+                 excluded: Sequence[str] = ()) -> Path:
     out = out_dir if out_dir is not None else _REPORT_DIR
     out.mkdir(parents=True, exist_ok=True)
     path = out / f'{timestamp}.md'
     path.write_text(
         render_markdown(lanes, check_timeout=check_timeout,
-                        run_timeout=run_timeout, timestamp=timestamp),
+                        run_timeout=run_timeout, timestamp=timestamp,
+                        tier=tier, excluded=excluded),
         encoding='utf-8')
     return path
 
@@ -2313,6 +2359,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help='HTTP/2 lane target (loopback hosts only)')
     parser.add_argument('--lane', choices=(*LANES, 'all'), default='all',
                         help='which lane(s) to run (default all)')
+    parser.add_argument('--tier', choices=('quick', 'long'), default='quick',
+                        help='quick: bounded waits for the PR gate (<=60s); '
+                             'long: also waits out documented default defence '
+                             'timeouts in real time (default quick)')
     parser.add_argument('--tls-ca', default=None,
                         help='PEM bundle the TLS lane verifies against '
                              '(default: the fixture certificate in the '
@@ -2355,17 +2405,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     for lane in lane_names:
         url, target = gated[lane]
         probe = Probe(target, args.check_timeout, tls_ca=args.tls_ca,
-                      budget=budget)
-        results = run_checks(probe, checks_for(lane), deadline)
+                      budget=budget, tier=args.tier)
+        results = run_checks(probe, checks_for(lane, args.tier), deadline)
         lanes.append(Lane(lane, url, tuple(results)))
+    excluded = tuple(sorted({c.check_id for lane in lane_names
+                             for c in checks_for(lane) if args.tier not in c.tiers}))
 
-    print(f'# {timestamp} lane={args.lane} '
+    print(f'# {timestamp} lane={args.lane} tier={args.tier} '
           f'check-timeout={args.check_timeout:g}s run-timeout={args.run_timeout:g}s')
+    if excluded:
+        print(f'# not in tier {args.tier}: {", ".join(excluded)}')
     for lane in lanes:
         print(f'## {lane.name} lane — {lane.base_url}')
         print(render_table(lane.results))
     report = write_report(lanes, check_timeout=args.check_timeout,
-                          run_timeout=args.run_timeout, timestamp=timestamp)
+                          run_timeout=args.run_timeout, timestamp=timestamp,
+                          tier=args.tier, excluded=excluded)
     print(f'report: {report}')
     return exit_code(lanes)
 

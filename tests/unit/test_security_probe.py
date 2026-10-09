@@ -43,6 +43,7 @@ from tools.security.probe import (
     render_markdown,
     render_table,
     run_checks,
+    slow_hold_verdict,
     split_interims,
     state_verdict,
     tls_verdict,
@@ -197,6 +198,53 @@ def test_main_rejects_non_finite_timeouts():
     assert excinfo.value.code == 2
 
 
+def test_slow_hold_verdict_rejects_silence():
+    silence = [('a', None, True), ('b', None, True)]
+    verdict = slow_hold_verdict(silence, 12.0)
+    assert verdict.verdict == FAIL
+    assert 'silence is not a pass' in verdict.detail
+    closed = slow_hold_verdict([('a', None, False), ('b', 408, False)], 12.0)
+    assert closed.verdict == PASS and 'defence acted' in closed.detail
+    assert slow_hold_verdict([('a', 431, False)], 12.0).verdict == PASS
+    accepted = slow_hold_verdict([('a', 200, False)], 12.0)
+    assert accepted.verdict == FAIL
+    assert 'answered 200 to a partial request line' in accepted.detail
+
+
+def test_quick_tier_excludes_long_only_checks():
+    quick = {c.check_id for c in checks_for('h1', 'quick')}
+    long = {c.check_id for c in checks_for('h1', 'long')}
+    assert 'H1-ROBUST-011' not in quick
+    assert 'H1-ROBUST-011' in long
+    assert quick < long
+    assert len(checks_for('h1')) == len(long)
+
+
+def test_run_checks_records_elapsed_seconds():
+    def slow(probe):
+        time.sleep(0.05)
+        return Verdict(PASS, 'stub ok')
+
+    stub = (Check('STUB-004', 'stub', 'Low', 'CWE-400', slow, 'h1'),)
+    from tools.security.probe import Probe, Target
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    results = run_checks(probe, stub, deadline=time.monotonic() + 10)
+    assert results[0].elapsed_s >= 0.04
+
+
+def test_long_tier_budget_overrides_the_check_timeout():
+    def hold(probe):
+        return Verdict(PASS, f'effective {probe.effective_timeout:g}')
+
+    stub = (Check('STUB-005', 'stub', 'Low', 'CWE-400', hold, 'h1',
+                  timeout_long=16.0),)
+    from tools.security.probe import Probe, Target
+    quick = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    assert run_checks(quick, stub, deadline=time.monotonic() + 10)[0].detail == 'effective 5'
+    long = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0, tier='long')
+    assert run_checks(long, stub, deadline=time.monotonic() + 30)[0].detail == 'effective 16'
+
+
 def test_hang_escalates_h1_robust_checks_to_high():
     by_id = {check.check_id: check for check in CHECKS}
     for check_id in ('H1-ROBUST-001', 'H1-ROBUST-002', 'H1-ROBUST-003',
@@ -261,6 +309,9 @@ def test_write_report_writes_both_lane_tables(tmp_path):
 def test_exit_code_maps_verdicts_across_lanes():
     assert exit_code([Lane('h1', 'http://127.0.0.1:8000', (_results()[0],))]) == 0
     assert exit_code(_lanes()) == 1
+    skipped = CheckResult('TLS-001', 'floor', 'Medium', SKIP,
+                          'not exercised', 'CWE-326')
+    assert exit_code([Lane('h2', 'https://127.0.0.1:8443', (skipped,))]) == 0
 
 
 def test_check_registry_uses_lane_and_severity_vocabulary():

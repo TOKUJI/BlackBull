@@ -120,7 +120,7 @@ would carry. The convention throughout: a hang or crash is **High**
 | H1-ROBUST-008 (missing Host) | Low, or High if crash/hang | CWE-755 |
 | H1-ROBUST-009 (absolute-form) | Info, or High if crash/hang | CWE-755 |
 | H1-ROBUST-010 (NUL/overlong path) | High (path confusion can reach another resource) | CWE-158 |
-| H1-ROBUST-011 (slow-send lite) | Medium (bounded availability), or High if crash/hang | CWE-400 |
+| H1-ROBUST-011 (slow-send lite, long tier) | Medium (bounded availability), or High if crash/hang | CWE-400 |
 | SMUGGLE-001 (CL and TE together) | High | CWE-444 |
 | SMUGGLE-002 (obfuscated/duplicated TE) | High | CWE-444 |
 | SMUGGLE-003 (duplicate Content-Length) | High | CWE-444 |

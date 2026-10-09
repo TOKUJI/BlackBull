@@ -128,8 +128,12 @@ vuln-target-down:
     echo "vuln-target down; ports 8000 and 8443 free"
 
 # Run the BLA-526 robustness probe against running targets (both lanes)
-vuln-check base_url="http://127.0.0.1:8000" h2_url="https://127.0.0.1:8443" lane="all":
-    uv run python tools/security/probe.py --base-url "{{base_url}}" --h2-url "{{h2_url}}" --lane "{{lane}}"
+vuln-check base_url="http://127.0.0.1:8000" h2_url="https://127.0.0.1:8443" lane="all" tier="quick":
+    uv run python tools/security/probe.py --base-url "{{base_url}}" --h2-url "{{h2_url}}" --lane "{{lane}}" --tier "{{tier}}"
+
+# G2-1 gate: every check against a do-nothing peer must earn zero PASS
+vuln-stub-gate:
+    uv run python tools/security/silent_stub.py
 
 # YouTrack REST access. Credentials are read only by scripts/youtrack.sh.
 yt-search query='project: BLA #Unresolved':

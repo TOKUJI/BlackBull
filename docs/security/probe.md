@@ -59,7 +59,7 @@ across all lanes.
   handshake attempts included; every connection is closed in a `finally`
   block.
 - **No real DoS.** H1-ROBUST-011 is slow-send *lite*: 2 connections, one
-  bounded hold of at most 5 s, then abort. The flood-shaped h2 checks are
+  bounded hold (at most 12 s, long tier only), then abort. The flood-shaped h2 checks are
   *lite* by construction: H2-ROBUST-006 resets exactly 20 streams one at a
   time (never more than one open, so the advertised
   `MAX_CONCURRENT_STREAMS` is never exceeded), H2-ROBUST-007 sends 30
@@ -68,6 +68,17 @@ across all lanes.
   code and in the unit tests). RANGE-001 sends at most 15 ranges per
   request. Nothing in the harness floods, loops, or holds more than the
   per-check deadline.
+
+## Tiers (G2-5)
+
+`--tier quick` (default) is the PR gate: bounded waits only, both lanes in
+about 25 s. `--tier long` additionally runs the long-only checks, which wait
+out documented default defence timeouts in real time (H1-ROBUST-011 waits
+the 10 s default header timeout plus margin). The report records each tier's
+check list and per-check seconds; checks outside the selected tier are listed
+in the header. Silence is never a verdict's evidence (G2-1): a verdict of
+PASS always names an observed answer or close — `just vuln-stub-gate` proves
+it by running every check against a do-nothing peer and requiring 0 PASS.
 
 ## Verdicts and severity
 
@@ -102,7 +113,7 @@ prescribes.
 | CHUNK-001 | chunk extension (`1;x=y`, `4;foo="a b"`) + valid chunked body → 200 with the body echoed **exactly**, or 400, or close; then the STATE-001 follow-up |
 | CHUNK-002 | malformed chunk sizes (`-1`, `0x10`, `FFFFFFFFFFFFFFFF`) then FIN → 400 or close (RFC 9112 §7.1); then the STATE-001 follow-up. The FIN is part of the oracle: a size that swallows the pipelined `GET /` as chunk data cannot fake a hang-free exchange. |
 | STATE-001 | standalone battery: after **each** abusive exchange (chunk extension, obs-fold, garbage line, TE obfuscation, truncated body) a `GET /` pipelined on the same connection must yield exactly one clean `200 ok`, or the connection must be closed; a garbled/mixed response, a second response, or `GET /` ignored on a live connection = FAIL. The same oracle runs inside every SMUGGLE-\*/CHUNK-\* variant. |
-| H1-ROBUST-011 | slow-send lite: 2 connections each send a partial request line (`GET / HT`) and hold for `min(check-timeout, 5s)`; acceptable outcomes are no response (the server may wait), 408, or close. Any other answer, or a check-deadline overrun, = FAIL. Server survival after the hold is BASELINE-003's row. |
+| H1-ROBUST-011 | slow-send lite (long tier only): 2 connections each send a partial request line (`GET / HT`) and hold without completing the request, waiting out the documented default header-idle defence (10 s) plus margin in real time. Acceptable outcomes are a refusal (4xx/5xx) or close; **silence is never a pass** (G2-1 — no answer and no close within the wait = FAIL), and a 2xx/3xx answer to a partial line = FAIL. Server survival after the hold is BASELINE-003's row. |
 | STATIC-001 | `GET /static/../fixture_app.py` and `/static/%2e%2e/fixture_app.py` → 400/403/404; any 200 = FAIL |
 | TRAILER-001 | chunked request with trailer fields: forbidden ones (`Content-Length`, `Transfer-Encoding`, `Host`, RFC 9110 §6.5.1) → 400 or close, then the STATE-001 follow-up; a permitted custom trailer (`X-Smuggle: 1`) is ignored safely — 200 with the body echoed **exactly** or 400, and the pipelined `GET /echo-headers` echo must not contain the trailer name and must keep no CR/LF (RFC 9112 §7.1.2; CVE-2023-46589 / CVE-2025-53643 / CVE-2026-22815 class) |
 | RANGE-001 | `Range` abuse on `/static/hello.txt` (≤ 15 ranges: `bytes=0-0,-1,1-99999999999`, inverted `10-5`, suffix `-0`, junk `--3`, 15 single-byte ranges) → **200/206/416 only**, nothing else: 200 must carry the whole file (an ignored Range is legal), a single-range 206 must match its `Content-Range` exactly (start ≤ end < size, body length = end−start+1), `multipart/byteranges` 206 is accepted as-is, 416 is accepted (its `Content-Range`, when present, must use `bytes */size`); a close without a response, a 5xx, or a deadline overrun is FAIL/TIMEOUT (CVE-2011-3192 class) |
@@ -234,7 +245,7 @@ advisories (`gh api /advisories?ecosystem=pip&affects=hypercorn`).
 | pseudo-header / frame-order faults | RFC 9113, CVE-2025-57804 class | COVERED | H2-ROBUST-001..005 |
 | WebSocket handshake validation, masking | CVE-2024-37890, CVE-2026-69243, RFC 6455 §5.1/§5.3 | COVERED (M4) | WS-001 |
 | TLS version floor / ALPN | CVE-2009-3555 (class) | PARTIAL | TLS-001 (floor only; no renegotiation probe — see open questions) |
-| slow-send / slowloris | class | PARTIAL | H1-ROBUST-011 (lite) |
+| slow-send / slowloris | class | PARTIAL | H1-ROBUST-011 (lite; waits the default 10 s header timeout in long tier) |
 | h1→h2 request tunneling | CVE-2022-41721 | PARTIAL | framing checks cover the h1 side; no MaxBytesHandler analog in the fixture surface |
 | WS frame memory limits / compression | CVE-2026-54274, GHSA-mq44-7p77-q5h7 | GAP (skipped) | needs fragment/deflate state juggling and a memory oracle — not one-shot mechanical |
 | regex DoS (Content-Type, cookies) | CVE-2024-24762, CVE-2024-7592 | GAP (skipped) | judged by timing, not a mechanical accept set |
