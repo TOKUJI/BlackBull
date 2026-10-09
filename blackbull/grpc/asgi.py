@@ -99,8 +99,7 @@ def _accepts_gzip(accept: bytes) -> bool:
     The header is a comma-separated list of message encodings the client can
     decode (e.g. ``identity,deflate,gzip``); the server may compress responses
     with any it recognises."""
-    return any(tok.strip().lower() == b'gzip'
-               for tok in (accept or b'').split(b','))
+    return any(tok.strip().lower() == b'gzip' for tok in accept.split(b','))
 
 
 def _decompress_message(message: bytes, encoding: bytes) -> bytes:
@@ -190,8 +189,10 @@ class GrpcContext:
         getter = getattr(headers, 'get', None)
         if getter is not None and not isinstance(headers, (list, tuple)):
             return getter(name, default)
+        name = name.lower()
+        # An ASGI request scope may keep the client's header-name case.
         for k, v in headers or ():
-            if k.lower() == name.lower():
+            if k.lower() == name:
                 return v
         return default
 
