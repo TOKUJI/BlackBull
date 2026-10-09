@@ -129,7 +129,7 @@ def _read_reply(response, *, unary: bool | None = None) -> GrpcReply:
     transport = response.status != 200
     if transport:
         problems.append(f'HTTP status {response.status} (expected 200)')
-    content_type = response.headers.get(b'content-type', b'').strip()
+    content_type = response.headers.get(b'content-type', b'')
     if not _is_grpc_content_type(content_type):
         transport = True
         problems.append(f'content-type {content_type!r} is not application/grpc')

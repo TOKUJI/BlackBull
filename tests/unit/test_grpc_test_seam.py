@@ -389,7 +389,7 @@ def test_the_helper_accepts_the_content_types_the_server_accepts(content_type):
     reply = _judge(_response(head=[(b'content-type', content_type)],
                              body=encode_message(b'ok'), trailers=[_status(b'0')]))
 
-    server_accepts = _resolve_content_type(content_type) == content_type.strip()
+    server_accepts = _resolve_content_type(content_type) == content_type
     assert (reply.violation is None) is server_accepts
 
 

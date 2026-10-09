@@ -500,7 +500,7 @@ class BlackBull:
         # gRPC rides the HTTP/2 path; see enable_grpc.
         if self._grpc_registry is not None and scheme == Scheme.http:
             content_type = conn.headers.get(b'content-type', b'')
-            if content_type.strip().startswith(b'application/grpc'):
+            if content_type.startswith(b'application/grpc'):
                 from .grpc import serve_grpc  # noqa: PLC0415 — optional subpackage
                 await serve_grpc(self._grpc_registry, conn, receive, send)
                 return

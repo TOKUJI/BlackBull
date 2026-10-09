@@ -272,18 +272,15 @@ class GrpcContext:
 
 def _resolve_content_type(raw: bytes) -> bytes:
     """Return the response content-type, echoing a valid ``application/grpc``
-    request subtype (e.g. ``application/grpc+proto``) and tolerating
-    surrounding whitespace; falls back to bare ``application/grpc``."""
-    ct = (raw or b'').strip()
-    return ct if _is_grpc_content_type(ct) else _GRPC_CONTENT_TYPE
+    request subtype (e.g. ``application/grpc+proto``); falls back to bare
+    ``application/grpc``."""
+    return raw if _is_grpc_content_type(raw) else _GRPC_CONTENT_TYPE
 
 
 def _is_grpc_content_type(value: bytes) -> bool:
-    """``application/grpc`` or ``application/grpc+<subtype>``, case-sensitive.
-
-    The one grammar for requests the server serves and replies
-    ``blackbull.testing.grpc`` accepts.
-    """
+    """Exactly ``application/grpc`` or ``application/grpc+<subtype>``: the one
+    grammar for requests the server serves and replies ``blackbull.testing.grpc``
+    accepts."""
     return value == _GRPC_CONTENT_TYPE or value.startswith(_GRPC_SUBTYPE_PREFIX)
 
 
@@ -781,7 +778,7 @@ async def serve_grpc(registry: GrpcServiceRegistry, conn, receive, send) -> None
     # Compression negotiation.  The request's ``grpc-encoding`` names the coding
     # of its compressed messages; the client's ``grpc-accept-encoding`` says
     # what it can decode, so we may gzip responses only when it lists gzip.
-    request_encoding = context.metadata(b'grpc-encoding').strip().lower()
+    request_encoding = context.metadata(b'grpc-encoding').lower()
     response_encoding = (
         b'gzip' if _accepts_gzip(context.metadata(b'grpc-accept-encoding'))
         else None)
