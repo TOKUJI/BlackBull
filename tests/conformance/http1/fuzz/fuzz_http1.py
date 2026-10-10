@@ -196,7 +196,7 @@ def TestOneInput(data: bytes) -> None:
     # Legacy single-server path.
     try:
         asyncio.run(_single_server(scenario))
-    except (asyncio.TimeoutError, ConnectionError, OSError):
+    except (asyncio.TimeoutError, ConnectionError, OSError, RuntimeError):
         return
 
 
@@ -210,6 +210,7 @@ if __name__ == "__main__":
     server = ASGIServer(app)
     try:
         server.open_socket(0)
+        app.port = server.port  # the single-server helpers dial app.port
         p = Process(target=lambda: asyncio.run(server.run()))
         p.start()
         wait_until_ready(f"http://localhost:{server.port}")

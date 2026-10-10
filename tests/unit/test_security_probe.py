@@ -1,0 +1,1055 @@
+"""Unit tests for the BLA-526 probe's pure parts: safety gate, accept-set
+helpers, dual-lane routing, and the report writer.
+
+The checks themselves need live servers (``just vuln-check``) and are never
+run under pytest; pytest.ini keeps tools/ out of collection entirely.
+"""
+from __future__ import annotations
+
+import ipaddress
+from pathlib import Path
+import re
+import time
+
+import pytest
+
+from tools.security.probe import (
+    ALLOWED_HOSTS,
+    CHECKS,
+    FAIL,
+    LANES,
+    PASS,
+    SEVERITIES,
+    SKIP,
+    TIMEOUT,
+    Canary,
+    Check,
+    CheckResult,
+    H2Info,
+    Lane,
+    UnsafeTargetError,
+    Verdict,
+    WsAttempt,
+    abuse_accept_verdict,
+    apply_canary,
+    apply_proc,
+    grpc_lpm,
+    grpc_parse_lpm,
+    h2_field,
+    ProcObserver,
+    ProcSnapshot,
+    parse_net_tcp,
+    parse_proc_stat_cpu,
+    parse_proc_status,
+    proc_residual,
+    checks_for,
+    exit_code,
+    expect_verdict,
+    h2_error_verdict,
+    h2_info,
+    h2_ok_verdict,
+    h2_recover_verdict,
+    h2_settings,
+    main,
+    parse_target,
+    rapid_reset_verdict,
+    range_verdict,
+    render_markdown,
+    render_table,
+    run_checks,
+    slow_hold_verdict,
+    split_interims,
+    state_verdict,
+    tls_verdict,
+    trailer_followup_verdict,
+    ws_bad_handshake_verdict,
+    ws_flood_verdict,
+    ws_head_parse,
+    ws_mask_verdict,
+    ws_scan_frames,
+    write_report,
+)
+
+_LOOPBACK_URLS = (
+    'http://127.0.0.1:8000',
+    'http://localhost:8000',
+    'http://[::1]:8000',
+    'http://127.0.0.1',
+    'http://LOCALHOST:9000/probe',
+    'https://127.0.0.1:8443',
+    'https://localhost:8443',
+)
+
+_REFUSED_URLS = (
+    'http://example.com:8000',
+    'http://10.0.0.1:8000',
+    'http://192.168.1.1:8000',
+    'http://127.0.0.1.evil.example:8000',
+    'http://0x7f000001:8000',
+    'http://user:pass@127.0.0.1:8000',
+    'file:///etc/passwd',
+    'gopher://127.0.0.1:8000',
+    'http://[::1',
+    'http://127.0.0.1:abc',
+    'http://127.0.0.1:-1',
+)
+
+
+@pytest.mark.parametrize('url', _LOOPBACK_URLS)
+def test_parse_target_accepts_loopback(url):
+    target = parse_target(url)
+    assert target.host in ALLOWED_HOSTS
+    assert isinstance(target.port, int) and 0 < target.port < 65536
+
+
+@pytest.mark.parametrize('url', _REFUSED_URLS)
+def test_parse_target_refuses_non_loopback(url):
+    with pytest.raises(UnsafeTargetError):
+        parse_target(url)
+
+
+def test_parse_target_defaults_ports_per_scheme():
+    assert parse_target('http://127.0.0.1').port == 80
+    assert parse_target('https://127.0.0.1').port == 443
+
+
+def test_parse_target_resolves_localhost_to_a_loopback_literal():
+    target = parse_target('http://localhost:8000')
+    assert target.host == 'localhost'  # the authority in requests stays a name
+    assert ipaddress.ip_address(target.peer).is_loopback
+    assert parse_target('http://127.0.0.1:8000').peer == '127.0.0.1'
+
+
+def test_parse_target_refuses_non_loopback_resolution(monkeypatch):
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        return [(2, 1, 6, '', ('10.0.0.5', port))]
+
+    monkeypatch.setattr('tools.security.probe.socket.getaddrinfo',
+                        fake_getaddrinfo)
+    with pytest.raises(UnsafeTargetError):
+        parse_target('http://localhost:8000')
+
+
+def test_target_peer_defaults_to_host():
+    from tools.security.probe import Target
+    assert Target(scheme='http', host='127.0.0.1', port=8000).peer == '127.0.0.1'
+
+
+def test_probe_dials_the_literal_address(monkeypatch):
+    from tools.security.probe import Probe, Target
+    dialed = []
+
+    class StubClient:
+        def __init__(self, host, port, **kwargs):
+            dialed.append(host)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def execute_scenario(self, scenario):
+            return 'stub-done'
+
+    monkeypatch.setattr('tools.security.probe.HTTP1Client', StubClient)
+    probe = Probe(parse_target('http://localhost:8000'), 0.2)
+    assert probe.scenario('stub') == 'stub-done'
+    assert dialed and ipaddress.ip_address(dialed[0]).is_loopback
+
+
+def test_probe_shares_the_runners_connection_budget():
+    from tools.security.probe import ConnectionBudget, Probe, Target
+    budget = ConnectionBudget(max_concurrent=1, max_total=2)
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0,
+                  budget=budget)
+    assert probe.budget is budget
+    budget.acquire()
+    with pytest.raises(RuntimeError, match='concurrent'):
+        budget.acquire()
+    budget.release()
+    budget.acquire()
+    with pytest.raises(RuntimeError, match='budget exhausted'):
+        budget.acquire()
+
+
+def test_runtime_dir_is_private_per_user(monkeypatch, tmp_path):
+    from tools.security import paths
+    monkeypatch.setenv('XDG_RUNTIME_DIR', str(tmp_path))
+    directory = paths.runtime_dir()
+    assert directory == tmp_path / 'bb-vuln-target'
+    assert directory.stat().st_mode & 0o077 == 0
+    directory.chmod(0o755)
+    with pytest.raises(paths.UnsafeRuntimeDirError):
+        paths.runtime_dir()
+
+
+def test_default_tls_ca_lives_in_the_private_runtime_dir(monkeypatch, tmp_path):
+    from tools.security.probe import default_tls_ca
+    monkeypatch.setenv('XDG_RUNTIME_DIR', str(tmp_path))
+    assert default_tls_ca() == str(tmp_path / 'bb-vuln-target' / 'tls' / 'cert.pem')
+
+
+def test_main_exits_2_on_refused_target_without_io():
+    assert main(['--base-url', 'http://example.com:8000']) == 2
+
+
+def test_main_gates_the_h2_lane_url_too():
+    assert main(['--h2-url', 'http://10.0.0.1:8443']) == 2
+
+
+def test_main_exits_2_on_malformed_target():
+    assert main(['--base-url', 'http://[::1']) == 2
+
+
+def test_main_refuses_https_lane_without_a_verifiable_ca(tmp_path):
+    assert main(['--lane', 'h2', '--tls-ca', str(tmp_path / 'missing.pem')]) == 2
+
+
+def test_main_rejects_non_finite_timeouts():
+    with pytest.raises(SystemExit) as excinfo:
+        main(['--check-timeout', 'nan'])
+    assert excinfo.value.code == 2
+
+
+def test_slow_hold_verdict_rejects_silence():
+    silence = [('a', None, True), ('b', None, True)]
+    verdict = slow_hold_verdict(silence, 12.0)
+    assert verdict.verdict == FAIL
+    assert 'silence is not a pass' in verdict.detail
+    closed = slow_hold_verdict([('a', None, False), ('b', 408, False)], 12.0)
+    assert closed.verdict == PASS and 'defence acted' in closed.detail
+    assert slow_hold_verdict([('a', 431, False)], 12.0).verdict == PASS
+    accepted = slow_hold_verdict([('a', 200, False)], 12.0)
+    assert accepted.verdict == FAIL
+    assert 'answered 200 to a partial request line' in accepted.detail
+
+
+def test_quick_tier_excludes_long_only_checks():
+    quick = {c.check_id for c in checks_for('h1', 'quick')}
+    long = {c.check_id for c in checks_for('h1', 'long')}
+    assert 'H1-ROBUST-011' not in quick
+    assert 'H1-ROBUST-011' in long
+    assert quick < long
+    assert len(checks_for('h1')) == len(long)
+
+
+def test_canary_failure_marks_the_previous_check_fail_high():
+    rows = _results()
+    healthy = apply_canary(rows[0], Canary(True, 0.003, '200 "ok"'))
+    assert healthy.verdict == PASS and healthy.canary == 'ok 3ms'
+    dead = apply_canary(rows[0], Canary(False, 0.5, 'ConnectionRefusedError'))
+    assert dead.verdict == FAIL
+    assert dead.severity == 'High'
+    assert 'canary FAILED 500ms' in dead.detail
+    already_failing = apply_canary(rows[1], Canary(False, 0.5, 'refused'))
+    assert already_failing.verdict == FAIL
+    assert already_failing.severity == 'High'  # the row's own failure rank
+    assert 'canary FAILED' in already_failing.detail
+    timed_out = apply_canary(rows[2], Canary(False, 0.5, 'refused'))
+    assert timed_out.verdict == TIMEOUT  # keeps its own verdict, gains the note
+
+
+def test_run_checks_runs_the_canary_on_every_row():
+    seen: list[str] = []
+
+    def fake_canary(probe, lane):
+        seen.append(lane)
+        return Canary(len(seen) < 2, 0.001, '200 "ok"' if len(seen) < 2 else 'refused')
+
+    stub = tuple(Check(f'STUB-C{i}', 'stub', 'Low', 'CWE-400',
+                       lambda p: Verdict(PASS, 'stub ok'), 'h1')
+                 for i in range(3))
+    from tools.security.probe import Probe, Target
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    results = run_checks(probe, stub, deadline=time.monotonic() + 10,
+                         lane='h1', canary=fake_canary)
+    assert seen == ['h1', 'h1', 'h1']
+    assert [r.verdict for r in results] == [PASS, FAIL, FAIL]
+    assert results[0].canary.startswith('ok')
+    assert all(r.severity == 'High' for r in results[1:])
+
+
+def test_run_checks_records_elapsed_seconds():
+    def slow(probe):
+        time.sleep(0.05)
+        return Verdict(PASS, 'stub ok')
+
+    stub = (Check('STUB-004', 'stub', 'Low', 'CWE-400', slow, 'h1'),)
+    from tools.security.probe import Probe, Target
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    results = run_checks(probe, stub, deadline=time.monotonic() + 10)
+    assert results[0].elapsed_s >= 0.04
+
+
+def test_long_tier_budget_overrides_the_check_timeout():
+    def hold(probe):
+        return Verdict(PASS, f'effective {probe.effective_timeout:g}')
+
+    stub = (Check('STUB-005', 'stub', 'Low', 'CWE-400', hold, 'h1',
+                  timeout_long=16.0),)
+    from tools.security.probe import Probe, Target
+    quick = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    assert run_checks(quick, stub, deadline=time.monotonic() + 10)[0].detail == 'effective 5'
+    long = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0, tier='long')
+    assert run_checks(long, stub, deadline=time.monotonic() + 30)[0].detail == 'effective 16'
+
+
+def _snap(pid=1, fds=9, sockets=None, rss=6224, hwm=6432, threads=5,
+          cpu=46):
+    return ProcSnapshot(pid=pid, fds=fds, sockets=sockets or {},
+                        rss_kb=rss, hwm_kb=hwm, threads=threads,
+                        cpu_ticks=cpu)
+
+
+def test_parse_proc_status_reports_rss_hwm_and_threads():
+    text = ('Name:\tfixture_app\nVmHWM:\t    6432 kB\n'
+            'VmRSS:\t    6224 kB\nThreads:\t5\n')
+    assert parse_proc_status(text) == (6224, 6432, 5)
+
+
+def test_parse_proc_stat_cpu_ticks():
+    assert parse_proc_stat_cpu(
+        '123 (fixture app) S 1 1 1 0 -1 0 0 0 0 0 12 34') == 46
+
+
+def test_parse_net_tcp_counts_only_owned_inodes():
+    text = (
+        '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n'
+        '   0: 0100007F:1F40 0100007F:0050 01 00000000:00000000 00:00000000 00000000 0 0 111\n'
+        '   1: 0100007F:0050 0100007F:1F40 08 00000000:00000000 00000000 00000000 0 0 222\n'
+    )
+    assert parse_net_tcp(text, {'111'}) == {'ESTABLISHED': 1}
+    assert parse_net_tcp(text, {'111', '222'}) == {'ESTABLISHED': 1,
+                                                  'CLOSE_WAIT': 1}
+
+
+def test_proc_residual_rejects_leaked_connections():
+    before = _snap(fds=9, sockets={'ESTABLISHED': 0, 'CLOSE_WAIT': 0})
+    clean = _snap(fds=9, sockets={'ESTABLISHED': 0, 'CLOSE_WAIT': 0}, cpu=48)
+    assert proc_residual(before, clean) is None
+    leaky = _snap(fds=12, sockets={'ESTABLISHED': 2, 'CLOSE_WAIT': 1})
+    residual = proc_residual(before, leaky)
+    assert residual is not None
+    assert residual.verdict == FAIL
+    assert 'fd 9->12' in residual.detail
+    assert 'ESTABLISHED 0->2' in residual.detail
+    assert 'CLOSE_WAIT 0->1' in residual.detail
+
+
+def test_proc_residual_allows_counts_that_dropped():
+    before = _snap(fds=9, sockets={'ESTABLISHED': 1})
+    after = _snap(fds=8, sockets={'ESTABLISHED': 0})
+    assert proc_residual(before, after) is None
+
+
+def test_apply_proc_marks_residuals_fail_high():
+    before = _snap(fds=9)
+    leaky = _snap(fds=11, sockets={'ESTABLISHED': 2})
+    row = CheckResult('H1-ROBUST-005', 'd', 'Info', PASS, 'closed', 'CWE-400')
+    marked = apply_proc(row, before, leaky)
+    assert marked.verdict == FAIL
+    assert marked.severity == 'High'
+    assert marked.proc.startswith('RESIDUAL fd 9->11')
+    clean = apply_proc(row, before, _snap(fds=9))
+    assert clean.verdict == PASS
+    assert clean.proc.startswith('fd 9->9')
+
+
+def test_apply_proc_keeps_failing_rows_and_records_the_residual():
+    before = _snap(fds=9)
+    row = CheckResult('X', 'd', 'High', FAIL, 'broke', 'CWE-400')
+    marked = apply_proc(row, before, _snap(fds=13))
+    assert marked.verdict == FAIL
+    assert marked.detail == 'broke; residual connections after settle: fd 9->13'
+    assert marked.proc.startswith('RESIDUAL')
+
+
+def test_run_checks_observes_the_server_process():
+    from tools.security.probe import Probe, Target
+
+    class Observer:
+        def sample(self):
+            return _snap(fds=9)
+
+    stub = tuple(Check(f'STUB-C{i}', 'obs', 'Low', 'CWE-400',
+                       lambda p: Verdict(PASS, 'stub ok'), 'h1')
+                 for i in range(2))
+    runner = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    results = run_checks(runner, stub, deadline=time.monotonic() + 10,
+                         lane='h1', observer=Observer(), observe_settle=0.0)
+    assert [r.verdict for r in results] == [PASS, PASS]
+    assert all(r.proc.startswith('fd 9->9') for r in results)
+
+
+def test_run_checks_marks_residuals_on_the_row():
+    from tools.security.probe import Probe, Target
+
+    class Observer:
+        def __init__(self):
+            self.fds = 9
+
+        def sample(self):
+            self.fds += 1
+            return _snap(fds=self.fds)
+
+    stub = Check('STUB-C0', 'obs', 'Low', 'CWE-400',
+                 lambda p: Verdict(PASS, 'stub ok'), 'h1')
+    runner = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    results = run_checks(runner, [stub], deadline=time.monotonic() + 10,
+                         lane='h1', observer=Observer(), observe_settle=0.0)
+    assert results[0].verdict == FAIL
+    assert results[0].severity == 'High'
+    assert 'residual connections after settle: fd 10->11' in results[0].detail
+
+
+def test_lane_instances_run_the_family_minus_documented_exclusions():
+    from tools.security.probe import _LANE_FAMILY, checks_for
+    assert set(_LANE_FAMILY) == set(LANES)
+    for lane in LANES:
+        family = _LANE_FAMILY[lane]
+        for check in checks_for(lane):
+            assert check.lane == family
+            assert lane not in check.skip_lanes
+    # the h1 family on both transports, minus the half-close checks on TLS
+    h1 = {c.check_id for c in checks_for('h1')}
+    https1 = {c.check_id for c in checks_for('https1')}
+    assert h1 - https1 == {'H1-ROBUST-005', 'CHUNK-002', 'STATE-001'}
+    assert h1 >= https1
+    # the h2 family minus TLS-001 on the cleartext lane
+    assert 'TLS-001' in {c.check_id for c in checks_for('h2')}
+    assert 'TLS-001' not in {c.check_id for c in checks_for('h2c')}
+
+
+def test_every_skipped_lane_is_documented_with_its_reason():
+    root = Path(__file__).resolve().parents[2]
+    text = (root / 'docs' / 'security' / 'probe.md').read_text(encoding='utf-8')
+    for check in CHECKS:
+        for lane in check.skip_lanes:
+            assert any(check.check_id in line and lane in line
+                       for line in text.splitlines()), \
+                f'{check.check_id} skip on {lane} has no documented reason'
+
+
+def test_defense_sites_cover_the_documented_kinds():
+    from tools.security.reachability import defense_sites
+    sites = defense_sites(Path('blackbull'))
+    kinds = {s.kind for s in sites}
+    assert {'raise', 'defense-call', 'rejection-status', 'error-code'} <= kinds
+    assert sites, 'the AST pass must find the blackbull defense surface'
+    assert all(s.path not in ('config.py', 'env.py', '_env_vars.py')
+               for s in sites), 'startup config validation is not a site'
+    assert any(s.kind == 'defense-call' for s in sites)
+    assert any(s.kind == 'error-code' and s.context == 'PROTOCOL_ERROR'
+               for s in sites)
+
+
+def test_grpc_lpm_round_trips_messages():
+    assert grpc_lpm(b'ping') == b'\x00\x00\x00\x00\x04ping'
+    body = grpc_lpm(b'1') + grpc_lpm(b'2') + grpc_lpm(b'3')
+    assert grpc_parse_lpm(body) == [b'1', b'2', b'3']
+    assert grpc_parse_lpm(b'\x00\x00\x00\x00') is None  # short header
+    assert grpc_parse_lpm(grpc_lpm(b'ok') + b'\x00\x00') is None  # truncated
+    assert grpc_parse_lpm(b'') == []
+
+
+def test_h2_field_reads_trailer_fields():
+    hdrs = H2Info('HEADERS', 1, status=200,
+                  headers=((b'content-type', b'application/grpc'),))
+    trailers = H2Info('HEADERS', 1, end_stream=True,
+                      headers=((b'grpc-status', b'0'),))
+    data = H2Info('DATA', 1, body=b'\x00\x00\x00\x00\x00')
+    assert h2_field([hdrs, data, trailers], b'grpc-status') == b'0'
+    assert h2_field([hdrs, data], b'grpc-status') is None
+
+
+def test_fixture_route_table_matches_the_app():
+    from tools.security import fixture_app
+    actual = {(r.method, r.path) for r in fixture_app.app.get_routes()}
+    assert actual == set(fixture_app.ROUTE_TABLE)
+
+
+def test_container_metrics_parsers():
+    from tools.security.container_run import parse_cgroup_counters, parse_verdicts
+    events = 'low 0 high 0 max 0 oom 0 oom_kill 2 oom_group_kill 0\n'
+    assert parse_cgroup_counters(events)['oom_kill'] == 2
+    assert parse_cgroup_counters('max 1\n')['max'] == 1
+    table = ('check  severity  verdict  detail\n'
+             'BASELINE-001  High  PASS  200, body "ok"\n'
+             'TLS-001  Medium  SKIP  not exercised\n')
+    assert parse_verdicts(table) == {'BASELINE-001': 'PASS', 'TLS-001': 'SKIP'}
+
+
+def test_registry_checks_all_appear_in_the_documented_tables():
+    root = Path(__file__).resolve().parents[2]
+    docs = {name: (root / 'docs' / 'security' / name).read_text(encoding='utf-8')
+            for name in ('probe.md', 'severity.md', 'sufficiency.md')}
+    registry_ids = {check.check_id for check in CHECKS}
+    for name, text in docs.items():
+        missing = sorted(cid for cid in registry_ids if cid not in text)
+        assert not missing, f'{name} misses registry checks: {missing}'
+    cited = set(re.findall(
+        r'\b(?:BASELINE|H1-ROBUST|SMUGGLE|CHUNK|TRAILER|STATE|RANGE|EXPECT|HOST'
+        r'|STATIC|SYMLINK|WS|HDR|H2-BASE|H2-ROBUST|TLS|LANE)-\d{3}\b',
+        docs['sufficiency.md']))
+    unknown = sorted(cited - registry_ids)
+    assert not unknown, f'sufficiency.md cites unknown checks: {unknown}'
+
+
+def test_hang_escalates_h1_robust_checks_to_high():
+    by_id = {check.check_id: check for check in CHECKS}
+    for check_id in ('H1-ROBUST-001', 'H1-ROBUST-002', 'H1-ROBUST-003',
+                     'H1-ROBUST-005', 'H1-ROBUST-006', 'H1-ROBUST-007',
+                     'H1-ROBUST-008', 'H1-ROBUST-009', 'H1-ROBUST-010',
+                     'H1-ROBUST-011'):
+        assert by_id[check_id].timeout_severity() == 'High'
+
+
+def _results() -> list[CheckResult]:
+    return [
+        CheckResult('BASELINE-001', 'GET / returns 200 with body "ok"',
+                    'High', PASS, '200, body "ok"', 'CWE-400'),
+        CheckResult('SMUGGLE-001', 'CL+TE together rejected',
+                    'High', FAIL, 'accepted abuse with 200', 'CWE-444'),
+        CheckResult('H1-ROBUST-002', '100 KiB header value',
+                    'Medium', TIMEOUT, 'no response within 5s', 'CWE-400'),
+    ]
+
+
+def test_render_table_contains_check_rows():
+    table = render_table(_results())
+    for row in _results():
+        assert row.check_id in table
+        assert row.verdict in table
+    assert table.splitlines()[0].split() == ['check', 'severity', 'verdict', 'detail']
+
+
+def _lanes() -> list[Lane]:
+    return [
+        Lane('h1', 'http://127.0.0.1:8000', tuple(_results())),
+        Lane('h2', 'https://127.0.0.1:8443', (
+            CheckResult('H2-BASE-001', 'GET / over h2', 'High', PASS,
+                        '200, body "ok"', 'CWE-400'),
+            CheckResult('TLS-001', 'TLS floor', 'Medium', FAIL,
+                        'TLS1.0: handshake succeeded', 'CWE-326'),
+        )),
+    ]
+
+
+def test_render_markdown_has_one_table_per_lane():
+    md = render_markdown(_lanes(), check_timeout=5.0, run_timeout=120.0,
+                         timestamp='20260101T000000Z')
+    assert '## h1 lane — http://127.0.0.1:8000' in md
+    assert '## h2 lane — https://127.0.0.1:8443' in md
+    assert '| BASELINE-001 | High | PASS |' in md
+    assert '| SMUGGLE-001 | High | FAIL |' in md
+    assert '| H2-BASE-001 | High | PASS |' in md
+    assert '| TLS-001 | Medium | FAIL |' in md
+    assert 'CWE-444' in md and 'CWE-326' in md
+
+
+def test_write_report_writes_both_lane_tables(tmp_path):
+    path = write_report(_lanes(), check_timeout=5.0, run_timeout=120.0,
+                        timestamp='20260101T000000Z', out_dir=tmp_path)
+    assert path == tmp_path / '20260101T000000Z.md'
+    text = path.read_text(encoding='utf-8')
+    assert '| BASELINE-001 | High | PASS |' in text
+    assert '| TLS-001 | Medium | FAIL |' in text
+
+
+def test_exit_code_maps_verdicts_across_lanes():
+    assert exit_code([Lane('h1', 'http://127.0.0.1:8000', (_results()[0],))]) == 0
+    assert exit_code(_lanes()) == 1
+    skipped = CheckResult('TLS-001', 'floor', 'Medium', SKIP,
+                          'not exercised', 'CWE-326')
+    assert exit_code([Lane('h2', 'https://127.0.0.1:8443', (skipped,))]) == 0
+
+
+def test_check_registry_uses_lane_and_severity_vocabulary():
+    ids = [check.check_id for check in CHECKS]
+    assert len(ids) == len(set(ids))
+    for check in CHECKS:
+        assert check.lane in LANES
+        assert check.severity in SEVERITIES
+        assert (check.severity_on_timeout or check.severity) in SEVERITIES
+        assert check.description
+        assert check.cwe.startswith('CWE-')
+    assert checks_for('h1')[-1].check_id == 'BASELINE-003'
+    assert checks_for('h2')[-1].check_id == 'TLS-001'
+    assert len(checks_for('h1')) + len(checks_for('h2')) == len(CHECKS)
+
+
+def test_run_checks_routes_checks_and_records_budget_exhaustion():
+    seen: list[str] = []
+
+    def run(probe):
+        seen.append(probe.target.host)
+        return Verdict(PASS, 'stub ok')
+
+    stub = (Check('STUB-001', 'stub', 'Low', 'CWE-400', run, 'h1'),)
+    from tools.security.probe import Probe, Target
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    results = run_checks(probe, stub, deadline=time.monotonic() + 10)
+    assert [(r.check_id, r.verdict) for r in results] == [('STUB-001', PASS)]
+    assert seen == ['127.0.0.1']
+
+    late = run_checks(probe, stub, deadline=time.monotonic() - 1)
+    assert late[0].verdict == TIMEOUT
+    assert late[0].detail == 'run budget exhausted'
+
+
+def test_run_checks_maps_timeout_to_the_escalated_rank():
+    def hang(probe):
+        raise TimeoutError('stub deadline')
+
+    stub = (Check('STUB-002', 'stub', 'Info', 'CWE-400', hang, 'h1', 'High'),)
+    from tools.security.probe import Probe, Target
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    results = run_checks(probe, stub, deadline=time.monotonic() + 10)
+    assert results[0].verdict == TIMEOUT
+    assert results[0].severity == 'High'
+
+
+def test_session_bound_shrinks_with_the_check_deadline():
+    from tools.security.probe import Probe, Target
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 5.0)
+    assert probe._session_bound() > 5.0  # effective timeout plus one slack
+    probe.check_deadline = time.monotonic() + 0.3
+    first = probe._session_bound()
+    assert 0 < first <= 0.3
+    probe.check_deadline = time.monotonic() - 1
+    assert probe._session_bound() == pytest.approx(0.05)
+
+
+def test_run_checks_gives_every_session_of_a_check_one_deadline():
+    bounds: list[float | None] = []
+    shrinking: list[bool] = []
+
+    def fake(probe):
+        bounds.append(probe.check_deadline)
+        first = probe._session_bound()
+        time.sleep(0.05)
+        shrinking.append(probe._session_bound() < first)
+        return Verdict(PASS, 'stub ok')
+
+    stub = (Check('STUB-003', 'stub', 'Low', 'CWE-400', fake, 'h1'),)
+    from tools.security.probe import Probe, Target
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8000), 0.5)
+    run_checks(probe, stub, deadline=time.monotonic() + 10)
+    assert bounds[0] is not None          # one absolute deadline per check
+    assert shrinking == [True]            # sessions spend only what remains
+    assert probe.check_deadline is None   # cleared once the check is done
+
+
+# ------------------------------------------------------------------
+# STATE-001 / accept-set helpers
+# ------------------------------------------------------------------
+
+_OK = (200, b'ok')
+_ECHO = (200, b'Z')
+
+
+def test_state_verdict_accepts_one_clean_followup():
+    assert state_verdict((_ECHO, _OK), 'timeout').verdict == PASS
+    assert state_verdict((_OK,), 'timeout').verdict == PASS
+    assert state_verdict(((400, b'bad'),), 'closed').verdict == PASS
+    assert state_verdict((), 'closed').verdict == PASS
+
+
+def test_state_verdict_rejects_contaminated_sequences():
+    assert state_verdict((_ECHO, (200, b'garbled')), 'timeout').verdict == FAIL
+    assert state_verdict((_ECHO, _OK, _OK), 'timeout').verdict == FAIL
+    assert state_verdict(((400, b'bad'),), 'timeout').verdict == FAIL
+    assert state_verdict((_ECHO,), 'error:ValueError').verdict == FAIL
+
+
+def test_state_verdict_times_out_when_nothing_arrives():
+    assert state_verdict((), 'timeout').verdict == TIMEOUT
+
+
+def test_abuse_accept_verdict_accept_set_and_close():
+    assert abuse_accept_verdict(((400, b'bad'), _OK), 'timeout',
+                                accept=frozenset({400}), expected='400').verdict == PASS
+    assert abuse_accept_verdict((), 'closed', accept=frozenset({400}),
+                                expected='400').verdict == PASS
+    assert abuse_accept_verdict(((500, b'x'), _OK), 'timeout',
+                                accept=frozenset({400}), expected='400').verdict == FAIL
+
+
+def test_abuse_accept_verdict_echo_body_rule():
+    ok = abuse_accept_verdict((_ECHO, _OK), 'timeout', accept=frozenset({200, 400}),
+                              expected='400', ok_200_body=b'Z')
+    assert ok.verdict == PASS
+    bad = abuse_accept_verdict(((200, b'wrong'), _OK), 'timeout',
+                               accept=frozenset({200, 400}),
+                               expected='400', ok_200_body=b'Z')
+    assert bad.verdict == FAIL
+
+
+def test_abuse_accept_verdict_flags_dropped_abuse():
+    dropped = abuse_accept_verdict((_OK,), 'timeout', accept=frozenset({400}),
+                                   expected='400')
+    assert dropped.verdict == FAIL
+    assert 'not rejected' in dropped.detail
+
+
+# ------------------------------------------------------------------
+# h2 frame helpers
+# ------------------------------------------------------------------
+
+class _FakeFrame:
+    def __init__(self, frame_type, *, stream_id=0, error_code=None,
+                 pseudo=None, payload=b'', end_stream=False):
+        self._frame_type = frame_type
+        self.stream_id = stream_id
+        if error_code is not None:
+            self.error_code = error_code
+        if pseudo is not None:
+            self.pseudo_headers = pseudo
+        if payload:
+            self.payload = payload
+        if end_stream:
+            self.end_stream = end_stream
+
+    def FrameType(self):
+        return self._frame_type
+
+
+class _FakeType:
+    def __init__(self, name):
+        self.name = name
+
+
+def test_h2_info_reduces_frames_and_none():
+    headers = h2_info(_FakeFrame(_FakeType('HEADERS'), stream_id=1,
+                                 pseudo={':status': '200'}, end_stream=True))
+    assert headers == H2Info(kind='HEADERS', stream_id=1, error_code=None,
+                             status=200, body=b'', end_stream=True)
+    data = h2_info(_FakeFrame(_FakeType('DATA'), stream_id=1, payload=b'ok'))
+    assert (data.kind, data.body) == ('DATA', b'ok')
+    goaway = h2_info(_FakeFrame(_FakeType('GOAWAY'), error_code=1))
+    assert (goaway.kind, goaway.error_code) == ('GOAWAY', 1)
+    assert h2_info(None).kind == 'EOF'
+    assert h2_info(_FakeFrame(None)).kind == 'UNKNOWN'
+
+
+def test_h2_ok_verdict_requires_clean_stream_response():
+    infos = [h2_info(_FakeFrame(_FakeType('HEADERS'), stream_id=1,
+                                pseudo={':status': '200'})),
+             h2_info(_FakeFrame(_FakeType('DATA'), stream_id=1, payload=b'ok'))]
+    assert h2_ok_verdict(infos, stream_id=1).verdict == PASS
+    assert h2_ok_verdict(infos[:1], stream_id=1).verdict == FAIL
+    bad = [infos[0], h2_info(_FakeFrame(_FakeType('DATA'), stream_id=1,
+                                        payload=b'no'))]
+    assert h2_ok_verdict(bad, stream_id=1).verdict == FAIL
+
+
+def test_h2_error_verdict_accepts_matching_error_frames():
+    rst = [h2_info(_FakeFrame(_FakeType('RST_STREAM'), stream_id=1,
+                              error_code=1))]
+    assert h2_error_verdict(rst, stream_id=1,
+                            accept_codes=frozenset({1}),
+                            expected='PROTOCOL_ERROR').verdict == PASS
+    goaway = [h2_info(_FakeFrame(_FakeType('GOAWAY'), error_code=1))]
+    conn = h2_error_verdict(goaway, stream_id=None, accept_codes=frozenset({1}),
+                            expected='PROTOCOL_ERROR',
+                            accept_kinds=frozenset({'GOAWAY'}))
+    assert conn.verdict == PASS
+
+
+def test_h2_error_verdict_rejects_wrong_code_or_wrong_kind():
+    rst = [h2_info(_FakeFrame(_FakeType('RST_STREAM'), stream_id=1,
+                              error_code=8))]
+    assert h2_error_verdict(rst, stream_id=1, accept_codes=frozenset({1}),
+                            expected='PROTOCOL_ERROR').verdict == FAIL
+    # A stream error cannot stand in for the required connection error.
+    stream_only = h2_error_verdict(rst, stream_id=None, accept_codes=frozenset({8}),
+                                   expected='GOAWAY PROTOCOL_ERROR',
+                                   accept_kinds=frozenset({'GOAWAY'}))
+    assert stream_only.verdict == FAIL
+
+
+def test_h2_error_verdict_close_and_4xx_and_timeout():
+    closed = [h2_info(None)]
+    assert h2_error_verdict(closed, stream_id=1, accept_codes=frozenset({1}),
+                            expected='PROTOCOL_ERROR').verdict == PASS
+    too_large = [h2_info(_FakeFrame(_FakeType('HEADERS'), stream_id=1,
+                                    pseudo={':status': '431'}))]
+    verdict = h2_error_verdict(too_large, stream_id=1, accept_codes=frozenset(),
+                               expected='ENHANCE_YOUR_CALM',
+                               accept_4xx=frozenset({431}))
+    assert verdict.verdict == PASS
+    assert h2_error_verdict([], stream_id=1, accept_codes=frozenset({1}),
+                            expected='PROTOCOL_ERROR').verdict == TIMEOUT
+
+
+def test_tls_verdict_requires_old_failures_and_new_h2():
+    good = [('TLS1.0', 'refused', 'SSLError: alert'), ('TLS1.1', 'refused', 'SSLError: alert'),
+            ('TLS1.2', 'ok', 'tls=TLSv1.2 alpn=h2'),
+            ('TLS1.3', 'ok', 'tls=TLSv1.3 alpn=h2')]
+    assert tls_verdict(good).verdict == PASS
+    weak = [('TLS1.0', 'ok', 'tls=TLSv1.0 alpn=h2'), ('TLS1.1', 'refused', 'SSLError: alert'),
+            ('TLS1.2', 'ok', 'tls=TLSv1.2 alpn=h2'),
+            ('TLS1.3', 'ok', 'tls=TLSv1.3 alpn=h2')]
+    assert tls_verdict(weak).verdict == FAIL
+    no_alpn = [('TLS1.0', 'refused', 'SSLError: alert'), ('TLS1.1', 'refused', 'SSLError: alert'),
+               ('TLS1.2', 'ok', 'tls=TLSv1.2 alpn=None'),
+               ('TLS1.3', 'ok', 'tls=TLSv1.3 alpn=h2')]
+    assert tls_verdict(no_alpn).verdict == FAIL
+    dead = [('TLS1.0', 'refused', 'SSLError: alert'), ('TLS1.1', 'refused', 'SSLError: alert'),
+            ('TLS1.2', 'refused', 'SSLError: alert'), ('TLS1.3', 'refused', 'SSLError: alert')]
+    assert tls_verdict(dead).verdict == FAIL
+
+
+def test_tls_verdict_never_passes_unexercised_attempts():
+    skip = [('TLS1.0', 'not-exercised', 'SSLError: NO_PROTOCOLS_AVAILABLE'),
+            ('TLS1.1', 'not-exercised', 'SSLError: NO_PROTOCOLS_AVAILABLE'),
+            ('TLS1.2', 'ok', 'tls=TLSv1.2 alpn=h2'),
+            ('TLS1.3', 'ok', 'tls=TLSv1.3 alpn=h2')]
+    assert tls_verdict(skip).verdict == SKIP
+    fail_wins = [('TLS1.0', 'not-exercised', 'SSLError: NO_PROTOCOLS_AVAILABLE'),
+                 ('TLS1.1', 'not-exercised', 'SSLError: NO_PROTOCOLS_AVAILABLE'),
+                 ('TLS1.2', 'ok', 'tls=TLSv1.3 alpn=h2'),
+                 ('TLS1.3', 'ok', 'tls=TLSv1.3 alpn=h2')]
+    assert tls_verdict(fail_wins).verdict == FAIL
+
+
+# ------------------------------------------------------------------
+# M4 judges — WebSocket
+# ------------------------------------------------------------------
+
+
+def _ws_attempt(status=101, frames=b'', closed=True, timed_out=False):
+    return WsAttempt(name='t', status=status, accept=b'a', head=b'', frames=frames,
+                     closed=closed, timed_out=timed_out)
+
+
+def test_ws_head_parse_status_and_accept():
+    head = (b'HTTP/1.1 101 Switching Protocols\r\n'
+            b'Upgrade: websocket\r\nSec-WebSocket-Accept: xyz==\r\n\r\n')
+    assert ws_head_parse(head) == (101, b'xyz==')
+    assert ws_head_parse(b'HTTP/1.1 400 Bad Request\r\n\r\n') == (400, b'')
+    assert ws_head_parse(b'garbage') == (None, b'')
+
+
+def test_ws_scan_frames_reads_close_codes_and_echo():
+    close1002 = b'\x88\x02\x03\xea'
+    echo = b'\x81\x01X'
+    assert ws_scan_frames(close1002) == ((1002,), False, False)
+    assert ws_scan_frames(echo) == ((), True, False)
+    assert ws_scan_frames(b'\x88\x02\x03\xe8') == ((1000,), False, False)
+    assert ws_scan_frames(b'\x81\x81\x37\xfa\x21\x3d\x7f') == ((), False, True)
+    assert ws_scan_frames(b'\x81') == ((), False, False)  # truncated tail ignored
+
+
+def test_ws_mask_verdict_oracles():
+    assert ws_mask_verdict(_ws_attempt(frames=b'\x88\x02\x03\xea'), 5.0).verdict == PASS
+    assert ws_mask_verdict(_ws_attempt(closed=True), 5.0).verdict == PASS
+    echoed = ws_mask_verdict(_ws_attempt(frames=b'\x81\x01X'), 5.0)
+    assert echoed.verdict == FAIL and 'echoed' in echoed.detail
+    wrong = ws_mask_verdict(_ws_attempt(frames=b'\x88\x02\x03\xe8'), 5.0)
+    assert wrong.verdict == FAIL and '1000' in wrong.detail
+    untested = ws_mask_verdict(_ws_attempt(status=400), 5.0)
+    assert untested.verdict == FAIL and 'untested' in untested.detail
+    open_conn = ws_mask_verdict(_ws_attempt(closed=False), 5.0)
+    assert open_conn.verdict == FAIL
+
+
+def test_ws_bad_handshake_verdict_rejects_101():
+    ok = ws_bad_handshake_verdict(_ws_attempt(status=400), 5.0,
+                                  allow=frozenset({400, 426}))
+    assert ok.verdict == PASS
+    assert ws_bad_handshake_verdict(_ws_attempt(status=101), 5.0,
+                                    allow=frozenset({400})).verdict == FAIL
+    closed = ws_bad_handshake_verdict(_ws_attempt(status=None), 5.0,
+                                      allow=frozenset({400}))
+    assert closed.verdict == PASS
+
+
+def test_ws_flood_verdict_accepts_upgrade_or_refusal():
+    assert ws_flood_verdict(_ws_attempt(status=101), 5.0).verdict == PASS
+    assert ws_flood_verdict(_ws_attempt(status=431), 5.0).verdict == PASS
+    assert ws_flood_verdict(_ws_attempt(status=None), 5.0).verdict == PASS
+    assert ws_flood_verdict(_ws_attempt(status=500), 5.0).verdict == FAIL
+    stalled = ws_flood_verdict(_ws_attempt(status=None, closed=False,
+                                           timed_out=True), 5.0)
+    assert stalled.verdict == TIMEOUT
+
+
+# ------------------------------------------------------------------
+# M4 judges — H1 trailers / Range / Expect
+# ------------------------------------------------------------------
+
+
+def test_trailer_followup_verdict_detects_smuggling():
+    ok_body = b'{"headers": [["host", "probe"]]}'
+    clean = trailer_followup_verdict(((200, b'Z'), (200, ok_body)), 'timeout')
+    assert clean.verdict == PASS
+    smuggled = trailer_followup_verdict(
+        ((200, b'Z'), (200, b'{"headers": [["x-smuggle", "1"]]}')), 'timeout')
+    assert smuggled.verdict == FAIL and 'smuggled' in smuggled.detail
+    assert trailer_followup_verdict(((200, b'Z'), (500, b'x')), 'timeout').verdict == FAIL
+    assert trailer_followup_verdict(((200, b'Z'), (200, b'Z'), (200, ok_body)),
+                                    'timeout').verdict == FAIL
+    assert trailer_followup_verdict(((200, b'Z'),), 'closed').verdict == PASS
+    assert trailer_followup_verdict((), 'timeout').verdict == TIMEOUT
+    assert trailer_followup_verdict(((200, b'Z'),), 'timeout').verdict == FAIL
+
+
+def test_range_verdict_shapes():
+    hello = b'hello from the BlackBull static fixture\n'
+    size = len(hello)
+    full = range_verdict(200, [], hello, size=size, closed=False, timed_out=False)
+    assert full.verdict == PASS
+    wrong_body = range_verdict(200, [], b'nope', size=size, closed=False,
+                               timed_out=False)
+    assert wrong_body.verdict == FAIL
+    ok206 = range_verdict(
+        206, [(b'content-range', b'bytes 1-3/40'), (b'content-type', b'text/plain')],
+        b'ell', size=size, closed=False, timed_out=False)
+    assert ok206.verdict == PASS
+    bad_len = range_verdict(
+        206, [(b'content-range', b'bytes 1-3/40')], b'el', size=size,
+        closed=False, timed_out=False)
+    assert bad_len.verdict == FAIL
+    out_of_file = range_verdict(
+        206, [(b'content-range', b'bytes 1-3/99')], b'ell', size=size,
+        closed=False, timed_out=False)
+    assert out_of_file.verdict == FAIL
+    multipart = range_verdict(
+        206, [(b'content-type', b'multipart/byteranges; boundary=x')],
+        b'--x', size=size, closed=False, timed_out=False)
+    assert multipart.verdict == PASS
+    ok416 = range_verdict(416, [], b'', size=size, closed=False, timed_out=False)
+    assert ok416.verdict == PASS
+    bad416 = range_verdict(416, [(b'content-range', b'bytes 0-1/40')], b'',
+                           size=size, closed=False, timed_out=False)
+    assert bad416.verdict == FAIL
+    assert range_verdict(500, [], b'', size=size, closed=False,
+                         timed_out=False).verdict == FAIL
+    assert range_verdict(None, [], b'', size=size, closed=True,
+                         timed_out=False).verdict == FAIL
+    assert range_verdict(None, [], b'', size=size, closed=False,
+                         timed_out=True).verdict == TIMEOUT
+
+
+def test_split_interims_and_expect_verdict():
+    assert split_interims([(100, b''), (200, b'hello'), (200, b'ok')]) == (
+        ((100, b''),), ((200, b'hello'), (200, b'ok')))
+    good = expect_verdict(((100, b''), (200, b'hello'), (200, b'ok')), 'timeout',
+                          ok_body=b'hello')
+    assert good.verdict == PASS and '100-then' in good.detail
+    no_interim = expect_verdict(((200, b'hello'), (200, b'ok')), 'timeout',
+                                ok_body=b'hello')
+    assert no_interim.verdict == PASS and 'no 100' in no_interim.detail
+    rejected = expect_verdict(((417, b'x'), (200, b'ok')), 'timeout',
+                              ok_body=b'hello')
+    assert rejected.verdict == PASS
+    weird_interim = expect_verdict(((103, b''), (200, b'hello')), 'timeout',
+                                   ok_body=b'hello')
+    assert weird_interim.verdict == FAIL
+    wrong_body = expect_verdict(((200, b'wrong'), (200, b'ok')), 'timeout',
+                                ok_body=b'hello')
+    assert wrong_body.verdict == FAIL
+    dropped = expect_verdict(((200, b'ok'),), 'timeout', ok_body=b'hello')
+    assert dropped.verdict == FAIL
+
+
+# ------------------------------------------------------------------
+# M4 judges — H2
+# ------------------------------------------------------------------
+
+
+def _h2_fake(frame_type, stream_id=None, error_code=None, body=b''):
+    return H2Info(kind=frame_type, stream_id=stream_id, error_code=error_code,
+                  body=body)
+
+
+def test_h2_settings_parses_advertised_parameters():
+    payload = (3).to_bytes(2, 'big') + (100).to_bytes(4, 'big')
+    payload += (5).to_bytes(2, 'big') + (16384).to_bytes(4, 'big')
+    settings = h2_settings([_h2_fake('SETTINGS', 0, body=payload),
+                            _h2_fake('SETTINGS', 0)])
+    assert settings == {3: 100, 5: 16384}
+    assert h2_settings([_h2_fake('HEADERS', 1)]) == {}
+
+
+def test_h2_recover_verdict_accepts_completion_or_refusal():
+    done = [_h2_fake('HEADERS', 3, body=b''), ]
+    done[0] = H2Info(kind='HEADERS', stream_id=3, status=200)
+    assert h2_recover_verdict(done, 3, accept_codes=frozenset(),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == PASS
+    refused = [_h2_fake('GOAWAY', 0, error_code=11)]
+    assert h2_recover_verdict(refused, 3, accept_codes=frozenset({11}),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == PASS
+    wrong_code = [_h2_fake('GOAWAY', 0, error_code=2)]
+    assert h2_recover_verdict(wrong_code, 3, accept_codes=frozenset({11}),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == FAIL
+    bad_status = [H2Info(kind='HEADERS', stream_id=3, status=500)]
+    assert h2_recover_verdict(bad_status, 3, accept_codes=frozenset({11}),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == FAIL
+    assert h2_recover_verdict([_h2_fake('EOF')], 3, accept_codes=frozenset({11}),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == PASS
+    assert h2_recover_verdict([], 3, accept_codes=frozenset({11}),
+                              accept_statuses=frozenset({200}),
+                              expected='x').verdict == TIMEOUT
+
+
+def test_rapid_reset_verdict_flags_illegal_error_codes():
+    ok = [_h2_fake('RST_STREAM', 1, error_code=8), _h2_fake('GOAWAY', 0, error_code=0)]
+    assert rapid_reset_verdict(ok, 41, 20).verdict == PASS
+    bad = [_h2_fake('GOAWAY', 0, error_code=1)]
+    verdict = rapid_reset_verdict(bad, 41, 20)
+    assert verdict.verdict == FAIL and 'PROTOCOL_ERROR' in verdict.detail
+    assert rapid_reset_verdict([], 41, 20).verdict == PASS
+
+
+def test_h2_bomb_stays_within_its_declared_cap():
+    import hpack
+    from tools.security.probe import (
+        _H2_BOMB_CAP, _H2_BOMB_NAME, _H2_BOMB_REFS, _H2_BOMB_VALUE)
+    enc = hpack.Encoder()
+    fields = ((':method', 'GET'), (':path', '/'),
+              (':scheme', 'http'), (':authority', '127.0.0.1:8443'))
+    enc.encode(list(fields) + [(_H2_BOMB_NAME, _H2_BOMB_VALUE)])
+    bomb = enc.encode(list(fields) + [(_H2_BOMB_NAME, _H2_BOMB_VALUE)] * _H2_BOMB_REFS)
+    decoded = hpack.Decoder(max_header_list_size=_H2_BOMB_CAP + 1).decode(bomb)
+    total = sum(len(n) + len(v) for n, v in decoded)
+    assert len(bomb) < 8192
+    assert total <= _H2_BOMB_CAP
+
+
+def test_h2_continuation_steps_cut_one_block_into_thirty_one():
+    from tools.security.probe import Probe, Target, _h2_continuation_steps
+    probe = Probe(Target(scheme='http', host='127.0.0.1', port=8443), 5.0)
+    steps = _h2_continuation_steps(probe, stream_id=1, continuations=30)
+    assert len(steps) == 31
+    kinds = []
+    for step in steps:
+        raw = step.data
+        frame_type, flags = raw[3], raw[4]
+        stream = int.from_bytes(raw[5:9], 'big')
+        assert stream == 1
+        kinds.append((frame_type, flags))
+    assert kinds[0] == (0x01, 0x01)            # HEADERS, END_STREAM
+    assert all(t == 0x09 and f == 0x00 for t, f in kinds[1:-1])
+    assert kinds[-1] == (0x09, 0x04)           # CONTINUATION, END_HEADERS
+    import hpack
+    block = b''.join(s.data[9:9 + int.from_bytes(s.data[0:3], 'big')]
+                     for s in steps)
+    fields = hpack.Decoder().decode(block)
+    assert (':method', 'GET') in fields
+
+
+def test_m4_checks_escalate_hangs_to_high():
+    by_id = {check.check_id: check for check in CHECKS}
+    for check_id in ('RANGE-001', 'EXPECT-001', 'HOST-001', 'WS-001',
+                     'H2-ROBUST-006', 'H2-ROBUST-007', 'H2-ROBUST-008'):
+        assert by_id[check_id].timeout_severity() == 'High'
+    assert by_id['SYMLINK-001'].severity == 'Critical'
+    assert by_id['TRAILER-001'].timeout_severity() == 'High'
