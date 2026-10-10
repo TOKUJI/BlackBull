@@ -21,12 +21,14 @@ import ast
 import pathlib
 
 import blackbull.client.http1 as client_http1
+import blackbull.connection as connection_module
 import blackbull.headers as headers_module
 import blackbull.middleware.cache as cache_module
 import blackbull.protocol.frame_types as frame_types
 import blackbull.protocol.framing as framing_module
 import blackbull.router as router
 import blackbull.server.http1_actor as http1_actor
+import blackbull.server.http2_actor as http2_actor
 import blackbull.server.parser as parser
 import blackbull.server.recipient as recipient
 from blackbull.protocol import field_grammar
@@ -36,17 +38,21 @@ from blackbull.protocol.frame_types import (
 
 #: Each reader and the grammar names it imports.
 _READERS = {
-    http1_actor: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS',
-                  'COMMON_METHODS_OCTETS', 'method_token_is_valid'),
+    http1_actor: ('FIELD_VALUE_ALLOWED_OCTETS', 'COMMON_METHODS_OCTETS',
+                  'method_token_is_valid', 'field_line', 'field_value',
+                  'host_field_value'),
+    http2_actor: ('PROHIBITED_TRAILER_FIELDS',),
+    connection_module: ('normalized_fields', 'host_field_value'),
     frame_types: ('LOWERCASE_TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     headers_module: ('TCHAR_OCTETS', 'LOWERCASE_TCHAR_OCTETS',
                      'FIELD_VALUE_ALLOWED_OCTETS'),
-    recipient: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
+    recipient: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS', 'field_line',
+                'field_value', 'PROHIBITED_TRAILER_FIELDS'),
     client_http1: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     framing_module: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     cache_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET'),
     parser: ('COMMON_METHODS', 'COMMON_SCHEMES', 'URI_SCHEME_RE',
-             'method_token_is_valid'),
+             'method_token_is_valid', 'authority_is_valid', 'host_field_value'),
     router: ('method_token_is_valid',),
 }
 
@@ -61,6 +67,9 @@ _OWNED_BY_THE_GRAMMAR = frozenset({
     'COMMON_METHODS_OCTETS', '_COMMON_METHODS_OCTETS',
     'COMMON_METHODS', '_COMMON_METHODS',
     'COMMON_SCHEMES', '_COMMON_SCHEMES',
+    'PROHIBITED_TRAILER_FIELDS', '_PROHIBITED_TRAILER_FIELDS',
+    'HOST_FORBIDDEN_BYTES', '_HOST_FORBIDDEN_BYTES',
+    '_AUTHORITY_SCAN_BYTES', '_AUTHORITY_SCAN_RE',
 })
 
 #: RFC 9110 §5.6.2 — names are lowercase in HTTP/2 (RFC 9113 §8.2).

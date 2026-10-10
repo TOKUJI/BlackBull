@@ -528,6 +528,12 @@ carries no content; an explicit, valid `Content-Length` is retained as
 selected-representation metadata, but one is not generated from an attempted
 response body.  Application body events for these statuses are discarded.
 
+A request's trailer section is read and discarded; it never reaches the
+application.  Its field lines follow the header section's grammar, and it may
+not carry a field RFC 9110 §6.5.1 prohibits (framing, routing,
+authentication, content handling).  A violation answers 400 on HTTP/1.1 and
+resets the stream (`PROTOCOL_ERROR`) on HTTP/2.
+
 ## WebSocket frames
 
 For WebSocket routes (`scheme=Scheme.websocket`), use

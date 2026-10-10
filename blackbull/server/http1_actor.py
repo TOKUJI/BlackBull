@@ -58,8 +58,9 @@ _HTTP_VERSION_RE = re.compile(rb'\AHTTP/\d\.\d\Z')
 
 # Share field octet grammar with HTTP/2.
 from ..protocol.field_grammar import (
-    COMMON_METHODS_OCTETS, FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS,
-    URI_SCHEME_RE, FieldError, host_field_value, method_token_is_valid)
+    COMMON_METHODS_OCTETS, FIELD_VALUE_ALLOWED_OCTETS, URI_SCHEME_RE,
+    FieldError, field_line, field_value, host_field_value,
+    method_token_is_valid)
 
 
 
@@ -128,27 +129,18 @@ _SPEC_ENUMERATED_LINES: tuple[bytes, ...] = (
 
 
 def _build_default_lines() -> dict[bytes, tuple[bytes, bytes]]:
-    """Validate every default line and map it to the pair ``_parse`` produces.
+    """Map every default line to the pair ``_parse`` produces for it.
 
-    Same expressions, same rules, so a hand-written entry cannot disagree with
-    what parsing that line would yield.  A violation raises at import rather
-    than serving a wrong pair at runtime.
+    Lines go through the same ``field_line``/``field_value`` as parsing; a
+    violation raises ``FieldError``/``ValueError`` at import.
     """
     table: dict[bytes, tuple[bytes, bytes]] = {}
     for line in _SPEC_ENUMERATED_LINES:
-        colon = line.find(b':')
-        if colon < 1 or line[0] in (0x20, 0x09):
-            raise ValueError(f'malformed default header line: {line!r}')
-        key = line[:colon]
-        if key.translate(None, TCHAR_OCTETS):
-            raise ValueError(f'invalid name in default header line: {line!r}')
-        lkey = key.lower()
+        lkey, raw = field_line(line)
         if lkey in _UNDERSCORE_FRAMING_NAMES or lkey in _FRAMING_NAMES:
             raise ValueError(
                 f'framing header must not be pre-seeded: {line!r}')
-        value = line[colon + 1:].strip(b' \t')
-        if value.translate(None, FIELD_VALUE_ALLOWED_OCTETS):
-            raise ValueError(f'CTL in default header value: {line!r}')
+        value = field_value(raw)
         if len(line) > _LINE_CACHE_MAX_LINE:
             raise ValueError(f'default header line too long: {line!r}')
         table[line] = (lkey, value)
@@ -840,40 +832,17 @@ class HTTP1Actor(Actor):
                     else:
                         same.append(hit)
                     continue
-            # RFC 9112 §5.2: reject obs-fold in requests.
-            if line[0] in (0x20, 0x09):
-                raise BadRequestError(
-                    f'obsolete line folding rejected: {line!r}')
-            colon = line.find(b':')
-            if colon < 1:
-                raise BadRequestError(f'malformed header line: {line!r}')
-            key = line[:colon]
-            value = line[colon + 1:]
-            # field-name must be a valid token (§5.1 / RFC 9110 §5.6.2).  SP
-            # and HTAB are not tchar, so this one test also decides §5.1 (no
-            # whitespace between field-name and ':'), and only a rejected name
-            # pays to tell the two apart.  `colon < 1` makes `key[-1]` safe.
-            if key.translate(None, TCHAR_OCTETS):
-                if key[-1] in (0x20, 0x09):
-                    raise BadRequestError(
-                        f'whitespace before colon (smuggling vector): {line!r}')
-                raise BadRequestError(f'invalid header name {key!r}')
-            lkey = key.lower()
-            if lkey in _UNDERSCORE_FRAMING_NAMES:
-                raise BadRequestError(
-                    f'framing-confusable header name {key!r} '
-                    f'(NORM-UNDERSCORE)')
-            if lkey == b'content-length' and not _CL_STRICT_RE.match(value):
-                raise BadRequestError(
-                    f'ambiguous Content-Length value {value!r} '
-                    f'(RFC 9110 §8.6)')
-            # Strip the OWS surrounding the value (§5).
-            value = value.strip(b' \t')
-            if (values_need_checking
-                    and value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
-                raise BadRequestError(
-                    f'CTL in header value (smuggling / log-injection): '
-                    f'{key!r}: {value!r}')
+            try:
+                lkey, value = field_line(line)
+                if lkey in _UNDERSCORE_FRAMING_NAMES:
+                    raise FieldError(f'framing-confusable header name {lkey!r} '
+                                     f'(NORM-UNDERSCORE)')
+                if lkey == b'content-length' and not _CL_STRICT_RE.match(value):
+                    raise FieldError(f'ambiguous Content-Length value {value!r} '
+                                     f'(RFC 9110 §8.6)')
+                value = field_value(value, check=values_need_checking)
+            except FieldError as exc:
+                raise BadRequestError(str(exc)) from None
             pair = (lkey, value)
             raw.append(pair)
             same = index.get(lkey)

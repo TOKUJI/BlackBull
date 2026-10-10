@@ -18,6 +18,7 @@ from ..env import get_settings
 from ..event_aggregator import EventAggregator
 from ..logger import log, debug_gate
 from ..protocol.frame import FrameFactory
+from ..protocol.field_grammar import PROHIBITED_TRAILER_FIELDS
 from ..protocol.framing import method_is
 from ..protocol.frame_types import (
     ErrorCodes, FrameBase, FrameTypes,
@@ -1274,13 +1275,17 @@ class HTTP2Actor(Actor):
         """
         if stream.conn is not None:
             # A second field section is trailers: it must end the request,
-            # carry no pseudo-header field, and reach no handler; anything
-            # else earns the head's verdict.
+            # carry no pseudo-header or prohibited field (RFC 9110 §6.5.1),
+            # and reach no handler; anything else earns the head's verdict.
+            prohibited = next((name for name, _ in header_frame.headers
+                               if name in PROHIBITED_TRAILER_FIELDS), None)
             if (not header_frame.end_stream or header_frame.malformed
-                    or header_frame.pseudo_headers):
+                    or header_frame.pseudo_headers or prohibited is not None):
                 reason = (header_frame.malformed_reason
                           or ('pseudo-header in trailer section'
                               if header_frame.pseudo_headers
+                              else f'prohibited trailer field {prohibited!r}'
+                              if prohibited is not None
                               else 'section does not end the request'))
                 if _DEBUG:
                     logger.debug(

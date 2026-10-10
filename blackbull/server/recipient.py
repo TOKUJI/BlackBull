@@ -12,7 +12,9 @@ from inspect import signature
 from time import monotonic as _monotonic
 from typing import Awaitable, Callable, NoReturn, Optional
 
-from ..protocol.field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
+from ..protocol.field_grammar import (
+    FIELD_VALUE_ALLOWED_OCTETS, PROHIBITED_TRAILER_FIELDS, TCHAR_OCTETS,
+    FieldError, field_line, field_value)
 from .cap_log import log_cap_hit
 from .deadline import ConnectionDeadline, WsIdleWatchdog
 from .sender import AbstractWriter, AsyncioWriter
@@ -168,18 +170,6 @@ def _validate_chunk_ext(ext: bytes) -> None:
 # BB_HEADER_MAX_LINE default: extensions and trailers are ignored on receipt, so
 # nothing legitimate needs more.
 _CHUNK_LINE_MAX = 8192
-
-# RFC 9110 §6.5.1 — fields controlling message framing, routing, request
-# modifiers, authentication, or content handling are prohibited in a
-# chunked trailer section (SMUG-TRAILER-*).  BlackBull never merges
-# trailers into the header section, but silently swallowing these invites
-# a front-end that *does* merge them to be desynced through us — reject.
-_PROHIBITED_TRAILER_FIELDS = frozenset((
-    b'transfer-encoding', b'content-length', b'host', b'content-type',
-    b'content-encoding', b'content-range', b'trailer', b'te',
-    b'authorization', b'proxy-authorization', b'cookie', b'set-cookie',
-    b'cache-control', b'expect', b'max-forwards', b'pragma', b'range',
-))
 
 
 def _parse_chunk_size(line: bytes) -> int:
@@ -1183,8 +1173,13 @@ class HTTP1Recipient(BaseRecipient):
                             raise _bad_request(
                                 f'trailer line not CRLF-terminated: '
                                 f'{line[-8:]!r}')
-                        name = line.split(b':', 1)[0].strip(b' \t').lower()
-                        if name in _PROHIBITED_TRAILER_FIELDS:
+                        try:
+                            name, raw = field_line(line[:-2])
+                            field_value(raw)
+                        except FieldError as exc:
+                            self.framing_broken = True
+                            raise _bad_request(f'trailer: {exc}') from None
+                        if name in PROHIBITED_TRAILER_FIELDS:
                             self.framing_broken = True
                             raise _bad_request(
                                 f'prohibited trailer field {name!r} '

@@ -60,6 +60,38 @@ class FieldError(ValueError):
     """A field section that breaks the field grammar; the request gets 400."""
 
 
+def field_value(raw: bytes, *, check: bool = True) -> bytes:
+    """Return *raw* without its edge SP/HTAB.
+
+    The result carries no CTL: raises [`FieldError`][] for one, unless *check*
+    is false because the caller has already proved the octets clean.
+    """
+    value = raw.strip(b' \t')
+    if check and value.translate(None, FIELD_VALUE_ALLOWED_OCTETS):
+        raise FieldError(f'control octet in field value {value!r}')
+    return value
+
+
+def field_line(line: bytes) -> tuple[bytes, bytes]:
+    """Split one HTTP/1.1 field line (no CRLF) into its lowercase tchar name and
+    the raw value after the colon, still unstripped (RFC 9112 §5).
+
+    Raises [`FieldError`][] for obs-fold, a missing colon, whitespace before
+    the colon, or a name outside tchar.  Pass the value to [`field_value`][].
+    """
+    if line[:1] in (b' ', b'\t'):
+        raise FieldError(f'obsolete line folding rejected: {line!r}')
+    colon = line.find(b':')
+    if colon < 1:
+        raise FieldError(f'malformed field line: {line!r}')
+    name = line[:colon]
+    if name.translate(None, TCHAR_OCTETS):
+        if name[-1] in (0x20, 0x09):
+            raise FieldError(f'whitespace before colon (smuggling vector): {line!r}')
+        raise FieldError(f'invalid field name {name!r}')
+    return name.lower(), line[colon + 1:]
+
+
 def normalized_fields(pairs: Iterable) -> list[tuple[bytes, bytes]]:
     """Return *pairs* with every name lowercased and every value's edge SP/HTAB
     removed, in order.
@@ -76,11 +108,18 @@ def normalized_fields(pairs: Iterable) -> list[tuple[bytes, bytes]]:
         name = name.lower()
         if not name or name.translate(None, LOWERCASE_TCHAR_OCTETS):
             raise FieldError(f'invalid field name {name!r}')
-        value = value.strip(b' \t')
-        if value.translate(None, FIELD_VALUE_ALLOWED_OCTETS):
-            raise FieldError(f'control octet in field {name!r}')
-        out.append((name, value))
+        out.append((name, field_value(value)))
     return out
+
+
+#: RFC 9110 §6.5.1 — fields a trailer section may not carry: framing, routing,
+#: authentication, request modifiers, response control and content handling.
+PROHIBITED_TRAILER_FIELDS = frozenset((
+    b'transfer-encoding', b'content-length', b'host', b'content-type',
+    b'content-encoding', b'content-range', b'trailer', b'te',
+    b'authorization', b'proxy-authorization', b'cookie', b'set-cookie',
+    b'cache-control', b'expect', b'max-forwards', b'pragma', b'range',
+))
 
 
 # RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port]; these octets are
