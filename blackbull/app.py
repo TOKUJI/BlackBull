@@ -17,9 +17,9 @@ from .event import Event, EventDispatcher, EventHandler
 from .utils import Scheme, is_client_error, is_server_error
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
 from .request import ClientDisconnected
-from .connection import Connection, disconnected, CONNECTION_STASH_KEY
+from .connection import Connection, disconnected, refuse_scope, CONNECTION_STASH_KEY
 from .protocol.field_grammar import FieldError, media_type
-from .native import NativeResponse, NativeWSMessage
+from .native import NativeResponse
 from .response import wrap_native_send
 from .asgi import ASGIReceiveCallable, ASGISendCallable
 from .config import AppConfig
@@ -661,28 +661,18 @@ class BlackBull:
         elif conn.get('type') == 'lifespan':
             await self._handle_lifespan(receive, send)
             return
-        elif conn.get('type') == 'websocket':
-            # The WS extras are derived (``conn.subprotocols`` reads the request
-            # header) or actor-set (``conn._ws``), so none of them needs the
-            # scope dict past this point.
-            request = conn.get(CONNECTION_STASH_KEY)
-            if request is None:
-                try:
-                    request = Connection.from_scope(conn, receive)
-                except FieldError:
-                    await send(NativeWSMessage.close(code=1002))
-                    return
         else:
             # Reuse the stashed native Connection on compatibility scopes.
             # Do not rebind _receive to the disconnect wrapper: it captures conn and
-            # would create a per-request reference cycle.
+            # would create a per-request reference cycle.  No WebSocket extra
+            # needs the scope dict past this point: each is derived from a
+            # request header or set by the actor.
             request = conn.get(CONNECTION_STASH_KEY)
             if request is None:
                 try:
                     request = Connection.from_scope(conn, receive)
                 except FieldError:
-                    # The native parsers answer the same input with a bare 400.
-                    await send(NativeResponse(status=400, header=[], body=b''))
+                    await refuse_scope(conn, send)
                     return
 
         if self._chain is None:

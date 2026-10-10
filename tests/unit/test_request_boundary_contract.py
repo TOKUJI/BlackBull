@@ -1,4 +1,4 @@
-"""Every Connection carries the same header contract, however it was built.
+"""Every Connection a boundary builds carries the same header contract.
 
 Native parsing and ``Connection.from_scope`` (an external ASGI host, or
 ``BB_FORCE_ASGI_SCOPE=1``) both hand dispatch a Connection whose header names
@@ -12,6 +12,7 @@ import pytest
 
 from blackbull import BlackBull
 from blackbull.connection import Connection
+from blackbull.native import asgi_send_boundary
 from blackbull.protocol.field_grammar import FieldError
 from blackbull.server.http1_actor import BadRequestError, HTTP1Actor
 
@@ -144,3 +145,48 @@ class TestTheAppRefusesAScopeThatBreaksTheContract:
         await app(scope, receive, send)
 
         assert [e['type'] for e in sent] == ['websocket.close']
+        assert sent[0]['code'] == 1002
+
+
+def _router_with_routes():
+    from http import HTTPMethod
+
+    from blackbull.router import Router
+    from blackbull.utils import Scheme
+
+    router = Router()
+    called = []
+
+    @router.route(path='plain', methods=[HTTPMethod.GET])
+    async def plain():
+        called.append('plain')
+
+    @router.route(path='query', methods=[HTTPMethod.GET])
+    async def query(q: int = 0):
+        called.append('query')
+
+    @router.route(path='item/{id_}', methods=[HTTPMethod.GET])
+    async def item(id_: str):
+        called.append('item')
+
+    def route(path):
+        return router[(path, HTTPMethod.GET, Scheme.http)]
+
+    return route, called
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('path', ['plain', 'query', 'item/1'])
+async def test_a_route_driven_with_a_bare_scope_refuses_it_like_the_app(path):
+    route, called = _router_with_routes()
+    sent = []
+
+    async def send(event):
+        sent.append(event)
+
+    await route(path)(_scope([(b'host', b'a'), (b'x-a', b'\x0bchunked')]), None,
+                      asgi_send_boundary(send))
+
+    assert called == []
+    assert (sent[0]['type'], sent[0]['status']) == ('http.response.start', 400)
+    assert b''.join(e.get('body', b'') for e in sent[1:]) == b''

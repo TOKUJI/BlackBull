@@ -194,7 +194,7 @@ class Cache:
             bucket.entries.clear()
         key = _variant_key(vary_fields, req_headers)
         stored = _owned_response_fields(headers)
-        stored[:] = [field for field in stored if field[0] != b'age']
+        stored.discard(b'age')
         bucket.entries[key] = _StoredResponse(
             status=status, header=stored, body=body, etag=etag,
             expires_at=now + ttl, stored_at=now)
@@ -258,14 +258,14 @@ class _Capture:
         if (not isinstance(event, NativeResponse)
                 or event._extension is not None
                 or event.expects_trailers
-                or event.trailers is not None):
+                or event._trailers is not None):
             # Nothing about this shape can be stored, and the rest of the
             # response has to follow it out unchanged.
             await self._forward(event)
             return
         if event._header is not None:
             self._status = event.status
-            self._headers = list(event._header)
+            self._headers = event._header.copy()
             self._vary_fields = _vary_fields(self._headers)
             # ``Vary: *`` and an unstorable status or directive are settled by
             # the header alone: stop holding the body as well.

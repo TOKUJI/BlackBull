@@ -361,7 +361,7 @@ class Compression:
                     if (event._header is None and event._body is not None
                             and not event.more_body
                             and not event.expects_trailers
-                            and event.trailers is None):
+                            and event._trailers is None):
                         # The terminal body for the held header: the two
                         # halves are a complete response again.
                         await _emit_native_complete(
@@ -380,7 +380,7 @@ class Compression:
                         and event._body is not None
                         and not event.more_body
                         and not event.expects_trailers
-                        and event.trailers is None):
+                        and event._trailers is None):
                     await _emit_native_complete(
                         event.status, event._header, event._body,
                         original=event)
@@ -398,7 +398,7 @@ class Compression:
                         and event._header is not None
                         and event._body is None
                         and not event.expects_trailers
-                        and event.trailers is None):
+                        and event._trailers is None):
                     # Header arm alone.  Hold it — the body that follows
                     # completes the response, and the compress decision needs
                     # both.  Nothing is on the wire yet, so holding costs no

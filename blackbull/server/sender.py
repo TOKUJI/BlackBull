@@ -542,7 +542,7 @@ class HTTP1Sender(BaseSender):
             return
 
         if isinstance(body, dict):
-            body = _native_from_asgi(body, copy_headers=False)
+            body = _native_from_asgi(body)
 
         if (isinstance(body, NativeResponse) and body._extension is not None
                 and body.push is not None):
@@ -597,10 +597,10 @@ class HTTP1Sender(BaseSender):
                 if body.body is not None:
                     self._response_started = True
                     await self._handle_body_content(body._body, body.more_body)
-                if body.trailers is not None and not self._completed:
+                if body._trailers is not None and not self._completed:
                     self._response_started = True
                     await self._handle_trailers(
-                        body.trailers, body.more_trailers)
+                        body._trailers, body.more_trailers)
 
             case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)
@@ -1498,7 +1498,7 @@ class HTTP2Sender(BaseSender):
             return
 
         if isinstance(body, dict):
-            body = _native_from_asgi(body, copy_headers=False)
+            body = _native_from_asgi(body)
 
         if isinstance(body, bytes):
             # RFC 9113 §8.1, as in the dict branch below.
@@ -1574,9 +1574,9 @@ class HTTP2Sender(BaseSender):
                     self._log_record.mark('start_arm_out')
             if body.body is not None:
                 await self._handle_body_content(body._body, not body.more_body)
-            if body.trailers is not None and not self._end_stream_sent:
+            if body._trailers is not None and not self._end_stream_sent:
                 await self._handle_trailers(
-                    body.trailers, body.more_trailers)
+                    body._trailers, body.more_trailers)
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')

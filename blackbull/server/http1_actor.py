@@ -59,7 +59,7 @@ _HTTP_VERSION_RE = re.compile(rb'\AHTTP/\d\.\d\Z')
 # Share field octet grammar with HTTP/2.
 from ..protocol.field_grammar import (
     COMMON_METHODS_OCTETS, FIELD_VALUE_ALLOWED_OCTETS, URI_SCHEME_RE,
-    FieldError, field_line, field_value, host_field_value,
+    FieldError, field_line, field_value, host_field_value, list_members,
     method_token_is_valid)
 
 
@@ -894,8 +894,8 @@ class HTTP1Actor(Actor):
         self._request_framing = request_framing(headers)
         self._declared_body_len = self._request_framing[0] or 0
         expect = index.get(b'expect')
-        self._expects_continue = (
-            expect is not None and expect[0][1].lower() == b'100-continue')
+        self._expects_continue = expect is not None and b'100-continue' in list_members(
+            b','.join([value for _, value in expect]))
         try:
             host_value = host_field_value(index.get(b'host'))
         except FieldError as exc:
@@ -944,7 +944,7 @@ class HTTP1Actor(Actor):
             # ``Upgrade: h2c`` probe on ``--http2``) is served as ordinary
             # HTTP/1.1, because dispatch has no route for it and the connection
             # would close with no reply.
-            if upgrade[0][1].lower() == b'websocket':
+            if b'websocket' in list_members(b','.join([value for _, value in upgrade])):
                 conn.type = 'websocket'
                 conn.scheme = 'ws'
 
@@ -1184,10 +1184,10 @@ class HTTP1Actor(Actor):
         """Return True if the connection should persist after this request."""
         http_version = conn.http_version
         fields = conn.headers._index.get(b'connection')
-        connection = fields[0][1].lower() if fields else b''
+        members = list_members(b','.join([value for _, value in fields])) if fields else ()
         if http_version == '1.1':
-            return connection != b'close'
-        return connection == b'keep-alive'
+            return b'close' not in members
+        return b'keep-alive' in members
 
     async def _handle(self, msg: Message) -> None:  # never reached
         raise NotImplementedError

@@ -18,7 +18,7 @@ from ..env import get_settings
 from ..event_aggregator import EventAggregator
 from ..logger import log, debug_gate
 from ..protocol.frame import FrameFactory
-from ..protocol.field_grammar import PROHIBITED_TRAILER_FIELDS
+from ..protocol.field_grammar import PROHIBITED_TRAILER_FIELDS, field_value
 from ..protocol.framing import method_is
 from ..protocol.frame_types import (
     ErrorCodes, FrameBase, FrameTypes,
@@ -1668,8 +1668,8 @@ class HTTP2Actor(Actor):
             parent_headers, parent_scheme, _parent_client = Headers([]), 'https', None
         # §8.3.1 maps ``:authority`` into ``host``, so a dispatched parent
         # always carries one; the fallback only covers a parent with none.
-        raw_authority = (parent_headers.get(b'host') or b'localhost')
-        authority = raw_authority.decode() if isinstance(raw_authority, bytes) else raw_authority
+        raw_authority = parent_headers.get(b'host') or b'localhost'
+        authority = raw_authority.decode()
 
         from ..protocol.frame_types import PseudoHeaders  # noqa: PLC0415
         pseudo = {
@@ -1678,8 +1678,10 @@ class HTTP2Actor(Actor):
             PseudoHeaders.SCHEME:    parent_scheme,
             PseudoHeaders.AUTHORITY: authority,
         }
-        # NativeResponse holds lowercase tchar names: no pseudo-header here.
-        regular = list(event._header or ())
+        # NativeResponse holds lowercase tchar names and no host; the promised
+        # request takes its host from the authority above (§8.3.1).
+        regular = [(name, field_value(value, check=False))
+                   for name, value in (event._header or ())]
 
         pp = self.factory.push_promise(parent_stream_id, push_stream_id, pseudo, regular)
         # The peer may reset a promised id as soon as the frame reaches its
@@ -1719,7 +1721,7 @@ class HTTP2Actor(Actor):
             method='GET',
             path=_pushed_path,
             raw_path=_pushed_raw_path,
-            headers=Headers.from_lowered(list(regular)),
+            headers=Headers.from_lowered([(b'host', raw_authority), *regular]),
             query_string=_pushed_query,
             http_version='2',
             scheme=parent_scheme,

@@ -740,7 +740,7 @@ class TestNonHTTPRequests:
             sent.append(event)
 
         await mw(_scope(), None, send, call_next)
-        assert [(e.trailers) for e in sent] == [None, [(b'x-sum', b'1')]]
+        assert [e.trailers and list(e.trailers) for e in sent] == [None, [(b'x-sum', b'1')]]
         await mw(_scope(), None, send, call_next)
         assert calls['n'] == 2
 

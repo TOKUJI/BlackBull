@@ -31,8 +31,8 @@ class _MinimalResponseHeaders(list):
     ``transfer_encoding`` and ``date`` (whether present).
 
     Build one with [`_as_response_fields`][]; add or remove fields only with
-    [`add`][] and [`discard`][], which keep the framing facts true.  A value
-    replaced in place must still keep the contract.
+    [`add`][], [`extend`][] and [`discard`][], which keep the framing facts
+    true.  A value replaced in place must still keep the contract.
     """
 
     __slots__ = ('content_length', 'transfer_encoding', 'date')
@@ -43,6 +43,12 @@ class _MinimalResponseHeaders(list):
         field = (name.lower(), value)
         self.append(field)
         self._locate(field)
+
+    def extend(self, fields: Iterable) -> None:
+        """Append *fields*, validated unless they already keep the contract."""
+        for field in _as_response_fields(fields):
+            self.append(field)
+            self._locate(field)
 
     def discard(self, name: bytes) -> None:
         """Remove every field named *name* (lowercase)."""

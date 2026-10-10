@@ -131,6 +131,9 @@ def list_members(value: bytes) -> list[bytes]:
     """Return the lowercase members of a comma-separated list value without
     OWS, empty members dropped (RFC 9110 §5.6.1).  Not for case-sensitive
     members such as entity-tags."""
+    if b',' not in value:
+        member = value.strip(b' \t').lower()
+        return [member] if member else []
     return [m for m in (p.strip(b' \t').lower() for p in value.split(b',')) if m]
 
 

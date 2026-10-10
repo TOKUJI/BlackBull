@@ -171,7 +171,7 @@ class TestWireEquivalence:
         await s2(first)
         await s2(NativeResponse(trailers=[(b'x-second', b'2')]))
         assert bytes(w2) == bytes(w1)
-        assert first.trailers == [(b'x-first', b'1')]
+        assert list(first.trailers) == [(b'x-first', b'1')]
 
         frames = _collect_frames(w2, f2)
         assert len(frames) == 3

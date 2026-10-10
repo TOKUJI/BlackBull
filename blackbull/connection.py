@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator, Callable, NamedTuple
 from urllib.parse import parse_qsl
 
 from .headers import Headers
+from .native import NativeResponse, NativeWSMessage
 from .protocol.field_grammar import host_field_value, media_type, normalized_fields
 from .request import (read_body, stream_body, cookies_from_headers,
                       ClientDisconnected, _json_or_none)
@@ -155,6 +156,16 @@ def stashed_connection(target, receive) -> tuple['Connection', bool]:
     return conn, True
 
 
+async def refuse_scope(scope: dict, send) -> None:
+    """Answer an ASGI *scope* that [`Connection.from_scope`][] refused as the
+    native parsers answer the same request: a bare 400, or close 1002 before
+    accept for WebSocket."""
+    if scope.get('type') == 'websocket':
+        await send(NativeWSMessage.close(code=1002))
+    else:
+        await send(NativeResponse(status=400, header=[], body=b''))
+
+
 def bind_receive_channel(target, receive) -> None:
     """Bind the raw receive channel once.
 
@@ -175,8 +186,12 @@ def bind_receive_channel(target, receive) -> None:
 class Connection:
     """One HTTP (or WebSocket) request — the single internal representation.
 
-    Built by the protocol actor, consumed by the router, dispatcher,
-    middleware, and handlers. The ASGI ``scope`` dict is a *derived* view
+    Its creator builds it to the request contract: header names are lowercase
+    tchar, values carry no edge SP/HTAB and no CTL, ``host`` is at most one
+    valid authority, and ``scheme`` is lowercase.  The HTTP/1.1 and HTTP/2
+    parsers and [`from_scope`][] do; code that builds one directly must too.
+    The router, dispatcher, middleware and handlers rely on it and check
+    nothing again.  The ASGI ``scope`` dict is a *derived* view
     ([`as_scope`][]). ``Request`` is a deprecated alias of this class.
     """
 

@@ -452,11 +452,12 @@ await send(JSONResponse({'ok': True}, headers=[
 
 Each field name must be a non-empty RFC 9110 `token`; it is sent lowercase.
 Values may contain HTAB, spaces, visible ASCII, and `obs-text` bytes, but not
-NUL, CR, LF, other C0 controls, or DEL. Fields are checked once, when a
-`NativeResponse` is built: a `Response` helper builds it when sent, a
-`NativeResponse` checks when constructed, when its header is assigned and
-when a field is appended, and an ASGI `http.response.start` /
-`http.response.trailers` dict is checked when converted. Invalid fields raise
+NUL, CR, LF, other C0 controls, or DEL. Each field is checked once, when it
+enters a `NativeResponse`: a `Response` helper builds one when sent, a
+`NativeResponse` checks when constructed, when its `header` or `trailers` is
+assigned and when a field is appended to either, and an ASGI
+`http.response.start` / `http.response.trailers` dict is checked when
+converted. Invalid fields raise
 `ValueError`; they are never silently stripped or rewritten, and never reach
 the wire or the HTTP/2 HPACK table. If the response has already begun,
 HTTP/1.1 closes rather than reusing a connection with an incomplete field

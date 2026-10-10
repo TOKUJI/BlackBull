@@ -737,6 +737,27 @@ class TestHTTP2ServerPush:
                     else push_conn.extensions) or {}
         assert 'http.response.push' not in push_ext
 
+    async def test_the_pushed_request_keeps_the_request_contract(self):
+        """Host comes from the promised :authority; values are trimmed."""
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+        conns = []
+
+        async def app(conn, receive, send):
+            conns.append(conn)
+            if conn.path == '/':
+                await send({'type': 'http.response.push', 'path': '/pushed.css',
+                            'headers': [(b'accept', b' text/css\t')]})
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        handler, _ = _make_h2_actor(app=app)
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        await handler.run()
+
+        pushed = next(c for c in conns if c.path == '/pushed.css')
+        assert pushed.headers.getlist(b'host') == [(b'host', b'example.com')]
+        assert pushed.headers.get(b'accept') == b'text/css'
+
     async def test_scope_has_push_extension(self):
         """HTTP/2 scope must advertise 'http.response.push' in extensions."""
         h_frame = _make_headers_frame(stream_id=1, end_stream=True)
