@@ -8,6 +8,7 @@ from blackbull.grpc import (
 )
 from blackbull.grpc.asgi import serve_grpc, GrpcContext, _pct_encode_message
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ class TestRegistry:
 # ---------------------------------------------------------------------------
 
 def _grpc_scope(path, headers=None):
-    base = [(b'content-type', b'application/grpc'), (b':method', b'POST')]
+    base = [(b'content-type', b'application/grpc')]
     return {'type': 'http', 'path': path,
             'headers': headers if headers is not None else base}
 
@@ -152,7 +153,7 @@ async def test_unary_success():
         return request[::-1]
 
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/echo.Echo/Echo'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/echo.Echo/Echo')),
                      _receive_with(encode_message(b'abc')), send)
 
     start = events[0]
@@ -182,7 +183,7 @@ async def test_handler_raises_grpc_error():
         raise GrpcError(GrpcStatus.NOT_FOUND, 'no such user\n')
 
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/x/Fail'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/x/Fail')),
                      _receive_with(encode_message(b'')), send)
     tr = _trailers_of(events)
     assert tr[b'grpc-status'] == str(int(GrpcStatus.NOT_FOUND)).encode()
@@ -207,7 +208,7 @@ async def test_context_abort(path, handler, expected):
     if handler is not None:
         reg.add_method(path, handler)
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope(path),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope(path)),
                      _receive_with(encode_message(b'')), send)
     assert _trailers_of(events)[b'grpc-status'] == str(int(expected)).encode()
 
@@ -221,7 +222,7 @@ async def test_handler_unexpected_exception_becomes_internal():
         raise RuntimeError('kaboom')
 
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/x/Boom'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/x/Boom')),
                      _receive_with(encode_message(b'')), send)
     assert _trailers_of(events)[b'grpc-status'] == str(int(GrpcStatus.INTERNAL)).encode()
 
@@ -239,7 +240,7 @@ async def test_handler_can_read_metadata_and_set_custom_status():
 
     headers = [(b'content-type', b'application/grpc'), (b'x-token', b'secret')]
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/x/Meta', headers),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/x/Meta', headers)),
                      _receive_with(encode_message(b'')), send)
     trailers = events[2]['headers']
     assert (b'grpc-status', b'0') in trailers
@@ -256,7 +257,7 @@ async def test_two_messages_is_unimplemented_for_unary():
 
     body = encode_message(b'a') + encode_message(b'b')
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/x/Unary'), _receive_with(body), send)
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/x/Unary')), _receive_with(body), send)
     assert _trailers_of(events)[b'grpc-status'] == str(int(GrpcStatus.UNIMPLEMENTED)).encode()
 
 

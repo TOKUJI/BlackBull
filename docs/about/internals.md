@@ -43,6 +43,14 @@ means an ASGI dictionary for an external host or `BB_FORCE_ASGI_SCOPE=1`.
 Create it after pre-dispatch mutations; shared `state` and `extensions`
 remain live for late updates.
 
+Every `Connection` carries one header contract, however it was built: names
+are lowercase tchar, values have no edge SP/HTAB and no CTL, `host` is at
+most one valid authority, and `scheme` is lowercase. The HTTP/1.1 and HTTP/2
+parsers produce it; `Connection.from_scope` establishes it for a scope and
+refuses one that cannot meet it (a bare 400, or close 1002 for WebSocket).
+Code past dispatch relies on it and does not normalise again; code that
+rewrites a field after construction keeps it.
+
 A connection owns one read buffer. `BufferReader` owns receive policy,
 `ConnectionProtocol` performs transport callbacks and pauses, and
 `ReadBuffer` owns bytes and cursors. Detection must not consume the prefix;

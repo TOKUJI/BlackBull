@@ -24,6 +24,7 @@ from blackbull.grpc import compression
 from blackbull.grpc.asgi import serve_grpc
 import blackbull.grpc.asgi as grpc_asgi
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 # --------------------------------------------------------------------------
@@ -31,7 +32,7 @@ from blackbull.native import NativeResponse
 # --------------------------------------------------------------------------
 
 def _grpc_scope(path, headers=None):
-    base = [(b'content-type', b'application/grpc'), (b':method', b'POST')]
+    base = [(b'content-type', b'application/grpc')]
     return {'type': 'http', 'path': path,
             'headers': headers if headers is not None else base}
 
@@ -184,7 +185,7 @@ class TestRequestDecompression:
         scope = _grpc_scope('/svc/Echo', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-encoding', b'gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([_compressed_frame(payload)]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([_compressed_frame(payload)]), send)
 
         assert _trailers(events)[b'grpc-status'] == b'0'
         assert _decoded(events) == [payload]
@@ -201,7 +202,7 @@ class TestRequestDecompression:
         scope = _grpc_scope('/svc/Join', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-encoding', b'gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([body]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([body]), send)
 
         assert _trailers(events)[b'grpc-status'] == b'0'
         assert _decoded(events) == [b'aaa' * 100 + b'|' + b'bbb' * 100]
@@ -220,7 +221,7 @@ class TestRequestDecompression:
         scope = _grpc_scope('/svc/Join', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-encoding', b'gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([body]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([body]), send)
 
         assert _decoded(events) == [b'zzz' * 100 + b'|plain']
 
@@ -237,7 +238,7 @@ class TestRequestDecompression:
         scope = _grpc_scope('/svc/Echo', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-encoding', b'snappy')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([frame]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([frame]), send)
 
         assert _trailers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()
@@ -254,7 +255,7 @@ class TestRequestDecompression:
 
         frame = struct.pack('>BI', 1, 3) + b'xyz'  # Flag set, no grpc-encoding
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Echo'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Echo')),
                          _receive_chunks([frame]), send)
         assert _trailers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()
@@ -272,7 +273,7 @@ class TestRequestDecompression:
         scope = _grpc_scope('/svc/Echo', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-encoding', b'gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([frame]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([frame]), send)
         assert _trailers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.RESOURCE_EXHAUSTED)).encode()
 
@@ -290,7 +291,7 @@ class TestRequestDecompression:
         scope = _grpc_scope('/svc/Echo', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-encoding', b'gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([frame]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([frame]), send)
         assert _trailers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.INTERNAL)).encode()
 
@@ -317,7 +318,7 @@ class TestRequestDecompression:
         scope = _grpc_scope('/svc/Echo', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-encoding', b'gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope,
+        await serve_grpc(reg, Connection.from_scope(scope),
                          _receive_chunks([encode_message(body, compressed=True)]),
                          send)
 
@@ -342,7 +343,7 @@ class TestRequestDecompression:
         scope = _grpc_scope('/svc/Join', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-encoding', b'gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([body]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([body]), send)
 
         assert _trailers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.INTERNAL)).encode()
@@ -367,7 +368,7 @@ class TestRequestDecompression:
         scope = _grpc_scope('/svc/Join', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-encoding', b'gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([body]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([body]), send)
 
         assert _trailers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.INTERNAL)).encode()
@@ -392,7 +393,7 @@ class TestResponseCompression:
             (b'content-type', b'application/grpc'),
             (b'grpc-accept-encoding', b'identity,gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([encode_message(b'go')]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([encode_message(b'go')]), send)
 
         assert _start_headers(events)[b'grpc-encoding'] == b'gzip'
         (compressed, _payload), = _frames(events)
@@ -410,7 +411,7 @@ class TestResponseCompression:
 
         # No grpc-accept-encoding → client can't decode gzip → send plain.
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Big'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Big')),
                          _receive_chunks([encode_message(b'go')]), send)
 
         assert b'grpc-encoding' not in _start_headers(events)
@@ -430,7 +431,7 @@ class TestResponseCompression:
             (b'content-type', b'application/grpc'),
             (b'grpc-accept-encoding', b'gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([encode_message(b'go')]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([encode_message(b'go')]), send)
 
         # grpc-encoding is still advertised (gzip negotiated) but the message
         # rides uncompressed because it is under the threshold.
@@ -455,7 +456,7 @@ class TestResponseCompression:
             (b'content-type', b'application/grpc'),
             (b'grpc-accept-encoding', b'gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([encode_message(b'go')]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([encode_message(b'go')]), send)
 
         # gzip would grow it, so the framer falls back to Flag = 0.
         (compressed, body), = _frames(events)
@@ -476,7 +477,7 @@ class TestResponseCompression:
             (b'content-type', b'application/grpc'),
             (b'grpc-accept-encoding', b'gzip')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([encode_message(b'go')]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([encode_message(b'go')]), send)
 
         assert _start_headers(events)[b'grpc-encoding'] == b'gzip'
         frames = _frames(events)

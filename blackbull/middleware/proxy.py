@@ -113,7 +113,7 @@ def _singleton(headers: Headers, name: bytes) -> bytes:
     fields = headers.getlist(name)
     if len(fields) != 1 or b',' in fields[0][1]:
         return b''
-    return fields[0][1].strip(b' \t')
+    return fields[0][1]
 
 
 def _prefix(value: bytes) -> str | None:

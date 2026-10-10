@@ -1,7 +1,7 @@
 """A Host header the parser cannot decode must be a 400, not a dropped call.
 
 `_parse_host_header` calls `value.decode('utf-8')` in five places with no
-guard, so `_validate_host` has to reject a high byte before the parser sees
+guard, so `host_field_value` has to reject a high byte before the parser sees
 it.  It does that with the same forbidden-byte scan as the delimiters — the
 class carries `\\x80-\\xff` — which is why the two cannot drift apart: a value
 is delimited, non-ASCII, or fit to parse.
@@ -16,9 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from blackbull.server.http1_actor import (
-    BadRequestError, _parse_host_header, _validate_host,
-)
+from blackbull.protocol.field_grammar import FieldError, host_field_value
+from blackbull.server.http1_actor import _parse_host_header
 
 
 def _headers(value: bytes) -> list:
@@ -34,8 +33,8 @@ class TestANonDecodableHostIsRejected:
         b'\xc3\x28',                   # valid-looking lead byte, bad continuation
     ])
     def test_validate_rejects_it(self, value):
-        with pytest.raises(BadRequestError):
-            _validate_host(_headers(value))
+        with pytest.raises(FieldError):
+            host_field_value(_headers(value))
 
     @pytest.mark.parametrize('value', [
         b'\xff', b'example.com\xff', b'ex\xffample.com:8080',
@@ -43,7 +42,7 @@ class TestANonDecodableHostIsRejected:
     def test_the_parser_never_sees_it(self, value):
         """Belt and braces: even called directly it must not raise.
 
-        `_validate_host` is the gate, but the parser is reachable from
+        `host_field_value` is the gate, but the parser is reachable from
         other call sites and a bare `decode` there is a latent repeat of
         the same defect.
         """
@@ -64,14 +63,14 @@ class TestValidHostsStillWork:
         (b'xn--n3h.example', 'xn--n3h.example', 80),   # punycode is ASCII
     ])
     def test_accepted(self, value, host, port):
-        _validate_host(_headers(value))                # must not raise
+        host_field_value(_headers(value))                # must not raise
         assert _parse_host_header(value, 80) == (host, port)
 
     def test_the_existing_delimiter_rule_is_unchanged(self):
-        with pytest.raises(BadRequestError):
-            _validate_host(_headers(b'0/0'))
-        with pytest.raises(BadRequestError):
-            _validate_host(_headers(b''))
+        with pytest.raises(FieldError):
+            host_field_value(_headers(b'0/0'))
+        with pytest.raises(FieldError):
+            host_field_value(_headers(b''))
 
 
 class TestEveryHighByteIsRejected:
@@ -83,13 +82,13 @@ class TestEveryHighByteIsRejected:
 
     @pytest.mark.parametrize('high', range(0x80, 0x100))
     def test_a_bare_high_byte(self, high):
-        with pytest.raises(BadRequestError):
-            _validate_host(_headers(bytes([high])))
+        with pytest.raises(FieldError):
+            host_field_value(_headers(bytes([high])))
 
     @pytest.mark.parametrize('high', range(0x80, 0x100))
     def test_a_high_byte_inside_an_otherwise_valid_host(self, high):
-        with pytest.raises(BadRequestError):
-            _validate_host(_headers(b'example.com' + bytes([high])))
+        with pytest.raises(FieldError):
+            host_field_value(_headers(b'example.com' + bytes([high])))
 
     @pytest.mark.parametrize('value', [
         b'ex\xffample.com',    # non-ASCII
@@ -98,5 +97,5 @@ class TestEveryHighByteIsRejected:
         b'[::1',               # an IP-literal that is not one
     ])
     def test_the_shapes_the_one_scan_refuses(self, value):
-        with pytest.raises(BadRequestError, match='invalid Host authority'):
-            _validate_host(_headers(value))
+        with pytest.raises(FieldError, match='invalid Host authority'):
+            host_field_value(_headers(value))

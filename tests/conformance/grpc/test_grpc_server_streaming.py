@@ -18,6 +18,7 @@ from blackbull.grpc import (
 from blackbull.grpc.asgi import serve_grpc
 import blackbull.grpc.asgi as grpc_asgi
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 # --------------------------------------------------------------------------
@@ -25,7 +26,7 @@ from blackbull.native import NativeResponse
 # --------------------------------------------------------------------------
 
 def _grpc_scope(path, headers=None):
-    base = [(b'content-type', b'application/grpc'), (b':method', b'POST')]
+    base = [(b'content-type', b'application/grpc')]
     return {'type': 'http', 'path': path,
             'headers': headers if headers is not None else base}
 
@@ -127,7 +128,7 @@ class TestServerStreamingShape:
                 yield f'm{i}'.encode()
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Stream'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Stream')),
                          _receive_with(encode_message(b'')), send)
 
         types = [e['type'] for e in events]
@@ -161,7 +162,7 @@ class TestServerStreamingShape:
             yield b'b'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Meta'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Meta')),
                          _receive_with(encode_message(b'')), send)
         tr = _trailers(events)
         assert tr[b'grpc-status'] == b'0'
@@ -177,7 +178,7 @@ class TestServerStreamingShape:
             yield  # pragma: no cover — makes this an async generator
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Empty'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Empty')),
                          _receive_with(encode_message(b'')), send)
         types = [e['type'] for e in events]
         assert types == ['http.response.start', 'http.response.trailers']
@@ -199,7 +200,7 @@ class TestServerStreamingErrors:
             raise RuntimeError('mid-stream boom')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Boom'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Boom')),
                          _receive_with(encode_message(b'')), send)
         types = [e['type'] for e in events]
         # Headers + the one delivered message + error trailers.
@@ -219,7 +220,7 @@ class TestServerStreamingErrors:
             yield  # pragma: no cover — async generator
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Early'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Early')),
                          _receive_with(encode_message(b'')), send)
         types = [e['type'] for e in events]
         assert types == ['http.response.start', 'http.response.trailers']
@@ -237,7 +238,7 @@ class TestServerStreamingErrors:
             yield b'x' * 2048
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Big'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Big')),
                          _receive_with(encode_message(b'')), send)
         # First message rejected before headers → Trailers-Only.
         assert [e['type'] for e in events] == \
@@ -259,7 +260,7 @@ class TestServerStreamingErrors:
         scope = _grpc_scope('/svc/Slow', headers=[
             (b'content-type', b'application/grpc'),
             (b'grpc-timeout', b'1m')])
-        await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_with(encode_message(b'')), send)
         assert [e['type'] for e in events] == \
             ['http.response.start', 'http.response.trailers']
         assert _trailers(events)[b'grpc-status'] == \
@@ -290,7 +291,7 @@ class TestServerStreamingCancellation:
 
         events, send = _collector()
         task = asyncio.create_task(
-            serve_grpc(reg, _grpc_scope('/svc/Long'),
+            serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Long')),
                        _receive_with(encode_message(b'')), send))
         await asyncio.sleep(0.05)  # let a few messages stream
         task.cancel()

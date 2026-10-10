@@ -10,7 +10,8 @@ from ..protocol.framing import method_is
 import logging
 from ..connection import Connection
 from ..headers import Headers
-from .http1_actor import _TARGET_ALLOWED_OCTETS, _authority_is_valid
+from ..protocol.field_grammar import FieldError, authority_is_valid, host_field_value
+from .http1_actor import _TARGET_ALLOWED_OCTETS
 from .request_target import split_path_query
 
 logger = logging.getLogger(__name__)
@@ -71,21 +72,12 @@ def _split_h2_path(raw: str) -> tuple[str, bytes, bytes]:
 
 
 def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
-    """Validate the request's host authority and map ``:authority`` → ``host``.
+    """Return the request's fields with at most one ``host``: ``:authority``
+    when present (replacing any Host), else the one Host field; either is a
+    valid authority.
 
-    RFC 9113 §8.3.1 — ``:authority`` MUST NOT include userinfo; an
-    ``http``/``https`` request without ``:authority`` must carry a valid
-    ``Host`` field (*require_present*).  The grammar is H1's
-    ``_authority_is_valid`` (RFC 3986 §3.2 delimiters, controls and ASCII
-    rule, the §3.2.2 IP-literal, and the ``host [":" port]`` shape), so
-    H/2 refuses what H/1 refuses; a present ``:authority`` replaces any
-    literal
-    ``Host`` handed to the application, mirroring H1's absolute-form override
-    (RFC 9112 §3.2.2) so handlers see one ``host`` under either transport.
-
-    Returns the header list for ``Headers(...)``, or ``None`` after
-    marking the frame malformed (the actor then answers RST_STREAM
-    PROTOCOL_ERROR).
+    *require_present* demands one of them (RFC 9113 §8.3.1).  Returns ``None``
+    after marking the frame malformed (RST_STREAM PROTOCOL_ERROR).
     """
     authority = frame.pseudo_headers.get(PseudoHeaders.AUTHORITY)
     if authority is not None:
@@ -93,28 +85,19 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
         if not value:
             frame._mark_malformed('empty :authority')
             return None
-        if not _authority_is_valid(value):
+        if not authority_is_valid(value):
             frame._mark_malformed(f'invalid :authority {authority!r}')
             return None
         return ([(k, v) for (k, v) in frame.headers if k != b'host']
                 + [(b'host', value)])
 
-    hosts = [v for (k, v) in frame.headers if k == b'host']
-    if len(hosts) > 1:
-        frame._mark_malformed(
-            f'multiple Host headers ({len(hosts)} — smuggling vector)')
+    try:
+        host = host_field_value([f for f in frame.headers if f[0] == b'host'])
+    except FieldError as exc:
+        frame._mark_malformed(str(exc))
         return None
-    if not hosts:
-        if require_present:
-            frame._mark_malformed('missing :authority and Host')
-            return None
-        return frame.headers
-    value = hosts[0].strip(b' \t')
-    if not value:
-        frame._mark_malformed('empty Host header value')
-        return None
-    if not _authority_is_valid(value):
-        frame._mark_malformed(f'invalid Host authority {value!r}')
+    if host is None and require_present:
+        frame._mark_malformed('missing :authority and Host')
         return None
     return frame.headers
 
@@ -122,6 +105,9 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
 def parse_headers(frame) -> Connection | None:
     """Build a native HTTP or WebSocket Connection, or None for a malformed head.
 
+    The Connection's header names are lowercase tchar, its values carry no edge
+    SP/HTAB and no CTL, ``host`` is one valid authority taken from
+    ``:authority`` or Host, and ``scheme`` is lowercase.
     None must coincide with frame.malformed; never expose partial connections.
     Validate required pseudo-fields and request-target octets (RFC 9113 §8.3.1)
     after field-level checks in parse_payload.

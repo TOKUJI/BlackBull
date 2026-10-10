@@ -19,12 +19,12 @@ import pytest
 from blackbull.grpc import GrpcServiceRegistry, encode_message, decode_messages
 from blackbull.grpc.asgi import serve_grpc
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 def _grpc_scope(path):
     return {'type': 'http', 'path': path,
-            'headers': [(b'content-type', b'application/grpc'),
-                        (b':method', b'POST')]}
+            'headers': [(b'content-type', b'application/grpc')]}
 
 
 def _receive_with(body: bytes):
@@ -67,7 +67,7 @@ async def test_message_delivered_while_producer_blocks():
             events.append(event)
 
     call = asyncio.create_task(serve_grpc(
-        reg, _grpc_scope('/watch.W/Watch'),
+        reg, Connection.from_scope(_grpc_scope('/watch.W/Watch')),
         _receive_with(encode_message(b'')), send))
 
     # The first message must arrive without touching `release` — poll for the
@@ -111,7 +111,7 @@ async def test_synchronous_burst_still_batches():
         else:
             events.append(event)
 
-    await serve_grpc(reg, _grpc_scope('/bulk.B/Burst'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/bulk.B/Burst')),
                      _receive_with(encode_message(b'')), send)
     bodies = _bodies(events)
     total = sum(len(decode_messages(b)) for b in bodies)
@@ -143,7 +143,7 @@ async def test_slow_producer_flushes_each_message():
         else:
             events.append(event)
 
-    await serve_grpc(reg, _grpc_scope('/slow.S/Tick'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/slow.S/Tick')),
                      _receive_with(encode_message(b'')), send)
     messages = [m for b in _bodies(events) for _, m in decode_messages(b)]
     assert messages == [b'tick0', b'tick1', b'tick2']

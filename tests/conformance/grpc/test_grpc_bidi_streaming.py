@@ -21,10 +21,11 @@ from blackbull.grpc import (
 )
 from blackbull.grpc.asgi import serve_grpc
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 def _grpc_scope(path, headers=None):
-    base = [(b'content-type', b'application/grpc'), (b':method', b'POST')]
+    base = [(b'content-type', b'application/grpc')]
     return {'type': 'http', 'path': path,
             'headers': headers if headers is not None else base}
 
@@ -81,7 +82,7 @@ class TestBidiShape:
                 yield b'echo:' + msg
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Chat'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Chat')),
                          _receive_chunks([_framed(b'a', b'bb', b'ccc')]), send)
 
         assert events[0]['type'] == 'http.response.start'
@@ -101,7 +102,7 @@ class TestBidiShape:
                 yield msg[::-1]
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Double'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Double')),
                          _receive_chunks([_framed(b'ab', b'cd')]), send)
         assert _messages(events) == [b'ab', b'ba', b'cd', b'dc']
 
@@ -115,7 +116,7 @@ class TestBidiShape:
                 yield b'x'  # pragma: no cover — no request messages arrive
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Chat'), _receive_chunks([b'']), send)
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Chat')), _receive_chunks([b'']), send)
         assert [e['type'] for e in events] == \
             ['http.response.start', 'http.response.trailers']
         assert _trailers(events)[b'grpc-status'] == b'0'
@@ -133,7 +134,7 @@ class TestBidiErrors:
                 raise GrpcError(GrpcStatus.PERMISSION_DENIED, 'stop')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Boom'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Boom')),
                          _receive_chunks([_framed(b'a', b'b')]), send)
         assert _messages(events) == [b'ok:a']
         assert _trailers(events)[b'grpc-status'] == \
@@ -151,7 +152,7 @@ class TestBidiErrors:
         # Truncated LPM prefix — the de-framer raises before the first yield.
         bad = b'\x00\x00\x00\x00\x05z'
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Chat'), _receive_chunks([bad]), send)
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Chat')), _receive_chunks([bad]), send)
         assert [e['type'] for e in events] == \
             ['http.response.start', 'http.response.trailers']
         assert _trailers(events)[b'grpc-status'] == \
@@ -170,7 +171,7 @@ class TestBidiErrors:
         scope = _grpc_scope('/svc/Slow', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-timeout', b'1m')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([_framed(b'a')]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([_framed(b'a')]), send)
         # One message got out, then the deadline fired → status in trailers.
         assert _messages(events) == [b'first:a']
         assert _trailers(events)[b'grpc-status'] == \
@@ -196,7 +197,7 @@ class TestBidiCancellation:
 
         events, send = _collector()
         task = asyncio.create_task(
-            serve_grpc(reg, _grpc_scope('/svc/Forever'),
+            serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Forever')),
                        _receive_chunks([_framed(b'go')]), send))
         await asyncio.sleep(0.05)
         task.cancel()

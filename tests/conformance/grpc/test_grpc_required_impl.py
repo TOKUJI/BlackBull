@@ -17,6 +17,7 @@ from blackbull.grpc import asgi as grpc_asgi
 from blackbull.grpc.asgi import serve_grpc, _parse_grpc_timeout
 from blackbull.grpc.codec import decode_messages, MAX_MESSAGE_LENGTH
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 # ---------------------------------------------------------------------------
@@ -24,7 +25,7 @@ from blackbull.native import NativeResponse
 # ---------------------------------------------------------------------------
 
 def _grpc_scope(path, content_type=b'application/grpc', extra_headers=()):
-    headers = [(b'content-type', content_type), (b':method', b'POST')]
+    headers = [(b'content-type', content_type)]
     headers.extend(extra_headers)
     return {'type': 'http', 'path': path, 'headers': headers}
 
@@ -112,7 +113,7 @@ class TestRequiredGrpcTimeout:
         # 10ms deadline → handler must be cut off with DEADLINE_EXCEEDED.
         await serve_grpc(
             reg,
-            _grpc_scope('/svc/Slow', extra_headers=[(b'grpc-timeout', b'10m')]),
+            Connection.from_scope(_grpc_scope('/svc/Slow', extra_headers=[(b'grpc-timeout', b'10m')])),
             _receive_with(encode_message(b'')), send)
         assert _all_headers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.DEADLINE_EXCEEDED)).encode()
@@ -128,7 +129,7 @@ class TestRequiredGrpcTimeout:
         events, send = _collector()
         await serve_grpc(
             reg,
-            _grpc_scope('/svc/Fast', extra_headers=[(b'grpc-timeout', b'30S')]),
+            Connection.from_scope(_grpc_scope('/svc/Fast', extra_headers=[(b'grpc-timeout', b'30S')])),
             _receive_with(encode_message(b'')), send)
         assert _all_headers(events)[b'grpc-status'] == b'0'
 
@@ -154,7 +155,7 @@ class TestRequiredBaseExceptionHandling:
             raise RuntimeError('handler bug')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Boom'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Boom')),
                          _receive_with(encode_message(b'')), send)
         assert _all_headers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.INTERNAL)).encode()
@@ -169,7 +170,7 @@ class TestRequiredBaseExceptionHandling:
             yield b''  # pragma: no cover — marks this an async generator
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/StreamBoom'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/StreamBoom')),
                          _receive_with(encode_message(b'')), send)
         assert _all_headers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.INTERNAL)).encode()
@@ -187,7 +188,7 @@ class TestRequiredBaseExceptionHandling:
 
         events, send = _collector()
         with pytest.raises(asyncio.CancelledError):
-            await serve_grpc(reg, _grpc_scope('/svc/Cancel'),
+            await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Cancel')),
                              _receive_with(encode_message(b'')), send)
         # And no status was emitted (the error was not masked into a response).
         assert b'grpc-status' not in _all_headers(events)
@@ -212,7 +213,7 @@ class TestRequiredMaxMessageSize:
 
         events, send = _collector()
         oversized = b'x' * 2048  # > 1024 limit
-        await serve_grpc(reg, _grpc_scope('/svc/Big'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Big')),
                          _receive_with(encode_message(oversized)), send)
         assert _all_headers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.RESOURCE_EXHAUSTED)).encode()
@@ -227,7 +228,7 @@ class TestRequiredMaxMessageSize:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Ok'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Ok')),
                          _receive_with(encode_message(b'x' * 512)), send)
         assert _all_headers(events)[b'grpc-status'] == b'0'
 
@@ -254,7 +255,7 @@ class TestRequiredContentTypeSubtype:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Echo', content_type=request_ct),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Echo', content_type=request_ct)),
                          _receive_with(encode_message(b'')), send)
         start = next(e for e in events if e['type'] == 'http.response.start')
         assert dict(start['headers'])[b'content-type'] == expected_ct
@@ -274,7 +275,7 @@ class TestRequiredCompressionNegotiation:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Ok'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Ok')),
                          _receive_with(encode_message(b'')), send)
         start = next(e for e in events if e['type'] == 'http.response.start')
         # The server decodes gzip as well as identity.
@@ -284,7 +285,7 @@ class TestRequiredCompressionNegotiation:
     async def test_grpc_accept_encoding_advertised_on_error_path(self):
         reg = GrpcServiceRegistry()  # no methods → UNIMPLEMENTED (trailers-only)
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Missing'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Missing')),
                          _receive_with(encode_message(b'')), send)
         assert _all_headers(events)[b'grpc-accept-encoding'] == b'identity,gzip'
 
@@ -303,7 +304,7 @@ class TestRequiredCompressionNegotiation:
         scope = _grpc_scope('/svc/Echo',
                             extra_headers=[(b'grpc-encoding', b'snappy')])
         events, send = _collector()
-        await serve_grpc(reg, scope,
+        await serve_grpc(reg, Connection.from_scope(scope),
                          _receive_with(struct.pack('>BI', 1, 3) + b'xyz'), send)
         assert _all_headers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()

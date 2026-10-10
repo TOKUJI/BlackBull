@@ -752,36 +752,16 @@ class TestOriginKeying:
     @pytest.mark.parametrize('h1,h2,n', [
         pytest.param(b'a.example', b'b.example', 2, id='hosts-do-not-share'),
         pytest.param(b'Example.com', b'example.com:080', 1, id='case-and-default-port'),
-        pytest.param(b'[v1.example]', b'v1.example', 2, id='ip-literal-distinct'),
+        pytest.param(b'[::1]', b'localhost', 2, id='ip-literal-distinct'),
     ])
     async def test_hosts_do_not_share_an_entry(self, h1, h2, n):
-        """Cache entry origin identity: two hosts never share one copy;
-        case and the default port collapse to one origin; an IP literal is
-        not the same name."""
+        """Two hosts never share one copy; case and the default port collapse
+        to one origin; an IP literal is not a name."""
         mw = Cache(max_age=600)
         cn, counter = _make_handler()
         await _run(mw, _scope(headers=[(b'host', h1)]), cn)
         await _run(mw, _scope(headers=[(b'host', h2)]), cn)
         assert counter['n'] == n
-
-    async def test_two_host_fields_bypass_the_cache(self):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler()
-        await _run(mw, _scope(headers=[(b'host', b'a.example'),
-                                       (b'host', b'b.example')]), cn)
-        await _run(mw, _scope(headers=[(b'host', b'a.example')]), cn)
-        assert counter['n'] == 2
-
-    @pytest.mark.parametrize('authority', [
-        b'a.example@b.example', b'a.example/x', b'a.example:invalid',
-        b'[::1]suffix', b'',
-    ])
-    async def test_an_ambiguous_authority_bypasses_the_cache(self, authority):
-        mw = Cache(max_age=600)
-        cn, counter = _make_handler()
-        await _run(mw, _scope(headers=[(b'host', authority)]), cn)
-        await _run(mw, _scope(headers=[(b'host', authority)]), cn)
-        assert counter['n'] == 2
 
 
 @pytest.mark.asyncio

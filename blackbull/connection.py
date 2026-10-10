@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator, Callable, NamedTuple
 from urllib.parse import parse_qsl
 
 from .headers import Headers
+from .protocol.field_grammar import host_field_value, normalized_fields
 from .request import (read_body, stream_body, cookies_from_headers,
                       ClientDisconnected, _json_or_none)
 
@@ -82,7 +83,7 @@ def _headers_to_scope(h: Headers) -> list:
 
 
 def _headers_from_scope(v: Any) -> Headers:
-    return v if isinstance(v, Headers) else Headers(v)
+    return Headers.from_lowered(normalized_fields(v))
 
 
 def _tuple_to_list(v):
@@ -289,13 +290,22 @@ class Connection:
 
     @classmethod
     def from_scope(cls, scope: dict, receive: Any = None) -> 'Connection':
-        """Build a Connection from an external ASGI scope (the single
-        ASGI→native point). Unknown keys are ignored; missing optional keys
-        fall back to the field defaults."""
+        """Build a Connection from an external ASGI scope.
+
+        The result keeps the contract of a natively parsed Connection: header
+        names are lowercase tchar, values carry no edge SP/HTAB and no CTL,
+        ``host`` is at most one valid authority, and ``scheme`` is lowercase.
+        Raises ``FieldError`` for headers that cannot meet it.  Unknown keys
+        are ignored; missing optional keys take the field defaults.
+        """
         kwargs: dict[str, Any] = {}
         for spec in _SCOPE_FIELDS:
             if spec.scope_key in scope:
                 kwargs[spec.attr] = spec.from_scope(scope[spec.scope_key])
+        if 'headers' in kwargs:
+            host_field_value(kwargs['headers'].getlist(b'host'))
+        if 'scheme' in kwargs:
+            kwargs['scheme'] = kwargs['scheme'].lower()
         # A conformant ASGI http/websocket scope always carries method, path,
         # and headers, but default them so ``from_scope`` is total and never
         # raises on a partial scope (e.g. a hand-built one in a unit test, or a

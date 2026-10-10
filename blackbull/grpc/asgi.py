@@ -11,6 +11,7 @@ import binascii
 import logging
 import os
 
+from ..connection import Connection
 from ..native import NativeResponse
 from ..request import stream_body, ClientDisconnected
 from . import compression
@@ -140,16 +141,6 @@ def _frame_response(payload: bytes, compress: bool) -> bytes:
     return encode_message(payload)
 
 
-def _req_field(conn, name, default=None):
-    """Read a request field from either a native
-    [`Connection`][blackbull.connection.Connection] (the ``serve_grpc(conn, …)`` path)
-    or an ASGI ``scope`` dict — the field names (``headers``/``client``/``path``)
-    coincide with the Connection attributes."""
-    if isinstance(conn, dict):
-        return conn.get(name, default)
-    return getattr(conn, name, default)
-
-
 class GrpcContext:
     """Per-call metadata, peer, deadline and response status/metadata controls for raw-byte handlers.
     """
@@ -158,7 +149,7 @@ class GrpcContext:
                  '_send', '_content_type', '_response_encoding',
                  '_initial_metadata', '_started')
 
-    def __init__(self, conn):
+    def __init__(self, conn: Connection):
         self.conn = conn
         self.code: GrpcStatus = GrpcStatus.OK
         self.details: str = ''
@@ -184,30 +175,19 @@ class GrpcContext:
             self._deadline = asyncio.get_event_loop().time() + deadline
 
     def metadata(self, name: bytes, default: bytes = b'') -> bytes:
-        """Return a request header (call metadata) value, or *default*."""
-        headers = _req_field(self.conn, 'headers')
-        getter = getattr(headers, 'get', None)
-        if getter is not None and not isinstance(headers, (list, tuple)):
-            return getter(name, default)
-        name = name.lower()
-        # An ASGI request scope may keep the client's header-name case.
-        for k, v in headers or ():
-            if k.lower() == name:
-                return v
-        return default
+        """Return the first request field named *name* (any case), or *default*."""
+        return self.conn.headers.get(name, default)
 
     def invocation_metadata(self) -> list[tuple[bytes, bytes]]:
-        """Return all request metadata (HTTP/2 headers) as ``(name, value)``
-        pairs — grpcio's ``ServicerContext.invocation_metadata``.  Pseudo-
-        headers (``:method``, ``:path``, …) are excluded; they are call routing,
-        not application metadata."""
-        headers = _req_field(self.conn, 'headers') or ()
-        return [(k, v) for k, v in headers if not k.startswith(b':')]
+        """Return the request fields as ``(name, value)`` pairs with lowercase
+        names and no pseudo-headers — grpcio's
+        ``ServicerContext.invocation_metadata``."""
+        return list(self.conn.headers)
 
     def peer(self) -> str:
         """Return the client address as grpcio formats it (``ipv4:host:port`` /
         ``ipv6:[host]:port``), or ``''`` when the transport did not supply one."""
-        client = _req_field(self.conn, 'client')
+        client = self.conn.client
         if not client:
             return ''
         host, port = client[0], client[1]
@@ -756,12 +736,13 @@ async def _finish_stream_error(send, context: GrpcContext, status: GrpcStatus,
                                   context._trailing)
 
 
-async def serve_grpc(registry: GrpcServiceRegistry, conn, receive, send) -> None:
-    """Serve any of the four gRPC call shapes through Connection/receive/send.
+async def serve_grpc(registry: GrpcServiceRegistry, conn: Connection,
+                     receive, send) -> None:
+    """Serve any of the four gRPC call shapes for *conn*.
 
     Report handler and protocol failures as gRPC status.
     """
-    path = _req_field(conn, 'path', '')
+    path = conn.path
     context = GrpcContext(conn)
     # Echo the request's content-type subtype (application/grpc+proto, +json, …)
     # back on the response, defaulting to bare application/grpc.

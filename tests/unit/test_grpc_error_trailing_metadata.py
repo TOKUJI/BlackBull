@@ -18,6 +18,7 @@ from blackbull.grpc import (
 )
 from blackbull.grpc.asgi import serve_grpc
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 _DETAILS_BIN = (b'grpc-status-details-bin', b'CAMSB2JhZCBhcmc')
@@ -31,7 +32,7 @@ def _without_optional_protobuf(monkeypatch):
 
 
 def _grpc_scope(path, headers=None):
-    base = [(b'content-type', b'application/grpc'), (b':method', b'POST')]
+    base = [(b'content-type', b'application/grpc')]
     if headers:
         base += headers
     return {'type': 'http', 'path': path, 'headers': base}
@@ -82,7 +83,7 @@ async def test_unary_abort_carries_trailing_metadata():
         context.abort(GrpcStatus.INVALID_ARGUMENT, 'bad arg')
 
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/x/Abort'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/x/Abort')),
                      _receive_with(encode_message(b'')), send)
     tr = _trailing_headers(events)
     assert tr[b'grpc-status'] == str(int(GrpcStatus.INVALID_ARGUMENT)).encode()
@@ -102,7 +103,7 @@ async def test_unary_abort_after_initial_metadata_carries_trailing_metadata():
         raise GrpcError(GrpcStatus.FAILED_PRECONDITION, 'nope')
 
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/x/AbortLate'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/x/AbortLate')),
                      _receive_with(encode_message(b'')), send)
     assert events[0]['type'] == 'http.response.start'
     tr = _trailing_headers(events)
@@ -123,7 +124,7 @@ async def test_streaming_midstream_error_carries_trailing_metadata():
         raise GrpcError(GrpcStatus.RESOURCE_EXHAUSTED, 'over quota')
 
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/x/StreamFail'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/x/StreamFail')),
                      _receive_with(encode_message(b'')), send)
     # The yielded message was committed before the error.
     bodies = b''.join(e['body'] for e in events if e['type'] == 'http.response.body')
@@ -146,7 +147,7 @@ async def test_unhandled_exception_carries_trailing_metadata():
         raise RuntimeError('boom')
 
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/x/Boom'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/x/Boom')),
                      _receive_with(encode_message(b'')), send)
     tr = _trailing_headers(events)
     assert tr[b'grpc-status'] == str(int(GrpcStatus.INTERNAL)).encode()
@@ -168,7 +169,7 @@ async def test_deadline_exceeded_carries_trailing_metadata():
     events, send = _collector()
     await serve_grpc(
         reg,
-        _grpc_scope('/x/Slow', headers=[(b'grpc-timeout', b'10m')]),
+        Connection.from_scope(_grpc_scope('/x/Slow', headers=[(b'grpc-timeout', b'10m')])),
         _receive_with(encode_message(b'')), send)
     tr = _trailing_headers(events)
     assert tr[b'grpc-status'] == str(int(GrpcStatus.DEADLINE_EXCEEDED)).encode()
@@ -179,7 +180,7 @@ def test_trailing_metadata_getter_returns_copy():
     """GrpcContext.trailing_metadata() exposes what was set (as a copy), so
     helper packages can append rather than clobber."""
     from blackbull.grpc.asgi import GrpcContext
-    ctx = GrpcContext(_grpc_scope('/x/Y'))
+    ctx = GrpcContext(Connection.from_scope(_grpc_scope('/x/Y')))
     assert ctx.trailing_metadata() == []
     ctx.set_trailing_metadata([(b'a', b'1')])
     got = ctx.trailing_metadata()
@@ -200,7 +201,7 @@ async def test_success_trailing_metadata_unchanged():
         return b'fine'
 
     events, send = _collector()
-    await serve_grpc(reg, _grpc_scope('/x/Ok'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/x/Ok')),
                      _receive_with(encode_message(b'')), send)
     tr = _trailing_headers(events)
     assert tr[b'grpc-status'] == b'0'

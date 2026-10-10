@@ -4,8 +4,6 @@ HTTP1Actor drives the keep-alive loop for one TCP connection.
 RequestActor owns the lifetime of a single HTTP request.
 """
 import asyncio
-import ipaddress
-from functools import lru_cache
 import logging
 import re
 import time as _time
@@ -61,7 +59,7 @@ _HTTP_VERSION_RE = re.compile(rb'\AHTTP/\d\.\d\Z')
 # Share field octet grammar with HTTP/2.
 from ..protocol.field_grammar import (
     COMMON_METHODS_OCTETS, FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS,
-    URI_SCHEME_RE, method_token_is_valid)
+    URI_SCHEME_RE, FieldError, host_field_value, method_token_is_valid)
 
 
 
@@ -239,7 +237,7 @@ def _declares_content(headers: 'Headers') -> bool:
     """
     if headers.getlist(b'transfer-encoding'):
         return True
-    cl = headers.get(b'content-length', b'').strip()
+    cl = headers.get(b'content-length', b'')
     # ``Content-Length: 0`` — and ``000`` — declares no octets, so there is
     # nothing that could be framed two ways.
     return bool(cl) and bool(cl.lstrip(b'0'))
@@ -299,65 +297,8 @@ def _validate_message_framing(cls: list | None, tes: list | None) -> int:
     return declared
 
 
-# RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port]; these octets are
-# not in one.  ``@`` is the deprecated userinfo component, the controls are
-# CTL/DEL and the high bytes non-ASCII, all carried here because HTTP/2 has no
-# per-value CTL scan before the authority becomes the host header.
-_HOST_FORBIDDEN_BYTES = (
-    frozenset(b'/?# \t@') | frozenset(range(0x20)) | frozenset({0x7F})
-    | frozenset(range(0x80, 0x100)))
-
-# RFC 3986 §3.2.2: brackets enclose IPv6, and an unbracketed colon starts
-# a numeric port. Keep host and port validation on the authority boundary.
-_AUTHORITY_SCAN_BYTES = _HOST_FORBIDDEN_BYTES | {0x5B, 0x5D}  # '[' ']'
-_AUTHORITY_SCAN_RE = re.compile(
-    b'[' + re.escape(bytes(sorted(_AUTHORITY_SCAN_BYTES))) + b']'
-    b'|\\A:|:[0-9]*[^0-9]')
-
 # RFC 9112 §2.1 / RFC 3986 — a request-target may carry only visible ASCII.
 _TARGET_ALLOWED_OCTETS = bytes(range(0x21, 0x7F))
-
-
-# Accept bracketed IPv6; IPvFuture is unsupported.
-def _ip_literal_is_valid(value: bytes) -> bool:
-    """RFC 3986 §3.2.2 — whether *value*'s bracketed host is an IPv6 address."""
-    if (
-        not value.startswith(b'[')
-        or value.count(b'[') != 1
-        or value.count(b']') != 1
-    ):
-        return False
-
-    close = value.find(b']', 1)
-    tail = value[close + 1:]
-
-    if tail and (
-        tail[:1] != b':'
-        or not _HOST_FORBIDDEN_BYTES.isdisjoint(tail[1:])
-    ):
-        return False
-
-    try:
-        # ``UnicodeDecodeError`` is a ``ValueError``: a high byte inside the
-        # bracket reaches this decode.
-        ipaddress.IPv6Address(value[1:close].decode('ascii'))
-    except ValueError:
-        return False
-    return True
-
-
-def _authority_is_valid(value: bytes) -> bool:
-    """Validate a URI authority against RFC 3986 §3.2, including bracketed IP literals.
-    """
-    match = _AUTHORITY_SCAN_RE.search(value)
-    if match is None:
-        return True
-    return match[0] in (b'[', b']') and _ip_literal_is_valid(value)
-
-
-# A client repeats its authority on every request; the answer depends only on
-# the bytes, so it is remembered (bounded: the bytes are the peer's).
-_authority_is_valid = lru_cache(maxsize=256)(_authority_is_valid)
 
 
 def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
@@ -369,7 +310,7 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
     host at the first ``:`` (§3.2.2 — a reg-name carries none), so no port text
     survives in the host.
     """
-    # ``_validate_host`` rejects non-ASCII on the request path; ``replace``
+    # ``host_field_value`` rejects non-ASCII on the request path; ``replace``
     # keeps this total for every other caller.
     def _dec(b: bytes) -> str:
         return b.decode('utf-8', errors='replace')
@@ -388,27 +329,6 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
     if sep and port_s.isdigit():
         return _dec(host), int(port_s)
     return _dec(host), default_port
-
-
-def _validate_host(hosts: list | None) -> bytes | None:
-    """Validate Host presence and URI-authority syntax (RFC 9112 §3.2, §7.2).
-
-    Return the received value, or None when absent.
-    """
-    if hosts is not None and len(hosts) > 1:
-        raise BadRequestError(
-            f'multiple Host headers ({len(hosts)} — smuggling vector)')
-    if not hosts:
-        # The version-aware presence rule lives in ``_parse``, which knows the
-        # request version; this helper only grades a value that is present.
-        return None
-    received = hosts[0][1]
-    value = received.strip(b' \t')
-    if not value:
-        raise BadRequestError('empty Host header value')
-    if not _authority_is_valid(value):
-        raise BadRequestError(f'invalid Host authority {value!r}')
-    return received
 
 
 # ---------------------------------------------------------------------------
@@ -774,6 +694,8 @@ class HTTP1Actor(Actor):
     def _parse(self, data: bytes) -> Connection:
         """Parse raw HTTP/1.1 request bytes into a native [`Connection`][].
 
+        The Connection's header names are lowercase tchar, its values carry no
+        edge SP/HTAB and no CTL, and ``host`` is at most one valid authority.
         Raises [`BadRequestError`][] on an RFC 9112 framing violation the
         caller should answer with 400, and [`HeaderTooLargeError`][] when a
         single line exceeds ``BB_HEADER_MAX_LINE``.  The whole-block limit
@@ -997,7 +919,10 @@ class HTTP1Actor(Actor):
         expect = index.get(b'expect')
         self._expects_continue = (
             expect is not None and expect[0][1].lower() == b'100-continue')
-        host_value = _validate_host(index.get(b'host'))
+        try:
+            host_value = host_field_value(index.get(b'host'))
+        except FieldError as exc:
+            raise BadRequestError(str(exc)) from None
         # RFC 9112 §3.2 / §7.2 — every HTTP/1.1 (and later 1.x) request MUST
         # carry a Host header (RFC9112-7.1-MISSING-HOST); only HTTP/1.0, which
         # predates Host, may omit it (COMP-HTTP10-NO-HOST).
@@ -1042,7 +967,7 @@ class HTTP1Actor(Actor):
             # ``Upgrade: h2c`` probe on ``--http2``) is served as ordinary
             # HTTP/1.1, because dispatch has no route for it and the connection
             # would close with no reply.
-            if upgrade[0][1].strip().lower() == b'websocket':
+            if upgrade[0][1].lower() == b'websocket':
                 conn.type = 'websocket'
                 conn.scheme = 'ws'
 
@@ -1111,7 +1036,7 @@ class HTTP1Actor(Actor):
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'content-type', b'text/plain')])
             return False
-        key = headers.get(b'sec-websocket-key', b'').strip()
+        key = headers.get(b'sec-websocket-key', b'')
         # RFC 6455 §4.2.1 — the client MUST send a Sec-WebSocket-Key whose
         # base64-decoded value is 16 bytes.  An absent or malformed key is a
         # bad handshake; answer 400 rather than completing an accept hash over

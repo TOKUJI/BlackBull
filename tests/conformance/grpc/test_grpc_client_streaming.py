@@ -21,6 +21,7 @@ from blackbull.grpc import (
 from blackbull.grpc.asgi import serve_grpc
 import blackbull.grpc.asgi as grpc_asgi
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 # --------------------------------------------------------------------------
@@ -28,7 +29,7 @@ from blackbull.native import NativeResponse
 # --------------------------------------------------------------------------
 
 def _grpc_scope(path, headers=None):
-    base = [(b'content-type', b'application/grpc'), (b':method', b'POST')]
+    base = [(b'content-type', b'application/grpc')]
     return {'type': 'http', 'path': path,
             'headers': headers if headers is not None else base}
 
@@ -165,7 +166,7 @@ class TestClientStreamingShape:
 
         body = encode_message(b'aa') + encode_message(b'bbb') + encode_message(b'c')
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Join'), _receive_chunks([body]), send)
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Join')), _receive_chunks([body]), send)
 
         assert [e['type'] for e in events] == \
             ['http.response.start', 'http.response.body', 'http.response.trailers']
@@ -184,7 +185,7 @@ class TestClientStreamingShape:
         # Split so a single logical message straddles the event boundary.
         mid = len(full) // 2
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Join'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Join')),
                          _receive_chunks([full[:mid], full[mid:]]), send)
         assert _messages(events) == [b'hello,world']
         assert _trailers(events)[b'grpc-status'] == b'0'
@@ -202,7 +203,7 @@ class TestClientStreamingShape:
 
         full = b''.join(encode_message(m) for m in (b'a', b'bb', b'ccc'))
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Count'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Count')),
                          _receive_chunks([full[i:i + 1] for i in range(len(full))]),
                          send)
         assert _messages(events) == [b'3']
@@ -216,7 +217,7 @@ class TestClientStreamingShape:
             return str(len([m async for m in request_iter])).encode()
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Count'), _receive_chunks([b'']), send)
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Count')), _receive_chunks([b'']), send)
         assert _messages(events) == [b'0']
         assert _trailers(events)[b'grpc-status'] == b'0'
 
@@ -236,7 +237,7 @@ class TestClientStreamingErrors:
             return b''  # pragma: no cover
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Nope'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Nope')),
                          _receive_chunks([encode_message(b'x')]), send)
         assert [e['type'] for e in events] == \
             ['http.response.start', 'http.response.trailers']
@@ -255,7 +256,7 @@ class TestClientStreamingErrors:
         # Truncated LPM prefix (declares 5-byte body, provides 1).
         bad = encode_message(b'ok') + b'\x00\x00\x00\x00\x05z'
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Join'), _receive_chunks([bad]), send)
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Join')), _receive_chunks([bad]), send)
         assert _trailers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.INTERNAL)).encode()
 
@@ -269,7 +270,7 @@ class TestClientStreamingErrors:
             return b','.join([m async for m in request_iter])
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Join'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Join')),
                          _receive_chunks([encode_message(b'x' * 2048)]), send)
         assert _trailers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.RESOURCE_EXHAUSTED)).encode()
@@ -287,6 +288,6 @@ class TestClientStreamingErrors:
         scope = _grpc_scope('/svc/Slow', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-timeout', b'1m')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_chunks([encode_message(b'x')]), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([encode_message(b'x')]), send)
         assert _trailers(events)[b'grpc-status'] == \
             str(int(GrpcStatus.DEADLINE_EXCEEDED)).encode()

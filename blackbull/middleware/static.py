@@ -76,13 +76,12 @@ def _not_modified(headers, etag: bytes, mtime_ns: int) -> bool:
     inm = None
     ims = None
     for k, v in headers:
-        kl = k.lower()
-        if kl == b'if-none-match':
+        if k == b'if-none-match':
             inm = v
-        elif kl == b'if-modified-since':
+        elif k == b'if-modified-since':
             ims = v
     if inm is not None:
-        candidate = inm.strip()
+        candidate = inm
         if candidate == b'*':
             return True
         target = etag[2:] if etag.startswith(b'W/') else etag

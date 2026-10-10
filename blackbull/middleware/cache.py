@@ -298,58 +298,40 @@ class _Capture:
 # --- header inspection helpers ---------------------------------------------
 
 def _origin(conn: Connection) -> tuple[str, str, int] | None:
-    """Effective HTTP origin, after trusted middleware has applied rewrites.
+    """Return the request's origin ``(scheme, host, port)``, or ``None`` for a
+    scheme other than http/https or no authority.
 
-    Native HTTP/2 maps :authority into Host before dispatch, as does the ASGI
-    boundary.  Forwarded headers are not authority here: only the configured
-    trusted-proxy layer may change what the application sees.
+    Relies on the Connection contract: ``scheme`` is lowercase and ``host`` is
+    at most one valid authority.  Host case and an explicit default port do not
+    make a different origin (RFC 9110 §4.3.1).
     """
-    scheme = conn.scheme.lower()
+    scheme = conn.scheme
     default_port = {'http': 80, 'https': 443}.get(scheme)
     if default_port is None:
         return None
-    hosts = conn.headers.getlist(b'host')
-    if len(hosts) > 1:
+    host_field = conn.headers.get(b'host')
+    if host_field:
+        authority = host_field.decode('ascii')
+    elif conn.server is not None:
+        host, port = conn.server
+        # ASGI server tuples use an unbracketed IPv6 address; URI
+        # authority syntax needs brackets to distinguish it from a port.
+        authority = (f'[{host}]'
+                     if ':' in host and not host.startswith('[') else host)
+        if port is not None:
+            authority += f':{port}'
+    else:
         return None
     try:
-        if hosts:
-            authority = hosts[0][1].strip(b' \t').decode('ascii')
-        elif conn.server is not None:
-            host, port = conn.server
-            # ASGI server tuples use an unbracketed IPv6 address; URI
-            # authority syntax needs brackets to distinguish it from a port.
-            authority = (f'[{host}]'
-                         if ':' in host and not host.startswith('[') else host)
-            if port is not None:
-                authority += f':{port}'
-        else:
-            return None
-        # ``urlsplit`` removes some control characters and interprets
-        # delimiters; do not let those transformations alias an ambiguous value
-        # to a cacheable origin.  Request validation belongs to the protocol
-        # layer, so this is only a second reading of the same value.
-        if not authority or any(ord(c) <= 32 or ord(c) == 127 or c in '/?#@\\'
-                                for c in authority):
-            return None
-        literal = authority.startswith('[')
-        if literal:
-            end = authority.find(']')
-            suffix = authority[end + 1:]
-            if end < 0 or (suffix and not suffix.startswith(':')):
-                return None
         parts = urlsplit('//' + authority)
-        host = parts.hostname
-        port = parts.port
-        if not host:
-            return None
-    except (UnicodeError, ValueError):
+        host, port = parts.hostname, parts.port
+    except ValueError:  # a port beyond 65535
         return None
-    # RFC 9110 §4.3.1: host/scheme case and explicit default ports do not
-    # identify different origins, and integer conversion normalizes leading
-    # zeros.  Preserve IP-literal syntax: [v1.example] (IPvFuture) is not the
-    # registered name v1.example.  urlsplit lowercases the hostname while
-    # preserving the case-sensitive zone identifier of a scoped address.
-    return (scheme, f'[{host}]' if literal else host,
+    if not host:
+        return None
+    # urlsplit lowercases the hostname; brackets keep an IP literal distinct
+    # from a registered name.
+    return (scheme, f'[{host}]' if authority.startswith('[') else host,
             default_port if port is None else port)
 
 
@@ -600,7 +582,7 @@ def _etag_matches(if_none_match: bytes, etag: bytes) -> bool:
     Weak comparison ignores ``W/`` on either side; ``*`` and a list of
     candidates are both read.
     """
-    if if_none_match.strip() == b'*':
+    if if_none_match == b'*':
         return True
     target = etag[2:] if etag.startswith(b'W/') else etag
     for candidate in if_none_match.split(b','):

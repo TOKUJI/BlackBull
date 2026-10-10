@@ -913,7 +913,7 @@ class HTTP1Recipient(BaseRecipient):
         headers = conn.headers
         self._req_path: str | None = conn.path
         if framing is None:
-            te = headers.get(b'transfer-encoding', b'').strip().lower()
+            te = headers.get(b'transfer-encoding', b'').lower()
             cl = headers.get(b'content-length', b'')
             if te and te != b'chunked':
                 raise NotImplementedError(
