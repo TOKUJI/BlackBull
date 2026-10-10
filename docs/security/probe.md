@@ -122,6 +122,40 @@ gRPC rides on the h2 family's transports (h2 and h2c); its baselines are
 the gRPC lanes of M5-4's fixture work — see the unsupported list until
 those land.
 
+## Fuzzing (G6)
+
+The fuzz surface reuses the **existing** Atheris harnesses unchanged
+(M5-6: new-input harnesses are out of scope):
+
+| Recipe | Asset | Bound |
+|---|---|---|
+| `just fuzz-seed` | `tests/conformance/http1/fuzz/make_seeds.py`, `tests/conformance/http2/fuzz/make_seeds.py` | regenerates opcode-tagged seeds under each `corpus/` |
+| `just fuzz-http1 t=60` | `tests/conformance/http1/fuzz/fuzz_http1.py` | `$t` seconds of fuzzing inside an outer `timeout`; crash artifacts to `/tmp/bla526-fuzz-http1/` |
+| `just fuzz-http2 t=60` | `tests/conformance/http2/fuzz/fuzz_http2.py` | same, artifacts to `/tmp/bla526-fuzz-http2/` |
+| `just fuzz-all t=60` | both | recipe-level bound |
+
+The harnesses self-host BlackBull per input; the committed `corpus/`
+directories are the seeds and `user-corpus/` holds replayable
+differential findings.  Differential mode against nginx is available
+through the harnesses' own `BB_FUZZ_NGINX_HOST`/`_PORT` env vars and is
+not part of the recipe.  `atheris` is an environment dependency
+(`uv pip install atheris`); the recipes exit 3 with the hint when it is
+missing.
+
+`tools/security/fuzz_run.py` is the recipes' only adapter: it forces the
+`fork` multiprocessing start method (Python 3.14 defaults to
+`forkserver`, under which the harnesses' lambda `Process` target does not
+pickle), drops into the harness directory, and runs the file as
+`__main__` — the harnesses themselves are unmodified in structure.  Two
+compatibility repairs were needed on top: `fuzz_http1.py` now sets
+`app.port = server.port` after binding (the attribute the single-server
+helpers dial), and both harnesses treat a cleanup-time `RuntimeError`
+("Event loop is closed") as an expected outcome so a bound-adjacent
+teardown cannot kill a run.  Neither is a product finding — no
+`blackbull/` frame appears in either traceback.  No harness exists for
+the gRPC LPM decoder or the WebSocket response-side frame parser —
+listed as unsupported on BLA-526.
+
 ## Process observation (G2-3)
 
 With `--server-pid PID` the probe samples the server's `/proc` before and

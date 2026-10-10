@@ -204,6 +204,46 @@ vuln-matrix:
     done
     exit $status
 
+# --- M5-6: existing Atheris harnesses, time-bounded -------------------
+# The committed corpora (tests/conformance/http{1,2}/fuzz/corpus) are the
+# seeds; fuzz-seed re-emits opcode-tagged seeds for the current Scenario
+# codec.  Each run is capped at $t seconds of fuzzing inside an outer
+# timeout, and crash artifacts land in /tmp so the worktree stays clean.
+
+fuzz-seed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export UV_CACHE_DIR=$PWD/.uv-cache XDG_RUNTIME_DIR=/tmp/xdg-runtime
+    (cd tests/conformance/http1/fuzz && uv run python make_seeds.py)
+    (cd tests/conformance/http2/fuzz && uv run python make_seeds.py)
+    echo "seed corpora refreshed"
+
+fuzz-http1 t="60":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export UV_CACHE_DIR=$PWD/.uv-cache XDG_RUNTIME_DIR=/tmp/xdg-runtime
+    if ! uv run python -c 'import atheris' 2>/dev/null; then
+        echo "atheris is not installed: uv pip install atheris (docs/security/probe.md, G6)"
+        exit 3
+    fi
+    mkdir -p /tmp/bla526-fuzz-http1
+    timeout -k 5 $(( {{t}} + 30 )) uv run python tools/security/fuzz_run.py http1 \
+        -max_total_time={{t}} -artifact_prefix=/tmp/bla526-fuzz-http1/ corpus/ || [ $? -eq 124 ]
+
+fuzz-http2 t="60":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export UV_CACHE_DIR=$PWD/.uv-cache XDG_RUNTIME_DIR=/tmp/xdg-runtime
+    if ! uv run python -c 'import atheris' 2>/dev/null; then
+        echo "atheris is not installed: uv pip install atheris (docs/security/probe.md, G6)"
+        exit 3
+    fi
+    mkdir -p /tmp/bla526-fuzz-http2
+    timeout -k 5 $(( {{t}} + 30 )) uv run python tools/security/fuzz_run.py http2 \
+        -max_total_time={{t}} -artifact_prefix=/tmp/bla526-fuzz-http2/ corpus/ || [ $? -eq 124 ]
+
+fuzz-all t="60": (fuzz-http1 t) (fuzz-http2 t)
+
 # YouTrack REST access. Credentials are read only by scripts/youtrack.sh.
 yt-search query='project: BLA #Unresolved':
     scripts/youtrack.sh search "{{query}}"
