@@ -40,7 +40,7 @@ from blackbull.protocol.frame_types import (
 _READERS = {
     http1_actor: ('FIELD_VALUE_ALLOWED_OCTETS', 'COMMON_METHODS_OCTETS',
                   'method_token_is_valid', 'field_line', 'host_field_value'),
-    http2_actor: ('PROHIBITED_TRAILER_FIELDS', 'field_value'),
+    http2_actor: ('PROHIBITED_TRAILER_FIELDS',),
     connection_module: ('normalized_fields', 'host_field_value', 'media_type'),
     frame_types: ('LOWERCASE_TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     headers_module: ('TCHAR_OCTETS', 'LOWERCASE_TCHAR_OCTETS',

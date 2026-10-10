@@ -11,7 +11,7 @@ from .headers import _MinimalResponseHeaders, _as_response_fields, _owned_respon
 
 class _HeaderView:
     """Zero-copy view over a [`NativeResponse`][] header or trailer list, whose
-    names are lowercase tchar and values free of CTL.
+    names are lowercase tchar and values free of CTL and of edge SP/HTAB.
 
     ``append`` validates and lowercases what it adds, so the list keeps that
     contract; lookups take a name in any case (RFC 9110 §5.1).  Mutations are
@@ -161,8 +161,9 @@ class NativeResponse:
     """A response on the native send path: header and/or body and/or trailers.
 
     ``header`` and ``trailers`` keep the response-field contract from creation
-    on: names are lowercase tchar and values carry no CTL.  A field that cannot
-    meet it raises ``ValueError``/``TypeError`` here; readers do not check again.
+    on: names are lowercase tchar and values carry no CTL and no edge SP/HTAB
+    (trimmed on entry).  A field that cannot meet it raises
+    ``ValueError``/``TypeError`` here; readers do not check again.
     ``header`` is ``None`` when absent (never ``[]``).  ``body`` is ``None``
     when absent; ``b''`` is a real empty body.  ``more_body`` marks a
     non-terminal body chunk.  ``push`` makes this a promised request instead:

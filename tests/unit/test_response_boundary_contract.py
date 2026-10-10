@@ -63,6 +63,59 @@ class TestEveryWayInKeepsTheContract:
         assert (b'x-trace', b'1') in list(native.header)
 
 
+def _padded_ways_in():
+    """A NativeResponse reached by each way a field can enter one."""
+    from blackbull.native import _native_from_asgi
+
+    padded = [(b'x-a', b' \tv w\t ')]
+    built = NativeResponse(status=200, header=padded)
+    assigned = NativeResponse(status=200, header=[])
+    assigned.header = padded
+    appended = NativeResponse(status=200, header=[])
+    appended.header.append(*padded[0])
+    trailer = NativeResponse(trailers=[])
+    trailer.trailers.append(*padded[0])
+    return {
+        'built': built.header, 'assigned': assigned.header,
+        'appended': appended.header, 'trailer-appended': trailer.trailers,
+        'trailers-built': NativeResponse(trailers=padded).trailers,
+        'to_native': Response(b'ok', headers=padded).to_native().header,
+        'asgi-dict': _native_from_asgi({'type': 'http.response.start',
+                                        'status': 200, 'headers': padded}).header,
+        'push': NativeResponse(push='/x', header=padded).header,
+    }
+
+
+@pytest.mark.parametrize('way', list(_padded_ways_in()))
+def test_every_way_in_trims_edge_whitespace_from_values(way):
+    """RFC 9110 §5.5: edge SP/HTAB is not part of a value (RFC 9113 §8.2.1
+    makes it malformed on HTTP/2); inner whitespace stays."""
+    assert _padded_ways_in()[way].get(b'x-a') == b'v w'
+
+
+@pytest.mark.asyncio
+async def test_both_transports_send_the_trimmed_value():
+    from hpack import Decoder, Encoder
+
+    from blackbull.server.sender import (AbstractWriter, HTTP1Sender,
+                                         build_response_headers)
+
+    class _Writer(AbstractWriter):
+        def __init__(self):
+            self.out = bytearray()
+
+        async def write(self, data):
+            self.out += data
+
+    response = NativeResponse(status=200, header=[(b'x-a', b' v\t')], body=b'')
+    writer = _Writer()
+    await HTTP1Sender(writer)(response)
+    block = build_response_headers(Encoder(), 1, 200, response._header, end_stream=True)
+
+    assert b'\r\nx-a: v\r\n' in bytes(writer.out)
+    assert (b'x-a', b'v') in Decoder().decode(block[9:], raw=True)
+
+
 def _scope(headers):
     return {'type': 'http', 'http_version': '1.1', 'method': 'GET',
             'scheme': 'http', 'path': '/', 'raw_path': b'/', 'query_string': b'',

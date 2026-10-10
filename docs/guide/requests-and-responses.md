@@ -457,9 +457,10 @@ enters a `NativeResponse`: a `Response` helper builds one when sent, a
 `NativeResponse` checks when constructed, when its `header` or `trailers` is
 assigned and when a field is appended to either, and an ASGI
 `http.response.start` / `http.response.trailers` dict is checked when
-converted. Invalid fields raise
-`ValueError`; they are never silently stripped or rewritten, and never reach
-the wire or the HTTP/2 HPACK table. If the response has already begun,
+converted. Leading and trailing SP/HTAB are not part of a value (RFC 9110
+§5.5), so they are removed there and both transports send the same value.
+Any other invalid octet raises `ValueError`; it is never stripped or
+rewritten, and never reaches the wire or the HTTP/2 HPACK table. If the response has already begun,
 HTTP/1.1 closes rather than reusing a connection with an incomplete field
 section.
 

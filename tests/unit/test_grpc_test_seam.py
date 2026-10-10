@@ -59,6 +59,17 @@ class TestTheSeamDrivesAServicer:
         assert reply.status == GrpcStatus.NOT_FOUND
         assert reply.grpc_message == 'no such greeting'
 
+    async def test_a_status_message_keeps_its_edge_spaces(self):
+        """Field values lose edge SP/HTAB (RFC 9110 §5.5), so the encoder
+        percent-encodes edge spaces and the detail round-trips."""
+        async def _boom(request, context):
+            raise GrpcError(GrpcStatus.INVALID_ARGUMENT, '  bad field  ')
+
+        async with GrpcTestServer(_app_with(_boom)) as grpc:
+            reply = await grpc.unary('/demo.Greeter/SayHello', b'x')
+
+        assert reply.grpc_message == '  bad field  '
+
     async def test_an_unregistered_method_is_unimplemented(self):
         async def _hello(request, context):  # pragma: no cover - never called
             return b''

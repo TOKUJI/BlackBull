@@ -26,7 +26,8 @@ def _validate_response_header_field(name: bytes, value: bytes) -> None:
 
 class _MinimalResponseHeaders(list):
     """A response field section that keeps its contract: every name lowercase
-    tchar, every value free of CTL, and the framing fields located —
+    tchar, every value free of CTL and of edge SP/HTAB, and the framing fields
+    located —
     ``content_length`` (the Content-Length fields, or ``None``),
     ``transfer_encoding`` and ``date`` (whether present).
 
@@ -38,9 +39,10 @@ class _MinimalResponseHeaders(list):
     __slots__ = ('content_length', 'transfer_encoding', 'date')
 
     def add(self, name: bytes, value: bytes) -> None:
-        """Append one field, validated, with its name lowercased."""
+        """Append one field, validated, with its name lowercased and its value
+        trimmed of edge SP/HTAB."""
         _validate_response_header_field(name, value)
-        field = (name.lower(), value)
+        field = (name.lower(), value.strip(b' \t'))
         self.append(field)
         self._locate(field)
 
@@ -87,7 +89,8 @@ class _MinimalResponseHeaders(list):
 
 def _as_response_fields(fields: Iterable) -> _MinimalResponseHeaders:
     """Return *fields* when they already keep the response-field contract,
-    else a validated copy with names lowercased.
+    else a validated copy with names lowercased and values trimmed of edge
+    SP/HTAB (RFC 9110 §5.5: not part of the value).
 
     *fields* holds ``(name, value)`` pairs in any two-item form ASGI allows.
     Raises ``ValueError``/``TypeError`` for a field that cannot remain one
@@ -105,7 +108,9 @@ def _as_response_fields(fields: Iterable) -> _MinimalResponseHeaders:
                 or value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
             _validate_response_header_field(name, value)
             name = name.lower()
-            head[i] = field = (name, value)
+            head[i] = field = (name, value.strip(b' \t'))
+        elif len(trimmed := value.strip(b' \t')) != len(value):
+            head[i] = field = (name, trimmed)
         size = len(name)
         if size == 14:
             if name == b'content-length':

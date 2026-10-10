@@ -84,14 +84,19 @@ def _pct_encode_message(details: str) -> bytes:
     """Percent-encode a ``grpc-message`` value per the gRPC HTTP/2 spec.
 
     ASCII 0x20–0x7E except ``%`` pass through; everything else (including
-    non-ASCII, encoded UTF-8 first) becomes ``%XX``.
+    non-ASCII, encoded UTF-8 first) becomes ``%XX``, and so do edge spaces,
+    which a field value cannot carry (RFC 9110 §5.5).
     """
-    out = bytearray()
-    for b in details.encode('utf-8'):
+    raw = details.encode('utf-8')
+    stripped = raw.lstrip(b' ')
+    body = stripped.rstrip(b' ')
+    out = bytearray(b'%20' * (len(raw) - len(stripped)))
+    for b in body:
         if 0x20 <= b <= 0x7E and b != 0x25:  # printable ASCII, not '%'
             out.append(b)
         else:
             out += b'%%%02X' % b
+    out += b'%20' * (len(stripped) - len(body))
     return bytes(out)
 
 

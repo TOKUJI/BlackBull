@@ -18,7 +18,7 @@ from ..env import get_settings
 from ..event_aggregator import EventAggregator
 from ..logger import log, debug_gate
 from ..protocol.frame import FrameFactory
-from ..protocol.field_grammar import PROHIBITED_TRAILER_FIELDS, field_value
+from ..protocol.field_grammar import PROHIBITED_TRAILER_FIELDS
 from ..protocol.framing import method_is
 from ..protocol.frame_types import (
     ErrorCodes, FrameBase, FrameTypes,
@@ -1678,10 +1678,9 @@ class HTTP2Actor(Actor):
             PseudoHeaders.SCHEME:    parent_scheme,
             PseudoHeaders.AUTHORITY: authority,
         }
-        # NativeResponse holds lowercase tchar names and no host; the promised
-        # request takes its host from the authority above (§8.3.1).
-        regular = [(name, field_value(value, check=False))
-                   for name, value in (event._header or ())]
+        # NativeResponse holds lowercase tchar names, trimmed values and no
+        # host; the promised request takes its host from the authority above.
+        regular = list(event._header or ())
 
         pp = self.factory.push_promise(parent_stream_id, push_stream_id, pseudo, regular)
         # The peer may reset a promised id as soon as the frame reaches its

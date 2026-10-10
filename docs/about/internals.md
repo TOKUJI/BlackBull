@@ -55,8 +55,9 @@ rewrites a field after construction keeps it.
 
 A `NativeResponse` keeps the same field contract from the moment it exists:
 every way a field enters it (construction, `header`/`trailers` assignment,
-`append` on either view) checks and lowercases that field once, so middleware
-and senders read names exactly and check nothing again. Its header and trailer
+`append` on either view) checks that field once, lowercases its name and
+trims edge SP/HTAB from its value, so middleware and senders read fields
+exactly and check nothing again. Its header and trailer
 lists are `_MinimalResponseHeaders`; change them only through `add`, `extend`
 and `discard`, which keep the located framing fields true.
 
