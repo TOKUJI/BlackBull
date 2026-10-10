@@ -70,6 +70,8 @@ The registry detects the async-generator form automatically — no flag needed.
 (If a decorator hides the generator nature of your handler, force it with
 `grpc.method(path, streaming=True)` or `add_method(path, fn, streaming=True)`.)
 
+Request lifecycle events identify the dispatcher as `serve_grpc` in `handler`.
+
 Semantics that match the gRPC spec:
 
 - The status rides the trailing HEADERS frame after the last message. A handler
@@ -78,10 +80,12 @@ Semantics that match the gRPC spec:
   exactly like a unary failure.
 - `context.set_trailing_metadata(...)` / `set_code(...)` apply to the final
   trailers.
-- The generator is always finalised (its `finally`/cleanup runs) when the client
-  cancels or disconnects mid-stream, so long streams stop producing promptly.
-- A `grpc-timeout` deadline bounds the **whole** stream (`DEADLINE_EXCEEDED` on
-  expiry).
+- One `grpc-timeout` deadline covers input, handler work and response completion
+  for all four RPC forms. Expiry cancels the call and reports `DEADLINE_EXCEEDED`;
+  a handler's own `TimeoutError` reports `INTERNAL`.
+  On deadline expiry, cleanup and expiry reporting each have a 100 ms grace period.
+  If reporting stalls, an exception lets the host terminate the stream. Handlers
+  must cooperate with cancellation; synchronous work cannot be preempted.
 
 ## Client-streaming and bidirectional RPCs
 

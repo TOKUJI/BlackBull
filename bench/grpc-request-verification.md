@@ -44,6 +44,14 @@ from grpc_bridge import unary, collect
 registry = GrpcServiceRegistry()
 registry.add_method('/svc/Unary', unary)
 registry.add_method('/svc/Collect', collect)
+async def stream(request, context):
+    if hasattr(request, '__aiter__'):
+        async for _ in request:
+            pass
+    for _ in range(1000):
+        yield b'ok'
+registry.add_method('/svc/Server', stream, client_streaming=False)
+registry.add_method('/svc/Bidi', stream, client_streaming=True)
 app = BlackBull()
 app.enable_grpc(registry)
 app.run(port=8080)
@@ -72,6 +80,28 @@ For each round, compute `100 * (mean(B) / mean(A) - 1)`. Use paired round deltas
 and Student t 95% intervals (df=5 for bridge, df=2 for wire). A micro delta is
 time; a wire delta is throughput. An interval crossing zero does not establish
 equivalence, and null-label drift limits interpretation of small effects.
+
+Use `--timeout 1S` for a separate bridge comparison with a client deadline.
+For deadline changes, compare both with and without this option; use the same
+header for both arms.
+Use `--shapes Server Bidi --messages 1000 --calls 100 --warmup 10 --sizes 16`
+for synchronous streaming bursts; add `--yield-every 100` for a suspending
+producer. Each arm validates all response frames before timing. Repeat with
+`--null` to measure label drift with identical bridge sources. For BLA-344,
+compare against `dd073c9c` (before the fix) and `8a40ae41` (initial fix).
+For wire comparison, add `-H 'grpc-timeout: 1S'` to both warmup and measured runs.
+The BLA-344 follow-up uses Python 3.11/3.14, all four methods, both scope lanes,
+50 warmup requests and 500 measured requests per sample. Streaming methods emit
+1000 messages. Compare `dd073c9c` with the candidate, then repeat both labels
+using the candidate. Validate `grpc-status: 0` and the complete framed response
+before load generation. Exact runner, settings and samples are attached to
+BLA-344 as `BLA-344-performance-followup-20261010.zip`.
+
+The subsequent performance review also compares against `4089bf6c` (the current
+PR). Use `--messages 1 --calls 2000 --warmup 200` to isolate short-stream overhead.
+Its exact runners, candidate patch and results are attached as
+`BLA-344-performance-review-20261010.zip`; streaming wire cases cover both 1 and
+1000 response messages.
 
 ## Correctness
 

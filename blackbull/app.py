@@ -496,6 +496,18 @@ class BlackBull:
             }))
         await self._dispatch_http(conn, receive, send, scheme)
 
+    def _handler_event(self, name, conn, handler, exception=None):
+        detail = {
+            'conn': conn,
+            'client_ip': conn.client[0] if conn.client else '',
+            'method': conn.method,
+            'path': conn.path,
+            'handler': handler.__name__,
+        }
+        if name == 'after_handler':
+            detail['exception'] = exception
+        return Event(name, detail=detail)
+
     async def _dispatch_http(self, conn, receive: ASGIReceiveCallable | None,
                              send: ASGISendCallable, scheme):
         """Route and run one HTTP request (the non-WebSocket half of _dispatch)."""
@@ -503,7 +515,17 @@ class BlackBull:
         if self._grpc_registry is not None and scheme == Scheme.http:
             from .grpc.asgi import _is_grpc_content_type, serve_grpc  # noqa: PLC0415 — optional subpackage
             if _is_grpc_content_type(conn.headers.get(b'content-type', b'')):
-                await serve_grpc(self._grpc_registry, conn, receive, send)
+                exc_caught = None
+                try:
+                    if self._dispatcher.has_listeners('before_handler'):
+                        await self._dispatcher.emit(self._handler_event('before_handler', conn, serve_grpc))
+                    await serve_grpc(self._grpc_registry, conn, receive, send)
+                except BaseException as exc:
+                    exc_caught = exc
+                    raise
+                finally:
+                    if self._dispatcher.has_listeners('after_handler'):
+                        await self._dispatcher.emit(self._handler_event('after_handler', conn, serve_grpc, exc_caught))
                 return
 
         # ``raw_send`` is retained so a route with declared response headers can
@@ -571,13 +593,7 @@ class BlackBull:
         exc_caught: Exception | None = None
         try:
             if self._dispatcher.has_listeners('before_handler'):
-                await self._dispatcher.emit(Event('before_handler', detail={
-                    'conn':     conn,
-                    'client_ip': conn.client[0] if conn.client else '',
-                    'method':    conn.method,
-                    'path':      conn.path,
-                    'handler':   function.__name__,
-                }))
+                await self._dispatcher.emit(self._handler_event('before_handler', conn, function))
             await function(conn, receive, send)
         except (ClientDisconnected, ConnectionResetError) as e:
             # Peer disconnect during body reads is an ordinary close, not a handler failure.
@@ -597,14 +613,7 @@ class BlackBull:
             self._logger.error(traceback.format_exc())
         finally:
             if self._dispatcher.has_listeners('after_handler'):
-                await self._dispatcher.emit(Event('after_handler', detail={
-                    'conn':     conn,
-                    'client_ip': conn.client[0] if conn.client else '',
-                    'method':    conn.method,
-                    'path':      conn.path,
-                    'handler':   function.__name__,
-                    'exception': exc_caught,
-                }))
+                await self._dispatcher.emit(self._handler_event('after_handler', conn, function, exc_caught))
 
         if exc_caught is not None and not isinstance(exc_caught, ClientDisconnected):
             err_status = (exc_caught.status if isinstance(exc_caught, HTTPException)
