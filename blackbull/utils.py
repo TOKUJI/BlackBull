@@ -3,9 +3,20 @@
 from enum import StrEnum, auto
 from http import HTTPStatus
 
+import asyncio
 import logging
+import sys
 
 logger = logging.getLogger(__name__)
+
+_EAGER_TASKS = sys.version_info >= (3, 12)
+
+
+def create_eager_task(coro, loop=None):
+    loop = loop or asyncio.get_running_loop()
+    if _EAGER_TASKS:
+        return asyncio.Task(coro, loop=loop, eager_start=True)
+    return loop.create_task(coro)
 
 
 def is_client_error(status: HTTPStatus | int) -> bool:

@@ -904,6 +904,24 @@ class TestMiscellaneousEdgeCases:
     """Various edge cases that don't fit neatly into other categories."""
 
     @pytest.mark.asyncio
+    async def test_bytes_subclass_conversion_is_preserved(self):
+        class Reply(bytes):
+            def __bytes__(self):
+                return b'converted'
+
+        registry = GrpcServiceRegistry()
+
+        @registry.method('/svc/M')
+        async def handler(request, context):
+            return Reply(b'original')
+
+        events, send = _collector()
+        await serve_grpc(registry, _grpc_scope('/svc/M'),
+                         _receive_with(encode_message(b'')), send)
+        body = next(event['body'] for event in events if event['type'] == 'http.response.body')
+        assert decode_messages(body) == [(False, b'converted')]
+
+    @pytest.mark.asyncio
     async def test_handler_returns_bytearray(self):
         """``bytearray`` is accepted as a valid response type (like ``bytes``)."""
         reg = GrpcServiceRegistry()
