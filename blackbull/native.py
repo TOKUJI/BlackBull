@@ -146,16 +146,16 @@ class _PushPath:
 class NativeResponse:
     """A response on the native send path: header and/or body and/or trailers.
 
-    ``header`` is ``None`` when absent (never ``[]`` — presence is decided by
-    ``is not None``).  ``body`` is ``None`` when absent; ``b''`` is a real
-    empty body.  ``more_body`` marks a non-terminal body chunk (streaming).
-    ``push`` makes this a promised request instead: its path is ``push`` and
-    ``header`` contains request headers. It cannot carry response-only fields.
-    ``more_trailers`` marks a non-terminal trailer event.
-    ``expects_trailers`` preserves the ASGI ``http.response.start``
-    ``trailers: True`` flag so the sender withholds the terminal chunk until
-    the trailers event (lossless full-form compat — a terminal body before
-    trailers would otherwise corrupt chunked framing).
+    ``header`` and ``trailers`` keep the response-field contract from creation
+    on: names are lowercase tchar and values carry no CTL.  A field that cannot
+    meet it raises ``ValueError``/``TypeError`` here; readers do not check again.
+    ``header`` is ``None`` when absent (never ``[]``).  ``body`` is ``None``
+    when absent; ``b''`` is a real empty body.  ``more_body`` marks a
+    non-terminal body chunk.  ``push`` makes this a promised request instead:
+    its path is ``push`` and ``header`` holds request headers, with no
+    response-only fields.  ``more_trailers`` marks a non-terminal trailer
+    event.  ``expects_trailers`` (ASGI ``trailers: True``) makes the sender
+    withhold the terminal chunk until the trailers event.
     """
 
     __slots__ = (
@@ -166,7 +166,7 @@ class NativeResponse:
         'more_body',
         'more_trailers',
         'status',
-        'trailers',
+        '_trailers',
     )
 
     def __init__(self, *, status: int = 200,
@@ -184,7 +184,7 @@ class NativeResponse:
                         else None if header is None else _as_response_fields(header))
         self._body = body
         self.more_body = more_body
-        self.trailers = None if trailers is None else _as_response_fields(trailers)
+        self._trailers = None if trailers is None else _as_response_fields(trailers)
         self.more_trailers = more_trailers
         self.expects_trailers = expects_trailers
         # Sendfile form: the response body *is* this file, and the sender is
@@ -209,7 +209,7 @@ class NativeResponse:
         self._header = _as_response_fields(header)
         self._body = body
         self.more_body = False
-        self.trailers = None
+        self._trailers = None
         self.more_trailers = False
         self.expects_trailers = False
         self._extension = None
@@ -232,7 +232,7 @@ class NativeResponse:
         self._header = _as_response_fields(header)
         self._body = body
         self.more_body = True
-        self.trailers = _as_response_fields(trailers)
+        self._trailers = _as_response_fields(trailers)
         self.more_trailers = False
         self.expects_trailers = True
         self._extension = None
@@ -287,6 +287,15 @@ class NativeResponse:
             self._header = value._items
         else:
             self._header = _as_response_fields(value)
+
+    @property
+    def trailers(self) -> _MinimalResponseHeaders | None:
+        """The trailer arm, or ``None`` when there is none."""
+        return self._trailers
+
+    @trailers.setter
+    def trailers(self, value) -> None:
+        self._trailers = None if value is None else _as_response_fields(value)
 
     # --- body: plain bytes; DX via helper properties -----------------------
     @property

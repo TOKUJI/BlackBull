@@ -34,8 +34,7 @@ from ..asgi import (
     WebSocketSendEvent,
 )
 from ..headers import (
-    HeaderList, _MinimalResponseHeaders, _as_response_fields,
-    _owned_response_fields)
+    HeaderList, _MinimalResponseHeaders, _as_response_fields)
 from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
 
 from ..logger import debug_gate  # noqa: E402
@@ -562,7 +561,7 @@ class HTTP1Sender(BaseSender):
         match body:
             case bytes():
                 self._response_started = True
-                h = _owned_response_fields(headers)
+                h = _as_response_fields(headers)
                 if self._log_record is not None:
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
@@ -572,7 +571,7 @@ class HTTP1Sender(BaseSender):
 
             case NativeResponse():
                 if body._header is not None:
-                    head = _owned_response_fields(body._header)
+                    head = _as_response_fields(body._header)
                     self._response_started = True
                     await self._settle_buffered_head()
                     self._buffered_status = (_STATUS_BY_CODE.get(body.status)
@@ -655,7 +654,7 @@ class HTTP1Sender(BaseSender):
         """Write one part of the trailer section for dict and native paths."""
         if not (self._expect_trailers or self._chunked):
             return
-        headers = _owned_response_fields(headers)
+        headers = _as_response_fields(headers)
         if not self._trailers_started:
             await self._write(b'0\r\n')
             self._trailers_started = True
@@ -695,8 +694,7 @@ class HTTP1Sender(BaseSender):
         before rebuilding the field list so duplicate values cannot create two
         competing message boundaries.
 
-        When *head* carries no framing field the server's is appended to it
-        in place.
+        Returns a new field list; *head* is not modified.
         """
         code = int(status)
         self._chunked = False
@@ -728,7 +726,7 @@ class HTTP1Sender(BaseSender):
             for field in lengths:
                 pairs.remove(field)
         else:
-            pairs = head
+            pairs = list(head)
 
         if informational or code == 204:
             self._expect_trailers = False
@@ -1409,10 +1407,10 @@ class HTTP2Sender(BaseSender):
         """
         if self._closed:
             return
-        headers = _owned_response_fields(headers)
+        headers = _as_response_fields(headers)
         if more_trailers:
             if self._buffered_trailers is None:
-                self._buffered_trailers = headers
+                self._buffered_trailers = headers.copy()
             else:
                 self._buffered_trailers.extend(headers)
             return
@@ -1560,7 +1558,7 @@ class HTTP2Sender(BaseSender):
                     logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
-                head = _owned_response_fields(body._header)
+                head = _as_response_fields(body._header)
                 await self._settle_buffered_head()
                 self._buffered_status = HTTPStatus(body.status)
                 self._buffered_headers = head
@@ -1578,7 +1576,7 @@ class HTTP2Sender(BaseSender):
                 await self._handle_body_content(body._body, not body.more_body)
             if body.trailers is not None and not self._end_stream_sent:
                 await self._handle_trailers(
-                    list(body.trailers), body.more_trailers)
+                    body.trailers, body.more_trailers)
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')

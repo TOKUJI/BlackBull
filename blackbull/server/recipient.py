@@ -837,8 +837,9 @@ class BaseRecipient(ABC):
 class HTTP1Recipient(BaseRecipient):
     """Yield lazy HTTP/1.1 request-body slices as http.request events.
 
-    Framing comes from Content-Length or Transfer-Encoding. After the terminal
-    body event, subsequent calls return http.disconnect.
+    *framing* is ``request_framing(conn.headers)``, already validated; the body
+    is read by it, not by the headers again. After the terminal body event,
+    subsequent calls return http.disconnect.
     """
 
     _reader: AbstractReader  # narrows BaseRecipient._reader from AbstractReader | None

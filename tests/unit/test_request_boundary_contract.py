@@ -68,6 +68,13 @@ class TestFromScopeKeepsTheNativeContract:
         with pytest.raises(FieldError):
             Connection.from_scope(_scope([(name, b'v')]))
 
+    @pytest.mark.parametrize('field', [('x-a', b'v'), (b'x-a', 'v'),
+                                       (bytearray(b'x-a'), b'v'),
+                                       (b'x-a', b'v', b'w'), (b'x-a',)])
+    def test_a_field_that_is_not_two_bytes_strings_is_refused(self, field):
+        with pytest.raises(FieldError):
+            Connection.from_scope(_scope([field]))
+
     @pytest.mark.parametrize('hosts', [
         [b'a.example', b'b.example'],
         [b'a b'], [b'a/b'], [b''], [b'[::1'], [b'a.example:8x'],

@@ -33,6 +33,14 @@ class TestEveryWayInKeepsTheContract:
 
         assert list(resp.header) == [(b'x-a', b'1')]
 
+    def test_the_trailers_setter_lowercases_and_validates(self):
+        resp = NativeResponse(status=200, header=[])
+        resp.trailers = [(b'X-T', b'1')]
+
+        assert resp.trailers == [(b'x-t', b'1')]
+        with pytest.raises(ValueError):
+            resp.trailers = [(b'x-t', b'a\nb')]
+
     def test_append_lowercases_and_validates(self):
         resp = NativeResponse(status=200, header=[])
         resp.header.append(b'X-B', b'2')

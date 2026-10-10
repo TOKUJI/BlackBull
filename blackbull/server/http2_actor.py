@@ -1679,7 +1679,7 @@ class HTTP2Actor(Actor):
             PseudoHeaders.AUTHORITY: authority,
         }
         # NativeResponse holds lowercase tchar names: no pseudo-header here.
-        regular = [(k.decode(), v.decode()) for k, v in (event._header or ())]
+        regular = list(event._header or ())
 
         pp = self.factory.push_promise(parent_stream_id, push_stream_id, pseudo, regular)
         # The peer may reset a promised id as soon as the frame reaches its
@@ -1719,9 +1719,7 @@ class HTTP2Actor(Actor):
             method='GET',
             path=_pushed_path,
             raw_path=_pushed_raw_path,
-            headers=Headers([(k.encode() if isinstance(k, str) else k,
-                              v.encode() if isinstance(v, str) else v)
-                             for k, v in regular]),
+            headers=Headers.from_lowered(list(regular)),
             query_string=_pushed_query,
             http_version='2',
             scheme=parent_scheme,

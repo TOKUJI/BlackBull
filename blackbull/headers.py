@@ -90,16 +90,31 @@ def _as_response_fields(fields: Iterable) -> _MinimalResponseHeaders:
     if isinstance(fields, _MinimalResponseHeaders):
         return fields
     head = _MinimalResponseHeaders(fields)
-    head.content_length = None
-    head.transfer_encoding = head.date = False
+    content_length = None
+    transfer_encoding = date = False
     for i, field in enumerate(head):
         name, value = field
         if (type(name) is not bytes or type(value) is not bytes
                 or not name or name.translate(None, LOWERCASE_TCHAR_OCTETS)
                 or value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
             _validate_response_header_field(name, value)
-            head[i] = field = (name.lower(), value)
-        head._locate(field)
+            name = name.lower()
+            head[i] = field = (name, value)
+        size = len(name)
+        if size == 14:
+            if name == b'content-length':
+                if content_length is None:
+                    content_length = []
+                content_length.append(field)
+        elif size == 17:
+            if name == b'transfer-encoding':
+                transfer_encoding = True
+        elif size == 4:
+            if name == b'date':
+                date = True
+    head.content_length = content_length
+    head.transfer_encoding = transfer_encoding
+    head.date = date
     return head
 
 

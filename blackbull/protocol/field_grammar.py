@@ -1,6 +1,7 @@
 """Shared HTTP field, authority and URI scheme grammar."""
 from functools import lru_cache
 import ipaddress
+from operator import itemgetter
 import re
 from typing import Iterable
 
@@ -79,7 +80,7 @@ def field_line(line: bytes) -> tuple[bytes, bytes]:
     Raises [`FieldError`][] for obs-fold, a missing colon, whitespace before
     the colon, or a name outside tchar.  Pass the value to [`field_value`][].
     """
-    if line[:1] in (b' ', b'\t'):
+    if line and line[0] in (0x20, 0x09):
         raise FieldError(f'obsolete line folding rejected: {line!r}')
     colon = line.find(b':')
     if colon < 1:
@@ -100,16 +101,24 @@ def normalized_fields(pairs: Iterable) -> list[tuple[bytes, bytes]]:
     Raises [`FieldError`][] for a pair that is not two ``bytes``, a name
     outside tchar, or a value with a CTL.
     """
-    out = []
-    for pair in pairs:
-        name, value = pair
-        if type(name) is not bytes or type(value) is not bytes:
-            raise FieldError(f'field is not two bytes strings: {pair!r}')
-        name = name.lower()
-        if not name or name.translate(None, LOWERCASE_TCHAR_OCTETS):
-            raise FieldError(f'invalid field name {name!r}')
-        out.append((name, field_value(value)))
-    return out
+    try:
+        # The unbound methods refuse anything that is not bytes.
+        fields = [(bytes.lower(name), bytes.strip(value, b' \t'))
+                  for name, value in pairs]
+    except (TypeError, ValueError) as exc:
+        raise FieldError(f'field is not two bytes strings: {exc}') from None
+    names = [*map(_NAME, fields)]
+    # One scan per section; only a refusal walks the fields to name the culprit.
+    if (b'' in names or b''.join(names).translate(None, LOWERCASE_TCHAR_OCTETS)
+            or b''.join(map(_VALUE, fields)).translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
+        for name, value in fields:
+            if not name or name.translate(None, LOWERCASE_TCHAR_OCTETS):
+                raise FieldError(f'invalid field name {name!r}')
+            field_value(value)
+    return fields
+
+
+_NAME, _VALUE = itemgetter(0), itemgetter(1)
 
 
 def media_type(value: bytes) -> bytes:

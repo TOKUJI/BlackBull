@@ -12,7 +12,7 @@ import logging
 import os
 
 from ..connection import Connection
-from ..protocol.field_grammar import media_type
+from ..protocol.field_grammar import list_members, media_type
 from ..native import NativeResponse
 from ..request import stream_body, ClientDisconnected
 from . import compression
@@ -93,15 +93,6 @@ def _pct_encode_message(details: str) -> bytes:
         else:
             out += b'%%%02X' % b
     return bytes(out)
-
-
-def _accepts_gzip(accept: bytes) -> bool:
-    """Return ``True`` if the client's ``grpc-accept-encoding`` lists ``gzip``.
-
-    The header is a comma-separated list of message encodings the client can
-    decode (e.g. ``identity,deflate,gzip``); the server may compress responses
-    with any it recognises."""
-    return any(tok.strip().lower() == b'gzip' for tok in accept.split(b','))
 
 
 def _decompress_message(message: bytes, encoding: bytes) -> bytes:
@@ -764,7 +755,8 @@ async def serve_grpc(registry: GrpcServiceRegistry, conn: Connection,
     # what it can decode, so we may gzip responses only when it lists gzip.
     request_encoding = context.metadata(b'grpc-encoding').lower()
     response_encoding = (
-        b'gzip' if _accepts_gzip(context.metadata(b'grpc-accept-encoding'))
+        b'gzip' if b'gzip' in list_members(
+            context.conn.headers.get_combined(b'grpc-accept-encoding') or b'')
         else None)
 
     # Wire the context's response side now, so the handler can call

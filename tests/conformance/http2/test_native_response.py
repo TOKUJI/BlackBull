@@ -167,10 +167,11 @@ class TestWireEquivalence:
         s2, w2, f2, _ = _make_sender()
         await s2(NativeResponse(status=200, header=[], expects_trailers=True))
         await s2(NativeResponse(body=b'Hi'))
-        await s2(NativeResponse(trailers=[(b'x-first', b'1')],
-                                more_trailers=True))
+        first = NativeResponse(trailers=[(b'x-first', b'1')], more_trailers=True)
+        await s2(first)
         await s2(NativeResponse(trailers=[(b'x-second', b'2')]))
         assert bytes(w2) == bytes(w1)
+        assert first.trailers == [(b'x-first', b'1')]
 
         frames = _collect_frames(w2, f2)
         assert len(frames) == 3

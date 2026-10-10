@@ -381,7 +381,12 @@ class TestRequestDecompression:
 
 class TestResponseCompression:
     @pytest.mark.asyncio
-    async def test_large_response_compressed_when_client_accepts_gzip(self, monkeypatch):
+    @pytest.mark.parametrize('accept', [
+        [(b'grpc-accept-encoding', b'identity,gzip')],
+        [(b'grpc-accept-encoding', b'identity'), (b'grpc-accept-encoding', b'GZIP')],
+    ])
+    async def test_large_response_compressed_when_client_accepts_gzip(
+            self, monkeypatch, accept):
         monkeypatch.setattr(grpc_asgi, '_COMPRESS_MIN_BYTES', 128)
         reg = GrpcServiceRegistry()
 
@@ -390,8 +395,7 @@ class TestResponseCompression:
             return b'x' * 4096  # highly compressible, over threshold
 
         scope = _grpc_scope('/svc/Big', headers=[
-            (b'content-type', b'application/grpc'),
-            (b'grpc-accept-encoding', b'identity,gzip')])
+            (b'content-type', b'application/grpc'), *accept])
         events, send = _collector()
         await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([encode_message(b'go')]), send)
 
