@@ -5749,6 +5749,7 @@ it as an async generator that <code>yield</code>s each response message:</p>
 <p>The registry detects the async-generator form automatically — no flag needed.
 (If a decorator hides the generator nature of your handler, force it with
 <code>grpc.method(path, streaming=True)</code> or <code>add_method(path, fn, streaming=True)</code>.)</p>
+<p>Request lifecycle events identify the dispatcher as <code>serve_grpc</code> in <code>handler</code>.</p>
 <p>Semantics that match the gRPC spec:</p>
 <ul>
 <li>The status rides the trailing HEADERS frame after the last message. A handler
@@ -5757,10 +5758,12 @@ it as an async generator that <code>yield</code>s each response message:</p>
   exactly like a unary failure.</li>
 <li><code>context.set_trailing_metadata(...)</code> / <code>set_code(...)</code> apply to the final
   trailers.</li>
-<li>The generator is always finalised (its <code>finally</code>/cleanup runs) when the client
-  cancels or disconnects mid-stream, so long streams stop producing promptly.</li>
-<li>A <code>grpc-timeout</code> deadline bounds the <strong>whole</strong> stream (<code>DEADLINE_EXCEEDED</code> on
-  expiry).</li>
+<li>One <code>grpc-timeout</code> deadline covers input, handler work and response completion
+  for all four RPC forms. Expiry cancels the call and reports <code>DEADLINE_EXCEEDED</code>;
+  a handler's own <code>TimeoutError</code> reports <code>INTERNAL</code>.
+  On deadline expiry, cleanup and expiry reporting each have a 100 ms grace period.
+  If reporting stalls, an exception lets the host terminate the stream. Handlers
+  must cooperate with cancellation; synchronous work cannot be preempted.</li>
 </ul>
 <h2 id="client-streaming-and-bidirectional-rpcs">Client-streaming and bidirectional RPCs<a class="headerlink" href="#client-streaming-and-bidirectional-rpcs" title="Permanent link">&para;</a></h2>
 <p>A handler whose first parameter is named <code>request_iter</code> (also accepted:
