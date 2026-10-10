@@ -16,7 +16,7 @@ class _HeaderView:
     ``append`` validates and lowercases what it adds, so the list keeps that
     contract; lookups take a name in any case (RFC 9110 §5.1).  Mutations are
     visible to anything reading the response afterwards (the sender,
-    ``to_asgi``).
+    ``to_asgi``); assigning the view to a response copies its fields.
     """
 
     __slots__ = ('_items', '_owner')
@@ -185,7 +185,7 @@ class NativeResponse:
     )
 
     def __init__(self, *, status: int = 200,
-                 header: list[tuple[bytes, bytes]] | None = None,
+                 header: list[tuple[bytes, bytes]] | _HeaderView | None = None,
                  body: bytes | None = None,
                  more_body: bool = False,
                  trailers: list[tuple[bytes, bytes]] | None = None,
@@ -195,7 +195,7 @@ class NativeResponse:
                  push: str | None = None) -> None:
         self.status = status
         # Keep constructor normalization synchronized with the header setter.
-        self._header = (header._items if isinstance(header, _HeaderView)
+        self._header = (header._items.copy() if isinstance(header, _HeaderView)
                         else None if header is None else _as_response_fields(header))
         self._body = body
         self.more_body = more_body
@@ -300,7 +300,7 @@ class NativeResponse:
         if value is None:
             self._header = None
         else:
-            header = (value._items if isinstance(value, _HeaderView)
+            header = (value._items.copy() if isinstance(value, _HeaderView)
                       else _as_response_fields(value))
             if isinstance(self._extension, _PushPath):
                 _refuse_push_host(header)

@@ -196,3 +196,12 @@ class TestAPushTakesItsAuthorityFromTheParent:
         message.push = '/style.css'
         with pytest.raises(ValueError, match='host'):
             view.append(b'host', b'a.example')
+
+    def test_a_push_does_not_share_another_responses_header_list(self):
+        base = NativeResponse(header=[(b'accept', b'*/*')])
+        message = NativeResponse(push='/style.css', header=base.header)
+        assigned = NativeResponse(push='/script.js', header=[])
+        assigned.header = base.header
+        base.header.append(b'host', b'a.example')
+        NativeResponse(header=message.header).header.append(b'host', b'b.example')
+        assert list(message.header) == list(assigned.header) == [(b'accept', b'*/*')]
