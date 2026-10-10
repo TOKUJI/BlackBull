@@ -204,6 +204,37 @@ vuln-matrix:
     done
     exit $status
 
+# --- G3-3: defense-site reachability (E1 AST method) -------------------
+# Extract defense sites from blackbull/ via AST, run the probe against a
+# fixture under branch coverage, and report which sites the runs reached.
+
+vuln-reachability tier="quick":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export UV_CACHE_DIR=$PWD/.uv-cache XDG_RUNTIME_DIR=/tmp/xdg-runtime
+    rm -f .coverage .coverage.*
+    mkdir -p bench/results/security /tmp/bla526-research
+    # every preforked fixture worker measures itself (covproc/sitecustomize.py);
+    # the env stays scoped to the fixture so probe-side code is not counted
+    (setsid env PYTHONPATH=$PWD/tools/security/covproc \
+        COVERAGE_PROCESS_START=$PWD/.coveragerc-reach \
+        uv run python tools/security/fixture_app.py --port 8123 \
+        --tls-port 8444 > /tmp/bla526-research/reach-fixture.log 2>&1 &)
+    for _ in $(seq 1 40); do
+        uv run python -c "import socket; socket.create_connection(('127.0.0.1', 8123), 1).close()" 2>/dev/null && break
+        sleep 0.5
+    done
+    uv run python tools/security/probe.py --base-url http://127.0.0.1:8123 \
+        --h2-url https://127.0.0.1:8444 --tier {{tier}} \
+        > bench/results/security/reachability-probe.txt 2>&1 || true
+    pgrep -f "fixture_app.py --port 8123" | xargs -r kill -INT
+    sleep 2
+    uv run coverage combine || true
+    uv run coverage json -o /tmp/bla526-research/coverage.json
+    uv run python tools/security/reachability.py \
+        --coverage-json /tmp/bla526-research/coverage.json \
+        | tee bench/results/security/reachability.txt
+
 # --- M5-6: existing Atheris harnesses, time-bounded -------------------
 # The committed corpora (tests/conformance/http{1,2}/fuzz/corpus) are the
 # seeds; fuzz-seed re-emits opcode-tagged seeds for the current Scenario

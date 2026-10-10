@@ -122,6 +122,32 @@ gRPC rides on the h2 family's transports (h2 and h2c); its baselines are
 the gRPC lanes of M5-4's fixture work — see the unsupported list until
 those land.
 
+## Defense-site reachability (G3-3)
+
+`just vuln-reachability tier=quick` measures how much of BlackBull's
+defense surface the probe exercises.  `tools/security/reachability.py`
+extracts the defense sites from `blackbull/` via AST (the E1 method):
+every `raise`, every defense call (`log_cap_hit`, `rst_stream`,
+`goaway`, `_connection_error`), and every reference to a rejection
+status or an HTTP/2 error code — excluding startup configuration
+validation (`config.py`, `env.py`, `_env_vars.py`).  The recipe runs the
+fixture under branch coverage, drives the probe tier against it, and
+reports which sites the run reached (a site is reached when its line
+executed), plus the covered-lines and covered-branches totals.  The
+report lands in `bench/results/security/reachability.txt`.  Reachability
+is a floor, not an oracle: an unreached site is a prompt for a new
+scenario, never a defect by itself.
+
+Known measurement limit (G3-3): the fixture preforks its serving
+processes, and only interpreter-exit writes coverage data — workers
+stopped by signal contribute nothing, so request-handling lines inside
+the serving processes are undercounted (the same 431 rejection path is
+proven exercised by the H2-ROBUST-005 oracle even when the report shows
+its site unreached).  Refinement: capture per-worker data (graceful
+worker shutdown, or a single-process serving mode) before drawing
+conclusions from the per-site list.  The site inventory and the
+per-kind totals are measurement-independent and valid as-is.
+
 ## Fuzzing (G6)
 
 The fuzz surface reuses the **existing** Atheris harnesses unchanged

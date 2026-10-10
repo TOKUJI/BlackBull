@@ -1,0 +1,5 @@
+[run]
+branch = True
+source = blackbull
+parallel = True
+data_file = .coverage

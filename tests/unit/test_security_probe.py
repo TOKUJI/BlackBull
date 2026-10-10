@@ -431,6 +431,19 @@ def test_every_skipped_lane_is_documented_with_its_reason():
                 f'{check.check_id} skip on {lane} has no documented reason'
 
 
+def test_defense_sites_cover_the_documented_kinds():
+    from tools.security.reachability import defense_sites
+    sites = defense_sites(Path('blackbull'))
+    kinds = {s.kind for s in sites}
+    assert {'raise', 'defense-call', 'rejection-status', 'error-code'} <= kinds
+    assert sites, 'the AST pass must find the blackbull defense surface'
+    assert all(s.path not in ('config.py', 'env.py', '_env_vars.py')
+               for s in sites), 'startup config validation is not a site'
+    assert any(s.kind == 'defense-call' for s in sites)
+    assert any(s.kind == 'error-code' and s.context == 'PROTOCOL_ERROR'
+               for s in sites)
+
+
 def test_grpc_lpm_round_trips_messages():
     assert grpc_lpm(b'ping') == b'\x00\x00\x00\x00\x04ping'
     body = grpc_lpm(b'1') + grpc_lpm(b'2') + grpc_lpm(b'3')
