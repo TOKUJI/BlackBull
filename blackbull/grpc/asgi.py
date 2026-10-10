@@ -785,7 +785,7 @@ async def _serve_with_deadline(call, context):
     budget = asyncio.timeout_at(context._deadline)
     try:
         async with budget:
-            await asyncio.shield(task)
+            return await asyncio.shield(task)
     except BaseException as failure:
         if budget.expired():
             context._deadline_expired = True
