@@ -132,16 +132,9 @@ def _decompress_message(message: bytes, encoding: bytes) -> bytes:
         f'server accepts {_GRPC_ACCEPT_ENCODING.decode()}')
 
 
-def _frame_response(payload: bytes, compress: bool) -> bytes:
-    """Frame *payload* as a Length-Prefixed-Message, gzip-compressing it
-    (Compressed-Flag = 1) when *compress* is set, the message is over
-    ``_COMPRESS_MIN_BYTES``, and compression actually shrinks it.
-
-    A per-message opt-out (sending an over-threshold-but-incompressible or a
-    small message uncompressed with Flag = 0) is valid even when the response's
-    ``grpc-encoding`` header advertises gzip — the flag, not the header, decides
-    each message."""
-    if compress and len(payload) > _COMPRESS_MIN_BYTES:
+def _frame_compressed_response(payload: bytes) -> bytes:
+    """Use gzip only when it shrinks a message above the compression threshold."""
+    if len(payload) > _COMPRESS_MIN_BYTES:
         packed = compression.compress_gzip(payload)
         if len(packed) < len(payload):
             return encode_message(packed, compressed=True)
@@ -525,7 +518,8 @@ async def _iter_request_messages(receive, encoding: bytes, *, single: bool = Fal
 def _validate_response_message(response) -> bytes:
     """Return *response* as ``bytes`` or raise [`GrpcError`][] (INTERNAL for
     a wrong type, RESOURCE_EXHAUSTED when it exceeds the per-message limit)."""
-    if not isinstance(response, (bytes, bytearray)):
+    is_bytes = type(response) is bytes
+    if not is_bytes and not isinstance(response, (bytes, bytearray)):
         raise GrpcError(
             GrpcStatus.INTERNAL,
             f'handler returned {type(response).__name__}, expected bytes')
@@ -534,7 +528,7 @@ def _validate_response_message(response) -> bytes:
             GrpcStatus.RESOURCE_EXHAUSTED,
             f'response message ({len(response)} bytes) larger than the '
             f'{MAX_MESSAGE_SIZE}-byte limit')
-    return bytes(response)
+    return response if is_bytes else bytes(response)
 
 
 def _response_headers(content_type: bytes,
@@ -598,7 +592,8 @@ async def _serve_unary(handler, request, context, send, content_type,
             send, context, GrpcStatus.INTERNAL, str(exc), content_type)
         return
 
-    body = _frame_response(response, response_encoding is not None)
+    body = (_frame_compressed_response(response) if response_encoding is not None
+            else encode_message(response))
     trailers = _status_trailers(context.code, context.details,
                                 context._trailing)
 
@@ -628,6 +623,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     Close the generator on exit; deadline cleanup is bounded.
     """
     agen = handler(request, context)
+    frame_response = _frame_compressed_response if response_encoding is not None else encode_message
     # context._start_response is idempotent after early initial metadata.
     # Buffer already-length-prefixed messages independently of DATA boundaries.
     buf = bytearray()
@@ -660,7 +656,15 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
             flush_wanted.clear()
             await _flush()
 
-    idle_flusher = asyncio.create_task(_idle_flusher())
+    loop = asyncio.get_running_loop()
+    idle_flusher = None
+
+    def _start_idle_flusher():
+        nonlocal idle_flusher
+        idle_flusher = create_eager_task(_idle_flusher(), loop)
+
+    # Avoid an idle-flusher Task when the call completes synchronously.
+    start_flusher = loop.call_soon(_start_idle_flusher)
 
     # Unannotated for the per-request-closure reason (see
     # app.py::_wrap_send_native); takes nothing, returns nothing.
@@ -668,6 +672,9 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
         # Cancel blocked writes on expiry; otherwise finish committed flushes.
         nonlocal finished
         finished = True
+        start_flusher.cancel()
+        if idle_flusher is None:
+            return
         flush_wanted.set()
         try:
             if asyncio.current_task().cancelling() or context.time_remaining() == 0:
@@ -678,9 +685,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
         except Exception:  # noqa: BLE001 — send failures already surfaced
             logger.exception('gRPC stream idle flusher raised')
 
-    # Unannotated for the per-request-closure reason (see
-    # app.py::_wrap_send_native); takes nothing, returns nothing.
-    async def _drive():
+    try:
         it = agen.__aiter__()
         while True:
             if context._deadline is not None:
@@ -688,16 +693,13 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
             try:
                 msg = await it.__anext__()
             except StopAsyncIteration:
-                return
-            buf.extend(_frame_response(_validate_response_message(msg),
-                                       response_encoding is not None))
+                break
+            if not buf:
+                flush_wanted.set()
+            buf.extend(frame_response(_validate_response_message(msg)))
             if len(buf) >= _STREAM_BATCH_BYTES:
                 await _flush()
-            elif buf:
-                flush_wanted.set()
 
-    try:
-        await _drive()
     except GrpcError as exc:
         # Deliver messages already committed by the generator, then the status.
         await _flush()

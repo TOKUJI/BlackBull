@@ -97,6 +97,12 @@ using the candidate. Validate `grpc-status: 0` and the complete framed response
 before load generation. Exact runner, settings and samples are attached to
 BLA-344 as `BLA-344-performance-followup-20261010.zip`.
 
+The subsequent performance review also compares against `4089bf6c` (the current
+PR). Use `--messages 1 --calls 2000 --warmup 200` to isolate short-stream overhead.
+Its exact runners, candidate patch and results are attached as
+`BLA-344-performance-review-20261010.zip`; streaming wire cases cover both 1 and
+1000 response messages.
+
 ## Correctness
 
 ```sh

@@ -213,3 +213,39 @@ async def test_timeout_owner_marks_expiry_before_clock_rounds_up(monkeypatch, sh
     monkeypatch.setattr(asyncio, 'timeout_at', lambda deadline: timeout_at(deadline - 0.01))
     statuses, *_ = await _call(shape, 'handler')
     assert statuses == [b'4']
+
+
+@pytest.mark.asyncio
+async def test_iterator_setup_expiry_prevents_first_message():
+    entered = []
+    closed = []
+    statuses = []
+
+    class Stream:
+        def __aiter__(self):
+            time.sleep(0.15)
+            return self
+
+        async def __anext__(self):
+            entered.append(True)
+            raise StopAsyncIteration
+
+        async def aclose(self):
+            closed.append(True)
+
+    registry = GrpcServiceRegistry()
+    registry.add_method('/svc/M', lambda request, context: Stream(), streaming=True)
+
+    async def receive():
+        return {'type': 'http.request', 'body': encode_message(b''), 'more_body': False}
+
+    async def send(event):
+        for item in event.to_asgi():
+            statuses.extend(value for key, value in item.get('headers', []) if key == b'grpc-status')
+
+    conn = {'type': 'http', 'path': '/svc/M',
+            'headers': [(b'content-type', b'application/grpc'), (b'grpc-timeout', b'100m')]}
+    await serve_grpc(registry, conn, receive, send)
+    assert not entered
+    assert closed == [True]
+    assert statuses == [b'4']
