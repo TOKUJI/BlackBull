@@ -109,7 +109,7 @@ def _as_response_fields(fields: Iterable) -> _MinimalResponseHeaders:
             _validate_response_header_field(name, value)
             name = name.lower()
             head[i] = field = (name, value.strip(b' \t'))
-        elif len(trimmed := value.strip(b' \t')) != len(value):
+        elif (trimmed := value.strip(b' \t')) is not value:  # CPython: same object when clean
             head[i] = field = (name, trimmed)
         size = len(name)
         if size == 14:
