@@ -428,6 +428,12 @@ def test_every_skipped_lane_is_documented_with_its_reason():
                 f'{check.check_id} skip on {lane} has no documented reason'
 
 
+def test_fixture_route_table_matches_the_app():
+    from tools.security import fixture_app
+    actual = {(r.method, r.path) for r in fixture_app.app.get_routes()}
+    assert actual == set(fixture_app.ROUTE_TABLE)
+
+
 def test_container_metrics_parsers():
     from tools.security.container_run import parse_cgroup_counters, parse_verdicts
     events = 'low 0 high 0 max 0 oom 0 oom_kill 2 oom_group_kill 0\n'

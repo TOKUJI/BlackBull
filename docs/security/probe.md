@@ -194,6 +194,11 @@ open.
 | Check | Oracle (mechanical) |
 |---|---|
 | LANE-001 | negotiation baseline: the h1-family lane speaks HTTP/1.1; on `https1` the handshake must select exactly ALPN `http/1.1` (another protocol succeeding = FAIL) |
+| ROUTES-001 | `/docs` and `/openapi.json` → 404 exactly (no auto-generated API surface) |
+| ROUTES-002 | `GET /stream/1000` → 200 and the body is exactly 1000 bytes |
+| ROUTES-003 | `POST /items` with valid JSON → 200 echoing the parsed dataclass; invalid JSON → 4xx (never 5xx); `POST /form` with a valid form → 200 |
+| ROUTES-004 | `GET /raise` → 500 and the body carries no traceback or exception text (CWE-209) |
+| ROUTES-005 | middleware contracts: gzip on `/big` with exact decoded bytes, CORS preflight carries Access-Control-Allow-Origin, cache headers present, TrustedProxy rewrites the client IP from X-Forwarded-For, `/pcstatic/hello.txt` serves the `.gz` sibling with Content-Encoding: gzip |
 | BASELINE-001/003 | `GET /` → 200 and body exactly `ok` (003 runs after all abuse) |
 | BASELINE-002 | `GET /json` → 200 and body is exactly `{"ok": true}` JSON |
 | H1-ROBUST-001 | request line `FOO / HTTP/1.1` → 4xx or 501/505 or connection close; 2xx/3xx and other 5xx = FAIL |

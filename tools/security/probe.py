@@ -850,6 +850,178 @@ def _combine(verdicts: Sequence[Verdict]) -> Verdict:
 # M1 checks (oracles unchanged)
 # ------------------------------------------------------------------
 
+def _header(resp, name: bytes):
+    """The first value of one response header (the map is case-insensitive
+    and holds ``(name, value)`` pairs per lookup)."""
+    try:
+        pairs = resp.headers[name]
+    except (KeyError, AttributeError, TypeError):
+        return None
+    if isinstance(pairs, (list, tuple)):
+        if not pairs:
+            return None
+        first = pairs[0]
+        return first[1] if isinstance(first, (list, tuple)) else first
+    return pairs
+
+
+def _req(method: str, path: str, *headers: str, body: bytes = b'') -> bytes:
+    """A request with extra headers and an optional body."""
+    head = f'{method} {path} HTTP/1.1\r\nHost: probe\r\nConnection: close\r\n'
+    for extra in headers:
+        head += extra + '\r\n'
+    if body:
+        head += f'Content-Length: {len(body)}\r\n'
+    return head.encode('latin-1') + b'\r\n' + body
+
+
+def _routes_001(probe: Probe) -> Verdict:
+    """ROUTES-001 (G4-4): /docs and /openapi.json answer 404 — the fixture
+    exposes no auto-generated API surface."""
+    for path in ('/docs', '/openapi.json'):
+        result = probe.raw_request(f'routes-001-{path}', _get_request(path))
+        resp = result.response
+        if resp is not None and resp.status == 404:
+            continue
+        return Verdict(FAIL, f'{path}: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else f'status {resp.status}, expected 404'))
+    return Verdict(PASS, '/docs and /openapi.json both 404')
+
+
+def _routes_002(probe: Probe) -> Verdict:
+    """ROUTES-002 (G4-4): /stream/{n} returns exactly n bytes."""
+    result = probe.raw_request('routes-002', _get_request('/stream/1000'))
+    resp = result.response
+    if resp is None:
+        return Verdict(FAIL, _describe(result, probe.effective_timeout))
+    if resp.status != 200:
+        return Verdict(FAIL, f'/stream/1000: status {resp.status}')
+    size = len(resp.body)
+    if size != 1000:
+        return Verdict(FAIL,
+                       f'/stream/1000: body is {size} bytes, expected exactly 1000')
+    return Verdict(PASS, '200 with exactly 1000 bytes')
+
+
+def _routes_003(probe: Probe) -> Verdict:
+    """ROUTES-003 (G4-4): JSON->dataclass and form parsing — valid payloads
+    earn 200 with the parsed values, invalid JSON is refused 4xx, never 5xx."""
+    result = probe.raw_request(
+        'routes-003-json', _req('POST', '/items', 'Content-Type: application/json',
+                                body=b'{"name": "x", "qty": 2}'))
+    resp = result.response
+    if resp is None or resp.status != 200 or b'"qty": 2' not in resp.body \
+            and b'"qty":2' not in resp.body:
+        return Verdict(FAIL, 'valid JSON: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else
+                          f'status {resp.status}, body {resp.body[:80]!r}'))
+    result = probe.raw_request(
+        'routes-003-bad', _req('POST', '/items', 'Content-Type: application/json',
+                               body=b'{not json'))
+    resp = result.response
+    if resp is None or not 400 <= resp.status < 500:
+        return Verdict(FAIL, 'invalid JSON: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else
+                          f'status {resp.status}, expected 4xx (never 5xx)'))
+    result = probe.raw_request(
+        'routes-003-form',
+        _req('POST', '/form', 'Content-Type: application/x-www-form-urlencoded',
+             body=b'a=1&b=two'))
+    resp = result.response
+    if resp is None or resp.status != 200 or b'two' not in resp.body:
+        return Verdict(FAIL, 'form: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else
+                          f'status {resp.status}, body {resp.body[:80]!r}'))
+    return Verdict(PASS, 'JSON->dataclass 200, invalid JSON 400, form 200')
+
+
+def _routes_004(probe: Probe) -> Verdict:
+    """ROUTES-004 (G4-4): the error route answers 500 and the body carries
+    no traceback or exception text (CWE-209)."""
+    result = probe.raw_request('routes-004', _get_request('/raise'))
+    resp = result.response
+    if resp is None:
+        return Verdict(FAIL, _describe(result, probe.effective_timeout))
+    if resp.status != 500:
+        return Verdict(FAIL, f'/raise: status {resp.status}, expected 500')
+    for marker in (b'Traceback', b'RuntimeError', b'File "'):
+        if marker in resp.body:
+            return Verdict(FAIL,
+                           f'500 body leaks {marker.decode()!r} (CWE-209)')
+    return Verdict(PASS, '500 with no traceback in the body')
+
+
+def _routes_005(probe: Probe) -> Verdict:
+    """ROUTES-005 (G4-4): the middleware set keeps its contracts —
+    compression, CORS preflight, cache headers, trusted-proxy client IP,
+    and precompressed static."""
+    import gzip as _gzip
+    result = probe.raw_request(
+        'routes-005-compress',
+        _req('GET', '/big', 'Accept-Encoding: gzip'))
+    resp = result.response
+    encoding = _header(resp, b'content-encoding') if resp is not None else None
+    if resp is None or resp.status != 200 \
+            or (encoding or b'').lower() != b'gzip':
+        return Verdict(FAIL, 'compression: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else
+                          f'status {resp.status}, content-encoding {encoding!r}'))
+    try:
+        plain = _gzip.decompress(resp.body)
+    except Exception as exc:  # noqa: BLE001 — a corrupt encoding is a finding
+        return Verdict(FAIL, f'compression: body does not gunzip: {exc!r}')
+    if plain != b'compress me ' * 200:
+        return Verdict(FAIL,
+                       f'compression: decoded body is {len(plain)} bytes, '
+                       f'expected {len(b"compress me " * 200)}')
+    result = probe.raw_request(
+        'routes-005-cors',
+        _req('OPTIONS', '/json', 'Origin: http://127.0.0.1:8000',
+             'Access-Control-Request-Method: GET'))
+    resp = result.response
+    allow = _header(resp, b'access-control-allow-origin') if resp is not None else None
+    if resp is None or allow is None:
+        return Verdict(FAIL, 'CORS: preflight carried no '
+                       'Access-Control-Allow-Origin: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else f'status {resp.status}'))
+    result = probe.raw_request('routes-005-cache', _get_request('/json'))
+    resp = result.response
+    cached = (_header(resp, b'etag'), _header(resp, b'cache-control')) \
+        if resp is not None else (None, None)
+    if resp is None or not any(cached):
+        return Verdict(FAIL, 'cache: no ETag or Cache-Control header: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else f'status {resp.status}'))
+    result = probe.raw_request(
+        'routes-005-proxy',
+        _req('GET', '/client-ip', 'X-Forwarded-For: 203.0.113.7'))
+    resp = result.response
+    if resp is None or resp.status != 200 or b'203.0.113.7' not in resp.body:
+        return Verdict(FAIL, 'trusted proxy: client IP not rewritten: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else
+                          f'status {resp.status}, body {resp.body[:80]!r}'))
+    result = probe.raw_request(
+        'routes-005-pre', _req('GET', '/pcstatic/hello.txt',
+                               'Accept-Encoding: gzip'))
+    resp = result.response
+    encoding = _header(resp, b'content-encoding') if resp is not None else None
+    if resp is None or resp.status != 200 \
+            or (encoding or b'').lower() != b'gzip':
+        return Verdict(FAIL, 'precompressed static: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else
+                          f'status {resp.status}, content-encoding {encoding!r}'))
+    return Verdict(PASS, 'compression gzip, CORS preflight, cache headers, '
+                         'trusted proxy rewrite, precompressed .gz served')
+
+
 def _lane_001(probe: Probe) -> Verdict:
     """LANE-001 (G4-1): the h1-family lane must negotiate HTTP/1.1.
 
@@ -2470,6 +2642,11 @@ CHECKS: tuple[Check, ...] = (
     Check('LANE-002', 'the h2-family lane negotiates HTTP/2 (ALPN h2 on h2; preface accepted on h2c)', 'High', 'CWE-444', _lane_002, 'h2'),
     Check('BASELINE-001', 'GET / returns 200 with body "ok"', 'High', 'CWE-400', _baseline_001, 'h1'),
     Check('BASELINE-002', 'GET /json returns 200 with JSON {"ok": true}', 'High', 'CWE-400', _baseline_002, 'h1'),
+    Check('ROUTES-001', '/docs and /openapi.json answer 404 (no auto-generated API surface)', 'Medium', 'CWE-200', _routes_001, 'h1'),
+    Check('ROUTES-002', 'deterministic streaming response /stream/{n} returns exactly n bytes', 'Medium', 'CWE-400', _routes_002, 'h1'),
+    Check('ROUTES-003', 'JSON/dataclass and form parsing refuse invalid JSON with 4xx, never 5xx', 'Medium', 'CWE-20', _routes_003, 'h1'),
+    Check('ROUTES-004', 'the error route answers 500 with no traceback in the body', 'Medium', 'CWE-209', _routes_004, 'h1'),
+    Check('ROUTES-005', 'middleware contracts: compression, CORS preflight, cache headers, trusted proxy, precompressed static', 'Medium', 'CWE-400', _routes_005, 'h1'),
     Check('H1-ROBUST-001', 'unknown method FOO answered with 4xx/501 or close', 'Info', 'CWE-755', _h1_robust_001, 'h1', 'High'),
     Check('H1-ROBUST-002', '100 KiB header value answered with 4xx or close', 'Medium', 'CWE-400', _h1_robust_002, 'h1', 'High'),
     Check('H1-ROBUST-003', 'garbage request-line bytes answered with 400 or close', 'Info', 'CWE-755', _h1_robust_003, 'h1', 'High'),

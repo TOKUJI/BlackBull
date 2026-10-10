@@ -70,8 +70,24 @@ fixture pins `minimum_version = TLSv1_2`; ALPN advertises `h2` then
 | `QUERY /search` | `200`, `{"echo": "<request body>"}` | QUERY-method surface with a request body (RFC 10008) |
 | `WS /ws` | WebSocket echo: accept, then echo every message | upgrade handshake and frame conformance: WS-001 |
 | `GET`/`HEAD` `/static/<path>` | file under `tools/security/static/` | path traversal: STATIC-001 |
-| 404 handler | `404`, `{"error": "not found"}` | stable not-found oracle |
+| `POST /items` | `200` echoing the dataclass parsed from the JSON body; invalid JSON → 4xx | JSON→dataclass parsing: ROUTES-003 |
+| `POST /form` | `200`, `{"fields": {...}}` of the form-urlencoded body | form parsing: ROUTES-003 |
+| `GET /stream/{n:int}` | `200`, exactly *n* bytes of `x`, chunked deterministically (capped 1 MiB) | streaming response: ROUTES-002 |
+| `GET /big` | `200`, buffered 2 400-byte `text/plain` body | compression contract: ROUTES-005 |
+| `GET /raise` | `500`, generic body, no traceback | error route: ROUTES-004 |
+| `GET /client-ip` | `200`, `{"client": "<conn.client host>"}` | TrustedProxy rewrite: ROUTES-005 |
+| `GET`/`HEAD` `/pcstatic/<path>` | precompressed root in the private runtime dir (`hello.txt` + `.gz` sibling, generated at startup) | precompressed static: ROUTES-005 |
+| 404 handler | `404`, `{"error": "not found"}` | stable not-found oracle; `/docs` and `/openapi.json` land here: ROUTES-001 |
 | 500 handler | `500`, `{"error": "internal server error"}` | stable server-error oracle |
+
+The default startup middleware set (G4-4) is application-wide:
+`CORS(allow_origins=['http://127.0.0.1:8000'])`, `Compression()`, `Cache()`
+and `TrustedProxy(trusted_proxies=['127.0.0.1/32', '::1/128'])`.  Their
+contracts are asserted by ROUTES-005 (gzip with exact decoded bytes, CORS
+preflight, cache headers, client-IP rewrite from X-Forwarded-For, and the
+precompressed `.gz` sibling).  `ROUTE_TABLE` in `tools/security/fixture_app.py`
+is the declared route table and `tests/unit/test_security_probe.py` asserts
+it matches `app.get_routes()` exactly.
 
 `tools/security/static/` holds the static-check inputs: `hello.txt` (one
 line) is the "inside the root" reference the traversal check contrasts

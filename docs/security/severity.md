@@ -109,6 +109,11 @@ would carry. The convention throughout: a hang or crash is **High**
 
 | Check | Rank if it fails | CWE |
 |---|---|---|
+| ROUTES-001 | Medium (information exposure: an auto API surface appeared) | CWE-200 |
+| ROUTES-002 | Medium (response corruption: streamed length drifted) | CWE-400 |
+| ROUTES-003 | Medium (input validation: the parser answered 5xx) | CWE-20 |
+| ROUTES-004 | Medium (sensitive data exposure: a traceback in the body) | CWE-209 |
+| ROUTES-005 | Medium (misconfiguration: a middleware contract broke) | CWE-400 |
 | LANE-001 | High (availability: the lane did not negotiate its protocol) | CWE-444 |
 | LANE-002 | High (availability: the lane did not negotiate its protocol) | CWE-444 |
 | BASELINE-001 | High (availability: server down or crashed) | CWE-400 |

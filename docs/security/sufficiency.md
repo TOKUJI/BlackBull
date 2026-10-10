@@ -45,6 +45,11 @@ machinery — see the gate). Check IDs are validated against the registry by
 | WebSocket handshake validation (key, version) | WS-001 (RFC 6455 §4.2.2) |
 | Client WebSocket frames must be masked | WS-001 (RFC 6455 §5.1) |
 | Each lane negotiates exactly its protocol (ALPN/preface) | LANE-001, LANE-002 |
+| No auto-generated API surface (/docs, /openapi.json stay 404) | ROUTES-001 |
+| Deterministic streaming responses keep their exact length | ROUTES-002 |
+| JSON→dataclass and form parsing: invalid input is 4xx, never 5xx | ROUTES-003 |
+| Error responses leak no traceback or exception text | ROUTES-004 |
+| Middleware contracts: compression, CORS, cache, trusted proxy, precompressed static | ROUTES-005 |
 | Positive baselines: GET / on HTTP/1.1 and h2 | BASELINE-001, BASELINE-002, H2-BASE-001, H2-BASE-002 |
 | Liveness after every probe | BASELINE-003, per-check canary (G2-2) |
 | gRPC message bounds (RESOURCE_EXHAUSTED on oversize) | Unsupported list: gRPC lanes arrive with G4-3/G4-4 |
