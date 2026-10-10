@@ -42,7 +42,7 @@ _READERS = {
                   'method_token_is_valid', 'field_line', 'field_value',
                   'host_field_value'),
     http2_actor: ('PROHIBITED_TRAILER_FIELDS',),
-    connection_module: ('normalized_fields', 'host_field_value'),
+    connection_module: ('normalized_fields', 'host_field_value', 'media_type'),
     frame_types: ('LOWERCASE_TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     headers_module: ('TCHAR_OCTETS', 'LOWERCASE_TCHAR_OCTETS',
                      'FIELD_VALUE_ALLOWED_OCTETS'),
@@ -50,10 +50,11 @@ _READERS = {
                 'field_value', 'PROHIBITED_TRAILER_FIELDS'),
     client_http1: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     framing_module: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
-    cache_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET'),
+    cache_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET', 'if_none_match_hit',
+                   'list_members'),
     parser: ('COMMON_METHODS', 'COMMON_SCHEMES', 'URI_SCHEME_RE',
              'method_token_is_valid', 'authority_is_valid', 'host_field_value'),
-    router: ('method_token_is_valid',),
+    router: ('method_token_is_valid', 'media_type'),
 }
 
 #: The names the grammar owns.  A reader that assigns one of these has

@@ -21,7 +21,8 @@ from urllib.parse import urlsplit
 from ..connection import Connection
 from ..headers import Headers
 from ..native import NativeResponse
-from ..protocol.field_grammar import FIELD_VALUE_ALLOWED_SET, TCHAR_SET
+from ..protocol.field_grammar import (
+    FIELD_VALUE_ALLOWED_SET, TCHAR_SET, if_none_match_hit, list_members)
 from .utils import as_middleware
 
 #: Narrower than RFC 9110 §15's heuristically cacheable set: caching an error
@@ -146,8 +147,8 @@ class Cache:
             self._store.move_to_end(base_key)
             variants.entries.move_to_end(variant_key)
             age = max(0, int(entry.age()))
-            inm = conn.headers.get(b'if-none-match')
-            if inm and _etag_matches(inm, entry.etag):
+            inm = conn.headers.get_combined(b'if-none-match')
+            if inm and if_none_match_hit(inm, entry.etag):
                 await send(NativeResponse(
                     status=304,
                     header=[(b'etag', entry.etag),
@@ -556,12 +557,10 @@ def _vary_fields(fields: Iterable[tuple[bytes, bytes]]
     for name, value in fields:
         if name.lower() != b'vary':
             continue
-        for token in value.split(b','):
-            token = token.strip().lower()
+        for token in list_members(value):
             if token == b'*':
                 return None
-            if token:
-                names.add(token)
+            names.add(token)
     return tuple(sorted(names))
 
 
@@ -574,21 +573,3 @@ def _response_etag(fields: Iterable[tuple[bytes, bytes]]) -> bytes | None:
     """The response's own ``ETag``, or ``None``."""
     return next((value for name, value in fields if name.lower() == b'etag'),
                 None)
-
-
-def _etag_matches(if_none_match: bytes, etag: bytes) -> bool:
-    """RFC 9110 §13.1.2 — ``If-None-Match`` against one ETag.
-
-    Weak comparison ignores ``W/`` on either side; ``*`` and a list of
-    candidates are both read.
-    """
-    if if_none_match == b'*':
-        return True
-    target = etag[2:] if etag.startswith(b'W/') else etag
-    for candidate in if_none_match.split(b','):
-        candidate = candidate.strip()
-        if candidate.startswith(b'W/'):
-            candidate = candidate[2:]
-        if candidate == target:
-            return True
-    return False

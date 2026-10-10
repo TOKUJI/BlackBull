@@ -24,6 +24,7 @@ _BROTLI_QUALITY = 4
 # eligible responses are served *uncompressed* rather than queued — bounded
 # fall-back instead of unbounded executor queue growth.  ``0`` disables.
 import os as _os  # noqa: PLC0415
+from ..protocol.field_grammar import list_members, media_type
 _MAX_INFLIGHT = max((_os.cpu_count() or 1) * 2, 4)
 
 # Skip compressed/binary media. Do not skip font/ wholesale: TTF, OTF and
@@ -70,8 +71,7 @@ def _detect_codecs(brotli_quality: int = _BROTLI_QUALITY) -> dict[str, Callable[
 
 def _is_compressible_content_type(headers: Headers) -> bool:
     """Return False when the Content-Type signals already-compressed content."""
-    ct = headers.get(b'content-type', b'').split(b';')[0].strip().lower()
-    ct_str = ct.decode('ascii', errors='ignore')
+    ct_str = media_type(headers.get(b'content-type', b'')).decode('ascii', errors='ignore')
     return not any(ct_str.startswith(prefix) for prefix in _SKIP_CONTENT_TYPES)
 
 
@@ -89,7 +89,7 @@ def _merge_vary(headers: list[tuple[bytes, bytes]],
     field_l = field.lower()
     for i, (k, v) in enumerate(headers):
         if k.lower() == b'vary':
-            tokens = [t.strip().lower() for t in v.split(b',')]
+            tokens = list_members(v)
             if b'*' in tokens or field_l in tokens:
                 return
             headers[i] = (k, v + b', ' + field)

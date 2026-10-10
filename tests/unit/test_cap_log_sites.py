@@ -35,6 +35,7 @@ import pytest
 from blackbull.server.http1_actor import HTTP1Actor
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
+from blackbull.server.http1_actor import request_framing
 
 
 def _conn(headers, path: str = '/'):
@@ -270,7 +271,7 @@ async def test_body_timeout_logs(caps_caplog):
 
     conn = _conn([(b'content-length', b'1024')], '/upload')
     recipient = HTTP1Recipient(reader=_SlowReader(), conn=conn,
-                               body_timeout=0.0)
+                               body_timeout=0.0, framing=request_framing(conn.headers))
     recipient._content_length = 1024  # bypass the parser
 
     event = await recipient()
@@ -296,7 +297,7 @@ async def test_body_timeout_no_log_when_data_arrives(caps_caplog):
     # Simple content-length request — one readexactly call, then http.disconnect.
     conn = _conn([(b'content-length', b'5')], '/upload')
     recipient = HTTP1Recipient(reader=_FastReader(), conn=conn,
-                               body_timeout=30.0)
+                               body_timeout=30.0, framing=request_framing(conn.headers))
     recipient._content_length = 5  # bypass parser
 
     event = await recipient()

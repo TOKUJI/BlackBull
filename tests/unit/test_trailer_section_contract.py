@@ -22,6 +22,7 @@ from blackbull.server.http1_actor import BadRequestError, HTTP1Actor
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.recipient import AbstractReader, HTTP1Recipient
 from blackbull.server.sender import AsyncioWriter
+from blackbull.server.http1_actor import request_framing
 
 #: Field lines the header section refuses.
 _BAD_LINES = [
@@ -56,7 +57,7 @@ def _header_refused(line: bytes) -> bool:
 async def _read_chunked(wire: bytes) -> bytes:
     conn = Connection(method='POST', path='/', raw_path=b'/', type='http',
                       headers=Headers([(b'transfer-encoding', b'chunked')]))
-    recipient = HTTP1Recipient(_Wire(wire), conn, chunk_size=64 * 1024)
+    recipient = HTTP1Recipient(_Wire(wire), conn, chunk_size=64 * 1024, framing=request_framing(conn.headers))
     body = bytearray()
     while True:
         event = await recipient()

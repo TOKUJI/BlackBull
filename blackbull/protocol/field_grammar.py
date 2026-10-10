@@ -112,6 +112,32 @@ def normalized_fields(pairs: Iterable) -> list[tuple[bytes, bytes]]:
     return out
 
 
+def media_type(value: bytes) -> bytes:
+    """Return the lowercase ``type/subtype`` of a media type or media range,
+    without its parameters (RFC 9110 §8.3.1); ``b''`` for an empty value."""
+    return value.split(b';', 1)[0].strip(b' \t').lower()
+
+
+def list_members(value: bytes) -> list[bytes]:
+    """Return the lowercase members of a comma-separated list value without
+    OWS, empty members dropped (RFC 9110 §5.6.1).  Not for case-sensitive
+    members such as entity-tags."""
+    return [m for m in (p.strip(b' \t').lower() for p in value.split(b',')) if m]
+
+
+def if_none_match_hit(value: bytes, etag: bytes) -> bool:
+    """Whether an If-None-Match *value* matches *etag* by weak comparison:
+    ``*``, or any listed entity-tag with ``W/`` ignored (RFC 9110 §13.1.2)."""
+    if value == b'*':
+        return True
+    target = etag[2:] if etag.startswith(b'W/') else etag
+    for tag in value.split(b','):
+        tag = tag.strip(b' \t')
+        if (tag[2:] if tag.startswith(b'W/') else tag) == target:
+            return True
+    return False
+
+
 #: RFC 9110 §6.5.1 — fields a trailer section may not carry: framing, routing,
 #: authentication, request modifiers, response control and content handling.
 PROHIBITED_TRAILER_FIELDS = frozenset((

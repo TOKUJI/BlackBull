@@ -12,6 +12,7 @@ import logging
 import os
 
 from ..connection import Connection
+from ..protocol.field_grammar import media_type
 from ..native import NativeResponse
 from ..request import stream_body, ClientDisconnected
 from . import compression
@@ -259,10 +260,11 @@ def _resolve_content_type(raw: bytes) -> bytes:
 
 
 def _is_grpc_content_type(value: bytes) -> bool:
-    """Exactly ``application/grpc`` or ``application/grpc+<subtype>``: the one
-    grammar for requests the server serves and replies ``blackbull.testing.grpc``
-    accepts."""
-    return value == _GRPC_CONTENT_TYPE or value.startswith(_GRPC_SUBTYPE_PREFIX)
+    """Whether *value*'s media type is ``application/grpc`` or
+    ``application/grpc+<subtype>``, in any case: the one grammar for requests
+    dispatched to gRPC and replies ``blackbull.testing.grpc`` accepts."""
+    mt = media_type(value)
+    return mt == _GRPC_CONTENT_TYPE or mt.startswith(_GRPC_SUBTYPE_PREFIX)
 
 
 def _normalized_base64(value: bytes) -> bytes | None:

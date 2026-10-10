@@ -25,6 +25,7 @@ from blackbull.server.recipient import (
     AbstractReader, HTTP1Recipient, ReadLimitExceeded, _parse_chunk_size,
 )
 from blackbull.server.sender import AbstractWriter
+from blackbull.server.http1_actor import request_framing
 
 
 def _conn(headers, path: str = '/'):
@@ -83,8 +84,7 @@ def _chunked_recipient(wire: bytes) -> HTTP1Recipient:
     return HTTP1Recipient(
         _BufReader(wire),
         _conn([(b'transfer-encoding', b'chunked')]),
-        chunk_size=64 * 1024,
-    )
+        chunk_size=64 * 1024,framing=request_framing(_conn([(b'transfer-encoding', b'chunked')]).headers))
 
 
 async def _drain_body(recipient: HTTP1Recipient) -> bytes:
@@ -454,8 +454,7 @@ class TestChunkLineLengthBound:
         recipient = HTTP1Recipient(
             _OverrunReader(),
             _conn([(b'transfer-encoding', b'chunked')]),
-            chunk_size=64 * 1024,
-        )
+            chunk_size=64 * 1024,framing=request_framing(_conn([(b'transfer-encoding', b'chunked')]).headers))
         with pytest.raises(HTTPException) as exc_info:
             await recipient()
         assert exc_info.value.status == HTTPStatus.BAD_REQUEST
@@ -479,8 +478,7 @@ class TestChunkLineLengthBound:
         recipient = HTTP1Recipient(
             reader,
             _conn([(b'transfer-encoding', b'chunked')]),
-            chunk_size=64 * 1024,
-        )
+            chunk_size=64 * 1024,framing=request_framing(_conn([(b'transfer-encoding', b'chunked')]).headers))
 
         with pytest.raises(HTTPException) as exc_info:
             await recipient()

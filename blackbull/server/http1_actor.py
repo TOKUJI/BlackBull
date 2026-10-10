@@ -235,6 +235,19 @@ def _declares_content(headers: 'Headers') -> bool:
     return bool(cl) and bool(cl.lstrip(b'0'))
 
 
+def request_framing(headers: Headers) -> tuple[int | None, bool]:
+    """Return the body framing a request head declares: ``(Content-Length or
+    None, chunked)``.
+
+    Raises [`BadRequestError`][] for ambiguous framing and
+    ``NotImplementedFramingError`` for a coding other than bare chunked.
+    """
+    cls = headers.getlist(b'content-length')
+    tes = headers.getlist(b'transfer-encoding')
+    declared = _validate_message_framing(cls, tes)
+    return (declared if cls else None, bool(tes))
+
+
 def _validate_message_framing(cls: list | None, tes: list | None) -> int:
     """Validate framing once and return declared Content-Length, or zero.
 
@@ -878,13 +891,8 @@ class HTTP1Actor(Actor):
 
         # RFC 9112 §6 — framing rejected before any body byte is read.  ``run``
         # weighs the returned length against ``BB_MAX_BODY_SIZE``.
-        content_length = index.get(b'content-length')
-        transfer_encoding = index.get(b'transfer-encoding')
-        self._declared_body_len = _validate_message_framing(
-            content_length, transfer_encoding)
-        self._request_framing = (
-            self._declared_body_len if content_length else None,
-            transfer_encoding is not None)
+        self._request_framing = request_framing(headers)
+        self._declared_body_len = self._request_framing[0] or 0
         expect = index.get(b'expect')
         self._expects_continue = (
             expect is not None and expect[0][1].lower() == b'100-continue')

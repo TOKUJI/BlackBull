@@ -18,6 +18,7 @@ from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.request import ClientDisconnected
 from blackbull.server.recipient import AbstractReader, HTTP1Recipient
+from blackbull.server.http1_actor import request_framing
 
 
 class _Source(AbstractReader):
@@ -68,7 +69,7 @@ async def _drain(recipient: HTTP1Recipient) -> list[bytes]:
 async def test_reads_follow_the_transport():
     """A fast peer earns large up-to-n slices; nothing waits on the cap."""
     src = _Source()
-    r = HTTP1Recipient(src, _conn(100_000), chunk_max=512 * 1024)
+    r = HTTP1Recipient(src, _conn(100_000), chunk_max=512 * 1024, framing=request_framing(_conn(100_000).headers))
     src.feed(b'a' * 64_000)            # first arrival: 64 KiB resident
     assert await r.next_chunk() == b'a' * 64_000
     src.feed(b'b' * 36_000)            # the rest arrives in one go
@@ -79,7 +80,7 @@ async def test_reads_follow_the_transport():
 async def test_slow_peer_gets_small_slices():
     """A trickle never blocks on the cap — each read returns what arrived."""
     src = _Source()
-    r = HTTP1Recipient(src, _conn(8), chunk_max=8)
+    r = HTTP1Recipient(src, _conn(8), chunk_max=8, framing=request_framing(_conn(8).headers))
     src.feed(b'ab')
     assert await r.next_chunk() == b'ab'
     src.feed(b'c')
@@ -93,7 +94,7 @@ async def test_slow_peer_gets_small_slices():
 async def test_read_asks_at_most_the_cap():
     """The per-read ask is min(remaining, cap) — never more."""
     src = _Source(b'x' * 100)
-    r = HTTP1Recipient(src, _conn(100), chunk_max=16)
+    r = HTTP1Recipient(src, _conn(100), chunk_max=16, framing=request_framing(_conn(100).headers))
     await _drain(r)
     asked = [n for n, _ in src.reads]
     assert asked == [16, 16, 16, 16, 16, 16, 4]
@@ -103,7 +104,7 @@ async def test_read_asks_at_most_the_cap():
 async def test_body_counted_by_returned_not_asked():
     """A short read decrements the body by what arrived, not what was asked."""
     src = _Source(b'abc')
-    r = HTTP1Recipient(src, _conn(10), chunk_max=8)
+    r = HTTP1Recipient(src, _conn(10), chunk_max=8, framing=request_framing(_conn(10).headers))
     assert await r.next_chunk() == b'abc'
     assert src.reads[0] == (8, 3)      # asked 8 (capped), got 3
     with pytest.raises(ClientDisconnected):
@@ -114,7 +115,7 @@ async def test_body_counted_by_returned_not_asked():
 async def test_truncated_body_is_not_a_complete_body():
     """EOF before the declared length is a truncated upload, never done."""
     src = _Source(b'abc')
-    r = HTTP1Recipient(src, _conn(5), chunk_max=8)
+    r = HTTP1Recipient(src, _conn(5), chunk_max=8, framing=request_framing(_conn(5).headers))
     assert await r.next_chunk() == b'abc'
     with pytest.raises(ClientDisconnected):
         await r.next_chunk()
@@ -124,14 +125,14 @@ async def test_truncated_body_is_not_a_complete_body():
 async def test_zero_cap_falls_back_to_one_byte():
     """A misconfigured 0 cap must not turn every read into EOF (b'')."""
     src = _Source(b'hello')
-    r = HTTP1Recipient(src, _conn(5), chunk_max=0)
+    r = HTTP1Recipient(src, _conn(5), chunk_max=0, framing=request_framing(_conn(5).headers))
     assert b''.join(await _drain(r)) == b'hello'
 
 
 @pytest.mark.asyncio
 async def test_cap_larger_than_body_reads_it_in_one():
     src = _Source(b'0123456789')
-    r = HTTP1Recipient(src, _conn(10), chunk_max=512 * 1024)
+    r = HTTP1Recipient(src, _conn(10), chunk_max=512 * 1024, framing=request_framing(_conn(10).headers))
     assert await _drain(r) == [b'0123456789']
 
 
@@ -188,7 +189,7 @@ async def test_zero_length_read_ends_the_body_whatever_its_truthiness():
     as "more to come" forever.  Zero bytes means the peer is gone, full stop.
     """
     src = _ZeroLengthSource()
-    r = HTTP1Recipient(src, _conn(10), chunk_max=8)
+    r = HTTP1Recipient(src, _conn(10), chunk_max=8, framing=request_framing(_conn(10).headers))
     with pytest.raises(ClientDisconnected):
         await r.next_chunk()
     assert src.calls == 1, 'the loop read again after a zero-length read'
@@ -198,8 +199,8 @@ async def test_zero_length_read_ends_the_body_whatever_its_truthiness():
 async def test_rebound_recipient_reads_next_body_from_scratch():
     """There is no per-request read-size state to leak into the next request."""
     src = _Source(b'first')
-    r = HTTP1Recipient(src, _conn(5), chunk_max=8)
+    r = HTTP1Recipient(src, _conn(5), chunk_max=8, framing=request_framing(_conn(5).headers))
     assert await r.next_chunk() == b'first'
     src.feed(b'second!')
-    r.bind(_conn(7))
+    r.bind(_conn(7), framing=request_framing(_conn(7).headers))
     assert await _drain(r) == [b'second!']

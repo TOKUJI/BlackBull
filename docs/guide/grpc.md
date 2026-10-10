@@ -303,6 +303,9 @@ users will actually use.
 
 - **All four RPC shapes are served**: unary, server-streaming,
   client-streaming, and bidirectional (see above).
+- A request reaches gRPC when its media type is `application/grpc` or
+  `application/grpc+<subtype>`, in any case and with any parameters.  Any other
+  `content-type`, `application/grpc-web` included, goes to your HTTP routes.
 - `BB_GRPC_MAX_MESSAGE_SIZE` (default 4 MiB) bounds each decoded request and
   response message. Incoming encoded messages also have a 16 MiB safety cap.
   Declared oversize is rejected at the prefix. Unary and server-streaming

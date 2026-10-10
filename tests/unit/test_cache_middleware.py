@@ -16,11 +16,11 @@ from unittest.mock import patch
 import pytest
 
 from blackbull.native import NativeResponse
+from blackbull.protocol.field_grammar import if_none_match_hit
 from blackbull.middleware.cache import (
     Cache,
     _Capture,
     _directives,
-    _etag_matches,
     _must_not_store,
     _names,
     _parse_directives,
@@ -968,15 +968,15 @@ class TestHeaderHelpers:
         pytest.param(b'"x", "y", "z"', b'"y"', id='multiple-candidates'),
     ])
     def test_etag_matches_exact(self, candidate, etag):
-        assert _etag_matches(candidate, etag)
+        assert if_none_match_hit(candidate, etag)
 
     def test_etag_matches_weak_vs_strong(self):
         """Weak comparison: W/"abc" matches "abc" (and itself)."""
-        assert _etag_matches(b'W/"abc"', b'"abc"')
-        assert _etag_matches(b'"abc"', b'W/"abc"')
+        assert if_none_match_hit(b'W/"abc"', b'"abc"')
+        assert if_none_match_hit(b'"abc"', b'W/"abc"')
 
     def test_etag_no_match(self):
-        assert not _etag_matches(b'"abc"', b'"def"')
+        assert not if_none_match_hit(b'"abc"', b'"def"')
 
 
 # ---------------------------------------------------------------------------

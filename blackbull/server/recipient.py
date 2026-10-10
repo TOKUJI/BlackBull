@@ -851,7 +851,7 @@ class HTTP1Recipient(BaseRecipient):
                  max_body: int | None = None,
                  min_rate: float | None = None,
                  min_rate_grace: float | None = None,
-                 framing: tuple[int | None, bool] | None = None):
+                 framing: tuple[int | None, bool]):
         super().__init__(reader)
         # ``chunk_size`` slices a chunked body, ``chunk_max`` bounds one
         # transport-paced Content-Length read; see docs/reference/env-vars.md.
@@ -886,11 +886,13 @@ class HTTP1Recipient(BaseRecipient):
         self.bind(conn, framing)
 
     def bind(self, conn: Connection,
-             framing: tuple[int | None, bool] | None = None) -> 'HTTP1Recipient':
-        """Point this recipient at *conn*, the next request on the connection.
+             framing: tuple[int | None, bool]) -> 'HTTP1Recipient':
+        """Point this recipient at *conn*, the next request on the connection,
+        whose body framing is *framing*: ``(Content-Length or None, chunked)``
+        as ``http1_actor.request_framing`` returned it.
 
         The reader, chunk size, and deadline are properties of the connection
-        and survive; the framing state is re-derived from the new head.  One
+        and survive; the per-request state starts over.  One
         recipient per connection is safe only because HTTP/1.1 dispatches one
         request at a time — **not** for HTTP/2, whose streams are concurrent.
 
@@ -900,16 +902,7 @@ class HTTP1Recipient(BaseRecipient):
         """
         # Do not retain conn: it binds this recipient as _receive.
         # Keep only the path for diagnostics to avoid a request reference cycle.
-        headers = conn.headers
         self._req_path: str | None = conn.path
-        if framing is None:
-            te = headers.get(b'transfer-encoding', b'').lower()
-            cl = headers.get(b'content-length', b'')
-            if te and te != b'chunked':
-                raise NotImplementedError(
-                    f'Transfer-Encoding "{te.decode()}" is not supported.'
-                )
-            framing = (int(cl) if cl else None, te == b'chunked')
         self._content_length, self._chunked = framing
         # Per request, not per connection: a rebound recipient that inherited a
         # half-read chunk would splice request N's body into request N+1.
@@ -2343,7 +2336,7 @@ class RecipientFactory:
     def http1(reader, conn: Connection, *,
               body_timeout: float = 0.0,
               deadline: ConnectionDeadline | None = None,
-              framing: tuple[int | None, bool] | None = None) -> HTTP1Recipient:
+              framing: tuple[int | None, bool]) -> HTTP1Recipient:
         if not isinstance(reader, AbstractReader):
             reader = AsyncioReader(reader)
         return HTTP1Recipient(reader, conn, body_timeout=body_timeout,

@@ -39,7 +39,7 @@ def __getattr__(name):
 
 import logging
 
-from .protocol.field_grammar import method_token_is_valid
+from .protocol.field_grammar import media_type, method_token_is_valid
 logger = logging.getLogger(__name__)
 
 
@@ -1298,10 +1298,7 @@ def request_media_type(conn) -> str:
     """Return the request's media type (``Content-Type`` sans parameters),
     lowercased; ``''`` when no Content-Type is present.
     """
-    ct = conn.headers.get(b'content-type', b'')
-    if not ct:
-        return ''
-    return ct.split(b';', 1)[0].strip().lower().decode('latin-1')
+    return media_type(conn.headers.get(b'content-type', b'')).decode('latin-1')
 
 
 class _LookupCache:
