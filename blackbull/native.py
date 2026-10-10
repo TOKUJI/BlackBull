@@ -6,16 +6,17 @@ dictionaries only at conversion boundaries.
 """
 from __future__ import annotations
 
-from .headers import _minimal_response_headers
+from .headers import _MinimalResponseHeaders, _as_response_fields, _owned_response_fields
 
 
 class _HeaderView:
-    """Zero-copy view over a [`NativeResponse`][] header list.
+    """Zero-copy view over a [`NativeResponse`][] header list, whose names are
+    lowercase tchar and values free of CTL.
 
-    Mutations (``append``) are visible to anything reading the response
-    afterwards (the sender, ``to_asgi``).  Models the DX of
-    [`blackbull.headers.Headers`][blackbull.headers.Headers] without a copy — lookups are
-    case-insensitive (RFC 9110 §5.1), matching ``Headers``.
+    ``append`` validates and lowercases what it adds, so the list keeps that
+    contract; lookups take a name in any case (RFC 9110 §5.1).  Mutations are
+    visible to anything reading the response afterwards (the sender,
+    ``to_asgi``).
     """
 
     __slots__ = ('_items',)
@@ -30,20 +31,19 @@ class _HeaderView:
         return len(self._items)
 
     def __contains__(self, name: bytes) -> bool:
-        lowered = name.lower()
-        return any(k == name or k.lower() == lowered for k, _ in self._items)
+        name = name.lower()
+        return any(k == name for k, _ in self._items)
 
     def get(self, name: bytes, default: bytes = b'') -> bytes:
-        lowered = name.lower()
+        name = name.lower()
         for k, v in self._items:
-            if k == name or k.lower() == lowered:
+            if k == name:
                 return v
         return default
 
     def getlist(self, name: bytes) -> list[tuple[bytes, bytes]]:
-        lowered = name.lower()
-        return [(k, v) for k, v in self._items
-                if k == name or k.lower() == lowered]
+        name = name.lower()
+        return [(k, v) for k, v in self._items if k == name]
 
     def append(self, name_or_pairs, value: bytes | None = None) -> None:
         if value is None:
@@ -53,11 +53,11 @@ class _HeaderView:
             # so a 2-tuple of (bytes, bytes) is treated as one pair.
             if (isinstance(name_or_pairs, tuple) and len(name_or_pairs) == 2
                     and isinstance(name_or_pairs[0], (bytes, str))):
-                self._items.append(name_or_pairs)
-            else:
-                self._items.extend(name_or_pairs)
+                name_or_pairs = (name_or_pairs,)
+            for name, field_value in name_or_pairs:
+                self._items.add(name, field_value)
         else:
-            self._items.append((name_or_pairs, value))
+            self._items.add(name_or_pairs, value)
 
 
 class NativeWSMessage:
@@ -180,10 +180,11 @@ class NativeResponse:
                  push: str | None = None) -> None:
         self.status = status
         # Keep constructor normalization synchronized with the header setter.
-        self._header = header._items if isinstance(header, _HeaderView) else header
+        self._header = (header._items if isinstance(header, _HeaderView)
+                        else None if header is None else _as_response_fields(header))
         self._body = body
         self.more_body = more_body
-        self.trailers = trailers
+        self.trailers = None if trailers is None else _as_response_fields(trailers)
         self.more_trailers = more_trailers
         self.expects_trailers = expects_trailers
         # Sendfile form: the response body *is* this file, and the sender is
@@ -205,7 +206,7 @@ class NativeResponse:
         """Header plus terminal body — a whole response in one object."""
         self = cls.__new__(cls)
         self.status = status
-        self._header = header
+        self._header = _as_response_fields(header)
         self._body = body
         self.more_body = False
         self.trailers = None
@@ -228,10 +229,10 @@ class NativeResponse:
         """
         self = cls.__new__(cls)
         self.status = status
-        self._header = header
+        self._header = _as_response_fields(header)
         self._body = body
         self.more_body = True
-        self.trailers = trailers
+        self.trailers = _as_response_fields(trailers)
         self.more_trailers = False
         self.expects_trailers = True
         self._extension = None
@@ -285,7 +286,7 @@ class NativeResponse:
         elif isinstance(value, _HeaderView):
             self._header = value._items
         else:
-            self._header = value
+            self._header = _as_response_fields(value)
 
     # --- body: plain bytes; DX via helper properties -----------------------
     @property
@@ -335,9 +336,9 @@ class NativeResponse:
         # start/body would be too late.  Each is a copy, so an append on the
         # live response (CORS) cannot reach an event the cache middleware
         # stored.
-        header = (_minimal_response_headers(self._header)
+        header = (_owned_response_fields(self._header)
                   if self._header is not None else None)
-        trailers = (_minimal_response_headers(self.trailers)
+        trailers = (_owned_response_fields(self.trailers)
                     if self.trailers is not None else None)
 
         events: list[dict] = []

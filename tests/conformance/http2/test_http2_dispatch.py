@@ -637,8 +637,7 @@ class TestHTTP2ServerPush:
             await send({
                 'type': 'http.response.push',
                 'path': '/style.css',
-                'headers': [(b':method', b'GET'), (b':path', b'/style.css'),
-                            (b':scheme', b'https'), (b':authority', b'example.com')],
+                'headers': [(b'accept', b'text/css')],
             })
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b''})
@@ -664,8 +663,7 @@ class TestHTTP2ServerPush:
             await send({
                 'type': 'http.response.push',
                 'path': '/favicon.ico',
-                'headers': [(b':method', b'GET'), (b':path', b'/favicon.ico'),
-                            (b':scheme', b'https'), (b':authority', b'example.com')],
+                'headers': [(b'accept', b'image/x-icon')],
             })
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b''})

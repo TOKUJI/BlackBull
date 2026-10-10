@@ -51,6 +51,12 @@ refuses one that cannot meet it (a bare 400, or close 1002 for WebSocket).
 Code past dispatch relies on it and does not normalise again; code that
 rewrites a field after construction keeps it.
 
+A `NativeResponse` keeps the same field contract from the moment it exists:
+construction, header assignment and `header.append` check and lowercase what
+they take, so middleware and senders read names exactly and check nothing
+again. Its header list is a `_MinimalResponseHeaders`; change it only through
+`add` and `discard`, which keep the located framing fields true.
+
 A connection owns one read buffer. `BufferReader` owns receive policy,
 `ConnectionProtocol` performs transport callbacks and pauses, and
 `ReadBuffer` owns bytes and cursors. Detection must not consume the prefix;

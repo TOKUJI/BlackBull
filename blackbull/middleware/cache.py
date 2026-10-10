@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 from ..connection import Connection
 from ..headers import Headers
+from ..headers import _owned_response_fields
 from ..native import NativeResponse
 from ..protocol.field_grammar import (
     FIELD_VALUE_ALLOWED_SET, TCHAR_SET, if_none_match_hit, list_members)
@@ -58,10 +59,9 @@ class _StoredResponse(NamedTuple):
 
     def replay(self, age: int) -> NativeResponse:
         """A private copy carrying its *current* age (RFC 9111 §4.2.3)."""
-        header = [(name, value) for name, value in self.header
-                  if name.lower() != b'age']
-        header.append((b'age', str(age).encode()))
-        return NativeResponse(status=self.status, header=header, body=self.body)
+        header = self.header.copy()
+        header.add(b'age', str(age).encode())
+        return NativeResponse.complete(self.status, header, self.body)
 
     def expired(self, now: float | None = None) -> bool:
         return (now if now is not None else time.monotonic()) >= self.expires_at
@@ -173,7 +173,7 @@ class Cache:
             return False
         # A field nobody can read could be stating one of those.
         return all(_readable(value) for name, value in headers
-                   if name.lower() == b'cache-control')
+                   if name == b'cache-control')
 
     def _remember(self, base_key: tuple, req_headers: Headers,
                   vary_fields: tuple[bytes, ...], status: int,
@@ -193,8 +193,10 @@ class Cache:
             bucket.vary_fields = vary_fields
             bucket.entries.clear()
         key = _variant_key(vary_fields, req_headers)
+        stored = _owned_response_fields(headers)
+        stored[:] = [field for field in stored if field[0] != b'age']
         bucket.entries[key] = _StoredResponse(
-            status=status, header=list(headers), body=body, etag=etag,
+            status=status, header=stored, body=body, etag=etag,
             expires_at=now + ttl, stored_at=now)
         bucket.entries.move_to_end(key)
         self._store.move_to_end(base_key)
@@ -438,7 +440,7 @@ def _directives(fields: Iterable[tuple[bytes, bytes]]
     act on a partly-read field checks [`_readable`][] itself.
     """
     for name, value in fields:
-        if name.lower() == b'cache-control':
+        if name == b'cache-control':
             yield from _parse_directives(value) or ()
 
 
@@ -472,7 +474,7 @@ def _incoming_age(fields: Iterable[tuple[bytes, bytes]]) -> int:
     evidence of staleness.
     """
     for name, value in fields:
-        if name.lower() != b'age':
+        if name != b'age':
             continue
         try:
             return max(0, min(int(value.strip()), _MAX_DELTA_SECONDS))
@@ -503,12 +505,12 @@ def _expires_in(fields: Iterable[tuple[bytes, bytes]]) -> int | None:
     reading of a repeated field, and this is consulted only when neither
     ``s-maxage`` nor ``max-age`` stated a lifetime.
     """
-    expires = [_date_seconds(v) for n, v in fields if n.lower() == b'expires']
+    expires = [_date_seconds(v) for n, v in fields if n == b'expires']
     if not expires:
         return None
     if any(when is None for when in expires):
         return 0
-    dates = [_date_seconds(v) for n, v in fields if n.lower() == b'date']
+    dates = [_date_seconds(v) for n, v in fields if n == b'date']
     base = max([when for when in dates if when is not None], default=time.time())
     return max(0, min(int(min(expires) - base), _MAX_DELTA_SECONDS))
 
@@ -555,7 +557,7 @@ def _vary_fields(fields: Iterable[tuple[bytes, bytes]]
     """
     names: set[bytes] = set()
     for name, value in fields:
-        if name.lower() != b'vary':
+        if name != b'vary':
             continue
         for token in list_members(value):
             if token == b'*':
@@ -571,5 +573,5 @@ def _variant_key(vary_fields: tuple[bytes, ...], headers: Headers) -> tuple:
 
 def _response_etag(fields: Iterable[tuple[bytes, bytes]]) -> bytes | None:
     """The response's own ``ETag``, or ``None``."""
-    return next((value for name, value in fields if name.lower() == b'etag'),
+    return next((value for name, value in fields if name == b'etag'),
                 None)

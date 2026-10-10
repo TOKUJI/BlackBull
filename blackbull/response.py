@@ -6,17 +6,17 @@ import logging
 from collections.abc import AsyncIterator, Mapping
 from http import HTTPStatus
 
-from .headers import _validate_response_header_field
 from .native import NativeResponse, _native_from_asgi
 
 logger = logging.getLogger(__name__)
 
 
 def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
-    """Normalize a Mapping or pair iterable to validated bytes header pairs.
+    """Return a Mapping or pair iterable as ``(bytes, bytes)`` pairs, in order.
 
-    str names/values must encode as ASCII; non-ASCII raises UnicodeEncodeError.
-    Invalid shapes or value types raise TypeError at construction.
+    str names/values must encode as ASCII (else UnicodeEncodeError); a bad
+    shape raises TypeError.  The field grammar is checked when a
+    NativeResponse is built from the pairs, not here.
     """
     if not headers:
         return []
@@ -42,13 +42,11 @@ def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
             raise TypeError(
                 'header name and value must be str or bytes; got '
                 f'({type(k).__name__}, {type(v).__name__})')
-        normalized = (bytes(k), bytes(v))
-        _validate_response_header_field(*normalized)
-        out.append(normalized)
+        out.append((bytes(k), bytes(v)))
     return out
 
 
-#: Validated ``content-type`` pairs by the ``str`` they came from; bounded,
+#: ``content-type`` pairs by the ``str`` they came from; bounded,
 #: since a content type is almost always a constant of the application.
 _CONTENT_TYPE_PAIRS: dict[str, tuple[bytes, bytes]] = {}
 _CONTENT_TYPE_PAIRS_MAX = 64
@@ -64,11 +62,9 @@ def _content_type_pair(content_type) -> tuple[bytes, bytes]:
 
 
 async def _emit_response(send, body: bytes, status, headers) -> None:
-    """Send one complete NativeResponse with normalized integer status.
-
-    Copy headers defensively; callers may supply an iterable of bytes pairs.
-    """
-    await send(NativeResponse.complete(int(status), list(headers), body))
+    """Send one complete NativeResponse with an integer status; *headers* is
+    any iterable of pairs, copied and checked as the NativeResponse is built."""
+    await send(NativeResponse.complete(int(status), headers, body))
 
 
 class Response:
@@ -111,8 +107,7 @@ class Response:
         [`NativeResponse.to_asgi`][NativeResponse.to_asgi] (the boundary conversion); streaming
         response types drive themselves and are not converted here.
         """
-        return NativeResponse.complete(int(self.status), list(self.headers),
-                                       self.body)
+        return NativeResponse.complete(int(self.status), self.headers, self.body)
 
 
 class JSONResponse(Response):
@@ -140,12 +135,11 @@ class RedirectResponse(Response):
 
 def cookie_header(name: str, value: str, path: str = '/',
                   http_only: bool = True) -> tuple[bytes, bytes]:
-    """Build a ``set-cookie`` header tuple suitable for inclusion in response headers."""
+    """Build a ``set-cookie`` header tuple for response headers; checked, like
+    any field, when the NativeResponse carrying it is built."""
     flags = '; HttpOnly' if http_only else ''
-    field = (b'set-cookie',
-             f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
-    _validate_response_header_field(*field)
-    return field
+    return (b'set-cookie',
+            f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
 
 
 class StreamingResponse:

@@ -959,7 +959,6 @@ class TestHeaderHelpers:
 
     def test_read_etag(self):
         assert _response_etag([(b'etag', b'"abc"')]) == b'"abc"'
-        assert _response_etag([(b'ETag', b'"abc"')]) == b'"abc"'
         assert _response_etag([]) is None
 
     @pytest.mark.parametrize('candidate,etag', [

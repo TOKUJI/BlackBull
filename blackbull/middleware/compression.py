@@ -9,7 +9,7 @@ import gzip
 import threading
 from collections.abc import Callable
 from ..connection import Connection
-from ..headers import Headers
+from ..headers import _MinimalResponseHeaders
 from ..native import NativeResponse
 from ..protocol.framing import is_informational
 from ..server.cap_log import log_cap_hit
@@ -69,13 +69,15 @@ def _detect_codecs(brotli_quality: int = _BROTLI_QUALITY) -> dict[str, Callable[
     return available
 
 
-def _is_compressible_content_type(headers: Headers) -> bool:
-    """Return False when the Content-Type signals already-compressed content."""
-    ct_str = media_type(headers.get(b'content-type', b'')).decode('ascii', errors='ignore')
+def _is_compressible_content_type(fields: list[tuple[bytes, bytes]]) -> bool:
+    """Return False when the Content-Type in response *fields* (lowercase
+    names) signals already-compressed content."""
+    ct = next((value for name, value in fields if name == b'content-type'), b'')
+    ct_str = media_type(ct).decode('ascii', errors='ignore')
     return not any(ct_str.startswith(prefix) for prefix in _SKIP_CONTENT_TYPES)
 
 
-def _merge_vary(headers: list[tuple[bytes, bytes]],
+def _merge_vary(headers: _MinimalResponseHeaders,
                 field: bytes = b'Accept-Encoding') -> None:
     """Ensure the response ``Vary`` header lists *field* (RFC 9110 §12.5.5).
 
@@ -88,16 +90,16 @@ def _merge_vary(headers: list[tuple[bytes, bytes]],
     """
     field_l = field.lower()
     for i, (k, v) in enumerate(headers):
-        if k.lower() == b'vary':
+        if k == b'vary':
             tokens = list_members(v)
             if b'*' in tokens or field_l in tokens:
                 return
             headers[i] = (k, v + b', ' + field)
             return
-    headers.append((b'vary', field))
+    headers.add(b'vary', field)
 
 
-def _stamp_vary_if_compressible(header: list[tuple[bytes, bytes]]) -> bool:
+def _stamp_vary_if_compressible(header: _MinimalResponseHeaders) -> bool:
     """Whether *header* describes a body worth compressing; stamps ``Vary``.
 
     The decision point shared by every native exit: a compressible
@@ -107,9 +109,9 @@ def _stamp_vary_if_compressible(header: list[tuple[bytes, bytes]]) -> bool:
     stamped here rather than only where compression succeeds.  Mutates
     *header* in place (zero-copy; the caller owns the list).
     """
-    if not _is_compressible_content_type(Headers(header)):
+    if not _is_compressible_content_type(header):
         return False
-    if any(k.lower() == b'content-encoding' for k, _ in header):
+    if any(k == b'content-encoding' for k, _ in header):
         return False
     _merge_vary(header)
     return True
@@ -259,9 +261,9 @@ class Compression:
             if (isinstance(event, NativeResponse)
                     and (event._extension is None or event.push is None)):
                 if event._header is not None:
-                    headers = Headers(event._header)
-                    if _is_compressible_content_type(headers) and \
-                            not headers.get(b'content-encoding'):
+                    header = event._header
+                    if _is_compressible_content_type(header) and not any(
+                            k == b'content-encoding' for k, _ in header):
                         _merge_vary(event._header)
             await send(event)
         return vary_send
@@ -315,15 +317,12 @@ class Compression:
                     # upstream content-length and replace it with the
                     # post-compression length (keeps H1 keepalive framing and
                     # strict H2 clients correct).
-                    existing = [(k, v) for k, v in header
-                                if k.lower() != b'content-length']
-                    existing.append(
-                        (b'content-encoding', codec_name.encode()))
-                    existing.append(
-                        (b'content-length', str(len(compressed)).encode()))
+                    existing = header.copy()
+                    existing.discard(b'content-length')
+                    existing.add(b'content-encoding', codec_name.encode())
+                    existing.add(b'content-length', str(len(compressed)).encode())
                     _merge_vary(existing)
-                    await send(NativeResponse(status=status, header=existing,
-                                              body=compressed))
+                    await send(NativeResponse.complete(status, existing, compressed))
                     return
             # Uncompressed forward: pre-encoded / non-compressible / too-small
             # / executor-at-cap.  Vary is already stamped on *header* when this

@@ -25,49 +25,90 @@ def _validate_response_header_field(name: bytes, value: bytes) -> None:
 
 
 class _MinimalResponseHeaders(list):
-    """A response field section as a sender owns it: every field validated,
-    every name lowercase, and the framing fields located.  Nothing is indexed
-    — the senders need only these three facts, not a [`Headers`][]."""
+    """A response field section that keeps its contract: every name lowercase
+    tchar, every value free of CTL, and the framing fields located —
+    ``content_length`` (the Content-Length fields, or ``None``),
+    ``transfer_encoding`` and ``date`` (whether present).
+
+    Build one with [`_as_response_fields`][]; add or remove fields only with
+    [`add`][] and [`discard`][], which keep the framing facts true.  A value
+    replaced in place must still keep the contract.
+    """
 
     __slots__ = ('content_length', 'transfer_encoding', 'date')
 
+    def add(self, name: bytes, value: bytes) -> None:
+        """Append one field, validated, with its name lowercased."""
+        _validate_response_header_field(name, value)
+        field = (name.lower(), value)
+        self.append(field)
+        self._locate(field)
 
-def _minimal_response_headers(fields: Iterable) -> _MinimalResponseHeaders:
-    """Copy *fields* into the form a sender writes, before its first write.
+    def discard(self, name: bytes) -> None:
+        """Remove every field named *name* (lowercase)."""
+        self[:] = [field for field in self if field[0] != name]
+        if name == b'content-length':
+            self.content_length = None
+        elif name == b'transfer-encoding':
+            self.transfer_encoding = False
+        elif name == b'date':
+            self.date = False
+
+    def copy(self) -> '_MinimalResponseHeaders':
+        """A copy with the same fields and framing facts."""
+        out = _MinimalResponseHeaders(self)
+        out.content_length = (None if self.content_length is None
+                              else list(self.content_length))
+        out.transfer_encoding = self.transfer_encoding
+        out.date = self.date
+        return out
+
+    def _locate(self, field: tuple[bytes, bytes]) -> None:
+        name = field[0]
+        size = len(name)
+        if size == 14:
+            if name == b'content-length':
+                if self.content_length is None:
+                    self.content_length = []
+                self.content_length.append(field)
+        elif size == 17:
+            if name == b'transfer-encoding':
+                self.transfer_encoding = True
+        elif size == 4:
+            if name == b'date':
+                self.date = True
+
+
+def _as_response_fields(fields: Iterable) -> _MinimalResponseHeaders:
+    """Return *fields* when they already keep the response-field contract,
+    else a validated copy with names lowercased.
 
     *fields* holds ``(name, value)`` pairs in any two-item form ASGI allows.
-    Raises on a field that cannot remain one field on the wire, and
-    lowercases a name that is not already.  ``content_length`` is the list of
-    Content-Length fields (``None`` when absent); ``transfer_encoding`` and
-    ``date`` say whether those are present.
+    Raises ``ValueError``/``TypeError`` for a field that cannot remain one
+    field on the wire.
     """
+    if isinstance(fields, _MinimalResponseHeaders):
+        return fields
     head = _MinimalResponseHeaders(fields)
-    content_length = None
-    transfer_encoding = date = False
-    for field in head:
+    head.content_length = None
+    head.transfer_encoding = head.date = False
+    for i, field in enumerate(head):
         name, value = field
         if (type(name) is not bytes or type(value) is not bytes
                 or not name or name.translate(None, LOWERCASE_TCHAR_OCTETS)
                 or value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
             _validate_response_header_field(name, value)
-            name = name.lower()
-            head[head.index(field)] = field = (name, value)
-        size = len(name)
-        if size == 14:
-            if name == b'content-length':
-                if content_length is None:
-                    content_length = []
-                content_length.append(field)
-        elif size == 17:
-            if name == b'transfer-encoding':
-                transfer_encoding = True
-        elif size == 4:
-            if name == b'date':
-                date = True
-    head.content_length = content_length
-    head.transfer_encoding = transfer_encoding
-    head.date = date
+            head[i] = field = (name.lower(), value)
+        head._locate(field)
     return head
+
+
+def _owned_response_fields(fields: Iterable) -> _MinimalResponseHeaders:
+    """Return a copy of *fields* the caller may mutate, keeping the
+    response-field contract; validated only when *fields* does not keep it."""
+    if isinstance(fields, _MinimalResponseHeaders):
+        return fields.copy()
+    return _as_response_fields(fields)
 
 
 class Headers:
