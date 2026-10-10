@@ -73,12 +73,13 @@ def field_value(raw: bytes, *, check: bool = True) -> bytes:
     return value
 
 
-def field_line(line: bytes) -> tuple[bytes, bytes]:
+def field_line(line: bytes, *, check: bool = True) -> tuple[bytes, bytes]:
     """Split one HTTP/1.1 field line (no CRLF) into its lowercase tchar name and
-    the raw value after the colon, still unstripped (RFC 9112 §5).
+    its value without edge SP/HTAB (RFC 9112 §5).
 
-    Raises [`FieldError`][] for obs-fold, a missing colon, whitespace before
-    the colon, or a name outside tchar.  Pass the value to [`field_value`][].
+    The value carries no CTL unless *check* is false because the caller has
+    already proved the octets clean.  Raises [`FieldError`][] for obs-fold, a
+    missing colon, whitespace before the colon, a name outside tchar, or a CTL.
     """
     if line and line[0] in (0x20, 0x09):
         raise FieldError(f'obsolete line folding rejected: {line!r}')
@@ -90,7 +91,11 @@ def field_line(line: bytes) -> tuple[bytes, bytes]:
         if name[-1] in (0x20, 0x09):
             raise FieldError(f'whitespace before colon (smuggling vector): {line!r}')
         raise FieldError(f'invalid field name {name!r}')
-    return name.lower(), line[colon + 1:]
+    # field_value inlined: this runs once per request line.
+    value = line[colon + 1:].strip(b' \t')
+    if check and value.translate(None, FIELD_VALUE_ALLOWED_OCTETS):
+        raise FieldError(f'control octet in field value {value!r}')
+    return name.lower(), value
 
 
 def normalized_fields(pairs: Iterable) -> list[tuple[bytes, bytes]]:

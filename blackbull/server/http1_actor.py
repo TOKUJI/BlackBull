@@ -59,7 +59,7 @@ _HTTP_VERSION_RE = re.compile(rb'\AHTTP/\d\.\d\Z')
 # Share field octet grammar with HTTP/2.
 from ..protocol.field_grammar import (
     COMMON_METHODS_OCTETS, FIELD_VALUE_ALLOWED_OCTETS, URI_SCHEME_RE,
-    FieldError, field_line, field_value, host_field_value, list_members,
+    FieldError, field_line, host_field_value, list_members,
     method_token_is_valid)
 
 
@@ -131,16 +131,15 @@ _SPEC_ENUMERATED_LINES: tuple[bytes, ...] = (
 def _build_default_lines() -> dict[bytes, tuple[bytes, bytes]]:
     """Map every default line to the pair ``_parse`` produces for it.
 
-    Lines go through the same ``field_line``/``field_value`` as parsing; a
-    violation raises ``FieldError``/``ValueError`` at import.
+    Lines go through the same ``field_line`` as parsing; a violation raises
+    ``FieldError``/``ValueError`` at import.
     """
     table: dict[bytes, tuple[bytes, bytes]] = {}
     for line in _SPEC_ENUMERATED_LINES:
-        lkey, raw = field_line(line)
+        lkey, value = field_line(line)
         if lkey in _UNDERSCORE_FRAMING_NAMES or lkey in _FRAMING_NAMES:
             raise ValueError(
                 f'framing header must not be pre-seeded: {line!r}')
-        value = field_value(raw)
         if len(line) > _LINE_CACHE_MAX_LINE:
             raise ValueError(f'default header line too long: {line!r}')
         table[line] = (lkey, value)
@@ -239,11 +238,13 @@ def request_framing(headers: Headers) -> tuple[int | None, bool]:
     """Return the body framing a request head declares: ``(Content-Length or
     None, chunked)``.
 
-    Raises [`BadRequestError`][] for ambiguous framing and
+    *headers* keeps the request contract (lowercase names).  Raises
+    [`BadRequestError`][] for ambiguous framing and
     ``NotImplementedFramingError`` for a coding other than bare chunked.
     """
-    cls = headers.getlist(b'content-length')
-    tes = headers.getlist(b'transfer-encoding')
+    index = headers._index
+    cls = index.get(b'content-length')
+    tes = index.get(b'transfer-encoding')
     declared = _validate_message_framing(cls, tes)
     return (declared if cls else None, bool(tes))
 
@@ -846,14 +847,16 @@ class HTTP1Actor(Actor):
                         same.append(hit)
                     continue
             try:
-                lkey, value = field_line(line)
+                lkey, value = field_line(line, check=values_need_checking)
                 if lkey in _UNDERSCORE_FRAMING_NAMES:
                     raise FieldError(f'framing-confusable header name {lkey!r} '
                                      f'(NORM-UNDERSCORE)')
-                if lkey == b'content-length' and not _CL_STRICT_RE.match(value):
-                    raise FieldError(f'ambiguous Content-Length value {value!r} '
-                                     f'(RFC 9110 §8.6)')
-                value = field_value(value, check=values_need_checking)
+                # The strict form is judged before OWS is stripped.
+                if lkey == b'content-length':
+                    raw_value = line[len(lkey) + 1:]
+                    if not _CL_STRICT_RE.match(raw_value):
+                        raise FieldError(f'ambiguous Content-Length value '
+                                         f'{raw_value!r} (RFC 9110 §8.6)')
             except FieldError as exc:
                 raise BadRequestError(str(exc)) from None
             pair = (lkey, value)

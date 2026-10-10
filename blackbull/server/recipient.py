@@ -14,7 +14,7 @@ from typing import Awaitable, Callable, NoReturn, Optional
 
 from ..protocol.field_grammar import (
     FIELD_VALUE_ALLOWED_OCTETS, PROHIBITED_TRAILER_FIELDS, TCHAR_OCTETS,
-    FieldError, field_line, field_value)
+    FieldError, field_line)
 from .cap_log import log_cap_hit
 from .deadline import ConnectionDeadline, WsIdleWatchdog
 from .sender import AbstractWriter, AsyncioWriter
@@ -1168,8 +1168,7 @@ class HTTP1Recipient(BaseRecipient):
                                 f'trailer line not CRLF-terminated: '
                                 f'{line[-8:]!r}')
                         try:
-                            name, raw = field_line(line[:-2])
-                            field_value(raw)
+                            name, _ = field_line(line[:-2])
                         except FieldError as exc:
                             self.framing_broken = True
                             raise _bad_request(f'trailer: {exc}') from None

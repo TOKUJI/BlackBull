@@ -39,15 +39,14 @@ from blackbull.protocol.frame_types import (
 #: Each reader and the grammar names it imports.
 _READERS = {
     http1_actor: ('FIELD_VALUE_ALLOWED_OCTETS', 'COMMON_METHODS_OCTETS',
-                  'method_token_is_valid', 'field_line', 'field_value',
-                  'host_field_value'),
-    http2_actor: ('PROHIBITED_TRAILER_FIELDS',),
+                  'method_token_is_valid', 'field_line', 'host_field_value'),
+    http2_actor: ('PROHIBITED_TRAILER_FIELDS', 'field_value'),
     connection_module: ('normalized_fields', 'host_field_value', 'media_type'),
     frame_types: ('LOWERCASE_TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     headers_module: ('TCHAR_OCTETS', 'LOWERCASE_TCHAR_OCTETS',
                      'FIELD_VALUE_ALLOWED_OCTETS'),
     recipient: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS', 'field_line',
-                'field_value', 'PROHIBITED_TRAILER_FIELDS'),
+                'PROHIBITED_TRAILER_FIELDS'),
     client_http1: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     framing_module: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     cache_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET', 'if_none_match_hit',

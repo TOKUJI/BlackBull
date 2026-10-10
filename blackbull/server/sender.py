@@ -571,7 +571,7 @@ class HTTP1Sender(BaseSender):
 
             case NativeResponse():
                 if body._header is not None:
-                    head = _as_response_fields(body._header)
+                    head = body._header
                     self._response_started = True
                     await self._settle_buffered_head()
                     self._buffered_status = (_STATUS_BY_CODE.get(body.status)
@@ -649,12 +649,11 @@ class HTTP1Sender(BaseSender):
                 and (not self._expect_trailers or self._head_mode)):
             self._completed = True
 
-    async def _handle_trailers(self, headers: HeaderList,
+    async def _handle_trailers(self, headers: _MinimalResponseHeaders,
                                more_trailers: bool = False) -> None:
-        """Write one part of the trailer section for dict and native paths."""
+        """Write one part of the trailer section."""
         if not (self._expect_trailers or self._chunked):
             return
-        headers = _as_response_fields(headers)
         if not self._trailers_started:
             await self._write(b'0\r\n')
             self._trailers_started = True
@@ -1392,13 +1391,10 @@ class HTTP2Sender(BaseSender):
 
     async def _handle_trailers(
         self,
-        headers: list[tuple[bytes, bytes]],
+        headers: _MinimalResponseHeaders,
         more_trailers: bool = False,
     ) -> None:
-        """Write the trailing HEADERS — shared by the dict and native H2 paths.
-
-        Takes a plain ``list`` of pairs (the H2 variant; ``HTTP1Sender``'s
-        same-named helper takes a ``HeaderList``).
+        """Write the trailing HEADERS.
 
         HPACK's dynamic table is stateful, so header blocks MUST be encoded in
         wire order: the response HEADERS block first, then the trailing HEADERS
@@ -1407,7 +1403,6 @@ class HTTP2Sender(BaseSender):
         """
         if self._closed:
             return
-        headers = _as_response_fields(headers)
         if more_trailers:
             if self._buffered_trailers is None:
                 self._buffered_trailers = headers.copy()
@@ -1558,7 +1553,7 @@ class HTTP2Sender(BaseSender):
                     logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
-                head = _as_response_fields(body._header)
+                head = body._header
                 await self._settle_buffered_head()
                 self._buffered_status = HTTPStatus(body.status)
                 self._buffered_headers = head
