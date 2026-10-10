@@ -188,16 +188,10 @@ class AccessLogRecord:
         """Snapshot parsed Connection fields without creating an ASGI scope.
         """
         client = conn.client or ('-',)
-        ae = b''
-        rng = b''
+        ae = rng = b''
         if PHASE_TRACE:
-            for k, v in conn.headers:
-                if isinstance(k, bytes):
-                    kl = k.lower()
-                    if kl == b'accept-encoding':
-                        ae = v
-                    elif kl == b'range':
-                        rng = v
+            ae = conn.headers.get_combined(b'accept-encoding') or b''
+            rng = conn.headers.get(b'range', b'')
         return cls(
             client_ip            = str(client[0]),
             method               = conn.method,

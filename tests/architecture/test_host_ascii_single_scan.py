@@ -1,6 +1,6 @@
 """The Host authority rule rides one forbidden-byte scan, not a second pass.
 
-`_authority_is_valid` runs on every HTTP/1.1 request, so the non-ASCII rule (RFC
+`authority_is_valid` runs on every request, so the non-ASCII rule (RFC
 3986 §3.2 authorities are ASCII) must not pay for another pass over the value:
 it lives in the one regex the function already runs.  That scan also reports
 the IP-literal brackets (§3.2.2), so the same pass decides that rule too — a
@@ -21,15 +21,15 @@ import pathlib
 
 import pytest
 
-import blackbull.server.http1_actor as http1_actor
+import blackbull.protocol.field_grammar as field_grammar
 
-_FUNCTION = '_authority_is_valid'
+_FUNCTION = 'authority_is_valid'
 _SCAN = '_AUTHORITY_SCAN_RE'
-# `_validate_host` grades the value only through `_authority_is_valid`; this
+# `host_field_value` grades the value only through `authority_is_valid`; this
 # is the one bare call it may make beyond its own errors.
-_DELEGATE = '_validate_host'
+_DELEGATE = 'host_field_value'
 
-# `_authority_is_valid` may make no attribute call on the value at all.  The
+# `authority_is_valid` may make no attribute call on the value at all.  The
 # scan is the one exception and the walker matches it by name; anything else
 # (``decode``, ``isascii``, ``translate``, ``match``, ``isdisjoint``, a second
 # pattern's ``search``, ...) is a read of the value by another name.
@@ -39,15 +39,16 @@ _SCAN_METHOD = 'search'
 _ALLOWED_CALLS = frozenset({'_ip_literal_is_valid'})
 # The only names that may be subscripted: the scan's match.
 _ALLOWED_SUBSCRIPTS = frozenset({'match'})
-# `_validate_host` may read the header list and strip the value, and may call
-# nothing but its own errors — the grammar is `_authority_is_valid`'s.
-_DELEGATE_READS = frozenset({'getlist', 'strip'})
-_DELEGATE_CALLS = frozenset({'len', 'BadRequestError'})
-_DELEGATE_SUBSCRIPTS = frozenset({'hosts'})
+# `host_field_value` may index the field list, and may call nothing but its
+# own errors — the grammar is `authority_is_valid`'s.
+_DELEGATE_READS: frozenset = frozenset()
+_DELEGATE_CALLS = frozenset({'len', 'FieldError'})
+# ``list`` and ``tuple`` are the parameter's annotation, not reads.
+_DELEGATE_SUBSCRIPTS = frozenset({'fields', 'list', 'tuple'})
 
 
 def _function(name: str) -> ast.FunctionDef:
-    tree = ast.parse(pathlib.Path(http1_actor.__file__).read_text())
+    tree = ast.parse(pathlib.Path(field_grammar.__file__).read_text())
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == name:
             return node
@@ -100,7 +101,7 @@ def test_authority_is_valid_reads_the_value_once():
     assert _scan_calls(function) == 1
 
 
-def test_validate_host_reads_the_value_only_through_the_authority_rule():
+def test_host_field_value_reads_the_value_only_through_the_authority_rule():
     function = _function(_DELEGATE)
     assert _second_passes(function, reads=_DELEGATE_READS,
                           calls=_DELEGATE_CALLS,
@@ -112,27 +113,27 @@ def test_validate_host_reads_the_value_only_through_the_authority_rule():
 
 
 def test_the_single_scan_rejects_every_non_ascii_octet():
-    regex = http1_actor._AUTHORITY_SCAN_RE
+    regex = field_grammar._AUTHORITY_SCAN_RE
     missed = [b for b in range(0x80, 0x100)
               if regex.search(bytes([b])) is None]
     assert missed == [], f'high bytes the Host scan accepts: {missed}'
 
 
 def test_the_single_scan_still_covers_the_delimiter_set():
-    regex = http1_actor._AUTHORITY_SCAN_RE
-    missed = [b for b in sorted(http1_actor._HOST_FORBIDDEN_BYTES)
+    regex = field_grammar._AUTHORITY_SCAN_RE
+    missed = [b for b in sorted(field_grammar.HOST_FORBIDDEN_BYTES)
               if regex.search(bytes([b])) is None]
     assert missed == [], f'forbidden bytes the Host scan accepts: {missed}'
 
 
 def test_the_single_scan_reports_both_ip_literal_brackets():
-    regex = http1_actor._AUTHORITY_SCAN_RE
+    regex = field_grammar._AUTHORITY_SCAN_RE
     assert regex.search(b'[')[0] == b'['
     assert regex.search(b']')[0] == b']'
 
 
 def test_the_single_scan_leaves_a_real_authority_alone():
-    assert http1_actor._AUTHORITY_SCAN_RE.search(b'example.com:8080') is None
+    assert field_grammar._AUTHORITY_SCAN_RE.search(b'example.com:8080') is None
 
 
 _SPELLINGS = {
@@ -143,8 +144,8 @@ _SPELLINGS = {
     'bytes translate': 'value.translate(None, forbidden)',
     'bytes contains': 'value.__contains__(0x80)',
     'bytes slice': 'value[1:]',
-    'frozenset isdisjoint': '_HOST_FORBIDDEN_BYTES.isdisjoint(value)',
-    'frozenset intersection': '_HOST_FORBIDDEN_BYTES.intersection(value)',
+    'frozenset isdisjoint': 'HOST_FORBIDDEN_BYTES.isdisjoint(value)',
+    'frozenset intersection': 'HOST_FORBIDDEN_BYTES.intersection(value)',
     'helper call': '_is_ascii(value)',
     'getattr lookup': 'getattr(value, "decode")("ascii")',
     'all comprehension': 'all(b < 0x80 for b in value)',

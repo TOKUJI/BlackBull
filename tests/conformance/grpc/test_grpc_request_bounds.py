@@ -13,6 +13,7 @@ from blackbull.grpc.asgi import serve_grpc
 import blackbull.grpc.asgi as grpc_asgi
 from blackbull.native import NativeResponse
 from blackbull.request import ClientDisconnected
+from blackbull.connection import Connection
 
 
 SHAPES = ('unary', 'server-streaming', 'client-streaming', 'bidi')
@@ -81,10 +82,10 @@ async def _call(chunks, shape='unary', *, encoding=b'', native=False, receiver=N
     async def send(event):
         events.extend(event.to_asgi() if isinstance(event, NativeResponse) else [event])
 
-    await serve_grpc(registry, {
+    await serve_grpc(registry, Connection.from_scope({
         'type': 'http', 'path': '/svc/M',
         'headers': [(b'content-type', b'application/grpc'),
-                    (b'grpc-encoding', encoding)]}, receive, send)
+                    (b'grpc-encoding', encoding)]}), receive, send)
     headers = {k: v for event in events for k, v in event.get('headers', [])}
     return headers[b'grpc-status'], seen, calls
 

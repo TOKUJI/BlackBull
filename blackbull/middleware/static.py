@@ -18,6 +18,7 @@ from blackbull.connection import Connection
 from blackbull.env import get_settings, Environment
 from blackbull.native import NativeResponse
 from ._accept_encoding import acceptable_encodings
+from ..protocol.field_grammar import if_none_match_hit
 
 
 # Register standard web-asset MIME types missing from slim host databases.
@@ -73,28 +74,12 @@ def _not_modified(headers, etag: bytes, mtime_ns: int) -> bool:
     former is present the latter is ignored.  Returns ``True`` when the
     client's cached copy is still fresh and the caller should answer 304.
     """
-    inm = None
-    ims = None
-    for k, v in headers:
-        kl = k.lower()
-        if kl == b'if-none-match':
-            inm = v
-        elif kl == b'if-modified-since':
-            ims = v
+    inm = headers.get_combined(b'if-none-match')
     if inm is not None:
-        candidate = inm.strip()
-        if candidate == b'*':
-            return True
-        target = etag[2:] if etag.startswith(b'W/') else etag
-        for tag in candidate.split(b','):
-            t = tag.strip()
-            if t.startswith(b'W/'):
-                t = t[2:]
-            if t == target:
-                return True
-        # If-None-Match present but no match → not fresh; ignore IMS.
-        return False
-    if ims is not None:
+        # Present but not matching: not fresh, and If-Modified-Since is ignored.
+        return if_none_match_hit(inm, etag)
+    ims = headers.get(b'if-modified-since')
+    if ims:
         try:
             ims_dt = parsedate_to_datetime(ims.decode('latin-1'))
         except (ValueError, TypeError):

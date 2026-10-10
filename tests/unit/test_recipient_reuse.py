@@ -12,6 +12,7 @@ import pytest
 from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.server.recipient import AsyncioReader, HTTP1Recipient
+from blackbull.server.http1_actor import NotImplementedFramingError, request_framing
 
 
 class _Source:
@@ -66,12 +67,12 @@ async def test_rebound_recipient_reads_the_second_request_body():
     answer request N+1 with ``http.disconnect`` and the handler would see an
     empty body."""
     src = _Source(b'first')
-    r = HTTP1Recipient(AsyncioReader(src), _conn([(b'content-length', b'5')]))
+    r = HTTP1Recipient(AsyncioReader(src), _conn([(b'content-length', b'5')]), framing=request_framing(_conn([(b'content-length', b'5')]).headers))
 
     assert (await r())['body'] == b'first'
 
     src.feed(b'second!')
-    r.bind(_conn([(b'content-length', b'7')]))
+    r.bind(_conn([(b'content-length', b'7')]), framing=request_framing(_conn([(b'content-length', b'7')]).headers))
 
     event = await r()
     assert event['type'] == 'http.request'
@@ -83,11 +84,11 @@ async def test_rebind_re_derives_framing_from_the_new_headers():
     """Content-Length → chunked on the next request: the framing comes from
     the new head, not the one the object was built with."""
     src = _Source(b'abc')
-    r = HTTP1Recipient(AsyncioReader(src), _conn([(b'content-length', b'3')]))
+    r = HTTP1Recipient(AsyncioReader(src), _conn([(b'content-length', b'3')]), framing=request_framing(_conn([(b'content-length', b'3')]).headers))
     assert (await r())['body'] == b'abc'
 
     src.feed(b'4\r\nwxyz\r\n0\r\n\r\n')
-    r.bind(_conn([(b'transfer-encoding', b'chunked')]))
+    r.bind(_conn([(b'transfer-encoding', b'chunked')]), framing=request_framing(_conn([(b'transfer-encoding', b'chunked')]).headers))
 
     body = b''
     while True:
@@ -104,23 +105,20 @@ async def test_rebind_re_derives_framing_from_the_new_headers():
 async def test_rebind_clears_broken_framing():
     """``framing_broken`` closes the connection; it must not be inherited by a
     request that never broke anything."""
-    r = HTTP1Recipient(AsyncioReader(_Source()), _conn([]))
+    r = HTTP1Recipient(AsyncioReader(_Source()), _conn([]), framing=request_framing(_conn([]).headers))
     r.framing_broken = True
 
-    r.bind(_conn([(b'content-length', b'2')]))
+    r.bind(_conn([(b'content-length', b'2')]), framing=request_framing(_conn([(b'content-length', b'2')]).headers))
 
     assert r.framing_broken is False
     assert r.needs_drain() is True
 
 
-@pytest.mark.asyncio
-async def test_rebind_rejects_unsupported_transfer_encoding():
-    """``__init__`` raises on an encoding we do not implement; rebinding is the
-    same entry point for request N+1 and must not become a way past it."""
-    r = HTTP1Recipient(AsyncioReader(_Source()), _conn([]))
-
-    with pytest.raises(NotImplementedError):
-        r.bind(_conn([(b'transfer-encoding', b'gzip')]))
+def test_every_request_s_framing_refuses_an_unsupported_coding():
+    """Request N+1's framing comes from ``request_framing`` like request N's,
+    so rebinding cannot carry a coding we do not implement."""
+    with pytest.raises(NotImplementedFramingError):
+        request_framing(_conn([(b'transfer-encoding', b'gzip')]).headers)
 
 
 @pytest.mark.asyncio
@@ -176,24 +174,26 @@ def test_bind_takes_a_connection_and_nothing_else():
     """
     from beartype.roar import BeartypeCallHintParamViolation
 
-    r = HTTP1Recipient(AsyncioReader(_Source()), _conn([]))
+    r = HTTP1Recipient(AsyncioReader(_Source()), _conn([]), framing=request_framing(_conn([]).headers))
 
     # Uninstrumented the dict fails on ``conn.headers``; under
     # ``--beartype-packages=blackbull`` the annotation rejects it first.
     with pytest.raises((AttributeError, BeartypeCallHintParamViolation)):
-        r.bind({'path': '/p', 'headers': [(b'content-length', b'2')]})
+        r.bind({'path': '/p', 'headers': [(b'content-length', b'2')]},
+               framing=(2, False))
 
 
 def test_rebinding_reads_the_connection_directly():
-    """A rebound recipient frames from the Connection's own Headers object."""
+    """A rebound recipient takes the new request's path and framing."""
     conn = _conn([(b'content-length', b'5')])
-    r = HTTP1Recipient(AsyncioReader(_Source(b'hello')), conn)
+    r = HTTP1Recipient(AsyncioReader(_Source(b'hello')), conn, framing=request_framing(conn.headers))
 
     assert r._content_length == 5
     assert r._req_path == '/p'
     assert r._chunked is False
 
-    r.bind(_conn([(b'transfer-encoding', b'chunked')], path='/q'))
+    nxt = _conn([(b'transfer-encoding', b'chunked')], path='/q')
+    r.bind(nxt, framing=request_framing(nxt.headers))
 
     assert r._chunked is True
     assert r._content_length is None

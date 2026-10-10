@@ -369,7 +369,7 @@ class TestHTTP1_1BodyDecoding:
 
         conn = Connection(method='POST', path='/', raw_path=b'/',
                           headers=Headers(headers), type='http')
-        return RecipientFactory.http1(FakeStreamReader(body_bytes), conn)
+        return RecipientFactory.http1(FakeStreamReader(body_bytes), conn, framing=request_framing(conn.headers))
 
     @pytest.mark.asyncio
     async def test_content_length_reads_exact_bytes(self):
@@ -666,6 +666,7 @@ from blackbull.server.http1_actor import HTTP1Actor as _HTTP1Actor_dispatch
 from blackbull.server.websocket_actor import WebSocketActor as _WebSocketActor_dispatch
 from blackbull.server.recipient import AbstractReader as _AbstractReader_dispatch
 from blackbull.server.sender import AbstractWriter as _AbstractWriter_dispatch
+from blackbull.server.http1_actor import request_framing
 
 
 class _DispatchReader(_AbstractReader_dispatch):

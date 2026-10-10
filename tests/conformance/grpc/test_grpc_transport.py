@@ -20,6 +20,7 @@ from blackbull.grpc import (
 )
 from blackbull.grpc.asgi import serve_grpc
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 # ---------------------------------------------------------------------------
@@ -28,8 +29,7 @@ from blackbull.native import NativeResponse
 
 def _grpc_scope(path):
     return {'type': 'http', 'path': path,
-            'headers': [(b'content-type', b'application/grpc'),
-                        (b':method', b'POST')]}
+            'headers': [(b'content-type', b'application/grpc')]}
 
 
 def _receive_with_disconnect(body_chunks: list[bytes],
@@ -122,7 +122,7 @@ class TestRstStreamDuringGrpc:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/M'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/M')),
                          _receive_disconnect_immediate(), send)
         # An immediate http.disconnect (RST_STREAM before any DATA) makes
         # read_body raise ClientDisconnected, which the bridge maps to the
@@ -143,7 +143,7 @@ class TestRstStreamDuringGrpc:
         # Split a valid LPM frame: prefix (5 bytes) then disconnect
         body_chunks = [encode_message(b'hello')[:3]]  # partial prefix
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/M'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/M')),
                          _receive_with_disconnect(body_chunks, disconnect_after=1),
                          send)
         trailers = _trailers_of(events)
@@ -173,7 +173,7 @@ class TestRstStreamDuringGrpc:
         # Instead, test what happens when the send channel gets disconnected.
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Slow'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Slow')),
                          _receive_with(body), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
 
@@ -198,7 +198,7 @@ class TestGoawayDuringGrpc:
 
         async def make_call():
             events, send = _collector()
-            await serve_grpc(reg, _grpc_scope('/svc/M'),
+            await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/M')),
                              _receive_disconnect_immediate(), send)
             return _trailers_of(events).get(b'grpc-status')
 
@@ -237,7 +237,7 @@ class TestH2PrefaceValidation:
                  'method': 'POST',
                  'headers': [(b'content-type', b'application/grpc')]}
         events, send = _collector()
-        await serve_grpc(reg, scope,
+        await serve_grpc(reg, Connection.from_scope(scope),
                          _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
 
@@ -251,7 +251,7 @@ class TestH2PrefaceValidation:
         events, send = _collector()
         scope = {'type': 'websocket', 'path': '/svc/M',
                  'headers': [(b'content-type', b'application/grpc')]}
-        await serve_grpc(reg, scope,
+        await serve_grpc(reg, Connection.from_scope(scope),
                          _receive_with(encode_message(b'')), send)
         # Should return UNIMPLEMENTED because path lookup fails
         trailers = _trailers_of(events)
@@ -285,7 +285,7 @@ class TestFlowControlEdgeCases:
             return {'type': 'http.request', 'body': b'', 'more_body': False}
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/M'), receive, send)
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/M')), receive, send)
         # Zero messages → error
         assert _trailers_of(events).get(b'grpc-status') in (
             str(int(GrpcStatus.INTERNAL)).encode(),
@@ -317,7 +317,7 @@ class TestFlowControlEdgeCases:
             return {'type': 'http.request', 'body': b'', 'more_body': False}
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/M'), receive, send)
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/M')), receive, send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
         body_ev = next((e for e in events
                        if e['type'] == 'http.response.body'), None)
@@ -344,8 +344,7 @@ class TestSettingsFrameEffects:
             return b'ok'
 
         scope = {'type': 'http', 'path': '/svc/M',
-                 'headers': [(b'content-type', b'application/grpc'),
-                             (b':method', b'POST')],
+                 'headers': [(b'content-type', b'application/grpc')],
                  'extensions': {
                      'http.response.http2_stream': {
                          'stream_id': 1,
@@ -354,6 +353,6 @@ class TestSettingsFrameEffects:
                      }
                  }}
         events, send = _collector()
-        await serve_grpc(reg, scope,
+        await serve_grpc(reg, Connection.from_scope(scope),
                          _receive_with(encode_message(b'hello')), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'

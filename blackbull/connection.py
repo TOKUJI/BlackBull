@@ -8,6 +8,8 @@ from typing import Any, AsyncIterator, Callable, NamedTuple
 from urllib.parse import parse_qsl
 
 from .headers import Headers
+from .native import NativeResponse, NativeWSMessage
+from .protocol.field_grammar import host_field_value, media_type, normalized_fields
 from .request import (read_body, stream_body, cookies_from_headers,
                       ClientDisconnected, _json_or_none)
 
@@ -73,8 +75,8 @@ def _is_urlencoded(headers: Headers) -> bool:
     rather than searched for as a substring of the whole header, so a
     ``Content-Type`` that merely contains ``application/x-www-form-urlencoded``
     (or smuggles it in a parameter) is not misread as a form."""
-    ct = headers.get(b'content-type', b'').decode('latin-1').lower()
-    return ct.split(';', 1)[0].strip() == 'application/x-www-form-urlencoded'
+    return (media_type(headers.get(b'content-type', b''))
+            == b'application/x-www-form-urlencoded')
 
 
 def _headers_to_scope(h: Headers) -> list:
@@ -82,7 +84,7 @@ def _headers_to_scope(h: Headers) -> list:
 
 
 def _headers_from_scope(v: Any) -> Headers:
-    return v if isinstance(v, Headers) else Headers(v)
+    return Headers.from_lowered(normalized_fields(v))
 
 
 def _tuple_to_list(v):
@@ -154,6 +156,16 @@ def stashed_connection(target, receive) -> tuple['Connection', bool]:
     return conn, True
 
 
+async def refuse_scope(scope: dict, send) -> None:
+    """Answer an ASGI *scope* that [`Connection.from_scope`][] refused as the
+    native parsers answer the same request: a bare 400, or close 1002 before
+    accept for WebSocket."""
+    if scope.get('type') == 'websocket':
+        await send(NativeWSMessage.close(code=1002))
+    else:
+        await send(NativeResponse(status=400, header=[], body=b''))
+
+
 def bind_receive_channel(target, receive) -> None:
     """Bind the raw receive channel once.
 
@@ -174,8 +186,12 @@ def bind_receive_channel(target, receive) -> None:
 class Connection:
     """One HTTP (or WebSocket) request — the single internal representation.
 
-    Built by the protocol actor, consumed by the router, dispatcher,
-    middleware, and handlers. The ASGI ``scope`` dict is a *derived* view
+    Its creator builds it to the request contract: header names are lowercase
+    tchar, values carry no edge SP/HTAB and no CTL, ``host`` is at most one
+    valid authority, and ``scheme`` is lowercase.  The HTTP/1.1 and HTTP/2
+    parsers and [`from_scope`][] do; code that builds one directly must too.
+    The router, dispatcher, middleware and handlers rely on it and check
+    nothing again.  The ASGI ``scope`` dict is a *derived* view
     ([`as_scope`][]). ``Request`` is a deprecated alias of this class.
     """
 
@@ -289,13 +305,22 @@ class Connection:
 
     @classmethod
     def from_scope(cls, scope: dict, receive: Any = None) -> 'Connection':
-        """Build a Connection from an external ASGI scope (the single
-        ASGI→native point). Unknown keys are ignored; missing optional keys
-        fall back to the field defaults."""
+        """Build a Connection from an external ASGI scope.
+
+        The result keeps the contract of a natively parsed Connection: header
+        names are lowercase tchar, values carry no edge SP/HTAB and no CTL,
+        ``host`` is at most one valid authority, and ``scheme`` is lowercase.
+        Raises ``FieldError`` for headers that cannot meet it.  Unknown keys
+        are ignored; missing optional keys take the field defaults.
+        """
         kwargs: dict[str, Any] = {}
         for spec in _SCOPE_FIELDS:
             if spec.scope_key in scope:
                 kwargs[spec.attr] = spec.from_scope(scope[spec.scope_key])
+        if 'headers' in kwargs:
+            host_field_value(kwargs['headers'].getlist(b'host'))
+        if 'scheme' in kwargs:
+            kwargs['scheme'] = kwargs['scheme'].lower()
         # A conformant ASGI http/websocket scope always carries method, path,
         # and headers, but default them so ``from_scope`` is total and never
         # raises on a partial scope (e.g. a hand-built one in a unit test, or a

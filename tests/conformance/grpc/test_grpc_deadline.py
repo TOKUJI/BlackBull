@@ -3,6 +3,7 @@ import time
 
 import pytest
 
+from blackbull.connection import Connection
 from blackbull.grpc import GrpcServiceRegistry, encode_message
 from blackbull.grpc.asgi import serve_grpc
 from blackbull.native import NativeResponse
@@ -112,7 +113,8 @@ async def _call(shape, stage, *, timeout=b'20m', native=False):
     before = asyncio.all_tasks()
     try:
         async with asyncio.timeout(0.5):
-            call = serve_grpc(registry, {'path': '/svc/M', 'headers': headers}, receive, send)
+            call = serve_grpc(registry, Connection.from_scope({'path': '/svc/M', 'headers': headers}),
+                              receive, send)
             if stage == 'cancel':
                 task = asyncio.create_task(call)
                 await started_handler.wait()
@@ -243,9 +245,9 @@ async def test_iterator_setup_expiry_prevents_first_message():
         for item in event.to_asgi():
             statuses.extend(value for key, value in item.get('headers', []) if key == b'grpc-status')
 
-    conn = {'type': 'http', 'path': '/svc/M',
-            'headers': [(b'content-type', b'application/grpc'), (b'grpc-timeout', b'100m')]}
-    await serve_grpc(registry, conn, receive, send)
+    scope = {'type': 'http', 'path': '/svc/M',
+             'headers': [(b'content-type', b'application/grpc'), (b'grpc-timeout', b'100m')]}
+    await serve_grpc(registry, Connection.from_scope(scope), receive, send)
     assert not entered
     assert closed == [True]
     assert statuses == [b'4']

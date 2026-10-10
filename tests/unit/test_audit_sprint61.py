@@ -31,6 +31,7 @@ from blackbull.server.recipient import (
     AbstractReader, HTTP1Recipient, IncompleteReadError,
 )
 from blackbull.server.sender import AbstractWriter, HTTP1Sender
+from blackbull.server.http1_actor import request_framing
 
 
 def _conn(headers, path: str = '/'):
@@ -107,8 +108,7 @@ async def test_chunked_body_reassembled_across_fragmented_reads():
     recipient = HTTP1Recipient(
         _DribbleReader(wire),
         _conn([(b'transfer-encoding', b'chunked')]),
-        chunk_size=64 * 1024,
-    )
+        chunk_size=64 * 1024,framing=request_framing(_conn([(b'transfer-encoding', b'chunked')]).headers))
     body = await _drain_recipient(recipient)
     assert body == payload, 'chunk split across reads must be reassembled whole'
 
@@ -121,8 +121,7 @@ async def test_chunked_multiple_chunks_fragmented():
     recipient = HTTP1Recipient(
         _DribbleReader(wire),
         _conn([(b'transfer-encoding', b'chunked')]),
-        chunk_size=64 * 1024,
-    )
+        chunk_size=64 * 1024,framing=request_framing(_conn([(b'transfer-encoding', b'chunked')]).headers))
     assert await _drain_recipient(recipient) == a + b
 
 
@@ -132,7 +131,7 @@ async def test_chunked_multiple_chunks_fragmented():
 
 @pytest.mark.asyncio
 async def test_needs_drain_false_for_bodyless_request():
-    recipient = HTTP1Recipient(_DribbleReader(b''), _conn([]))
+    recipient = HTTP1Recipient(_DribbleReader(b''), _conn([]), framing=request_framing(_conn([]).headers))
     assert recipient.needs_drain() is False
 
 
@@ -142,8 +141,7 @@ async def test_drain_consumes_unread_content_length_body():
     recipient = HTTP1Recipient(
         _DribbleReader(body),
         _conn([(b'content-length', str(len(body)).encode())]),
-        chunk_size=64 * 1024,
-    )
+        chunk_size=64 * 1024,framing=request_framing(_conn([(b'content-length', str(len(body)).encode())]).headers))
     assert recipient.needs_drain() is True
     assert await recipient.drain(max_bytes=64 * 1024) is True
     assert recipient.needs_drain() is False
@@ -155,8 +153,7 @@ async def test_drain_gives_up_past_bound_so_caller_closes():
     recipient = HTTP1Recipient(
         _DribbleReader(body),
         _conn([(b'content-length', str(len(body)).encode())]),
-        chunk_size=64,
-    )
+        chunk_size=64,framing=request_framing(_conn([(b'content-length', str(len(body)).encode())]).headers))
     # A body larger than the drain bound returns False → caller closes the
     # connection instead of spending bandwidth draining it.
     assert await recipient.drain(max_bytes=1024) is False

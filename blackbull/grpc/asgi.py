@@ -11,6 +11,8 @@ import binascii
 import logging
 import os
 
+from ..connection import Connection
+from ..protocol.field_grammar import list_members, media_type
 from ..native import NativeResponse
 from ..request import stream_body, ClientDisconnected
 from ..utils import create_eager_task
@@ -90,24 +92,20 @@ def _pct_encode_message(details: str) -> bytes:
     """Percent-encode a ``grpc-message`` value per the gRPC HTTP/2 spec.
 
     ASCII 0x20–0x7E except ``%`` pass through; everything else (including
-    non-ASCII, encoded UTF-8 first) becomes ``%XX``.
+    non-ASCII, encoded UTF-8 first) becomes ``%XX``, and so do edge spaces,
+    which a field value cannot carry (RFC 9110 §5.5).
     """
-    out = bytearray()
-    for b in details.encode('utf-8'):
+    raw = details.encode('utf-8')
+    stripped = raw.lstrip(b' ')
+    body = stripped.rstrip(b' ')
+    out = bytearray(b'%20' * (len(raw) - len(stripped)))
+    for b in body:
         if 0x20 <= b <= 0x7E and b != 0x25:  # printable ASCII, not '%'
             out.append(b)
         else:
             out += b'%%%02X' % b
+    out += b'%20' * (len(stripped) - len(body))
     return bytes(out)
-
-
-def _accepts_gzip(accept: bytes) -> bool:
-    """Return ``True`` if the client's ``grpc-accept-encoding`` lists ``gzip``.
-
-    The header is a comma-separated list of message encodings the client can
-    decode (e.g. ``identity,deflate,gzip``); the server may compress responses
-    with any it recognises."""
-    return any(tok.strip().lower() == b'gzip' for tok in accept.split(b','))
 
 
 def _decompress_message(message: bytes, encoding: bytes) -> bytes:
@@ -141,16 +139,6 @@ def _frame_compressed_response(payload: bytes) -> bytes:
     return encode_message(payload)
 
 
-def _req_field(conn, name, default=None):
-    """Read a request field from either a native
-    [`Connection`][blackbull.connection.Connection] (the ``serve_grpc(conn, …)`` path)
-    or an ASGI ``scope`` dict — the field names (``headers``/``client``/``path``)
-    coincide with the Connection attributes."""
-    if isinstance(conn, dict):
-        return conn.get(name, default)
-    return getattr(conn, name, default)
-
-
 class GrpcContext:
     """Per-call metadata, peer, deadline and response status/metadata controls for raw-byte handlers.
     """
@@ -159,7 +147,7 @@ class GrpcContext:
                  '_send', '_content_type', '_response_encoding',
                  '_initial_metadata', '_started', '_deadline_expired', '_clock')
 
-    def __init__(self, conn):
+    def __init__(self, conn: Connection):
         self.conn = conn
         self.code: GrpcStatus = GrpcStatus.OK
         self.details: str = ''
@@ -186,30 +174,19 @@ class GrpcContext:
         self._clock = asyncio.get_running_loop().time if deadline is not None else None
 
     def metadata(self, name: bytes, default: bytes = b'') -> bytes:
-        """Return a request header (call metadata) value, or *default*."""
-        headers = _req_field(self.conn, 'headers')
-        getter = getattr(headers, 'get', None)
-        if getter is not None and not isinstance(headers, (list, tuple)):
-            return getter(name, default)
-        name = name.lower()
-        # An ASGI request scope may keep the client's header-name case.
-        for k, v in headers or ():
-            if k.lower() == name:
-                return v
-        return default
+        """Return the first request field named *name* (any case), or *default*."""
+        return self.conn.headers.get(name, default)
 
     def invocation_metadata(self) -> list[tuple[bytes, bytes]]:
-        """Return all request metadata (HTTP/2 headers) as ``(name, value)``
-        pairs — grpcio's ``ServicerContext.invocation_metadata``.  Pseudo-
-        headers (``:method``, ``:path``, …) are excluded; they are call routing,
-        not application metadata."""
-        headers = _req_field(self.conn, 'headers') or ()
-        return [(k, v) for k, v in headers if not k.startswith(b':')]
+        """Return the request fields as ``(name, value)`` pairs with lowercase
+        names and no pseudo-headers — grpcio's
+        ``ServicerContext.invocation_metadata``."""
+        return list(self.conn.headers)
 
     def peer(self) -> str:
         """Return the client address as grpcio formats it (``ipv4:host:port`` /
         ``ipv6:[host]:port``), or ``''`` when the transport did not supply one."""
-        client = _req_field(self.conn, 'client')
+        client = self.conn.client
         if not client:
             return ''
         host, port = client[0], client[1]
@@ -285,10 +262,11 @@ def _resolve_content_type(raw: bytes) -> bytes:
 
 
 def _is_grpc_content_type(value: bytes) -> bool:
-    """Exactly ``application/grpc`` or ``application/grpc+<subtype>``: the one
-    grammar for requests the server serves and replies ``blackbull.testing.grpc``
-    accepts."""
-    return value == _GRPC_CONTENT_TYPE or value.startswith(_GRPC_SUBTYPE_PREFIX)
+    """Whether *value*'s media type is ``application/grpc`` or
+    ``application/grpc+<subtype>``, in any case: the one grammar for requests
+    dispatched to gRPC and replies ``blackbull.testing.grpc`` accepts."""
+    mt = media_type(value)
+    return mt == _GRPC_CONTENT_TYPE or mt.startswith(_GRPC_SUBTYPE_PREFIX)
 
 
 def _normalized_base64(value: bytes) -> bytes | None:
@@ -810,12 +788,13 @@ async def _serve_with_deadline(call, context):
         raise
 
 
-async def serve_grpc(registry: GrpcServiceRegistry, conn, receive, send) -> None:
-    """Serve any of the four gRPC call shapes through Connection/receive/send.
+async def serve_grpc(registry: GrpcServiceRegistry, conn: Connection,
+                     receive, send) -> None:
+    """Serve any of the four gRPC call shapes for *conn*.
 
     Report handler and protocol failures as gRPC status.
     """
-    path = _req_field(conn, 'path', '')
+    path = conn.path
     context = GrpcContext(conn)
     # Echo the request's content-type subtype (application/grpc+proto, +json, …)
     # back on the response, defaulting to bare application/grpc.
@@ -836,7 +815,8 @@ async def serve_grpc(registry: GrpcServiceRegistry, conn, receive, send) -> None
     # what it can decode, so we may gzip responses only when it lists gzip.
     request_encoding = context.metadata(b'grpc-encoding').lower()
     response_encoding = (
-        b'gzip' if _accepts_gzip(context.metadata(b'grpc-accept-encoding'))
+        b'gzip' if b'gzip' in list_members(
+            context.conn.headers.get_combined(b'grpc-accept-encoding') or b'')
         else None)
 
     # Wire the context's response side now, so the handler can call

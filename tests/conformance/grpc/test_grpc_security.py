@@ -22,6 +22,7 @@ from blackbull.grpc import (
 )
 from blackbull.grpc.asgi import serve_grpc, GrpcContext, _pct_encode_message
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 # ---------------------------------------------------------------------------
@@ -29,9 +30,7 @@ from blackbull.native import NativeResponse
 # ---------------------------------------------------------------------------
 
 def _grpc_scope(path, headers=None):
-    base = [(b'content-type', b'application/grpc'),
-            (b':method', b'POST'),
-            (b':path', path.encode() if isinstance(path, str) else path)]
+    base = [(b'content-type', b'application/grpc')]
     return {'type': 'http', 'path': path,
             'headers': headers if headers is not None else base}
 
@@ -103,7 +102,7 @@ class TestGrpcContentType:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/M'), _receive_with(encode_message(b'')), send)
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/M')), _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
 
     @pytest.mark.asyncio
@@ -127,9 +126,8 @@ class TestGrpcContentType:
 
         events, send = _collector()
         scope = {'type': 'http', 'path': '/svc/M',
-                 'headers': [(b'content-type', content_type),
-                             (b':method', b'POST')]}
-        await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
+                 'headers': [(b'content-type', content_type)]}
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
 
     @pytest.mark.asyncio
@@ -138,7 +136,7 @@ class TestGrpcContentType:
         reg = GrpcServiceRegistry()
         events, send = _collector()
         await serve_grpc(
-            reg, _grpc_scope('/Package.UnknownService/Missing'),
+            reg, Connection.from_scope(_grpc_scope('/Package.UnknownService/Missing')),
             _receive_with(encode_message(b'')), send)
         trailers = _trailers_of(events)
         assert trailers[b'grpc-status'] == str(int(GrpcStatus.UNIMPLEMENTED)).encode()
@@ -149,7 +147,7 @@ class TestGrpcContentType:
         reg = GrpcServiceRegistry()
         events, send = _collector()
         await serve_grpc(
-            reg, _grpc_scope('/Foo.Bar/Baz'),
+            reg, Connection.from_scope(_grpc_scope('/Foo.Bar/Baz')),
             _receive_with(encode_message(b'')), send)
         msg = _trailers_of(events).get(b'grpc-message', b'')
         assert b'Foo.Bar/Baz' in msg or b'/Foo.Bar/Baz' in msg
@@ -177,7 +175,7 @@ class TestGrpcStatusCodes:
                 raise GrpcError(_code, f'status {_code.value}')
 
             events, send = _collector()
-            await serve_grpc(reg, _grpc_scope(path),
+            await serve_grpc(reg, Connection.from_scope(_grpc_scope(path)),
                              _receive_with(encode_message(b'')), send)
             trailers = _trailers_of(events)
             expected = str(int(code)).encode()
@@ -197,7 +195,7 @@ class TestGrpcStatusCodes:
             return b'result'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/OK'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/OK')),
                          _receive_with(encode_message(b'')), send)
         trailers = _trailers_of(events)
         assert b'grpc-status' in trailers
@@ -283,7 +281,7 @@ class TestGrpcMessageInjection:
                             'bad\r\npseudo-header: evil')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Injection'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Injection')),
                          _receive_with(encode_message(b'')), send)
         trailers = _trailers_of(events)
         assert trailers[b'grpc-status'] == str(int(GrpcStatus.INVALID_ARGUMENT)).encode()
@@ -311,7 +309,7 @@ class TestMessageFramingAttacks:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Unary'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Unary')),
                          _receive_with(b''), send)
         trailers = _trailers_of(events)
         # Zero messages → GrpcDecodeError?  Actually decode_messages(b'') returns [].
@@ -332,7 +330,7 @@ class TestMessageFramingAttacks:
 
         body = encode_message(b'a') + encode_message(b'b') + encode_message(b'c')
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Unary'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Unary')),
                          _receive_with(body), send)
         assert _trailers_of(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()
@@ -347,7 +345,7 @@ class TestMessageFramingAttacks:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Unary'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Unary')),
                          _receive_with(b'\x00\x00'), send)  # truncated prefix
         assert _trailers_of(events)[b'grpc-status'] == \
             str(int(GrpcStatus.INTERNAL)).encode()
@@ -365,7 +363,7 @@ class TestMessageFramingAttacks:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Unary'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Unary')),
                          _receive_with(encode_message(b'data', compressed=True)), send)
         assert _trailers_of(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()
@@ -383,7 +381,7 @@ class TestMessageFramingAttacks:
         # valid message + trailing garbage that looks like another message
         body = encode_message(b'ok') + b'\x00\x00\x00\x00\x01'  # 2nd message: len=1 but no body
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Unary'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Unary')),
                          _receive_with(body), send)
         trailers = _trailers_of(events)
         # Could be UNIMPLEMENTED (multiple messages) or INTERNAL (truncated second)
@@ -410,7 +408,7 @@ class TestHandlerIsolation:
             return 'string not bytes'  # str, not bytes
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/BadReturn'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/BadReturn')),
                          _receive_with(encode_message(b'')), send)
         trailers = _trailers_of(events)
         assert trailers[b'grpc-status'] == str(int(GrpcStatus.INTERNAL)).encode()
@@ -425,7 +423,7 @@ class TestHandlerIsolation:
             return None
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/NoneReturn'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/NoneReturn')),
                          _receive_with(encode_message(b'')), send)
         trailers = _trailers_of(events)
         assert trailers[b'grpc-status'] == str(int(GrpcStatus.INTERNAL)).encode()
@@ -442,7 +440,7 @@ class TestHandlerIsolation:
             raise RuntimeError('catastrophic')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Boom'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Boom')),
                          _receive_with(encode_message(b'')), send)
         trailers = _trailers_of(events)
         assert trailers[b'grpc-status'] == str(int(GrpcStatus.INTERNAL)).encode()
@@ -463,7 +461,7 @@ class TestHandlerIsolation:
 
         events, send = _collector()
         with pytest.raises(BaseException, match='catastrophic'):
-            await serve_grpc(reg, _grpc_scope('/svc/BaseBoom'),
+            await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/BaseBoom')),
                              _receive_with(encode_message(b'')), send)
         # No status was emitted — the throwable was propagated, not reported.
         assert not any(e['type'] == 'http.response.trailers' for e in events)
@@ -478,7 +476,7 @@ class TestHandlerIsolation:
             raise RuntimeError('disk full: /dev/null')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Oops'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Oops')),
                          _receive_with(encode_message(b'')), send)
         msg = _trailers_of(events).get(b'grpc-message', b'')
         assert b'disk full' in msg
@@ -495,7 +493,7 @@ class TestHandlerIsolation:
             return b'should not be sent'  # unreachable
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/AbortTest'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/AbortTest')),
                          _receive_with(encode_message(b'')), send)
         trailers = _trailers_of(events)
         assert trailers[b'grpc-status'] == \
@@ -521,17 +519,14 @@ class TestGrpcMetadata:
 
         @reg.method('/svc/MetaEcho')
         async def meta_echo(request, context):
-            token = context.metadata(b'x-custom-bin', b'default')
             context.set_trailing_metadata([
-                (b'x-response-bin', token),
+                (b'x-response-bin', b'\x00\x01\x02\xff'),
                 (b'x-request-id', b'123'),
             ])
             return b'ok'
 
-        headers = [(b'content-type', b'application/grpc'),
-                   (b'x-custom-bin', b'\x00\x01\x02\xff')]
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/MetaEcho', headers),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/MetaEcho')),
                          _receive_with(encode_message(b'')), send)
         expected = base64.b64encode(b'\x00\x01\x02\xff').rstrip(b'=')
         # Find trailers event
@@ -560,7 +555,7 @@ class TestGrpcMetadata:
 
         events, send = _collector()
         await serve_grpc(
-            reg, _grpc_scope('/svc/RawStatusDetails'),
+            reg, Connection.from_scope(_grpc_scope('/svc/RawStatusDetails')),
             _receive_with(encode_message(b'')), send)
 
         assert _trailers_of(events)[b'grpc-status-details-bin'] == expected
@@ -576,7 +571,7 @@ class TestGrpcMetadata:
             return val
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Default'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Default')),
                          _receive_with(encode_message(b'')), send)
         body_event = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_event is not None
@@ -600,7 +595,7 @@ class TestResponseShape:
             return b'response'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Ok'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Ok')),
                          _receive_with(encode_message(b'')), send)
         types = [e['type'] for e in events]
         assert types == [
@@ -628,7 +623,7 @@ class TestResponseShape:
             raise GrpcError(GrpcStatus.NOT_FOUND, 'gone')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Err'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Err')),
                          _receive_with(encode_message(b'')), send)
         types = [e['type'] for e in events]
         assert types == ['http.response.start', 'http.response.trailers'], (
@@ -649,7 +644,7 @@ class TestResponseShape:
             raise GrpcError(GrpcStatus.PERMISSION_DENIED, 'nope')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Err'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Err')),
                          _receive_with(encode_message(b'')), send)
         start = events[0]
         assert start['type'] == 'http.response.start'
@@ -669,7 +664,7 @@ class TestResponseShape:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Ok'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Ok')),
                          _receive_with(encode_message(b'')), send)
         start_headers = dict(events[0]['headers'])
         assert start_headers.get(b'content-type') == b'application/grpc'
@@ -685,7 +680,7 @@ class TestResponseShape:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Ok'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Ok')),
                          _receive_with(encode_message(b'')), send)
         assert events[0].get('trailers') is True, (
             'response start must set trailers=True for gRPC success path')
@@ -714,7 +709,7 @@ class TestStreamingBody:
         # Split: first 3 bytes of prefix + chunk of body, then rest
         chunks = [body[:3], body[3:7], body[7:]]
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Multi'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Multi')),
                          _receive_streaming(chunks), send)
         body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_ev is not None
@@ -733,7 +728,7 @@ class TestStreamingBody:
         body = encode_message(payload)
         chunks = [bytes([b]) for b in body]
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/ByteByByte'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/ByteByByte')),
                          _receive_streaming(chunks), send)
         body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_ev is not None

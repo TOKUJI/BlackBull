@@ -622,7 +622,7 @@ class PushPromise(FrameBase):
                  *, data: bytes = b'', decoder=None, encoder=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         self.pseudo_headers: dict[PseudoHeaders, str] = {}
-        self.headers: list[tuple[str, str]] = []
+        self.headers: list[tuple[bytes, bytes]] = []
         self.encoder = encoder
         self.decoder = decoder
         self.end_headers = HeaderFrameFlags.END_HEADERS & self.flags

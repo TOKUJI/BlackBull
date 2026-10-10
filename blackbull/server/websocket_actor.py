@@ -11,7 +11,7 @@ from ..asgi import (ASGIEvent, WebSocketAcceptEvent, WebSocketCloseEvent,
                     WebSocketSendEvent)
 from .conn_id import new_connection_id
 from .constants import WSCloseCode
-from ..headers import _MinimalResponseHeaders, _minimal_response_headers
+from ..headers import _MinimalResponseHeaders, _as_response_fields
 from .permessage_deflate import (
     DeflateParams, InboundDecompressor, OutboundCompressor,
 )
@@ -38,7 +38,7 @@ def _app_accept_headers(raw) -> _MinimalResponseHeaders | None:
     """
     if not raw:
         return None
-    out = _minimal_response_headers((name, value) for name, value in raw)
+    out = _as_response_fields((name, value) for name, value in raw)
     for name, _ in out:
         if name in _HANDSHAKE_OWNED:
             raise ValueError(

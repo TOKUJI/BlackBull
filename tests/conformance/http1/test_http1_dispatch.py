@@ -15,6 +15,7 @@ from blackbull.server.http1_actor import HTTP1Actor
 from blackbull.server.sender import AbstractWriter, SenderFactory
 from blackbull.server.recipient import AbstractReader, IncompleteReadError
 from blackbull.server.websocket_actor import WebSocketActor
+from blackbull.server.http1_actor import request_framing
 
 
 def _conn(headers, path: str = '/'):
@@ -686,7 +687,7 @@ class TestStreamingRequestBody:
         from blackbull.headers import Headers
         conn = _conn(Headers([(b'transfer-encoding', b'chunked')]))
         reader = AsyncioReader(_FakeReader(chunked_wire))
-        return HTTP1Recipient(reader, conn)
+        return HTTP1Recipient(reader, conn, framing=request_framing(conn.headers))
 
     async def test_first_chunk_has_more_body_true(self):
         wire = b'5\r\nhello\r\n5\r\nworld\r\n0\r\n\r\n'
@@ -955,18 +956,17 @@ class TestHTTP1Recipient:
 
     @pytest.mark.asyncio
     async def test_unsupported_transfer_encoding_raises(self):
-        from blackbull.server.recipient import HTTP1Recipient
+        from blackbull.server.http1_actor import NotImplementedFramingError
         conn = _conn([(b'transfer-encoding', b'gzip')])
-        reader = self._make_reader(b'')
-        with pytest.raises(NotImplementedError, match='not supported'):
-            HTTP1Recipient(reader, conn)
+        with pytest.raises(NotImplementedFramingError):
+            request_framing(conn.headers)
 
     @pytest.mark.asyncio
     async def test_second_call_returns_disconnect(self):
         from blackbull.server.recipient import HTTP1Recipient
         conn = _conn([(b'content-length', b'5')])
         reader = self._make_reader(b'hello')
-        r = HTTP1Recipient(reader, conn)
+        r = HTTP1Recipient(reader, conn, framing=request_framing(conn.headers))
         first = await r()
         assert first['type'] == 'http.request'
         second = await r()
@@ -980,7 +980,7 @@ class TestHTTP1Recipient:
         from blackbull.server.recipient import HTTP1Recipient
         conn = _conn([(b'content-length', b'10')])
         reader = self._make_reader(b'0123456789')
-        r = HTTP1Recipient(reader, conn, chunk_max=4)
+        r = HTTP1Recipient(reader, conn, chunk_max=4, framing=request_framing(conn.headers))
         events = []
         while True:
             e = await r()
@@ -997,7 +997,7 @@ class TestHTTP1Recipient:
         from blackbull.server.recipient import HTTP1Recipient
         conn = _conn([(b'content-length', b'8')])
         reader = self._make_reader(b'abcdefgh')
-        r = HTTP1Recipient(reader, conn, chunk_max=4)
+        r = HTTP1Recipient(reader, conn, chunk_max=4, framing=request_framing(conn.headers))
         events = []
         while True:
             e = await r()
@@ -1021,7 +1021,7 @@ class TestHTTP1Recipient:
         from blackbull.server.recipient import HTTP1Recipient
         conn = _conn([(b'content-length', str(content_length).encode())])
         reader = self._make_reader(payload)
-        r = HTTP1Recipient(reader, conn, chunk_size=chunk_size)
+        r = HTTP1Recipient(reader, conn, chunk_size=chunk_size, framing=request_framing(conn.headers))
         event = await r()
         assert event == expected
 
@@ -1030,7 +1030,7 @@ class TestHTTP1Recipient:
         from blackbull.server.recipient import HTTP1Recipient
         conn = _conn([])
         reader = self._make_reader(b'')
-        r = HTTP1Recipient(reader, conn, chunk_size=4)
+        r = HTTP1Recipient(reader, conn, chunk_size=4, framing=request_framing(conn.headers))
         event = await r()
         assert event == {'type': 'http.request', 'body': b'', 'more_body': False}
 
@@ -1044,7 +1044,7 @@ class TestHTTP1Recipient:
         try:
             conn = _conn([(b'content-length', b'7')])
             reader = self._make_reader(b'abcdefg')
-            r = HTTP1Recipient(reader, conn)        # no chunk_max → env
+            r = HTTP1Recipient(reader, conn, framing=request_framing(conn.headers))        # no chunk_max → env
             sizes = []
             while True:
                 e = await r()

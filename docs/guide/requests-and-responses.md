@@ -450,15 +450,19 @@ await send(JSONResponse({'ok': True}, headers=[
 ]))
 ```
 
-Each field name must be a non-empty RFC 9110 `token`. Values may contain
-HTAB, spaces, visible ASCII, and `obs-text` bytes, but not NUL, CR, LF, other
-C0 controls, or DEL. `Response` helpers validate this contract when they are
-constructed. The lower-level `NativeResponse` and ASGI
-`http.response.start` / `http.response.trailers` forms are validated by the
-sender before that field section writes bytes or changes the HTTP/2 HPACK
-table. Invalid fields raise `ValueError`; they are never silently stripped or
-rewritten. If the response has already begun, HTTP/1.1 closes rather than
-reusing a connection with an incomplete field section.
+Each field name must be a non-empty RFC 9110 `token`; it is sent lowercase.
+Values may contain HTAB, spaces, visible ASCII, and `obs-text` bytes, but not
+NUL, CR, LF, other C0 controls, or DEL. Each field is checked once, when it
+enters a `NativeResponse`: a `Response` helper builds one when sent, a
+`NativeResponse` checks when constructed, when its `header` or `trailers` is
+assigned and when a field is appended to either, and an ASGI
+`http.response.start` / `http.response.trailers` dict is checked when
+converted. Leading and trailing SP/HTAB are not part of a value (RFC 9110
+§5.5), so they are removed there and both transports send the same value.
+Any other invalid octet raises `ValueError`; it is never stripped or
+rewritten, and never reaches the wire or the HTTP/2 HPACK table. If the response has already begun,
+HTTP/1.1 closes rather than reusing a connection with an incomplete field
+section.
 
 String names and values are encoded as ASCII. Pass bytes explicitly when an
 RFC-defined field needs `obs-text`. Empty values and repeated fields such as
@@ -527,6 +531,12 @@ its boundary remains explicit on a persistent connection.  A `304` also
 carries no content; an explicit, valid `Content-Length` is retained as
 selected-representation metadata, but one is not generated from an attempted
 response body.  Application body events for these statuses are discarded.
+
+A request's trailer section is read and discarded; it never reaches the
+application.  Its field lines follow the header section's grammar, and it may
+not carry a field RFC 9110 §6.5.1 prohibits (framing, routing,
+authentication, content handling).  A violation answers 400 on HTTP/1.1 and
+resets the stream (`PROTOCOL_ERROR`) on HTTP/2.
 
 ## WebSocket frames
 

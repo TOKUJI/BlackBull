@@ -34,7 +34,7 @@ from ..asgi import (
     WebSocketSendEvent,
 )
 from ..headers import (
-    HeaderList, _MinimalResponseHeaders, _minimal_response_headers)
+    HeaderList, _MinimalResponseHeaders, _as_response_fields)
 from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
 
 from ..logger import debug_gate  # noqa: E402
@@ -119,11 +119,9 @@ def build_response_headers(encoder, stream_id: int, status,
     Injects a ``date`` header when the app did not supply one, mirroring the
     ``Headers.save()`` send path.  ``status`` may be an ``HTTPStatus``, an
     ``int``, or a ``str`` — it is normalised via ``str()`` exactly as the
-    object path does.  *headers* that is not yet a
-    ``_MinimalResponseHeaders`` goes through that pass here.
+    object path does.  *headers* is read, not mutated.
     """
-    if not isinstance(headers, _MinimalResponseHeaders):
-        headers = _minimal_response_headers(headers)
+    headers = _as_response_fields(headers)
     fields = headers if headers.date else (*headers, (b'date', _http_date()))
 
     fast = hpack_fastpath.status_fast_bytes(str(status))
@@ -147,8 +145,7 @@ def build_trailers(encoder, stream_id: int, headers) -> bytes:
     This is the basis for the gRPC ``grpc-status`` trailers path — a unary
     RPC response carries a second HEADERS frame with regular fields only.
     """
-    if not isinstance(headers, _MinimalResponseHeaders):
-        headers = _minimal_response_headers(headers)
+    headers = _as_response_fields(headers)
     payload = encoder.encode(headers)
     flags = HeaderFrameFlags.END_HEADERS.value | HeaderFrameFlags.END_STREAM.value
     return (len(payload).to_bytes(3, 'big') + FrameTypes.HEADERS.value
@@ -545,7 +542,7 @@ class HTTP1Sender(BaseSender):
             return
 
         if isinstance(body, dict):
-            body = _native_from_asgi(body, copy_headers=False)
+            body = _native_from_asgi(body)
 
         if (isinstance(body, NativeResponse) and body._extension is not None
                 and body.push is not None):
@@ -564,7 +561,7 @@ class HTTP1Sender(BaseSender):
         match body:
             case bytes():
                 self._response_started = True
-                h = _minimal_response_headers(headers)
+                h = _as_response_fields(headers)
                 if self._log_record is not None:
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
@@ -574,7 +571,7 @@ class HTTP1Sender(BaseSender):
 
             case NativeResponse():
                 if body._header is not None:
-                    head = _minimal_response_headers(body._header)
+                    head = body._header
                     self._response_started = True
                     await self._settle_buffered_head()
                     self._buffered_status = (_STATUS_BY_CODE.get(body.status)
@@ -600,10 +597,10 @@ class HTTP1Sender(BaseSender):
                 if body.body is not None:
                     self._response_started = True
                     await self._handle_body_content(body._body, body.more_body)
-                if body.trailers is not None and not self._completed:
+                if body._trailers is not None and not self._completed:
                     self._response_started = True
                     await self._handle_trailers(
-                        body.trailers, body.more_trailers)
+                        body._trailers, body.more_trailers)
 
             case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)
@@ -652,12 +649,11 @@ class HTTP1Sender(BaseSender):
                 and (not self._expect_trailers or self._head_mode)):
             self._completed = True
 
-    async def _handle_trailers(self, headers: HeaderList,
+    async def _handle_trailers(self, headers: _MinimalResponseHeaders,
                                more_trailers: bool = False) -> None:
-        """Write one part of the trailer section for dict and native paths."""
+        """Write one part of the trailer section."""
         if not (self._expect_trailers or self._chunked):
             return
-        headers = _minimal_response_headers(headers)
         if not self._trailers_started:
             await self._write(b'0\r\n')
             self._trailers_started = True
@@ -697,8 +693,7 @@ class HTTP1Sender(BaseSender):
         before rebuilding the field list so duplicate values cannot create two
         competing message boundaries.
 
-        When *head* carries no framing field the server's is appended to it
-        in place.
+        Returns a new field list; *head* is not modified.
         """
         code = int(status)
         self._chunked = False
@@ -730,7 +725,7 @@ class HTTP1Sender(BaseSender):
             for field in lengths:
                 pairs.remove(field)
         else:
-            pairs = head
+            pairs = list(head)
 
         if informational or code == 204:
             self._expect_trailers = False
@@ -1396,13 +1391,10 @@ class HTTP2Sender(BaseSender):
 
     async def _handle_trailers(
         self,
-        headers: list[tuple[bytes, bytes]],
+        headers: _MinimalResponseHeaders,
         more_trailers: bool = False,
     ) -> None:
-        """Write the trailing HEADERS — shared by the dict and native H2 paths.
-
-        Takes a plain ``list`` of pairs (the H2 variant; ``HTTP1Sender``'s
-        same-named helper takes a ``HeaderList``).
+        """Write the trailing HEADERS.
 
         HPACK's dynamic table is stateful, so header blocks MUST be encoded in
         wire order: the response HEADERS block first, then the trailing HEADERS
@@ -1411,10 +1403,9 @@ class HTTP2Sender(BaseSender):
         """
         if self._closed:
             return
-        headers = _minimal_response_headers(headers)
         if more_trailers:
             if self._buffered_trailers is None:
-                self._buffered_trailers = headers
+                self._buffered_trailers = headers.copy()
             else:
                 self._buffered_trailers.extend(headers)
             return
@@ -1502,7 +1493,7 @@ class HTTP2Sender(BaseSender):
             return
 
         if isinstance(body, dict):
-            body = _native_from_asgi(body, copy_headers=False)
+            body = _native_from_asgi(body)
 
         if isinstance(body, bytes):
             # RFC 9113 §8.1, as in the dict branch below.
@@ -1562,7 +1553,7 @@ class HTTP2Sender(BaseSender):
                     logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
-                head = _minimal_response_headers(body._header)
+                head = body._header
                 await self._settle_buffered_head()
                 self._buffered_status = HTTPStatus(body.status)
                 self._buffered_headers = head
@@ -1578,9 +1569,9 @@ class HTTP2Sender(BaseSender):
                     self._log_record.mark('start_arm_out')
             if body.body is not None:
                 await self._handle_body_content(body._body, not body.more_body)
-            if body.trailers is not None and not self._end_stream_sent:
+            if body._trailers is not None and not self._end_stream_sent:
                 await self._handle_trailers(
-                    list(body.trailers), body.more_trailers)
+                    body._trailers, body.more_trailers)
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')

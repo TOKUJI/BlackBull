@@ -20,8 +20,10 @@ from urllib.parse import urlsplit
 
 from ..connection import Connection
 from ..headers import Headers
+from ..headers import _owned_response_fields
 from ..native import NativeResponse
-from ..protocol.field_grammar import FIELD_VALUE_ALLOWED_SET, TCHAR_SET
+from ..protocol.field_grammar import (
+    FIELD_VALUE_ALLOWED_SET, TCHAR_SET, if_none_match_hit, list_members)
 from .utils import as_middleware
 
 #: Narrower than RFC 9110 §15's heuristically cacheable set: caching an error
@@ -57,10 +59,9 @@ class _StoredResponse(NamedTuple):
 
     def replay(self, age: int) -> NativeResponse:
         """A private copy carrying its *current* age (RFC 9111 §4.2.3)."""
-        header = [(name, value) for name, value in self.header
-                  if name.lower() != b'age']
-        header.append((b'age', str(age).encode()))
-        return NativeResponse(status=self.status, header=header, body=self.body)
+        header = self.header.copy()
+        header.add(b'age', str(age).encode())
+        return NativeResponse.complete(self.status, header, self.body)
 
     def expired(self, now: float | None = None) -> bool:
         return (now if now is not None else time.monotonic()) >= self.expires_at
@@ -146,8 +147,8 @@ class Cache:
             self._store.move_to_end(base_key)
             variants.entries.move_to_end(variant_key)
             age = max(0, int(entry.age()))
-            inm = conn.headers.get(b'if-none-match')
-            if inm and _etag_matches(inm, entry.etag):
+            inm = conn.headers.get_combined(b'if-none-match')
+            if inm and if_none_match_hit(inm, entry.etag):
                 await send(NativeResponse(
                     status=304,
                     header=[(b'etag', entry.etag),
@@ -172,7 +173,7 @@ class Cache:
             return False
         # A field nobody can read could be stating one of those.
         return all(_readable(value) for name, value in headers
-                   if name.lower() == b'cache-control')
+                   if name == b'cache-control')
 
     def _remember(self, base_key: tuple, req_headers: Headers,
                   vary_fields: tuple[bytes, ...], status: int,
@@ -192,8 +193,10 @@ class Cache:
             bucket.vary_fields = vary_fields
             bucket.entries.clear()
         key = _variant_key(vary_fields, req_headers)
+        stored = _owned_response_fields(headers)
+        stored.discard(b'age')
         bucket.entries[key] = _StoredResponse(
-            status=status, header=list(headers), body=body, etag=etag,
+            status=status, header=stored, body=body, etag=etag,
             expires_at=now + ttl, stored_at=now)
         bucket.entries.move_to_end(key)
         self._store.move_to_end(base_key)
@@ -255,14 +258,14 @@ class _Capture:
         if (not isinstance(event, NativeResponse)
                 or event._extension is not None
                 or event.expects_trailers
-                or event.trailers is not None):
+                or event._trailers is not None):
             # Nothing about this shape can be stored, and the rest of the
             # response has to follow it out unchanged.
             await self._forward(event)
             return
         if event._header is not None:
             self._status = event.status
-            self._headers = list(event._header)
+            self._headers = event._header.copy()
             self._vary_fields = _vary_fields(self._headers)
             # ``Vary: *`` and an unstorable status or directive are settled by
             # the header alone: stop holding the body as well.
@@ -298,58 +301,40 @@ class _Capture:
 # --- header inspection helpers ---------------------------------------------
 
 def _origin(conn: Connection) -> tuple[str, str, int] | None:
-    """Effective HTTP origin, after trusted middleware has applied rewrites.
+    """Return the request's origin ``(scheme, host, port)``, or ``None`` for a
+    scheme other than http/https or no authority.
 
-    Native HTTP/2 maps :authority into Host before dispatch, as does the ASGI
-    boundary.  Forwarded headers are not authority here: only the configured
-    trusted-proxy layer may change what the application sees.
+    Relies on the Connection contract: ``scheme`` is lowercase and ``host`` is
+    at most one valid authority.  Host case and an explicit default port do not
+    make a different origin (RFC 9110 §4.3.1).
     """
-    scheme = conn.scheme.lower()
+    scheme = conn.scheme
     default_port = {'http': 80, 'https': 443}.get(scheme)
     if default_port is None:
         return None
-    hosts = conn.headers.getlist(b'host')
-    if len(hosts) > 1:
+    host_field = conn.headers.get(b'host')
+    if host_field:
+        authority = host_field.decode('ascii')
+    elif conn.server is not None:
+        host, port = conn.server
+        # ASGI server tuples use an unbracketed IPv6 address; URI
+        # authority syntax needs brackets to distinguish it from a port.
+        authority = (f'[{host}]'
+                     if ':' in host and not host.startswith('[') else host)
+        if port is not None:
+            authority += f':{port}'
+    else:
         return None
     try:
-        if hosts:
-            authority = hosts[0][1].strip(b' \t').decode('ascii')
-        elif conn.server is not None:
-            host, port = conn.server
-            # ASGI server tuples use an unbracketed IPv6 address; URI
-            # authority syntax needs brackets to distinguish it from a port.
-            authority = (f'[{host}]'
-                         if ':' in host and not host.startswith('[') else host)
-            if port is not None:
-                authority += f':{port}'
-        else:
-            return None
-        # ``urlsplit`` removes some control characters and interprets
-        # delimiters; do not let those transformations alias an ambiguous value
-        # to a cacheable origin.  Request validation belongs to the protocol
-        # layer, so this is only a second reading of the same value.
-        if not authority or any(ord(c) <= 32 or ord(c) == 127 or c in '/?#@\\'
-                                for c in authority):
-            return None
-        literal = authority.startswith('[')
-        if literal:
-            end = authority.find(']')
-            suffix = authority[end + 1:]
-            if end < 0 or (suffix and not suffix.startswith(':')):
-                return None
         parts = urlsplit('//' + authority)
-        host = parts.hostname
-        port = parts.port
-        if not host:
-            return None
-    except (UnicodeError, ValueError):
+        host, port = parts.hostname, parts.port
+    except ValueError:  # a port beyond 65535
         return None
-    # RFC 9110 §4.3.1: host/scheme case and explicit default ports do not
-    # identify different origins, and integer conversion normalizes leading
-    # zeros.  Preserve IP-literal syntax: [v1.example] (IPvFuture) is not the
-    # registered name v1.example.  urlsplit lowercases the hostname while
-    # preserving the case-sensitive zone identifier of a scoped address.
-    return (scheme, f'[{host}]' if literal else host,
+    if not host:
+        return None
+    # urlsplit lowercases the hostname; brackets keep an IP literal distinct
+    # from a registered name.
+    return (scheme, f'[{host}]' if authority.startswith('[') else host,
             default_port if port is None else port)
 
 
@@ -455,7 +440,7 @@ def _directives(fields: Iterable[tuple[bytes, bytes]]
     act on a partly-read field checks [`_readable`][] itself.
     """
     for name, value in fields:
-        if name.lower() == b'cache-control':
+        if name == b'cache-control':
             yield from _parse_directives(value) or ()
 
 
@@ -489,7 +474,7 @@ def _incoming_age(fields: Iterable[tuple[bytes, bytes]]) -> int:
     evidence of staleness.
     """
     for name, value in fields:
-        if name.lower() != b'age':
+        if name != b'age':
             continue
         try:
             return max(0, min(int(value.strip()), _MAX_DELTA_SECONDS))
@@ -520,12 +505,12 @@ def _expires_in(fields: Iterable[tuple[bytes, bytes]]) -> int | None:
     reading of a repeated field, and this is consulted only when neither
     ``s-maxage`` nor ``max-age`` stated a lifetime.
     """
-    expires = [_date_seconds(v) for n, v in fields if n.lower() == b'expires']
+    expires = [_date_seconds(v) for n, v in fields if n == b'expires']
     if not expires:
         return None
     if any(when is None for when in expires):
         return 0
-    dates = [_date_seconds(v) for n, v in fields if n.lower() == b'date']
+    dates = [_date_seconds(v) for n, v in fields if n == b'date']
     base = max([when for when in dates if when is not None], default=time.time())
     return max(0, min(int(min(expires) - base), _MAX_DELTA_SECONDS))
 
@@ -572,14 +557,12 @@ def _vary_fields(fields: Iterable[tuple[bytes, bytes]]
     """
     names: set[bytes] = set()
     for name, value in fields:
-        if name.lower() != b'vary':
+        if name != b'vary':
             continue
-        for token in value.split(b','):
-            token = token.strip().lower()
+        for token in list_members(value):
             if token == b'*':
                 return None
-            if token:
-                names.add(token)
+            names.add(token)
     return tuple(sorted(names))
 
 
@@ -590,23 +573,5 @@ def _variant_key(vary_fields: tuple[bytes, ...], headers: Headers) -> tuple:
 
 def _response_etag(fields: Iterable[tuple[bytes, bytes]]) -> bytes | None:
     """The response's own ``ETag``, or ``None``."""
-    return next((value for name, value in fields if name.lower() == b'etag'),
+    return next((value for name, value in fields if name == b'etag'),
                 None)
-
-
-def _etag_matches(if_none_match: bytes, etag: bytes) -> bool:
-    """RFC 9110 §13.1.2 — ``If-None-Match`` against one ETag.
-
-    Weak comparison ignores ``W/`` on either side; ``*`` and a list of
-    candidates are both read.
-    """
-    if if_none_match.strip() == b'*':
-        return True
-    target = etag[2:] if etag.startswith(b'W/') else etag
-    for candidate in if_none_match.split(b','):
-        candidate = candidate.strip()
-        if candidate.startswith(b'W/'):
-            candidate = candidate[2:]
-        if candidate == target:
-            return True
-    return False

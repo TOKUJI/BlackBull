@@ -43,6 +43,24 @@ means an ASGI dictionary for an external host or `BB_FORCE_ASGI_SCOPE=1`.
 Create it after pre-dispatch mutations; shared `state` and `extensions`
 remain live for late updates.
 
+Every `Connection` carries one header contract, and whoever creates it is
+responsible for it: names are lowercase tchar, values have no edge SP/HTAB
+and no CTL, `host` is at most one valid authority, and `scheme` is lowercase.
+The HTTP/1.1 and HTTP/2 parsers produce it; `Connection.from_scope`
+establishes it for a scope and refuses one that cannot meet it (a bare 400,
+or close 1002 for WebSocket); code that builds a `Connection` directly must
+keep it too.
+Code past dispatch relies on it and does not normalise again; code that
+rewrites a field after construction keeps it.
+
+A `NativeResponse` keeps the same field contract from the moment it exists:
+every way a field enters it (construction, `header`/`trailers` assignment,
+`append` on either view) checks that field once, lowercases its name and
+trims edge SP/HTAB from its value, so middleware and senders read fields
+exactly and check nothing again. Its header and trailer
+lists are `_MinimalResponseHeaders`; change them only through `add`, `extend`
+and `discard`, which keep the located framing fields true.
+
 A connection owns one read buffer. `BufferReader` owns receive policy,
 `ConnectionProtocol` performs transport callbacks and pauses, and
 `ReadBuffer` owns bytes and cursors. Detection must not consume the prefix;
@@ -118,9 +136,9 @@ vectored backing contract.
 See `tests/architecture/test_writer_backing_contract.py`.
 
 Normalize ASGI events through `blackbull.native`, not separate handler and
-sender conversions. Middleware copies mutable field lists; direct sender
-conversion can borrow only until the sender snapshots them. Validate and
-lowercase response heads and trailers once on entry. Push headers describe
+sender conversions. A conversion gives the result its own field lists, and
+senders read them in place without copying. Validate and lowercase response
+heads and trailers once on entry. Push headers describe
 a promised request and bypass response header injection and middleware.
 
 Bound socket drains and flow-control waits. File transfers use bounded

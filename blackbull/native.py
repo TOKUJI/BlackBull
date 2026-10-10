@@ -6,22 +6,25 @@ dictionaries only at conversion boundaries.
 """
 from __future__ import annotations
 
-from .headers import _minimal_response_headers
+from .headers import _MinimalResponseHeaders, _as_response_fields, _owned_response_fields
 
 
 class _HeaderView:
-    """Zero-copy view over a [`NativeResponse`][] header list.
+    """Zero-copy view over a [`NativeResponse`][] header or trailer list, whose
+    names are lowercase tchar and values free of CTL and of edge SP/HTAB.
 
-    Mutations (``append``) are visible to anything reading the response
-    afterwards (the sender, ``to_asgi``).  Models the DX of
-    [`blackbull.headers.Headers`][blackbull.headers.Headers] without a copy — lookups are
-    case-insensitive (RFC 9110 §5.1), matching ``Headers``.
+    ``append`` validates and lowercases what it adds, so the list keeps that
+    contract; lookups take a name in any case (RFC 9110 §5.1).  Mutations are
+    visible to anything reading the response afterwards (the sender,
+    ``to_asgi``); assigning the view to a response copies its fields.
     """
 
-    __slots__ = ('_items',)
+    __slots__ = ('_items', '_owner')
 
-    def __init__(self, items: list[tuple[bytes, bytes]]) -> None:
+    def __init__(self, items: _MinimalResponseHeaders,
+                 owner: NativeResponse | None = None) -> None:
         self._items = items
+        self._owner = owner
 
     def __iter__(self):
         return iter(self._items)
@@ -30,20 +33,19 @@ class _HeaderView:
         return len(self._items)
 
     def __contains__(self, name: bytes) -> bool:
-        lowered = name.lower()
-        return any(k == name or k.lower() == lowered for k, _ in self._items)
+        name = name.lower()
+        return any(k == name for k, _ in self._items)
 
     def get(self, name: bytes, default: bytes = b'') -> bytes:
-        lowered = name.lower()
+        name = name.lower()
         for k, v in self._items:
-            if k == name or k.lower() == lowered:
+            if k == name:
                 return v
         return default
 
     def getlist(self, name: bytes) -> list[tuple[bytes, bytes]]:
-        lowered = name.lower()
-        return [(k, v) for k, v in self._items
-                if k == name or k.lower() == lowered]
+        name = name.lower()
+        return [(k, v) for k, v in self._items if k == name]
 
     def append(self, name_or_pairs, value: bytes | None = None) -> None:
         if value is None:
@@ -53,11 +55,14 @@ class _HeaderView:
             # so a 2-tuple of (bytes, bytes) is treated as one pair.
             if (isinstance(name_or_pairs, tuple) and len(name_or_pairs) == 2
                     and isinstance(name_or_pairs[0], (bytes, str))):
-                self._items.append(name_or_pairs)
-            else:
-                self._items.extend(name_or_pairs)
+                name_or_pairs = (name_or_pairs,)
         else:
-            self._items.append((name_or_pairs, value))
+            name_or_pairs = ((name_or_pairs, value),)
+        push = self._owner is not None and isinstance(self._owner._extension, _PushPath)
+        for name, field_value in name_or_pairs:
+            if push and name.lower() == b'host':
+                raise ValueError(_PUSH_HOST)
+            self._items.add(name, field_value)
 
 
 class NativeWSMessage:
@@ -136,6 +141,15 @@ class NativeWSMessage:
         return [{'type': 'websocket.send', 'bytes': self.data}]
 
 
+#: RFC 9113 §8.4 — a promised request's authority is its parent's.
+_PUSH_HOST = 'push cannot carry host: its authority is the parent request\'s'
+
+
+def _refuse_push_host(fields: _MinimalResponseHeaders | None) -> None:
+    if fields is not None and any(name == b'host' for name, _ in fields):
+        raise ValueError(_PUSH_HOST)
+
+
 class _PushPath:
     __slots__ = ('path',)
 
@@ -146,16 +160,18 @@ class _PushPath:
 class NativeResponse:
     """A response on the native send path: header and/or body and/or trailers.
 
-    ``header`` is ``None`` when absent (never ``[]`` — presence is decided by
-    ``is not None``).  ``body`` is ``None`` when absent; ``b''`` is a real
-    empty body.  ``more_body`` marks a non-terminal body chunk (streaming).
-    ``push`` makes this a promised request instead: its path is ``push`` and
-    ``header`` contains request headers. It cannot carry response-only fields.
-    ``more_trailers`` marks a non-terminal trailer event.
-    ``expects_trailers`` preserves the ASGI ``http.response.start``
-    ``trailers: True`` flag so the sender withholds the terminal chunk until
-    the trailers event (lossless full-form compat — a terminal body before
-    trailers would otherwise corrupt chunked framing).
+    ``header`` and ``trailers`` keep the response-field contract from creation
+    on: names are lowercase tchar and values carry no CTL and no edge SP/HTAB
+    (trimmed on entry).  A field that cannot meet it raises
+    ``ValueError``/``TypeError`` here; readers do not check again.
+    ``header`` is ``None`` when absent (never ``[]``).  ``body`` is ``None``
+    when absent; ``b''`` is a real empty body.  ``more_body`` marks a
+    non-terminal body chunk.  ``push`` makes this a promised request instead:
+    its path is ``push`` and ``header`` holds request headers, with no
+    response-only fields and no ``host`` (the authority is the parent's).
+    ``more_trailers`` marks a non-terminal trailer event.  ``expects_trailers``
+    (ASGI ``trailers: True``) makes the sender withhold the terminal chunk until
+    the trailers event.
     """
 
     __slots__ = (
@@ -166,11 +182,11 @@ class NativeResponse:
         'more_body',
         'more_trailers',
         'status',
-        'trailers',
+        '_trailers',
     )
 
     def __init__(self, *, status: int = 200,
-                 header: list[tuple[bytes, bytes]] | None = None,
+                 header: list[tuple[bytes, bytes]] | _HeaderView | None = None,
                  body: bytes | None = None,
                  more_body: bool = False,
                  trailers: list[tuple[bytes, bytes]] | None = None,
@@ -180,10 +196,11 @@ class NativeResponse:
                  push: str | None = None) -> None:
         self.status = status
         # Keep constructor normalization synchronized with the header setter.
-        self._header = header._items if isinstance(header, _HeaderView) else header
+        self._header = (header._items.copy() if isinstance(header, _HeaderView)
+                        else None if header is None else _as_response_fields(header))
         self._body = body
         self.more_body = more_body
-        self.trailers = trailers
+        self._trailers = None if trailers is None else _as_response_fields(trailers)
         self.more_trailers = more_trailers
         self.expects_trailers = expects_trailers
         # Sendfile form: the response body *is* this file, and the sender is
@@ -205,10 +222,10 @@ class NativeResponse:
         """Header plus terminal body — a whole response in one object."""
         self = cls.__new__(cls)
         self.status = status
-        self._header = header
+        self._header = _as_response_fields(header)
         self._body = body
         self.more_body = False
-        self.trailers = None
+        self._trailers = None
         self.more_trailers = False
         self.expects_trailers = False
         self._extension = None
@@ -228,10 +245,10 @@ class NativeResponse:
         """
         self = cls.__new__(cls)
         self.status = status
-        self._header = header
+        self._header = _as_response_fields(header)
         self._body = body
         self.more_body = True
-        self.trailers = trailers
+        self._trailers = _as_response_fields(trailers)
         self.more_trailers = False
         self.expects_trailers = True
         self._extension = None
@@ -263,11 +280,12 @@ class NativeResponse:
                 self._extension = None
             return
         if (self.status != 200 or self._body is not None or self.more_body
-                or self.trailers is not None or self.more_trailers
+                or self._trailers is not None or self.more_trailers
                 or self.expects_trailers
                 or (self._extension is not None
                     and not isinstance(self._extension, _PushPath))):
             raise ValueError('push cannot carry response status, body, trailers, or file')
+        _refuse_push_host(self._header)
         self._extension = _PushPath(value)
 
     # --- header: DX view, or None when absent -----------------------------
@@ -276,16 +294,29 @@ class NativeResponse:
         """The header arm as a mutable view, or ``None`` when there is none."""
         if self._header is None:
             return None
-        return _HeaderView(self._header)
+        return _HeaderView(self._header, self)
 
     @header.setter
     def header(self, value) -> None:
         if value is None:
             self._header = None
-        elif isinstance(value, _HeaderView):
-            self._header = value._items
         else:
-            self._header = value
+            header = (value._items.copy() if isinstance(value, _HeaderView)
+                      else _as_response_fields(value))
+            if isinstance(self._extension, _PushPath):
+                _refuse_push_host(header)
+            self._header = header
+
+    @property
+    def trailers(self) -> _HeaderView | None:
+        """The trailer arm as a mutable view, or ``None`` when there is none."""
+        if self._trailers is None:
+            return None
+        return _HeaderView(self._trailers)
+
+    @trailers.setter
+    def trailers(self, value) -> None:
+        self._trailers = None if value is None else _as_response_fields(value)
 
     # --- body: plain bytes; DX via helper properties -----------------------
     @property
@@ -335,10 +366,10 @@ class NativeResponse:
         # start/body would be too late.  Each is a copy, so an append on the
         # live response (CORS) cannot reach an event the cache middleware
         # stored.
-        header = (_minimal_response_headers(self._header)
+        header = (_owned_response_fields(self._header)
                   if self._header is not None else None)
-        trailers = (_minimal_response_headers(self.trailers)
-                    if self.trailers is not None else None)
+        trailers = (_owned_response_fields(self._trailers)
+                    if self._trailers is not None else None)
 
         events: list[dict] = []
         if header is not None:
@@ -366,34 +397,31 @@ class NativeResponse:
         return events
 
 
-def _native_from_asgi(event, *, copy_headers=True):
+def _native_from_asgi(event):
     """Convert HTTP send events; leave other event types unchanged.
 
-    Middleware may mutate native headers, so its boundary copies them.
-    Senders pass ``copy_headers=False`` because they take their own snapshot
-    before buffering or writing, avoiding two consecutive copies.
+    Each converted field list is the result's own copy, checked unless it
+    already keeps the response-field contract.
     """
     kind = event.get('type')
     if kind == 'http.response.start':
-        headers = event.get('headers') or []
         return NativeResponse(
             status=int(event.get('status', 200)),
-            header=list(headers) if copy_headers else headers,
+            header=_owned_response_fields(event.get('headers') or ()),
             expects_trailers=bool(event.get('trailers', False)))
     if kind == 'http.response.body':
         # None would skip the body arm and leave buffered headers unflushed.
         return NativeResponse(body=event.get('body') or b'',
                               more_body=bool(event.get('more_body', False)))
     if kind == 'http.response.trailers':
-        headers = event.get('headers') or []
         return NativeResponse(
-            trailers=list(headers) if copy_headers else headers,
+            trailers=_owned_response_fields(event.get('headers') or ()),
             more_trailers=bool(event.get('more_trailers', False)))
     if kind == 'http.response.pathsend':
         return NativeResponse(file_path=event['path'])
     if kind == 'http.response.push':
         return NativeResponse(push=event.get('path', '/'),
-                              header=list(event.get('headers') or []))
+                              header=_owned_response_fields(event.get('headers') or ()))
     return event
 
 

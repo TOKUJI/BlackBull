@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from blackbull.middleware.compression import Compression, _merge_vary
+from blackbull.headers import _as_response_fields
 
 
 async def _noop_receive():
@@ -166,7 +167,7 @@ class TestVaryOnCompressibleButUncompressedPaths:
 
 class TestMergeVaryHelper:
     def test_appends_when_absent(self):
-        hdrs = [(b'content-type', b'text/plain')]
+        hdrs = _as_response_fields([(b'content-type', b'text/plain')])
         _merge_vary(hdrs)
         assert (b'vary', b'Accept-Encoding') in hdrs
 
@@ -179,7 +180,7 @@ class TestMergeVaryHelper:
                      [(b'vary', b'*')], id='star-untouched'),
     ])
     def test_folds_into_existing(self, hdrs_in, hdrs_out):
-        hdrs = list(hdrs_in)
+        hdrs = _as_response_fields(list(hdrs_in))
         _merge_vary(hdrs)
         assert hdrs == hdrs_out
 

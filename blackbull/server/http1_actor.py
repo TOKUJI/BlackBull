@@ -4,8 +4,6 @@ HTTP1Actor drives the keep-alive loop for one TCP connection.
 RequestActor owns the lifetime of a single HTTP request.
 """
 import asyncio
-import ipaddress
-from functools import lru_cache
 import logging
 import re
 import time as _time
@@ -60,8 +58,9 @@ _HTTP_VERSION_RE = re.compile(rb'\AHTTP/\d\.\d\Z')
 
 # Share field octet grammar with HTTP/2.
 from ..protocol.field_grammar import (
-    COMMON_METHODS_OCTETS, FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS,
-    URI_SCHEME_RE, method_token_is_valid)
+    COMMON_METHODS_OCTETS, FIELD_VALUE_ALLOWED_OCTETS, URI_SCHEME_RE,
+    FieldError, field_line, host_field_value, list_members,
+    method_token_is_valid)
 
 
 
@@ -130,27 +129,17 @@ _SPEC_ENUMERATED_LINES: tuple[bytes, ...] = (
 
 
 def _build_default_lines() -> dict[bytes, tuple[bytes, bytes]]:
-    """Validate every default line and map it to the pair ``_parse`` produces.
+    """Map every default line to the pair ``_parse`` produces for it.
 
-    Same expressions, same rules, so a hand-written entry cannot disagree with
-    what parsing that line would yield.  A violation raises at import rather
-    than serving a wrong pair at runtime.
+    Lines go through the same ``field_line`` as parsing; a violation raises
+    ``FieldError``/``ValueError`` at import.
     """
     table: dict[bytes, tuple[bytes, bytes]] = {}
     for line in _SPEC_ENUMERATED_LINES:
-        colon = line.find(b':')
-        if colon < 1 or line[0] in (0x20, 0x09):
-            raise ValueError(f'malformed default header line: {line!r}')
-        key = line[:colon]
-        if key.translate(None, TCHAR_OCTETS):
-            raise ValueError(f'invalid name in default header line: {line!r}')
-        lkey = key.lower()
+        lkey, value = field_line(line)
         if lkey in _UNDERSCORE_FRAMING_NAMES or lkey in _FRAMING_NAMES:
             raise ValueError(
                 f'framing header must not be pre-seeded: {line!r}')
-        value = line[colon + 1:].strip(b' \t')
-        if value.translate(None, FIELD_VALUE_ALLOWED_OCTETS):
-            raise ValueError(f'CTL in default header value: {line!r}')
         if len(line) > _LINE_CACHE_MAX_LINE:
             raise ValueError(f'default header line too long: {line!r}')
         table[line] = (lkey, value)
@@ -239,10 +228,25 @@ def _declares_content(headers: 'Headers') -> bool:
     """
     if headers.getlist(b'transfer-encoding'):
         return True
-    cl = headers.get(b'content-length', b'').strip()
+    cl = headers.get(b'content-length', b'')
     # ``Content-Length: 0`` — and ``000`` — declares no octets, so there is
     # nothing that could be framed two ways.
     return bool(cl) and bool(cl.lstrip(b'0'))
+
+
+def request_framing(headers: Headers) -> tuple[int | None, bool]:
+    """Return the body framing a request head declares: ``(Content-Length or
+    None, chunked)``.
+
+    *headers* keeps the request contract (lowercase names).  Raises
+    [`BadRequestError`][] for ambiguous framing and
+    ``NotImplementedFramingError`` for a coding other than bare chunked.
+    """
+    index = headers._index
+    cls = index.get(b'content-length')
+    tes = index.get(b'transfer-encoding')
+    declared = _validate_message_framing(cls, tes)
+    return (declared if cls else None, bool(tes))
 
 
 def _validate_message_framing(cls: list | None, tes: list | None) -> int:
@@ -299,65 +303,8 @@ def _validate_message_framing(cls: list | None, tes: list | None) -> int:
     return declared
 
 
-# RFC 3986 §3.2 — authority = [userinfo "@"] host [":" port]; these octets are
-# not in one.  ``@`` is the deprecated userinfo component, the controls are
-# CTL/DEL and the high bytes non-ASCII, all carried here because HTTP/2 has no
-# per-value CTL scan before the authority becomes the host header.
-_HOST_FORBIDDEN_BYTES = (
-    frozenset(b'/?# \t@') | frozenset(range(0x20)) | frozenset({0x7F})
-    | frozenset(range(0x80, 0x100)))
-
-# RFC 3986 §3.2.2: brackets enclose IPv6, and an unbracketed colon starts
-# a numeric port. Keep host and port validation on the authority boundary.
-_AUTHORITY_SCAN_BYTES = _HOST_FORBIDDEN_BYTES | {0x5B, 0x5D}  # '[' ']'
-_AUTHORITY_SCAN_RE = re.compile(
-    b'[' + re.escape(bytes(sorted(_AUTHORITY_SCAN_BYTES))) + b']'
-    b'|\\A:|:[0-9]*[^0-9]')
-
 # RFC 9112 §2.1 / RFC 3986 — a request-target may carry only visible ASCII.
 _TARGET_ALLOWED_OCTETS = bytes(range(0x21, 0x7F))
-
-
-# Accept bracketed IPv6; IPvFuture is unsupported.
-def _ip_literal_is_valid(value: bytes) -> bool:
-    """RFC 3986 §3.2.2 — whether *value*'s bracketed host is an IPv6 address."""
-    if (
-        not value.startswith(b'[')
-        or value.count(b'[') != 1
-        or value.count(b']') != 1
-    ):
-        return False
-
-    close = value.find(b']', 1)
-    tail = value[close + 1:]
-
-    if tail and (
-        tail[:1] != b':'
-        or not _HOST_FORBIDDEN_BYTES.isdisjoint(tail[1:])
-    ):
-        return False
-
-    try:
-        # ``UnicodeDecodeError`` is a ``ValueError``: a high byte inside the
-        # bracket reaches this decode.
-        ipaddress.IPv6Address(value[1:close].decode('ascii'))
-    except ValueError:
-        return False
-    return True
-
-
-def _authority_is_valid(value: bytes) -> bool:
-    """Validate a URI authority against RFC 3986 §3.2, including bracketed IP literals.
-    """
-    match = _AUTHORITY_SCAN_RE.search(value)
-    if match is None:
-        return True
-    return match[0] in (b'[', b']') and _ip_literal_is_valid(value)
-
-
-# A client repeats its authority on every request; the answer depends only on
-# the bytes, so it is remembered (bounded: the bytes are the peer's).
-_authority_is_valid = lru_cache(maxsize=256)(_authority_is_valid)
 
 
 def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
@@ -369,7 +316,7 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
     host at the first ``:`` (§3.2.2 — a reg-name carries none), so no port text
     survives in the host.
     """
-    # ``_validate_host`` rejects non-ASCII on the request path; ``replace``
+    # ``host_field_value`` rejects non-ASCII on the request path; ``replace``
     # keeps this total for every other caller.
     def _dec(b: bytes) -> str:
         return b.decode('utf-8', errors='replace')
@@ -388,27 +335,6 @@ def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
     if sep and port_s.isdigit():
         return _dec(host), int(port_s)
     return _dec(host), default_port
-
-
-def _validate_host(hosts: list | None) -> bytes | None:
-    """Validate Host presence and URI-authority syntax (RFC 9112 §3.2, §7.2).
-
-    Return the received value, or None when absent.
-    """
-    if hosts is not None and len(hosts) > 1:
-        raise BadRequestError(
-            f'multiple Host headers ({len(hosts)} — smuggling vector)')
-    if not hosts:
-        # The version-aware presence rule lives in ``_parse``, which knows the
-        # request version; this helper only grades a value that is present.
-        return None
-    received = hosts[0][1]
-    value = received.strip(b' \t')
-    if not value:
-        raise BadRequestError('empty Host header value')
-    if not _authority_is_valid(value):
-        raise BadRequestError(f'invalid Host authority {value!r}')
-    return received
 
 
 # ---------------------------------------------------------------------------
@@ -774,6 +700,8 @@ class HTTP1Actor(Actor):
     def _parse(self, data: bytes) -> Connection:
         """Parse raw HTTP/1.1 request bytes into a native [`Connection`][].
 
+        The Connection's header names are lowercase tchar, its values carry no
+        edge SP/HTAB and no CTL, and ``host`` is at most one valid authority.
         Raises [`BadRequestError`][] on an RFC 9112 framing violation the
         caller should answer with 400, and [`HeaderTooLargeError`][] when a
         single line exceeds ``BB_HEADER_MAX_LINE``.  The whole-block limit
@@ -918,40 +846,19 @@ class HTTP1Actor(Actor):
                     else:
                         same.append(hit)
                     continue
-            # RFC 9112 §5.2: reject obs-fold in requests.
-            if line[0] in (0x20, 0x09):
-                raise BadRequestError(
-                    f'obsolete line folding rejected: {line!r}')
-            colon = line.find(b':')
-            if colon < 1:
-                raise BadRequestError(f'malformed header line: {line!r}')
-            key = line[:colon]
-            value = line[colon + 1:]
-            # field-name must be a valid token (§5.1 / RFC 9110 §5.6.2).  SP
-            # and HTAB are not tchar, so this one test also decides §5.1 (no
-            # whitespace between field-name and ':'), and only a rejected name
-            # pays to tell the two apart.  `colon < 1` makes `key[-1]` safe.
-            if key.translate(None, TCHAR_OCTETS):
-                if key[-1] in (0x20, 0x09):
-                    raise BadRequestError(
-                        f'whitespace before colon (smuggling vector): {line!r}')
-                raise BadRequestError(f'invalid header name {key!r}')
-            lkey = key.lower()
-            if lkey in _UNDERSCORE_FRAMING_NAMES:
-                raise BadRequestError(
-                    f'framing-confusable header name {key!r} '
-                    f'(NORM-UNDERSCORE)')
-            if lkey == b'content-length' and not _CL_STRICT_RE.match(value):
-                raise BadRequestError(
-                    f'ambiguous Content-Length value {value!r} '
-                    f'(RFC 9110 §8.6)')
-            # Strip the OWS surrounding the value (§5).
-            value = value.strip(b' \t')
-            if (values_need_checking
-                    and value.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
-                raise BadRequestError(
-                    f'CTL in header value (smuggling / log-injection): '
-                    f'{key!r}: {value!r}')
+            try:
+                lkey, value = field_line(line, check=values_need_checking)
+                if lkey in _UNDERSCORE_FRAMING_NAMES:
+                    raise FieldError(f'framing-confusable header name {lkey!r} '
+                                     f'(NORM-UNDERSCORE)')
+                # The strict form is judged before OWS is stripped.
+                if lkey == b'content-length':
+                    raw_value = line[len(lkey) + 1:]
+                    if not _CL_STRICT_RE.match(raw_value):
+                        raise FieldError(f'ambiguous Content-Length value '
+                                         f'{raw_value!r} (RFC 9110 §8.6)')
+            except FieldError as exc:
+                raise BadRequestError(str(exc)) from None
             pair = (lkey, value)
             raw.append(pair)
             same = index.get(lkey)
@@ -987,17 +894,15 @@ class HTTP1Actor(Actor):
 
         # RFC 9112 §6 — framing rejected before any body byte is read.  ``run``
         # weighs the returned length against ``BB_MAX_BODY_SIZE``.
-        content_length = index.get(b'content-length')
-        transfer_encoding = index.get(b'transfer-encoding')
-        self._declared_body_len = _validate_message_framing(
-            content_length, transfer_encoding)
-        self._request_framing = (
-            self._declared_body_len if content_length else None,
-            transfer_encoding is not None)
+        self._request_framing = request_framing(headers)
+        self._declared_body_len = self._request_framing[0] or 0
         expect = index.get(b'expect')
-        self._expects_continue = (
-            expect is not None and expect[0][1].lower() == b'100-continue')
-        host_value = _validate_host(index.get(b'host'))
+        self._expects_continue = expect is not None and b'100-continue' in list_members(
+            b','.join([value for _, value in expect]))
+        try:
+            host_value = host_field_value(index.get(b'host'))
+        except FieldError as exc:
+            raise BadRequestError(str(exc)) from None
         # RFC 9112 §3.2 / §7.2 — every HTTP/1.1 (and later 1.x) request MUST
         # carry a Host header (RFC9112-7.1-MISSING-HOST); only HTTP/1.0, which
         # predates Host, may omit it (COMP-HTTP10-NO-HOST).
@@ -1042,7 +947,7 @@ class HTTP1Actor(Actor):
             # ``Upgrade: h2c`` probe on ``--http2``) is served as ordinary
             # HTTP/1.1, because dispatch has no route for it and the connection
             # would close with no reply.
-            if upgrade[0][1].strip().lower() == b'websocket':
+            if b'websocket' in list_members(b','.join([value for _, value in upgrade])):
                 conn.type = 'websocket'
                 conn.scheme = 'ws'
 
@@ -1111,7 +1016,7 @@ class HTTP1Actor(Actor):
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'content-type', b'text/plain')])
             return False
-        key = headers.get(b'sec-websocket-key', b'').strip()
+        key = headers.get(b'sec-websocket-key', b'')
         # RFC 6455 §4.2.1 — the client MUST send a Sec-WebSocket-Key whose
         # base64-decoded value is 16 bytes.  An absent or malformed key is a
         # bad handshake; answer 400 rather than completing an accept hash over
@@ -1282,10 +1187,10 @@ class HTTP1Actor(Actor):
         """Return True if the connection should persist after this request."""
         http_version = conn.http_version
         fields = conn.headers._index.get(b'connection')
-        connection = fields[0][1].lower() if fields else b''
+        members = list_members(b','.join([value for _, value in fields])) if fields else ()
         if http_version == '1.1':
-            return connection != b'close'
-        return connection == b'keep-alive'
+            return b'close' not in members
+        return b'keep-alive' in members
 
     async def _handle(self, msg: Message) -> None:  # never reached
         raise NotImplementedError

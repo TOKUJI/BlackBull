@@ -170,3 +170,38 @@ async def test_push_headers_are_not_response_headers(layer):
 def test_push_cannot_also_be_a_response(kwargs):
     with pytest.raises(ValueError, match='push'):
         NativeResponse(push='/style.css', **kwargs)
+
+
+class TestAPushTakesItsAuthorityFromTheParent:
+    def test_the_constructor_refuses_host(self):
+        with pytest.raises(ValueError, match='host'):
+            NativeResponse(push='/style.css', header=[(b'Host', b'a.example')])
+
+    def test_assigning_or_appending_host_is_refused(self):
+        message = NativeResponse(push='/style.css', header=[])
+        with pytest.raises(ValueError, match='host'):
+            message.header = [(b'host', b'a.example')]
+        with pytest.raises(ValueError, match='host'):
+            message.header.append(b'Host', b'a.example')
+        assert list(message.header) == []
+
+    def test_a_header_with_host_cannot_become_a_push(self):
+        message = NativeResponse(header=[(b'host', b'a.example')])
+        with pytest.raises(ValueError, match='host'):
+            message.push = '/style.css'
+
+    def test_a_view_taken_before_push_still_refuses_host(self):
+        message = NativeResponse(header=[])
+        view = message.header
+        message.push = '/style.css'
+        with pytest.raises(ValueError, match='host'):
+            view.append(b'host', b'a.example')
+
+    def test_a_push_does_not_share_another_responses_header_list(self):
+        base = NativeResponse(header=[(b'accept', b'*/*')])
+        message = NativeResponse(push='/style.css', header=base.header)
+        assigned = NativeResponse(push='/script.js', header=[])
+        assigned.header = base.header
+        base.header.append(b'host', b'a.example')
+        NativeResponse(header=message.header).header.append(b'host', b'b.example')
+        assert list(message.header) == list(assigned.header) == [(b'accept', b'*/*')]

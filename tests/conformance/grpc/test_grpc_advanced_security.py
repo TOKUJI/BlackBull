@@ -35,6 +35,8 @@ from blackbull.grpc import (
 from blackbull.grpc.asgi import serve_grpc, GrpcContext, _pct_encode_message
 from blackbull.grpc.status import GrpcStatus as GS
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
+from blackbull.protocol.field_grammar import FieldError
 
 # A raw/out-of-range int where a GrpcStatus enum is required is a caller bug,
 # rejected at the type boundary: beartype raises BeartypeCallHintParamViolation
@@ -54,9 +56,7 @@ _STATUS_REJECTED = ((ValueError,) if _BeartypeViolation is None
 # ---------------------------------------------------------------------------
 
 def _grpc_scope(path, headers=None):
-    base = [(b'content-type', b'application/grpc'),
-            (b':method', b'POST'),
-            (b':path', path.encode() if isinstance(path, str) else path)]
+    base = [(b'content-type', b'application/grpc')]
     return {'type': 'http', 'path': path,
             'headers': headers if headers is not None else base}
 
@@ -145,7 +145,7 @@ class TestOutOfRangeStatusCodes:
 
     def test_context_set_code_rejects_out_of_range(self):
         """``context.set_code(999)`` must be rejected."""
-        ctx = GrpcContext({'type': 'http', 'path': '/test', 'headers': []})
+        ctx = GrpcContext(Connection.from_scope({'type': 'http', 'path': '/test', 'headers': []}))
         with pytest.raises(_STATUS_REJECTED):
             ctx.set_code(999)  # type: ignore[arg-type]
 
@@ -172,7 +172,7 @@ class TestOutOfRangeStatusCodes:
 
         # Verify valid codes work
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/BadCode'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/BadCode')),
                          _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == str(16).encode()
 
@@ -204,9 +204,8 @@ class TestContentTypeConfusion:
         for suffix in [b'+thrift', b'+custom', b'+v2', b'-web']:
             events, send = _collector()
             scope = {'type': 'http', 'path': '/svc/M',
-                     'headers': [(b'content-type', b'application/grpc' + suffix),
-                                 (b':method', b'POST')]}
-            await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
+                     'headers': [(b'content-type', b'application/grpc' + suffix)]}
+            await serve_grpc(reg, Connection.from_scope(scope), _receive_with(encode_message(b'')), send)
             assert _trailers_of(events)[b'grpc-status'] == b'0', (
                 f'failed for suffix {suffix!r}')
 
@@ -223,8 +222,8 @@ class TestContentTypeConfusion:
 
         events, send = _collector()
         scope = {'type': 'http', 'path': '/svc/M',
-                 'headers': [(b':method', b'POST')]}
-        await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
+                 'headers': []}
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
 
     @pytest.mark.asyncio
@@ -244,9 +243,8 @@ class TestContentTypeConfusion:
                    b'\tapplication/grpc']:
             events, send = _collector()
             scope = {'type': 'http', 'path': '/svc/M',
-                     'headers': [(b'content-type', ct),
-                                 (b':method', b'POST')]}
-            await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
+                     'headers': [(b'content-type', ct)]}
+            await serve_grpc(reg, Connection.from_scope(scope), _receive_with(encode_message(b'')), send)
             assert _trailers_of(events)[b'grpc-status'] == b'0'
 
 
@@ -276,7 +274,7 @@ class TestMethodPathTraversal:
             return b'reached'  # pragma: no cover — should not be reached
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope(requested),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope(requested)),
                          _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()
@@ -291,7 +289,7 @@ class TestMethodPathTraversal:
         """Malformed paths answer UNIMPLEMENTED without crashing the bridge."""
         reg = GrpcServiceRegistry()
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope(path),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope(path)),
                          _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()
@@ -302,9 +300,8 @@ class TestMethodPathTraversal:
         reg = GrpcServiceRegistry()
         events, send = _collector()
         scope = {'type': 'http', 'path': '',
-                 'headers': [(b'content-type', b'application/grpc'),
-                             (b':method', b'POST')]}
-        await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
+                 'headers': [(b'content-type', b'application/grpc')]}
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()
 
@@ -330,7 +327,7 @@ class TestGrpcTimeoutHeader:
         headers = [(b'content-type', b'application/grpc'),
                    (b'grpc-timeout', b'5S')]
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Timeout', headers),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Timeout', headers)),
                          _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
 
@@ -348,7 +345,7 @@ class TestGrpcTimeoutHeader:
             headers = [(b'content-type', b'application/grpc'),
                        (b'grpc-timeout', bad_value)]
             events, send = _collector()
-            await serve_grpc(reg, _grpc_scope('/svc/Timeout', headers),
+            await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Timeout', headers)),
                              _receive_with(encode_message(b'')), send)
             assert _trailers_of(events)[b'grpc-status'] == b'0', (
                 f'failed for grpc-timeout={bad_value!r}')
@@ -379,7 +376,7 @@ class TestHandlerTimeout:
 
         events, send = _collector()
         await asyncio.wait_for(
-            serve_grpc(reg, _grpc_scope('/svc/Slow'),
+            serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Slow')),
                        _receive_with(encode_message(b'')), send),
             timeout=1.0,
         )
@@ -397,7 +394,7 @@ class TestHandlerTimeout:
             return b'eventually'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Slow'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Slow')),
                          _receive_with(encode_message(b'')), send)
         body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_ev is not None
@@ -422,7 +419,7 @@ class TestHandlerTimeout:
         events, send = _collector()
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(
-                serve_grpc(reg, _grpc_scope('/svc/Hang'),
+                serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Hang')),
                            _receive_with(encode_message(b'')), send),
                 timeout=0.05,
             )
@@ -440,41 +437,24 @@ class TestPseudoHeaderInjection:
     ``:authority``) must not be injectable as gRPC metadata that could
     confuse downstream proxies or the HTTP/2 layer."""
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize('meta_key,meta_value', [
-        pytest.param(b':status', b'999', id='pseudo-header-status'),
-        pytest.param(b':path', b'/evil.Service/Bad', id='pseudo-header-path'),
-        pytest.param(b'grpc-timeout', b'30S', id='grpc-timeout'),
-    ])
-    async def test_pseudo_header_status_is_readable_as_metadata(self, meta_key, meta_value):
-        """Request metadata (pseudo-header forms and grpc-timeout) is readable
-        through context.metadata(); injected headers never affect routing,
-        which uses scope['path']."""
-        reg = GrpcServiceRegistry()
-
-        @reg.method('/svc/Pseudo')
-        async def pseudo(request, context):
-            return context.metadata(meta_key, b'not-present')
-
-        headers = [(b'content-type', b'application/grpc'),
-                   (meta_key, meta_value)]
-        events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Pseudo', headers),
-                         _receive_with(encode_message(b'')), send)
-        body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
-        assert body_ev is not None
-        assert decode_messages(body_ev['body']) == [(False, meta_value)]
+    @pytest.mark.parametrize('pseudo', [b':status', b':path', b':method',
+                                        b':authority'])
+    def test_a_pseudo_header_is_refused_before_the_call(self, pseudo):
+        """The Connection boundary refuses a pseudo-header, so none reaches
+        call metadata or routing."""
+        with pytest.raises(FieldError):
+            Connection.from_scope(_grpc_scope('/svc/Pseudo', [
+                (b'content-type', b'application/grpc'), (pseudo, b'x')]))
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('lookup_key,sent_key,sent_value', [
-        pytest.param(b':method', b':method', b'GET', id='pseudo-header-method'),
-        pytest.param(b':authority', b':authority', b'evil.com:443',
-                     id='pseudo-header-authority'),
+        pytest.param(b'grpc-timeout', b'grpc-timeout', b'30S', id='grpc-timeout'),
         pytest.param(b'X-TOKEN', b'x-token', b'secret',
                      id='metadata-case-insensitive'),
     ])
-    async def test_pseudo_header_method_as_metadata(self, lookup_key, sent_key, sent_value):
-        """Metadata lookup covers pseudo-header keys and is case-insensitive."""
+    async def test_request_fields_are_readable_as_metadata(
+            self, lookup_key, sent_key, sent_value):
+        """Metadata lookup reads request fields, in any name case."""
         reg = GrpcServiceRegistry()
 
         @reg.method('/svc/Meta')
@@ -484,7 +464,7 @@ class TestPseudoHeaderInjection:
         headers = [(b'content-type', b'application/grpc'),
                    (sent_key, sent_value)]
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Meta', headers),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Meta', headers)),
                          _receive_with(encode_message(b'')), send)
         body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_ev is not None
@@ -506,7 +486,7 @@ class TestPseudoHeaderInjection:
         headers = [(b'content-type', b'application/grpc'),
                    (b'grpc-status', b'0')]  # attacker tries to force OK
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Override', headers),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Override', headers)),
                          _receive_with(encode_message(b'')), send)
         trailers = _trailers_of(events)
         # The server's grpc-status (7) must win, not the client's injected value
@@ -525,7 +505,7 @@ class TestPseudoHeaderInjection:
         headers = [(b'content-type', b'application/grpc'),
                    (b'grpc-message', b'injected by attacker')]
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/MsgOverride', headers),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/MsgOverride', headers)),
                          _receive_with(encode_message(b'')), send)
         trailers = _trailers_of(events)
         assert trailers[b'grpc-message'] != b'injected by attacker'
@@ -554,7 +534,7 @@ class TestLargeMetadata:
             headers.append((f'x-meta-{i:04d}'.encode(), b'v' * 1024))
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/ManyHeaders', headers),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/ManyHeaders', headers)),
                          _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
 
@@ -571,7 +551,7 @@ class TestLargeMetadata:
         headers = [(b'content-type', b'application/grpc'),
                    (b'x-large', b'X' * (64 * 1024))]
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/LargeValue', headers),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/LargeValue', headers)),
                          _receive_with(encode_message(b'')), send)
         body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_ev is not None
@@ -591,7 +571,7 @@ class TestLargeMetadata:
         headers = [(b'content-type', b'application/grpc'),
                    (long_name_bytes, b'value')]
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/LongName', headers),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/LongName', headers)),
                          _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
 
@@ -616,7 +596,7 @@ class TestConcurrentGrpcCalls:
 
         async def make_call(payload: bytes) -> list[tuple[bool, bytes]]:
             events, send = _collector()
-            await serve_grpc(reg, _grpc_scope('/svc/Id'),
+            await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Id')),
                              _receive_with(encode_message(payload)), send)
             body_ev = next((e for e in events
                            if e['type'] == 'http.response.body'), None)
@@ -645,7 +625,7 @@ class TestConcurrentGrpcCalls:
 
         async def call_upper(payload: bytes) -> list[tuple[bool, bytes]]:
             events, send = _collector()
-            await serve_grpc(reg, _grpc_scope('/svc/Upper'),
+            await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Upper')),
                              _receive_with(encode_message(payload)), send)
             body_ev = next((e for e in events
                            if e['type'] == 'http.response.body'), None)
@@ -654,7 +634,7 @@ class TestConcurrentGrpcCalls:
 
         async def call_lower(payload: bytes) -> list[tuple[bool, bytes]]:
             events, send = _collector()
-            await serve_grpc(reg, _grpc_scope('/svc/Lower'),
+            await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Lower')),
                              _receive_with(encode_message(payload)), send)
             body_ev = next((e for e in events
                            if e['type'] == 'http.response.body'), None)
@@ -686,13 +666,13 @@ class TestConcurrentGrpcCalls:
 
         async def call_ok() -> bytes:
             events, send = _collector()
-            await serve_grpc(reg, _grpc_scope('/svc/Ok'),
+            await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Ok')),
                              _receive_with(encode_message(b'')), send)
             return _trailers_of(events).get(b'grpc-status', b'?')
 
         async def call_err() -> bytes:
             events, send = _collector()
-            await serve_grpc(reg, _grpc_scope('/svc/Err'),
+            await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Err')),
                              _receive_with(encode_message(b'')), send)
             return _trailers_of(events).get(b'grpc-status', b'?')
 
@@ -723,7 +703,7 @@ class TestLargeMessageBody:
 
         payload = b'\xAB' * (1024 * 1024)
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Echo'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Echo')),
                          _receive_with(encode_message(payload)), send)
         body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_ev is not None
@@ -740,7 +720,7 @@ class TestLargeMessageBody:
 
         payload = b'\xCD' * (4 * 1024 * 1024)
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Echo'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Echo')),
                          _receive_with(encode_message(payload)), send)
         body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_ev is not None
@@ -757,7 +737,7 @@ class TestLargeMessageBody:
             return b''
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Zero'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Zero')),
                          _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == b'0'
         body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
@@ -836,7 +816,7 @@ class TestReflectionAbuse:
         """Unregistered built-in services answer UNIMPLEMENTED."""
         reg = GrpcServiceRegistry()
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope(path),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope(path)),
                          _receive_with(encode_message(b'')), send)
         assert _trailers_of(events)[b'grpc-status'] == \
             str(int(GrpcStatus.UNIMPLEMENTED)).encode()
@@ -854,8 +834,8 @@ class TestReflectionAbuse:
         events, send = _collector()
         await serve_grpc(
             reg,
-            _grpc_scope('/grpc.reflection.v1alpha.ServerReflection/'
-                        'ServerReflectionInfo'),
+            Connection.from_scope(_grpc_scope('/grpc.reflection.v1alpha.ServerReflection/'
+                        'ServerReflectionInfo')),
             _receive_with(encode_message(b'')),
             send,
         )
@@ -916,7 +896,7 @@ class TestMiscellaneousEdgeCases:
             return Reply(b'original')
 
         events, send = _collector()
-        await serve_grpc(registry, _grpc_scope('/svc/M'),
+        await serve_grpc(registry, Connection.from_scope(_grpc_scope('/svc/M')),
                          _receive_with(encode_message(b'')), send)
         body = next(event['body'] for event in events if event['type'] == 'http.response.body')
         assert decode_messages(body) == [(False, b'converted')]
@@ -931,7 +911,7 @@ class TestMiscellaneousEdgeCases:
             return bytearray(b'response')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/ByteArray'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/ByteArray')),
                          _receive_with(encode_message(b'')), send)
         body_ev = next((e for e in events if e['type'] == 'http.response.body'), None)
         assert body_ev is not None
@@ -948,7 +928,7 @@ class TestMiscellaneousEdgeCases:
             return memoryview(b'data')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/MemView'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/MemView')),
                          _receive_with(encode_message(b'')), send)
         trailers = _trailers_of(events)
         assert trailers[b'grpc-status'] == str(int(GrpcStatus.INTERNAL)).encode()
@@ -986,7 +966,7 @@ class TestMiscellaneousEdgeCases:
                 raise GrpcError(GrpcStatus.PERMISSION_DENIED, 'outer')
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Nested'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Nested')),
                          _receive_with(encode_message(b'')), send)
         trailers = _trailers_of(events)
         assert trailers[b'grpc-status'] == \
@@ -1004,7 +984,7 @@ class TestMiscellaneousEdgeCases:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/EmptyDetails'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/EmptyDetails')),
                          _receive_with(encode_message(b'')), send)
         trailers = events[2]['headers']
         # grpc-message should be absent or empty when details is ''
@@ -1026,7 +1006,7 @@ class TestMiscellaneousEdgeCases:
         reg.add_method('/svc/ScopeOnly', scope_only)
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/ScopeOnly'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/ScopeOnly')),
                          _receive_with(encode_message(b'')), send)
         # This should crash because serve_grpc calls handler(request, context)
         # but the handler only takes scope.  This is a user error, not a
