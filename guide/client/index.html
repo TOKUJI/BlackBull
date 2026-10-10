@@ -5929,7 +5929,11 @@ field sections apart, and gRPC puts <code>grpc-status</code> in the trailer. Fol
 them together, as this client did, left a caller unable to tell which
 section a field came from. The HTTP/1.1 client discards trailers as it reads
 them, so <code>res.trailers</code> is always empty there. Informational heads are read
-and discarded, which is what the HTTP/1.1 reader has always done with them.</p>
+and discarded, which is what the HTTP/1.1 reader has always done with them.
+<code>res.ended_on_head</code> is true when <code>END_STREAM</code> arrived on the final head's
+HEADERS frame — gRPC's Trailers-Only shape — and false when an empty DATA
+frame ended the stream, which leaves the same headers and body. It is always
+false on HTTP/1.1.</p>
 <h2 id="what-a-call-raises">What a call raises<a class="headerlink" href="#what-a-call-raises" title="Permanent link">&para;</a></h2>
 <p>Everything the client itself refuses derives from <code>ClientError</code>:</p>
 <div class="highlight"><pre><span></span><code>ClientError

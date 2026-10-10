@@ -5759,7 +5759,10 @@ response state and deadlines are stream-owned.</p>
 followed the body: RFC 9113 §8.1 makes it a separate field section, and
 gRPC puts <code>grpc-status</code> in it, so it is held apart rather than folded
 into <code>headers</code> where its provenance would be lost.  <code>body</code> is the
-concatenation of all DATA-frame payloads received on the stream.</p>
+concatenation of all DATA-frame payloads received on the stream.
+<code>ended_on_head</code> is true when <code>END_STREAM</code> arrived on the final head's
+HEADERS frame, so no DATA frame and no trailer section followed — gRPC's
+Trailers-Only shape.  It is always false on HTTP/1.1.</p>
 
 
 

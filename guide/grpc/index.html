@@ -5918,11 +5918,11 @@ you: pass the message bytes your servicer expects, not an encoded frame.</p>
 <tbody>
 <tr>
 <td><code>status</code></td>
-<td>the <code>grpc-status</code> trailer, as a <code>GrpcStatus</code></td>
+<td>the <code>grpc-status</code>, as a <code>GrpcStatus</code> — synthesized for a malformed reply</td>
 </tr>
 <tr>
 <td><code>grpc_message</code></td>
-<td>the <code>grpc-message</code> trailer — the human-readable detail</td>
+<td>the <code>grpc-message</code>, percent-decoded</td>
 </tr>
 <tr>
 <td><code>message</code></td>
@@ -5936,8 +5936,46 @@ you: pass the message bytes your servicer expects, not an encoded frame.</p>
 <td><code>response</code></td>
 <td>the raw <code>ClientResponse</code>, for anything the above does not surface</td>
 </tr>
+<tr>
+<td><code>violation</code></td>
+<td><code>None</code> for a well-formed reply; otherwise what is wrong with it</td>
+</tr>
 </tbody>
 </table>
+<p>A malformed reply is never <code>OK</code>. <code>status</code> follows what a gRPC client must
+report (<a href="https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md">PROTOCOL-HTTP2</a>):</p>
+<table>
+<thead>
+<tr>
+<th>Reply</th>
+<th><code>status</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>no <code>grpc-status</code></td>
+<td>from the HTTP status (<a href="https://grpc.github.io/grpc/core/md_doc_http-grpc-status-mapping.html">mapping</a>): <code>200</code> → <code>UNKNOWN</code>, <code>503</code> → <code>UNAVAILABLE</code>, …</td>
+</tr>
+<tr>
+<td>a repeated, non-decimal or undefined <code>grpc-status</code></td>
+<td><code>UNKNOWN</code></td>
+</tr>
+<tr>
+<td><code>grpc-status: 0</code>, but a non-<code>200</code> HTTP status or a non-gRPC <code>content-type</code></td>
+<td>from the HTTP status</td>
+</tr>
+<tr>
+<td><code>grpc-status: 0</code>, but broken framing, a compressed message, or a unary reply without exactly one message</td>
+<td><code>INTERNAL</code></td>
+</tr>
+<tr>
+<td>any other valid <code>grpc-status</code></td>
+<td>as sent</td>
+</tr>
+</tbody>
+</table>
+<p>The helper accepts identity encoding only. Whether a method is unary comes
+from the app's gRPC registry.</p>
 <p>An error asserts the same way, because a gRPC error <em>is</em> a response:</p>
 <div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">failing</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">context</span><span class="p">):</span>
     <span class="k">raise</span> <span class="n">GrpcError</span><span class="p">(</span><span class="n">GrpcStatus</span><span class="o">.</span><span class="n">NOT_FOUND</span><span class="p">,</span> <span class="s1">'no such greeting'</span><span class="p">)</span>

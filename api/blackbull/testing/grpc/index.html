@@ -5621,10 +5621,7 @@ cannot establish gRPC completion. This helper does not provide a general gRPC cl
 
 
 
-        <p>One gRPC response, with the trailer fields already read out.</p>
-<p><code>status</code> and <code>grpc_message</code> come from <em>trailing</em> headers, which is
-the whole reason this seam exists — reading them off the response
-object is what an app developer would otherwise have to work out.</p>
+        <p>One gRPC call's reply, judged as a gRPC client must (PROTOCOL-HTTP2.md).</p>
 
 
 
