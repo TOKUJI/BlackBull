@@ -244,7 +244,6 @@ class TestRequiredContentTypeSubtype:
         (b'application/grpc+proto', b'application/grpc+proto'),
         (b'application/grpc+json', b'application/grpc+json'),
         (b'application/grpc', b'application/grpc'),
-        (b' application/grpc+proto ', b'application/grpc+proto'),  # whitespace trimmed
     ])
     async def test_response_content_type_reflects_request_subtype(
             self, request_ct, expected_ct):

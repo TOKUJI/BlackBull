@@ -164,6 +164,19 @@ async def test_bodyless_status_ignores_misleading_framing(status, reason):
     assert reader.remaining.startswith(b'HTTP/1.1 200')
 
 
+@pytest.mark.parametrize('wire', [
+    _head(204, 'No Content'),
+    _head(200, headers=b'Content-Length: 0\r\n'),
+    _head(200, headers=b'Transfer-Encoding: chunked\r\n') + b'0\r\nx: 1\r\n\r\n',
+])
+@pytest.mark.asyncio
+async def test_a_response_never_ends_on_its_head_over_http1(wire):
+    """``ended_on_head`` is an HTTP/2 frame fact; HTTP/1.1 has no frames."""
+    response = await _client(_Reader(wire)).request('GET', '/')
+
+    assert response.ended_on_head is False
+
+
 @pytest.mark.asyncio
 async def test_receive_close_delimited_body_until_eof_and_marks_nonreusable():
     reader = _Reader(_head(200) + b'close-delimited')

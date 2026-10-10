@@ -155,11 +155,15 @@ class ClientResponse:
     gRPC puts ``grpc-status`` in it, so it is held apart rather than folded
     into ``headers`` where its provenance would be lost.  ``body`` is the
     concatenation of all DATA-frame payloads received on the stream.
+    ``ended_on_head`` is true when ``END_STREAM`` arrived on the final head's
+    HEADERS frame, so no DATA frame and no trailer section followed — gRPC's
+    Trailers-Only shape.  It is always false on HTTP/1.1.
     """
     status: int
     headers: Headers
     body: bytes
     trailers: Headers = field(default_factory=lambda: Headers([]))
+    ended_on_head: bool = False
 
 
 class _Phase(Enum):
@@ -1472,7 +1476,7 @@ class HTTP2Client:
         if frame.end_stream:
             if await self._settle_body_rate(frame.stream_id, pending, 0):
                 return
-            await self._complete(frame.stream_id)
+            await self._complete(frame.stream_id, ended_on_head=True)
 
     async def _settle_body_rate(self, stream_id: int,
                                 pending: '_PendingResponse',
@@ -1612,7 +1616,7 @@ class HTTP2Client:
                 self._factory.window_update(0, self._unacked_conn))
             self._unacked_conn = 0
 
-    async def _complete(self, stream_id: int) -> None:
+    async def _complete(self, stream_id: int, *, ended_on_head: bool = False) -> None:
         pending = self._responses.get(stream_id)
         if pending is None:
             return
@@ -1634,6 +1638,7 @@ class HTTP2Client:
             headers=Headers.from_lowered(pending.headers),
             body=b''.join(pending.body_parts),
             trailers=Headers.from_lowered(pending.trailer_fields),
+            ended_on_head=ended_on_head,
         )
         pending.future.set_result(response)
 

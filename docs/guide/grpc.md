@@ -249,11 +249,26 @@ you: pass the message bytes your servicer expects, not an encoded frame.
 
 | Field | |
 |---|---|
-| `status` | the `grpc-status` trailer, as a `GrpcStatus` |
-| `grpc_message` | the `grpc-message` trailer — the human-readable detail |
+| `status` | the `grpc-status`, as a `GrpcStatus` — synthesized for a malformed reply |
+| `grpc_message` | the `grpc-message`, percent-decoded |
 | `message` | the first response message, unframed |
 | `messages` | every response message, for server-streaming calls |
 | `response` | the raw `ClientResponse`, for anything the above does not surface |
+| `violation` | `None` for a well-formed reply; otherwise what is wrong with it |
+
+A malformed reply is never `OK`. `status` follows what a gRPC client must
+report ([PROTOCOL-HTTP2](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md)):
+
+| Reply | `status` |
+|---|---|
+| no `grpc-status` | from the HTTP status ([mapping](https://grpc.github.io/grpc/core/md_doc_http-grpc-status-mapping.html)): `200` → `UNKNOWN`, `503` → `UNAVAILABLE`, … |
+| a repeated, non-decimal or undefined `grpc-status` | `UNKNOWN` |
+| `grpc-status: 0`, but a non-`200` HTTP status or a non-gRPC `content-type` | from the HTTP status |
+| `grpc-status: 0`, but broken framing, a compressed message, or a unary reply without exactly one message | `INTERNAL` |
+| any other valid `grpc-status` | as sent |
+
+The helper accepts identity encoding only. Whether a method is unary comes
+from the app's gRPC registry.
 
 An error asserts the same way, because a gRPC error *is* a response:
 
