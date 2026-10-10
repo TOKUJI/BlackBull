@@ -6480,15 +6480,19 @@ non-ASCII URLs before passing them in. Extra <code>headers=</code> are merged in
     <span class="p">(</span><span class="sa">b</span><span class="s1">'cache-control'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'no-store'</span><span class="p">),</span>
 <span class="p">]))</span>
 </code></pre></div>
-<p>Each field name must be a non-empty RFC 9110 <code>token</code>. Values may contain
-HTAB, spaces, visible ASCII, and <code>obs-text</code> bytes, but not NUL, CR, LF, other
-C0 controls, or DEL. <code>Response</code> helpers validate this contract when they are
-constructed. The lower-level <code>NativeResponse</code> and ASGI
-<code>http.response.start</code> / <code>http.response.trailers</code> forms are validated by the
-sender before that field section writes bytes or changes the HTTP/2 HPACK
-table. Invalid fields raise <code>ValueError</code>; they are never silently stripped or
-rewritten. If the response has already begun, HTTP/1.1 closes rather than
-reusing a connection with an incomplete field section.</p>
+<p>Each field name must be a non-empty RFC 9110 <code>token</code>; it is sent lowercase.
+Values may contain HTAB, spaces, visible ASCII, and <code>obs-text</code> bytes, but not
+NUL, CR, LF, other C0 controls, or DEL. Each field is checked once, when it
+enters a <code>NativeResponse</code>: a <code>Response</code> helper builds one when sent, a
+<code>NativeResponse</code> checks when constructed, when its <code>header</code> or <code>trailers</code> is
+assigned and when a field is appended to either, and an ASGI
+<code>http.response.start</code> / <code>http.response.trailers</code> dict is checked when
+converted. Leading and trailing SP/HTAB are not part of a value (RFC 9110
+§5.5), so they are removed there and both transports send the same value.
+Any other invalid octet raises <code>ValueError</code>; it is never stripped or
+rewritten, and never reaches the wire or the HTTP/2 HPACK table. If the response has already begun,
+HTTP/1.1 closes rather than reusing a connection with an incomplete field
+section.</p>
 <p>String names and values are encoded as ASCII. Pass bytes explicitly when an
 RFC-defined field needs <code>obs-text</code>. Empty values and repeated fields such as
 <code>Set-Cookie</code> remain valid.</p>
@@ -6543,6 +6547,11 @@ its boundary remains explicit on a persistent connection.  A <code>304</code> al
 carries no content; an explicit, valid <code>Content-Length</code> is retained as
 selected-representation metadata, but one is not generated from an attempted
 response body.  Application body events for these statuses are discarded.</p>
+<p>A request's trailer section is read and discarded; it never reaches the
+application.  Its field lines follow the header section's grammar, and it may
+not carry a field RFC 9110 §6.5.1 prohibits (framing, routing,
+authentication, content handling).  A violation answers 400 on HTTP/1.1 and
+resets the stream (<code>PROTOCOL_ERROR</code>) on HTTP/2.</p>
 <h2 id="websocket-frames">WebSocket frames<a class="headerlink" href="#websocket-frames" title="Permanent link">&para;</a></h2>
 <p>For WebSocket routes (<code>scheme=Scheme.websocket</code>), use
 <code>WebSocketResponse</code> to dispatch on payload type automatically:</p>

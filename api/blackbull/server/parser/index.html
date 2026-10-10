@@ -5559,7 +5559,10 @@ reuse validated bytes but cannot weaken checks or change error scope.</p>
     <div class="doc doc-contents ">
 
         <p>Build a native HTTP or WebSocket Connection, or None for a malformed head.</p>
-<p>None must coincide with frame.malformed; never expose partial connections.
+<p>The Connection's header names are lowercase tchar, its values carry no edge
+SP/HTAB and no CTL, <code>host</code> is one valid authority taken from
+<code>:authority</code> or Host, and <code>scheme</code> is lowercase.
+None must coincide with frame.malformed; never expose partial connections.
 Validate required pseudo-fields and request-target octets (RFC 9113 §8.3.1)
 after field-level checks in parse_payload.</p>
 

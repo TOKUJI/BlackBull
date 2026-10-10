@@ -3693,6 +3693,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.trailers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trailers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.native.NativeResponse.complete" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5671,6 +5682,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.native.NativeResponse.trailers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        trailers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.native.NativeResponse.complete" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5827,16 +5849,18 @@ dictionaries only at conversion boundaries.</p>
 
 
         <p>A response on the native send path: header and/or body and/or trailers.</p>
-<p><code>header</code> is <code>None</code> when absent (never <code>[]</code> — presence is decided by
-<code>is not None</code>).  <code>body</code> is <code>None</code> when absent; <code>b''</code> is a real
-empty body.  <code>more_body</code> marks a non-terminal body chunk (streaming).
-<code>push</code> makes this a promised request instead: its path is <code>push</code> and
-<code>header</code> contains request headers. It cannot carry response-only fields.
-<code>more_trailers</code> marks a non-terminal trailer event.
-<code>expects_trailers</code> preserves the ASGI <code>http.response.start</code>
-<code>trailers: True</code> flag so the sender withholds the terminal chunk until
-the trailers event (lossless full-form compat — a terminal body before
-trailers would otherwise corrupt chunked framing).</p>
+<p><code>header</code> and <code>trailers</code> keep the response-field contract from creation
+on: names are lowercase tchar and values carry no CTL and no edge SP/HTAB
+(trimmed on entry).  A field that cannot meet it raises
+<code>ValueError</code>/<code>TypeError</code> here; readers do not check again.
+<code>header</code> is <code>None</code> when absent (never <code>[]</code>).  <code>body</code> is <code>None</code>
+when absent; <code>b''</code> is a real empty body.  <code>more_body</code> marks a
+non-terminal body chunk.  <code>push</code> makes this a promised request instead:
+its path is <code>push</code> and <code>header</code> holds request headers, with no
+response-only fields and no <code>host</code> (the authority is the parent's).
+<code>more_trailers</code> marks a non-terminal trailer event.  <code>expects_trailers</code>
+(ASGI <code>trailers: True</code>) makes the sender withhold the terminal chunk until
+the trailers event.</p>
 
 
 
@@ -5964,6 +5988,29 @@ trailers would otherwise corrupt chunked framing).</p>
 
         <p>True when the body arm is absent <em>or</em> zero-length.</p>
 <p>Distinct from <code>body is None</code>, which separates the two.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.native.NativeResponse.trailers" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">trailers</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#blackbull.native.NativeResponse.trailers" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The trailer arm as a mutable view, or <code>None</code> when there is none.</p>
 
     </div>
 

@@ -6058,7 +6058,8 @@ also send the equivalent <code>http.response.push</code> dictionary:</p>
 </code></pre></div>
 <p>For a push, <code>header</code> contains the promised request's headers:
 <code>NativeResponse(push='/static/style.css', header=[(b'accept', b'text/css')])</code>.
-A push cannot also carry response status, body, trailers, or a file.
+A push cannot also carry response status, body, trailers, a file, or <code>host</code>:
+the promised request's <code>host</code> is the parent request's authority.
 Clear <code>push</code> or <code>file_path</code> with <code>None</code> before switching between them;
 assigning a conflicting path raises <code>ValueError</code> and preserves the message.
 <code>push</code> (ASGI <code>path</code>) must be a plain string (percent-encoding decoded).

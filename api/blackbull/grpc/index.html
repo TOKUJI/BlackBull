@@ -6077,10 +6077,9 @@ protobuf is optional. Streaming contracts are in docs/guide/grpc.md.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Return all request metadata (HTTP/2 headers) as <code>(name, value)</code>
-pairs — grpcio's <code>ServicerContext.invocation_metadata</code>.  Pseudo-
-headers (<code>:method</code>, <code>:path</code>, …) are excluded; they are call routing,
-not application metadata.</p>
+        <p>Return the request fields as <code>(name, value)</code> pairs with lowercase
+names and no pseudo-headers — grpcio's
+<code>ServicerContext.invocation_metadata</code>.</p>
 
 
     </div>
@@ -6098,7 +6097,7 @@ not application metadata.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Return a request header (call metadata) value, or <em>default</em>.</p>
+        <p>Return the first request field named <em>name</em> (any case), or <em>default</em>.</p>
 
 
     </div>
@@ -6558,7 +6557,7 @@ prefix or a message body shorter than its declared length.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serve any of the four gRPC call shapes through Connection/receive/send.</p>
+        <p>Serve any of the four gRPC call shapes for <em>conn</em>.</p>
 <p>Report handler and protocol failures as gRPC status.</p>
 
 

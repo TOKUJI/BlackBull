@@ -2362,6 +2362,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.connection.refuse_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        refuse_scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.connection.stashed_connection" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5901,6 +5912,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.connection.refuse_scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        refuse_scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.connection.stashed_connection" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6052,8 +6074,16 @@ bytes had arrived before the disconnect.</p>
 
 
         <p>One HTTP (or WebSocket) request — the single internal representation.</p>
-<p>Built by the protocol actor, consumed by the router, dispatcher,
-middleware, and handlers. The ASGI <code>scope</code> dict is a <em>derived</em> view
+<p>Its creator builds it to the request contract: header names are lowercase
+tchar, values carry no edge SP/HTAB and no CTL, <code>host</code> is at most one
+valid authority, and <code>scheme</code> is lowercase.  The HTTP/1.1 and HTTP/2
+parsers and <a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
+
+  
+      classmethod
+  " href="#blackbull.connection.Connection.from_scope"><code>from_scope</code></a> do; code that builds one directly must too.
+The router, dispatcher, middleware and handlers rely on it and check
+nothing again.  The ASGI <code>scope</code> dict is a <em>derived</em> view
 (<a class="autorefs autorefs-internal" title="as_scope()" href="#blackbull.connection.Connection.as_scope"><code>as_scope</code></a>). <code>Request</code> is a deprecated alias of this class.</p>
 
 
@@ -6346,9 +6376,12 @@ and does not touch the body.  Multipart uploads are out of scope — use
 
     <div class="doc doc-contents ">
 
-        <p>Build a Connection from an external ASGI scope (the single
-ASGI→native point). Unknown keys are ignored; missing optional keys
-fall back to the field defaults.</p>
+        <p>Build a Connection from an external ASGI scope.</p>
+<p>The result keeps the contract of a natively parsed Connection: header
+names are lowercase tchar, values carry no edge SP/HTAB and no CTL,
+<code>host</code> is at most one valid authority, and <code>scheme</code> is lowercase.
+Raises <code>FieldError</code> for headers that cannot meet it.  Unknown keys
+are ignored; missing optional keys take the field defaults.</p>
 
 
     </div>
@@ -6515,6 +6548,34 @@ cycle. Preserve a receive channel already bound by an external ASGI host.</p>
       dataclass
   " href="#blackbull.connection.Connection"><code>Connection</code></a> or an
 ASGI <code>scope</code> dict (idempotent — caller guards on <a class="autorefs autorefs-internal" title="disconnected(target)" href="#blackbull.connection.disconnected"><code>disconnected</code></a>).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.connection.refuse_scope" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">refuse_scope</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.connection.refuse_scope" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Answer an ASGI <em>scope</em> that <a class="autorefs autorefs-internal" title="from_scope(scope, receive=None)
+
+  
+      classmethod
+  " href="#blackbull.connection.Connection.from_scope"><code>Connection.from_scope</code></a> refused as the
+native parsers answer the same request: a bare 400, or close 1002 before
+accept for WebSocket.</p>
 
 
     </div>

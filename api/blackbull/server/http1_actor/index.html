@@ -4473,6 +4473,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.request_framing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        request_framing
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5661,6 +5672,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http1_actor.request_framing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        request_framing
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -6018,6 +6040,28 @@ Supported and the connection is closed.  Distinct from
 
 </div>
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.server.http1_actor.request_framing" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">request_framing</span><span class="p">(</span><span class="n">headers</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.http1_actor.request_framing" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the body framing a request head declares: <code>(Content-Length or
+None, chunked)</code>.</p>
+<p><em>headers</em> keeps the request contract (lowercase names).  Raises
+<a class="autorefs autorefs-internal" href="#blackbull.server.http1_actor.BadRequestError"><code>BadRequestError</code></a> for ambiguous framing and
+<code>NotImplementedFramingError</code> for a coding other than bare chunked.</p>
+
+
+    </div>
+
+</div>
 
 
 

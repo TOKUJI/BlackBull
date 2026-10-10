@@ -5788,6 +5788,22 @@ accepted response work to drain. Read <code>blackbull/event_aggregator.py</code>
 means an ASGI dictionary for an external host or <code>BB_FORCE_ASGI_SCOPE=1</code>.
 Create it after pre-dispatch mutations; shared <code>state</code> and <code>extensions</code>
 remain live for late updates.</p>
+<p>Every <code>Connection</code> carries one header contract, and whoever creates it is
+responsible for it: names are lowercase tchar, values have no edge SP/HTAB
+and no CTL, <code>host</code> is at most one valid authority, and <code>scheme</code> is lowercase.
+The HTTP/1.1 and HTTP/2 parsers produce it; <code>Connection.from_scope</code>
+establishes it for a scope and refuses one that cannot meet it (a bare 400,
+or close 1002 for WebSocket); code that builds a <code>Connection</code> directly must
+keep it too.
+Code past dispatch relies on it and does not normalise again; code that
+rewrites a field after construction keeps it.</p>
+<p>A <code>NativeResponse</code> keeps the same field contract from the moment it exists:
+every way a field enters it (construction, <code>header</code>/<code>trailers</code> assignment,
+<code>append</code> on either view) checks that field once, lowercases its name and
+trims edge SP/HTAB from its value, so middleware and senders read fields
+exactly and check nothing again. Its header and trailer
+lists are <code>_MinimalResponseHeaders</code>; change them only through <code>add</code>, <code>extend</code>
+and <code>discard</code>, which keep the located framing fields true.</p>
 <p>A connection owns one read buffer. <code>BufferReader</code> owns receive policy,
 <code>ConnectionProtocol</code> performs transport callbacks and pauses, and
 <code>ReadBuffer</code> owns bytes and cursors. Detection must not consume the prefix;
@@ -5845,9 +5861,9 @@ Adapters must support both paths: testing only small responses misses the
 vectored backing contract.
 See <code>tests/architecture/test_writer_backing_contract.py</code>.</p>
 <p>Normalize ASGI events through <code>blackbull.native</code>, not separate handler and
-sender conversions. Middleware copies mutable field lists; direct sender
-conversion can borrow only until the sender snapshots them. Validate and
-lowercase response heads and trailers once on entry. Push headers describe
+sender conversions. A conversion gives the result its own field lists, and
+senders read them in place without copying. Validate and lowercase response
+heads and trailers once on entry. Push headers describe
 a promised request and bypass response header injection and middleware.</p>
 <p>Bound socket drains and flow-control waits. File transfers use bounded
 chunks under the write deadline rather than a whole-file timeout.

@@ -7110,8 +7110,9 @@ requires its own bound.</p>
 
 
         <p>Yield lazy HTTP/1.1 request-body slices as http.request events.</p>
-<p>Framing comes from Content-Length or Transfer-Encoding. After the terminal
-body event, subsequent calls return http.disconnect.</p>
+<p><em>framing</em> is <code>request_framing(conn.headers)</code>, already validated; the body
+is read by it, not by the headers again. After the terminal body event,
+subsequent calls return http.disconnect.</p>
 
 
 
@@ -7218,16 +7219,18 @@ body stands between here and the next request), or
 
 
 <h4 id="blackbull.server.recipient.HTTP1Recipient.bind" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">bind</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">framing</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">bind</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">framing</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.recipient.HTTP1Recipient.bind" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Point this recipient at <em>conn</em>, the next request on the connection.</p>
+        <p>Point this recipient at <em>conn</em>, the next request on the connection,
+whose body framing is <em>framing</em>: <code>(Content-Length or None, chunked)</code>
+as <code>http1_actor.request_framing</code> returned it.</p>
 <p>The reader, chunk size, and deadline are properties of the connection
-and survive; the framing state is re-derived from the new head.  One
+and survive; the per-request state starts over.  One
 recipient per connection is safe only because HTTP/1.1 dispatches one
 request at a time — <strong>not</strong> for HTTP/2, whose streams are concurrent.</p>
 <p>The split is the whole contract: any per-request field left out of this
