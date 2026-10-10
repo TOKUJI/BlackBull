@@ -45,6 +45,7 @@ machinery — see the gate). Check IDs are validated against the registry by
 | WebSocket handshake validation (key, version) | WS-001 (RFC 6455 §4.2.2) |
 | Client WebSocket frames must be masked | WS-001 (RFC 6455 §5.1) |
 | Each lane negotiates exactly its protocol (ALPN/preface) | LANE-001, LANE-002 |
+| gRPC unary and server-streaming calls answer grpc-status 0 (over h2 and h2c) | GRPC-BASE-001, GRPC-BASE-002 |
 | No auto-generated API surface (/docs, /openapi.json stay 404) | ROUTES-001 |
 | Deterministic streaming responses keep their exact length | ROUTES-002 |
 | JSON→dataclass and form parsing: invalid input is 4xx, never 5xx | ROUTES-003 |

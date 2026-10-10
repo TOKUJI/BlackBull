@@ -109,6 +109,8 @@ would carry. The convention throughout: a hang or crash is **High**
 
 | Check | Rank if it fails | CWE |
 |---|---|---|
+| GRPC-BASE-001 | High (availability: the gRPC service does not answer calls) | CWE-400 |
+| GRPC-BASE-002 | High (availability: the gRPC service does not answer calls) | CWE-400 |
 | ROUTES-001 | Medium (information exposure: an auto API surface appeared) | CWE-200 |
 | ROUTES-002 | Medium (response corruption: streamed length drifted) | CWE-400 |
 | ROUTES-003 | Medium (input validation: the parser answered 5xx) | CWE-20 |

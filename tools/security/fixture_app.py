@@ -28,6 +28,7 @@ from blackbull import (
     BlackBull, Connection, JSONResponse, Listener, QUERY, Response,
     StreamingResponse, Tcp, WebSocket,
 )
+from blackbull.grpc.registry import GrpcServiceRegistry
 from blackbull.middleware import Cache, CORS, Compression, TrustedProxy
 from blackbull.utils import Scheme
 
@@ -169,6 +170,33 @@ def _precompressed_root() -> Path:
 
 
 app.static('/pcstatic', _precompressed_root())
+
+
+# ---- G4-3: gRPC service (rides the h2 and h2c lanes) -------------------
+#
+# Raw message bytes, no protobuf dependency: Echo is unary, Count is
+# server-streaming (an async generator), matching GRPC-BASE-001/002.
+
+grpc_registry = GrpcServiceRegistry()
+
+
+async def grpc_echo(request: bytes, context) -> bytes:
+    return request
+
+
+async def grpc_count(request: bytes, context):
+    """Yield ``1``..``n`` as messages, where n is the request's leading digit."""
+    try:
+        n = int(request[:2].decode('ascii') or '0')
+    except ValueError:
+        n = 0
+    for i in range(1, max(0, min(n, 16)) + 1):
+        yield str(i).encode('ascii')
+
+
+grpc_registry.add_method('/probe.v1.Echo/Echo', grpc_echo)
+grpc_registry.add_method('/probe.v1.Echo/Count', grpc_count, streaming=True)
+app.enable_grpc(grpc_registry)
 
 
 #: The declared route table (G4-4).  tests/unit/test_security_probe.py

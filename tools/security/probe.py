@@ -1022,6 +1022,94 @@ def _routes_005(probe: Probe) -> Verdict:
                          'trusted proxy rewrite, precompressed .gz served')
 
 
+def h2_field(infos: Sequence[H2Info], name: bytes) -> bytes | None:
+    """The last value of one header field across all HEADERS frames."""
+    found = None
+    for info in infos:
+        if info.kind != 'HEADERS':
+            continue
+        for field, value in info.headers:
+            if bytes(field).lower() == name.lower():
+                found = bytes(value)
+    return found
+
+
+def grpc_lpm(payload: bytes) -> bytes:
+    """One gRPC length-prefixed message: flag byte + 4-byte length + payload."""
+    return b'\x00' + len(payload).to_bytes(4, 'big') + payload
+
+
+def grpc_parse_lpm(body: bytes) -> list[bytes] | None:
+    """All complete length-prefixed messages, or None on a malformed frame."""
+    messages: list[bytes] = []
+    i = 0
+    while i < len(body):
+        if len(body) - i < 5:
+            return None
+        length = int.from_bytes(body[i + 1:i + 5], 'big')
+        i += 5
+        if len(body) - i < length:
+            return None
+        messages.append(body[i:i + length])
+        i += length
+    return messages
+
+
+def _grpc_request(probe: Probe, path: str, body: bytes,
+                  stream_id: int = 1) -> list:
+    authority = f'{probe.target.host}:{probe.target.port}'
+    pseudo = ((':method', 'POST'), (':path', path),
+              (':scheme', probe.target.scheme), (':authority', authority))
+    headers = (('content-type', 'application/grpc'), ('te', 'trailers'))
+    head = h2s.encode_headers(h2s.SendHeaders(
+        pseudo=pseudo, headers=headers, stream_id=stream_id, end_stream=False))
+    data = h2s.encode_frame(h2s.SendFrame(
+        FrameTypes.DATA, flags=0x01, stream_id=stream_id, data=body))
+    return [h2s.SendRawBytes(head), h2s.SendRawBytes(data)]
+
+
+def _grpc_verdict(infos: Sequence[H2Info], expected: Sequence[bytes],
+                  shape: str) -> Verdict:
+    """G4-3 baseline oracle: 200, the expected messages, grpc-status 0."""
+    if any(i.error_code is not None for i in infos if i.kind == 'EOF'):
+        return Verdict(FAIL, f'{shape}: connection failed before the trailers')
+    if not any(i.status == 200 for i in infos):
+        return Verdict(FAIL, f'{shape}: no 200 response (frames: '
+                       + ', '.join(i.kind for i in infos) + ')')
+    body = b''.join(i.body for i in infos if i.kind == 'DATA')
+    messages = grpc_parse_lpm(body)
+    if messages is None or list(messages) != list(expected):
+        return Verdict(FAIL, f'{shape}: messages '
+                       + (f'unparseable ({body[:40]!r})' if messages is None
+                          else f'{messages!r}, expected {list(expected)!r}'))
+    code = h2_field(infos, b'grpc-status')
+    if code != b'0':
+        return Verdict(FAIL, f'{shape}: grpc-status {code!r} in trailers, '
+                       f'expected 0')
+    return Verdict(PASS, f'{shape} answered grpc-status 0 with '
+                         f'{len(expected)} message(s)')
+
+
+def _grpc_base_001(probe: Probe) -> Verdict:
+    """GRPC-BASE-001 (G4-3): a unary gRPC call echoes one message and
+    closes with grpc-status 0."""
+    result = probe.h2_scenario(
+        'grpc-base-001', *_h2_prefix(),
+        *_grpc_request(probe, '/probe.v1.Echo/Echo', grpc_lpm(b'ping')),
+        *_h2_reads(probe, tails=8))
+    return _grpc_verdict(h2_infos(result), [b'ping'], 'unary')
+
+
+def _grpc_base_002(probe: Probe) -> Verdict:
+    """GRPC-BASE-002 (G4-3): a server-streaming gRPC call delivers every
+    message and closes with grpc-status 0."""
+    result = probe.h2_scenario(
+        'grpc-base-002', *_h2_prefix(),
+        *_grpc_request(probe, '/probe.v1.Echo/Count', grpc_lpm(b'3')),
+        *_h2_reads(probe, tails=8))
+    return _grpc_verdict(h2_infos(result), [b'1', b'2', b'3'], 'streaming')
+
+
 def _lane_001(probe: Probe) -> Verdict:
     """LANE-001 (G4-1): the h1-family lane must negotiate HTTP/1.1.
 
@@ -1582,6 +1670,8 @@ class H2Info:
     status: int | None = None
     body: bytes = b''
     end_stream: bool = False
+    #: Regular header fields of a HEADERS frame (trailers carry gRPC status).
+    headers: tuple = ()
 
 
 def h2_info(frame) -> H2Info:
@@ -1611,6 +1701,7 @@ def h2_info(frame) -> H2Info:
         status=status,
         body=bytes(getattr(frame, 'payload', b'') or b''),
         end_stream=bool(getattr(frame, 'end_stream', False)),
+        headers=tuple(getattr(frame, 'headers', None) or ()),
     )
 
 
@@ -2683,6 +2774,8 @@ CHECKS: tuple[Check, ...] = (
     Check('H2-ROBUST-007', '30 CONTINUATION frames complete or are refused without crash (CVE-2023-45288 class)', 'Medium', 'CWE-400', _h2_robust_007, 'h2', 'High'),
     Check('H2-ROBUST-008', 'HPACK bomb lite (decoded ≤ 4 MiB) completes or is refused without crash (CVE-2016-6581 class)', 'Medium', 'CWE-409', _h2_robust_008, 'h2', 'High'),
     Check('H2-BASE-002', 'a fresh HTTP/2 request after all h2 abuse returns 200 with body "ok"', 'High', 'CWE-400', _h2_base_002, 'h2'),
+    Check('GRPC-BASE-001', 'unary gRPC call echoes one message with grpc-status 0 in trailers', 'High', 'CWE-400', _grpc_base_001, 'h2'),
+    Check('GRPC-BASE-002', 'server-streaming gRPC call delivers every message with grpc-status 0', 'High', 'CWE-400', _grpc_base_002, 'h2'),
     Check('TLS-001', 'TLS 1.0/1.1 refused; TLS 1.2/1.3 handshake negotiates ALPN h2', 'Medium', 'CWE-326', _tls_001, 'h2', skip_lanes=frozenset({'h2c'})),
 )
 

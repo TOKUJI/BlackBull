@@ -231,6 +231,8 @@ open.
 
 | Check | Oracle (mechanical) |
 |---|---|
+| GRPC-BASE-001 | unary gRPC (`/probe.v1.Echo/Echo`) over the lane's h2 transport: 200, exactly one length-prefixed echo message, `grpc-status: 0` in the trailers (G4-3) |
+| GRPC-BASE-002 | server-streaming gRPC (`/probe.v1.Echo/Count`): 200, every message delivered (`1`,`2`,`3`), `grpc-status: 0` in the trailers (G4-3) |
 | LANE-002 | negotiation baseline: the h2-family lane speaks HTTP/2 — on `h2` exactly ALPN `h2`; on `h2c` the prior-knowledge preface is accepted (SETTINGS received) |
 | H2-BASE-001 | `GET /` over HTTP/2 (TLS + ALPN `h2`) → 200 and body exactly `ok` |
 | H2-ROBUST-001 | HEADERS with a missing pseudo-header, or pseudo-headers after a regular field (RFC 9113 §8.1/§8.3) → `RST_STREAM`/`GOAWAY` carrying `PROTOCOL_ERROR`, or close; a dispatched request or any other error code = FAIL |

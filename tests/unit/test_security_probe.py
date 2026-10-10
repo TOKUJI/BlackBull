@@ -33,6 +33,9 @@ from tools.security.probe import (
     abuse_accept_verdict,
     apply_canary,
     apply_proc,
+    grpc_lpm,
+    grpc_parse_lpm,
+    h2_field,
     ProcObserver,
     ProcSnapshot,
     parse_net_tcp,
@@ -426,6 +429,25 @@ def test_every_skipped_lane_is_documented_with_its_reason():
             assert any(check.check_id in line and lane in line
                        for line in text.splitlines()), \
                 f'{check.check_id} skip on {lane} has no documented reason'
+
+
+def test_grpc_lpm_round_trips_messages():
+    assert grpc_lpm(b'ping') == b'\x00\x00\x00\x00\x04ping'
+    body = grpc_lpm(b'1') + grpc_lpm(b'2') + grpc_lpm(b'3')
+    assert grpc_parse_lpm(body) == [b'1', b'2', b'3']
+    assert grpc_parse_lpm(b'\x00\x00\x00\x00') is None  # short header
+    assert grpc_parse_lpm(grpc_lpm(b'ok') + b'\x00\x00') is None  # truncated
+    assert grpc_parse_lpm(b'') == []
+
+
+def test_h2_field_reads_trailer_fields():
+    hdrs = H2Info('HEADERS', 1, status=200,
+                  headers=((b'content-type', b'application/grpc'),))
+    trailers = H2Info('HEADERS', 1, end_stream=True,
+                      headers=((b'grpc-status', b'0'),))
+    data = H2Info('DATA', 1, body=b'\x00\x00\x00\x00\x00')
+    assert h2_field([hdrs, data, trailers], b'grpc-status') == b'0'
+    assert h2_field([hdrs, data], b'grpc-status') is None
 
 
 def test_fixture_route_table_matches_the_app():
