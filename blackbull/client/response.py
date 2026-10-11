@@ -98,6 +98,7 @@ class SettingsResponder(Responder):
             return
         if getattr(self.frame, 'initial_window_size', None) is not None:
             client._on_initial_window_size(self.frame.initial_window_size)
+        client._factory.apply_peer_header_table_size(self.frame.settings)
         ack = client._factory.create(FrameTypes.SETTINGS, SettingFrameFlags.ACK, 0)
         await client._send_raw_frame(ack)
 

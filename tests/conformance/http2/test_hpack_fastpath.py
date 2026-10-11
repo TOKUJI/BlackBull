@@ -95,7 +95,6 @@ def test_status_wire_equivalence_with_encoder_only(status: str):
 def test_unlisted_status_falls_through_to_encoder():
     """A status not in the static-table fast-path map (e.g. 201) must
     still encode correctly via the encoder."""
-    assert hpack_fastpath.status_fast_bytes("201") is None
     encoder = Encoder()
     h = _make_headers(encoder, "201", [(b"content-length", b"0")])
     payload = _extract_payload(h.save())

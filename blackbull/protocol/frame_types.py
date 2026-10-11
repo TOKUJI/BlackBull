@@ -563,25 +563,14 @@ class Headers(FrameBase):
         if self.encoder is None:
             raise no_hpack_context(self, 'encoder')
         encoder = self.encoder
-        # Pseudo-headers MUST come before regular headers (RFC 7540 §8.1.2.1)
-        # Fast-path :status when its value is one of the
-        # static-table entries (RFC 7541 App A indices 8-14).  The encoder
-        # would emit the same single byte, but at the cost of dict lookups
-        # and a generator iteration we can sidestep.  Static-indexed fields
-        # don't touch the dynamic table (RFC 7541 §6.1), so removing :status
-        # from the encoder's input is wire-equivalent.
-        fast_bytes = b''
         pseudo_items = self.pseudo_headers.items()
         status = self.pseudo_headers.get(PseudoHeaders.STATUS)
         if status is not None:
-            wire = hpack_fastpath.status_fast_bytes(status)
-            if wire is not None:
-                fast_bytes = wire
-                pseudo_items = (
-                    (k, v) for k, v in self.pseudo_headers.items()
-                    if k is not PseudoHeaders.STATUS
-                )
-        payload = fast_bytes + encoder.encode(chain(pseudo_items, self.headers))
+            pseudo_items = ((k, v) for k, v in pseudo_items if k is not PseudoHeaders.STATUS)
+            payload = hpack_fastpath.encode_status(
+                encoder, status, chain(pseudo_items, self.headers))
+        else:
+            payload = encoder.encode(chain(pseudo_items, self.headers))
         self.length = len(payload)
 
         base = super().save()
@@ -679,7 +668,8 @@ class PushPromise(FrameBase):
                 fast_bytes += wire
             else:
                 remaining_pseudo.append((k, v))
-        block = fast_bytes + encoder.encode(remaining_pseudo + self.headers)
+        block = hpack_fastpath.encode_with_prefix(
+            encoder, fast_bytes, remaining_pseudo + self.headers)
         payload = (self.promised_stream_id & 0x7FFFFFFF).to_bytes(4, 'big') + block
         self.length = len(payload)
         self.flags = HeaderFrameFlags.END_HEADERS

@@ -242,9 +242,7 @@ class SettingsResponder(Responder):
         if mfs is not None:
             for sender in handler._senders.values():
                 sender.apply_settings(max_frame_size=mfs)
-        # RFC 9113 §6.5.2 — the peer's SETTINGS_HEADER_TABLE_SIZE constrains
-        # OUR encoder's table, not our decoder's.  Resizing the decoder here
-        # trips InvalidTableSizeError: the peer's encoder never asked us to.
+        handler.factory.apply_peer_header_table_size(self.frame.settings)
         await handler.send_frame(handler.factory.settings(ack=True))
 
     FRAME_TYPE = FrameTypes.SETTINGS
