@@ -126,7 +126,7 @@ def build_response_headers(encoder, stream_id: int, status,
 
     fast = hpack_fastpath.status_fast_bytes(str(status))
     if fast is not None:
-        payload = fast + encoder.encode(fields)
+        payload = hpack_fastpath.encode_with_prefix(encoder, fast, fields)
     else:
         payload = encoder.encode(
             chain(((PseudoHeaders.STATUS, str(status)),), fields))

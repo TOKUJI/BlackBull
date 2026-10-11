@@ -581,7 +581,8 @@ class Headers(FrameBase):
                     (k, v) for k, v in self.pseudo_headers.items()
                     if k is not PseudoHeaders.STATUS
                 )
-        payload = fast_bytes + encoder.encode(chain(pseudo_items, self.headers))
+        payload = hpack_fastpath.encode_with_prefix(
+            encoder, fast_bytes, chain(pseudo_items, self.headers))
         self.length = len(payload)
 
         base = super().save()
@@ -679,7 +680,8 @@ class PushPromise(FrameBase):
                 fast_bytes += wire
             else:
                 remaining_pseudo.append((k, v))
-        block = fast_bytes + encoder.encode(remaining_pseudo + self.headers)
+        block = hpack_fastpath.encode_with_prefix(
+            encoder, fast_bytes, remaining_pseudo + self.headers)
         payload = (self.promised_stream_id & 0x7FFFFFFF).to_bytes(4, 'big') + block
         self.length = len(payload)
         self.flags = HeaderFrameFlags.END_HEADERS

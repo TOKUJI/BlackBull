@@ -47,3 +47,10 @@ def pseudo_fast_bytes(name, value) -> bytes | None:
     """Return static-table encoding for a str/bytes name/value pair, or None.
     """
     return _STATIC_INDEXED.get((_coerce_bytes(name), _coerce_bytes(value)))
+
+
+def encode_with_prefix(encoder, prefix: bytes, fields) -> bytes:
+    """Emit pending table updates before a static-indexed field prefix."""
+    if prefix and encoder.header_table.resized:
+        prefix = encoder.encode(()) + prefix
+    return prefix + encoder.encode(fields)
