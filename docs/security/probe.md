@@ -142,6 +142,21 @@ is a close, and a wait that expires with neither is a FAIL.  The report
 lands in `bench/results/security/catalogue.txt`; a unit test pins the
 14/11 inventory to the module callables.
 
+## Detection power by mutation (G3-4)
+
+`just vuln-mutation` measures whether the harness **notices** a missing
+defense.  `tools/security/mutation_run.py` neutralizes one BlackBull
+defense at a time in a throwaway copy of the package (the fixture serves
+from the mutated tree — it must *contain* the blackbull/ it serves, since
+the fixture's own bootstrap pins its package root), reruns the quick
+tier with the probe unchanged, and reports which clean PASS rows flip to
+FAIL/TIMEOUT.  A mutation with at least one flip is DETECTED.  The
+current mutations: the CL+TE smuggling rejection, the malformed
+Content-Length rejection, and the TE-list rejection (all in
+`server/http1_actor.py`'s framing).  Evidence on BLA-526 lists the
+detecting rows; a flip only by an indirect row is recorded as such, and
+a mutation no row catches is a harness gap — the point of the measure.
+
 ## Defense-site reachability (G3-3)
 
 `just vuln-reachability tier=quick` measures how much of BlackBull's

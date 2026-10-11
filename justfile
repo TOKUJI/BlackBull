@@ -204,6 +204,18 @@ vuln-matrix:
     done
     exit $status
 
+# --- G3-4: detection power by defense-site mutation --------------------
+# Neutralize one BlackBull defense in a throwaway copy; the harness must
+# catch it (a clean PASS flipping to FAIL/TIMEOUT).
+
+vuln-mutation:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export UV_CACHE_DIR=$PWD/.uv-cache XDG_RUNTIME_DIR=/tmp/xdg-runtime
+    mkdir -p bench/results/security
+    uv run python tools/security/mutation_run.py \
+        | tee bench/results/security/mutation.txt
+
 # --- G1: fault_injection catalogue against the fixture -----------------
 # The 14 h1_client + 11 h2_client scenarios run unchanged; the G1-2
 # oracle passes answer-or-close and fails silence.
