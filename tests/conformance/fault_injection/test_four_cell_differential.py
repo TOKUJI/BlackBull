@@ -271,6 +271,15 @@ def _require_nginx_image(selected: set[str]) -> None:
         time.sleep(2)
 
 
+@pytest.mark.timeout(_NGINX_BUILD_BUDGET)
+async def test_the_reference_image_is_prepared_for_this_context():
+    """Pay for the build here, once, under a budget that admits it is a build."""
+    _require_docker()
+    _prepare_nginx_image()
+    assert _nginx_image_present(), (
+        f'{_NGINX_IMAGE} missing after a build that reported success')
+
+
 async def test_the_nginx_tag_follows_the_context(tmp_path):
     """The tag changes with the content and the mode, but not with the path."""
     ctx = tmp_path / 'ctx'
@@ -575,13 +584,14 @@ async def test_a_peer_container_ends_without_its_teardown(request):
                        capture_output=True, timeout=120)
 
 
-@pytest.mark.timeout(_NGINX_BUILD_BUDGET)
-async def test_the_reference_image_is_prepared_for_this_context():
-    """Pay for the build here, once, under a budget that admits it is a build."""
-    _require_docker()
-    _prepare_nginx_image()
-    assert _nginx_image_present(), (
-        f'{_NGINX_IMAGE} missing after a build that reported success')
+async def test_the_preparer_is_this_modules_first_test(request):
+    """The tests that need the image wait for the preparer, so a serial run
+    reaching one of them first would wait out the build budget for nothing."""
+    here = [item.name for item in request.session.items
+            if item.path == request.node.path]
+    if _preparer_name() not in here:
+        pytest.skip(f'{_preparer_name()} is not selected')
+    assert here[0] == _preparer_name(), here[:3]
 
 
 @pytest.fixture(scope='module')
