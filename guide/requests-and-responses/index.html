@@ -6483,7 +6483,8 @@ non-ASCII URLs before passing them in. Extra <code>headers=</code> are merged in
 <p>Each field name must be a non-empty RFC 9110 <code>token</code>; it is sent lowercase.
 Values may contain HTAB, spaces, visible ASCII, and <code>obs-text</code> bytes, but not
 NUL, CR, LF, other C0 controls, or DEL. Each field is checked once, when it
-enters a <code>NativeResponse</code>: a <code>Response</code> helper builds one when sent, a
+enters a <code>NativeResponse</code>: a <code>Response</code> helper builds one when sent (its
+own content-type is checked once per value and reused), a
 <code>NativeResponse</code> checks when constructed, when its <code>header</code> or <code>trailers</code> is
 assigned and when a field is appended to either, and an ASGI
 <code>http.response.start</code> / <code>http.response.trailers</code> dict is checked when
