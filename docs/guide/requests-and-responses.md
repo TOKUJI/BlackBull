@@ -453,7 +453,8 @@ await send(JSONResponse({'ok': True}, headers=[
 Each field name must be a non-empty RFC 9110 `token`; it is sent lowercase.
 Values may contain HTAB, spaces, visible ASCII, and `obs-text` bytes, but not
 NUL, CR, LF, other C0 controls, or DEL. Each field is checked once, when it
-enters a `NativeResponse`: a `Response` helper builds one when sent, a
+enters a `NativeResponse`: a `Response` helper builds one when sent (its
+own content-type is checked once per value and reused), a
 `NativeResponse` checks when constructed, when its `header` or `trailers` is
 assigned and when a field is appended to either, and an ASGI
 `http.response.start` / `http.response.trailers` dict is checked when

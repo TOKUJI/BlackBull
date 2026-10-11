@@ -6,6 +6,7 @@ import logging
 from collections.abc import AsyncIterator, Mapping
 from http import HTTPStatus
 
+from .headers import _as_response_fields
 from .native import NativeResponse, _native_from_asgi
 
 logger = logging.getLogger(__name__)
@@ -46,19 +47,29 @@ def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
     return out
 
 
-#: ``content-type`` pairs by the ``str`` they came from; bounded,
-#: since a content type is almost always a constant of the application.
-_CONTENT_TYPE_PAIRS: dict[str, tuple[bytes, bytes]] = {}
+#: ``content-type`` pairs by the ``str`` they came from, each with its field
+#: list already checked (``None`` when the value breaks the field grammar, so
+#: the conversion refuses it); bounded, since a content type is almost always
+#: a constant of the application.
+_CONTENT_TYPE_PAIRS: dict[str, tuple] = {}
 _CONTENT_TYPE_PAIRS_MAX = 64
 
 
-def _content_type_pair(content_type) -> tuple[bytes, bytes]:
-    pair = _CONTENT_TYPE_PAIRS.get(content_type) if type(content_type) is str else None
-    if pair is None:
+def _content_type_pair(content_type) -> tuple:
+    """Return ``(pair, checked)``: the ``content-type`` pair for
+    *content_type* and, when it keeps the response-field contract, that pair
+    as a checked field list to copy instead of checking it again."""
+    entry = _CONTENT_TYPE_PAIRS.get(content_type) if type(content_type) is str else None
+    if entry is None:
         [pair] = _normalize_headers([(b'content-type', content_type)])
+        try:
+            checked = _as_response_fields([pair])
+        except (TypeError, ValueError):
+            checked = None
+        entry = (pair, checked)
         if type(content_type) is str and len(_CONTENT_TYPE_PAIRS) < _CONTENT_TYPE_PAIRS_MAX:
-            _CONTENT_TYPE_PAIRS[content_type] = pair
-    return pair
+            _CONTENT_TYPE_PAIRS[content_type] = entry
+    return entry
 
 
 async def _emit_response(send, body: bytes, status, headers) -> None:
@@ -72,6 +83,9 @@ class Response:
 
     An arbitrary ASGI host's raw send does not accept Response objects.
     """
+
+    #: ``(pair, checked)`` for the leading content-type, from _content_type_pair.
+    _checked = (None, None)
 
     def __init__(self, content: str | bytes,
                  status: HTTPStatus = HTTPStatus.OK,
@@ -87,7 +101,8 @@ class Response:
         # A dict or a list of (name, value) pairs; str or bytes names/values.
         # See _normalize_headers for the accepted shapes and the ASCII /
         # RFC 9110 §5.5 coercion rules.
-        self.headers = [_content_type_pair(content_type)]
+        self._checked = _content_type_pair(content_type)
+        self.headers = [self._checked[0]]
         if headers:
             self.headers.extend(_normalize_headers(headers))
 
@@ -107,7 +122,17 @@ class Response:
         [`NativeResponse.to_asgi`][NativeResponse.to_asgi] (the boundary conversion); streaming
         response types drive themselves and are not converted here.
         """
-        return NativeResponse.complete(int(self.status), self.headers, self.body)
+        headers = self.headers
+        pair, checked = self._checked
+        # Reuse the checked content-type only while it is still the leading
+        # field; whatever the application added after it is checked here.
+        if checked is not None and headers and headers[0] is pair:
+            fields = checked.copy()
+            if len(headers) > 1:
+                fields.extend(headers[1:])
+        else:
+            fields = headers
+        return NativeResponse.complete(int(self.status), fields, self.body)
 
 
 class JSONResponse(Response):
