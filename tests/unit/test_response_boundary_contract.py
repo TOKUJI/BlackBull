@@ -63,6 +63,39 @@ class TestEveryWayInKeepsTheContract:
         assert (b'x-trace', b'1') in list(native.header)
 
 
+class TestAResponseHelperKeepsTheContractWhenItReusesCheckedFields:
+    """The helper's own content-type is checked once and reused; anything the
+    application adds or replaces is still checked when converted."""
+
+    def test_a_header_appended_after_construction_is_checked(self):
+        resp = Response(b'ok', content_type='text/plain')
+        resp.headers.append((b'X-A', b'1'))
+        assert (b'x-a', b'1') in list(resp.to_native().header)
+        resp.headers.append((b'x-b', b'a\r\nb'))
+        with pytest.raises(ValueError):
+            resp.to_native()
+
+    def test_a_replaced_content_type_is_checked(self):
+        resp = Response(b'ok', content_type='text/plain')
+        resp.headers[0] = (b'content-type', b'a\r\nb')
+        with pytest.raises(ValueError):
+            resp.to_native()
+
+    def test_an_invalid_content_type_is_refused_when_converted(self):
+        resp = Response(b'ok', content_type='a\r\nb')
+        with pytest.raises(ValueError):
+            resp.to_native()
+
+    def test_a_converted_response_owns_its_fields(self):
+        resp = Response(b'ok', content_type='text/plain', headers=[(b'x-a', b'1')])
+        before = list(resp.headers)
+        first = resp.to_native()
+        first.header.append(b'x-b', b'2')
+        assert resp.headers == before
+        assert list(resp.to_native().header) == [
+            (b'content-type', b'text/plain'), (b'x-a', b'1')]
+
+
 def _padded_ways_in():
     """A NativeResponse reached by each way a field can enter one."""
     from blackbull.native import _native_from_asgi
