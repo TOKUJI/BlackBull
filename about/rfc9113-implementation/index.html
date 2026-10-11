@@ -5613,6 +5613,10 @@ RFC 8441 WebSocket requires explicit enablement.</p>
 <h2 id="hpack-and-field-blocks">HPACK and field blocks<a class="headerlink" href="#hpack-and-field-blocks" title="Permanent link">&para;</a></h2>
 <p>Use one <code>FrameFactory</code> per connection, including pushes and WebSocket
 streams. A second encoder creates a divergent dynamic table.</p>
+<p>Peer <code>SETTINGS_HEADER_TABLE_SIZE</code> limits the encoder, not the decoder. Apply
+entries in order before ACK, capped at the local encoder capacity. Emit the
+smallest pending size and final size at the start of the next field block,
+before any static-indexed prefix.</p>
 <p>Decode every received field block, including one whose stream will be
 refused or whose promise will be discarded. Complete CONTINUATION handling
 before a concurrency refusal; refusing early must not turn legal continuation
