@@ -431,6 +431,29 @@ def test_every_skipped_lane_is_documented_with_its_reason():
                 f'{check.check_id} skip on {lane} has no documented reason'
 
 
+def test_issue_words_link_filed_defects():
+    import dataclasses
+    from tools.security.probe import KNOWN, FIXED, apply_issue_word
+    def base(verdict):
+        return CheckResult('X-1', 'desc', 'High', verdict, 'the detail', 'CWE-1')
+    known = Check('X-1', 'desc', 'High', 'CWE-1', lambda p: None, 'h1',
+                  known_issue='BLA-1')
+    fixed = Check('X-1', 'desc', 'High', 'CWE-1', lambda p: None, 'h1',
+                  fixed_issue='BLA-2')
+    row = apply_issue_word(base(FAIL), known)
+    assert row.verdict == KNOWN and 'BLA-1' in row.detail
+    row = apply_issue_word(base(TIMEOUT), known)
+    assert row.verdict == KNOWN
+    row = apply_issue_word(base(PASS), fixed)
+    assert row.verdict == FIXED and 'BLA-2' in row.detail
+    row = apply_issue_word(base(FAIL), fixed)
+    assert row.verdict == FAIL and 'REGRESSION' in row.detail
+    row = apply_issue_word(base(PASS), known)
+    assert row.verdict == PASS
+    row = apply_issue_word(base(Skip := 'SKIP'), None)
+    assert row.verdict == 'SKIP'
+
+
 def test_catalogue_inventory_matches_the_modules():
     from tools.security.catalogue_run import H1_SCENARIOS, H2_SCENARIOS, judge
     from blackbull.fault_injection.catalogue import h1_client, h2_client

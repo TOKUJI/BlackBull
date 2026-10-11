@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import dataclasses
 from dataclasses import dataclass, replace
 import ipaddress
 import math
@@ -69,6 +70,9 @@ MAX_CANARY_TOTAL = 512
 MAX_TOTAL_CONNECTIONS = 96
 
 PASS, FAIL, TIMEOUT = 'PASS', 'FAIL', 'TIMEOUT'
+#: G5: KNOWN = a FAIL that is a filed, open defect (linked, not news);
+#: FIXED = a PASS confirming a filed fix (regression watch).
+KNOWN, FIXED = 'KNOWN', 'FIXED'
 #: The check could not be exercised by this client (e.g. its TLS stack
 #: cannot offer the version under test); never reported as PASS.
 SKIP = 'SKIP'
@@ -355,6 +359,10 @@ class Check:
     #: Lane instances that skip this check (G4-2); the reason lives in
     #: docs/security/probe.md's lane applicability table.
     skip_lanes: frozenset[str] = frozenset()
+    #: An OPEN defect this row's failure is already filed as (FAIL -> KNOWN).
+    known_issue: str = ''
+    #: A FIXED defect under regression watch (PASS -> FIXED; FAIL stays FAIL).
+    fixed_issue: str = ''
     #: Tiers that run this check; long-only checks wait out documented
     #: default defence timeouts in real time (G2-5).
     tiers: frozenset[str] = frozenset({'quick', 'long'})
@@ -2738,7 +2746,7 @@ CHECKS: tuple[Check, ...] = (
     Check('ROUTES-003', 'JSON/dataclass and form parsing refuse invalid JSON with 4xx, never 5xx', 'Medium', 'CWE-20', _routes_003, 'h1'),
     Check('ROUTES-004', 'the error route answers 500 with no traceback in the body', 'Medium', 'CWE-209', _routes_004, 'h1'),
     Check('ROUTES-005', 'middleware contracts: compression, CORS preflight, cache headers, trusted proxy, precompressed static', 'Medium', 'CWE-400', _routes_005, 'h1'),
-    Check('H1-ROBUST-001', 'unknown method FOO answered with 4xx/501 or close', 'Info', 'CWE-755', _h1_robust_001, 'h1', 'High'),
+    Check('H1-ROBUST-001', 'unknown method FOO answered with 4xx/501 or close', 'Info', 'CWE-755', _h1_robust_001, 'h1', 'High', known_issue='BLA-527'),
     Check('H1-ROBUST-002', '100 KiB header value answered with 4xx or close', 'Medium', 'CWE-400', _h1_robust_002, 'h1', 'High'),
     Check('H1-ROBUST-003', 'garbage request-line bytes answered with 400 or close', 'Info', 'CWE-755', _h1_robust_003, 'h1', 'High'),
     Check('H1-ROBUST-004', 'CRLF in a header value rejected, sanitized, or kept opaque (RFC 9110 §5.5)', 'High', 'CWE-113', _h1_robust_004, 'h1'),
@@ -2811,6 +2819,27 @@ def apply_canary(row: CheckResult, canary: Canary) -> CheckResult:
                        f'the post-check canary'))
 
 
+def apply_issue_word(result: CheckResult,
+                    check: Check | None) -> CheckResult:
+    """G5: link filed defects — a known failure becomes KNOWN, a fixed one
+    that passes becomes FIXED, and a fixed one that fails stays loud."""
+    if check is None:
+        return result
+    if result.verdict in (FAIL, TIMEOUT) and check.known_issue:
+        return dataclasses.replace(
+            result, verdict=KNOWN,
+            detail=f'{check.known_issue} (known): {result.detail}')
+    if result.verdict in (FAIL, TIMEOUT) and check.fixed_issue:
+        return dataclasses.replace(
+            result,
+            detail=f'REGRESSION, fixed in {check.fixed_issue}: {result.detail}')
+    if result.verdict == PASS and check.fixed_issue:
+        return dataclasses.replace(
+            result, verdict=FIXED,
+            detail=f'{check.fixed_issue} (fixed): {result.detail}')
+    return result
+
+
 def run_checks(probe: Probe, checks: Sequence[Check],
                deadline: float, *, lane: str = 'h1',
                canary: Callable[[Probe, str], Canary] | None = None,
@@ -2858,7 +2887,8 @@ def run_checks(probe: Probe, checks: Sequence[Check],
             row = _apply_observation(row, observer, before, sample_error,
                                      observe_settle)
         results.append(row)
-    return results
+    by_id = {c.check_id: c for c in checks}
+    return [apply_issue_word(r, by_id.get(r.check_id)) for r in results]
 
 
 def _apply_observation(row: CheckResult, observer: ProcObserver,

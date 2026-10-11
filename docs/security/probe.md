@@ -276,7 +276,19 @@ the result (G7-2). Per-config tables and verdict lists land in
 violated. `TIMEOUT` — no answer within the bound (counts as failure for the
 exit code). `SKIP` — the check could not be exercised by this client (for
 example its TLS stack refuses to offer the version under test); it is
-recorded, never reported as `PASS`, and does not fail the run. The severity column is the rank a *failure* of that check
+recorded, never reported as `PASS`, and does not fail the run.
+
+`KNOWN` and `FIXED` (G5) link filed defects. A check carrying
+`known_issue='BLA-…'` reports `KNOWN` when it fails — the failure is an
+OPEN, filed defect (the issue is in the row), not news, and does not
+fail the run. A check carrying `fixed_issue='BLA-…'` reports `FIXED`
+when it passes — the row confirms the filed fix and watches for
+regression; if it FAILS it stays `FAIL` and the row is prefixed
+`REGRESSION, fixed in BLA-…`, loud on purpose. H1-ROBUST-001 carries
+its filed open question as `known_issue='BLA-527'` (the 405-vs-501
+decision; its oracle is untouched).
+
+The severity column is the rank a *failure* of that check
 carries, per [severity criteria](severity.md); a hang or crash escalates the
 H1-ROBUST/H2-ROBUST/CHUNK checks to High, as that document's defaults table
 prescribes. A canary failure (G2-2) or a residual (G2-3) marks the row FAIL
