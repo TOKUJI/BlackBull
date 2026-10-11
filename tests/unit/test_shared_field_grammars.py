@@ -85,6 +85,23 @@ class TestGrpcDispatchUsesTheGrpcMediaType:
                            encode_message(b'x'))
         assert any(e['type'] == 'http.response.trailers' for e in sent)
 
+    async def test_a_plain_request_does_not_import_the_grpc_module(self, monkeypatch):
+        import builtins
+        app = self._app()
+        conn = Connection.from_scope(_scope('/demo.S/M', [(b'content-type', b'text/plain')]))
+        await app(conn, _no_body, _ignore)  # the first request may load lazily
+        imported = []
+        real_import = builtins.__import__
+
+        def spy(name, *args, **kwargs):
+            imported.append(name)
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, '__import__', spy)
+        conn = Connection.from_scope(_scope('/demo.S/M', [(b'content-type', b'text/plain')]))
+        await app(conn, _no_body, _ignore)
+        assert [name for name in imported if 'grpc' in name] == []
+
     async def test_grpc_web_is_not_grpc(self):
         sent = await _call(self._app(),
                            _scope('/demo.S/M', [(b'content-type', b'application/grpc-web')]))
@@ -117,6 +134,14 @@ class TestIfNoneMatchOnSeveralLines:
         again = await _through(cache, handler, [(b'if-none-match', b'"other"'),
                                                 (b'if-none-match', b'"v1"')])
         assert _status(again) == 304
+
+
+async def _no_body():
+    return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+
+async def _ignore(event):
+    pass
 
 
 def _get_scope(path, headers):

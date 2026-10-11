@@ -513,8 +513,8 @@ class BlackBull:
         """Route and run one HTTP request (the non-WebSocket half of _dispatch)."""
         # gRPC rides the HTTP/2 path; see enable_grpc.
         if self._grpc_registry is not None and scheme == Scheme.http:
-            from .grpc.asgi import _is_grpc_content_type, serve_grpc  # noqa: PLC0415 — optional subpackage
-            if _is_grpc_content_type(conn.headers.get(b'content-type', b'')):
+            is_grpc, serve_grpc = self._grpc_dispatch
+            if is_grpc(conn.headers.get(b'content-type', b'')):
                 exc_caught = None
                 try:
                     if self._dispatcher.has_listeners('before_handler'):
@@ -878,6 +878,9 @@ class BlackBull:
         Handlers exchange raw message bytes without a protobuf dependency. Use
         TLS+ALPN or h2c; status is sent in trailers. HTTP routes remain available.
         """
+        # Imported here, once: dispatch must not pay for it per request.
+        from .grpc.asgi import _is_grpc_content_type, serve_grpc  # noqa: PLC0415 — optional subpackage
+        self._grpc_dispatch = (_is_grpc_content_type, serve_grpc)
         self._grpc_registry = registry
 
     def enable_openapi(self, *,
