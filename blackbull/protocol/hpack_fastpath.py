@@ -3,6 +3,7 @@
 Use only exact name/value matches. Static entries do not mutate the dynamic
 table; literal encodings must still use the connection encoder.
 """
+from itertools import chain
 
 # RFC 7541 Appendix A — static-table entries with both name and value
 # defined.  Keys are (name_bytes, value_bytes); values are the precomputed
@@ -28,6 +29,12 @@ _STATIC_INDEXED: dict[tuple[bytes, bytes], bytes] = {
     (b'accept-encoding', b'gzip, deflate'): bytes((0x80 | 16,)),
 }
 
+_STATUS_INDEXED = {
+    status: wire
+    for (name, value), wire in _STATIC_INDEXED.items() if name == b':status'
+    for status in (value, value.decode('ascii'))
+}
+
 
 def _coerce_bytes(v) -> bytes:
     if isinstance(v, bytes):
@@ -37,10 +44,13 @@ def _coerce_bytes(v) -> bytes:
     return bytes(v)
 
 
-def status_fast_bytes(status_value) -> bytes | None:
-    """Return static-table encoding for a str/bytes status, or None.
-    """
-    return _STATIC_INDEXED.get((b':status', _coerce_bytes(status_value)))
+def encode_status(encoder, status, fields) -> bytes:
+    prefix = _STATUS_INDEXED.get(status)
+    if prefix is None:
+        return encoder.encode(chain(((b':status', status),), fields))
+    if encoder.header_table.resized:
+        return encode_with_prefix(encoder, prefix, fields)
+    return prefix + encoder.encode(fields)
 
 
 def pseudo_fast_bytes(name, value) -> bytes | None:

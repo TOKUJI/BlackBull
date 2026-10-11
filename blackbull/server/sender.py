@@ -11,7 +11,6 @@ from http import HTTPStatus
 from functools import cache
 from inspect import iscoroutinefunction
 from email.utils import formatdate
-from itertools import chain
 from typing import NoReturn
 
 from ..protocol import hpack_fastpath
@@ -19,7 +18,7 @@ from ..env import get_settings
 from ..protocol.framing import (NO_CONTENT_GENERATED_STATUSES, is_informational,
                                 parse_content_length)
 from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
-                                    FrameBase, PseudoHeaders,
+                                    FrameBase,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
 from .cap_log import log_cap_hit
 from .constants import WSCloseCode
@@ -101,35 +100,16 @@ def _http_date() -> bytes:
     return _HTTP_DATE
 
 
-# The two builders below must stay byte-for-byte equivalent to the frame-object
-# path they replace — ``protocol.frame_types.Headers.save()`` — including how
-# the shared HPACK dynamic table
-# evolves; ``tests/conformance/http2/test_headers_fastpath_builder.py`` asserts
-# both.  ``status_fast_bytes`` is static-indexed, so it never touches that table
-# (RFC 7541 §6.1).
-#
-# Assumption: the encoded block fits one frame (END_HEADERS always set).
-# BlackBull does not split outbound HEADERS across CONTINUATION; if that
-# ever changes these builders need a fallback.
+# Builders and frame objects must evolve the shared encoder identically.
+# Outbound field blocks currently fit one frame; fragmentation needs a shared fallback.
 
 def build_response_headers(encoder, stream_id: int, status,
                            headers, *, end_stream: bool) -> bytes:
-    """Encode a response HEADERS frame (carrying ``:status``) to wire bytes.
-
-    Injects a ``date`` header when the app did not supply one, mirroring the
-    ``Headers.save()`` send path.  ``status`` may be an ``HTTPStatus``, an
-    ``int``, or a ``str`` — it is normalised via ``str()`` exactly as the
-    object path does.  *headers* is read, not mutated.
-    """
+    """Encode response HEADERS, adding Date when absent."""
     headers = _as_response_fields(headers)
     fields = headers if headers.date else (*headers, (b'date', _http_date()))
 
-    fast = hpack_fastpath.status_fast_bytes(str(status))
-    if fast is not None:
-        payload = hpack_fastpath.encode_with_prefix(encoder, fast, fields)
-    else:
-        payload = encoder.encode(
-            chain(((PseudoHeaders.STATUS, str(status)),), fields))
+    payload = hpack_fastpath.encode_status(encoder, str(status), fields)
 
     flags = HeaderFrameFlags.END_HEADERS.value
     if end_stream:
