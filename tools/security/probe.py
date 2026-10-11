@@ -883,6 +883,51 @@ def _req(method: str, path: str, *headers: str, body: bytes = b'') -> bytes:
     return head.encode('latin-1') + b'\r\n' + body
 
 
+def _range_002(probe: Probe) -> Verdict:
+    """RANGE-002 (G5-3): the satisfiable-range clip contract (RFC 9110
+    §14.1.2, BLA-525) — a last-pos at or beyond EOF serves 206 clipped to
+    the last byte; 416 is only for a start at or past EOF."""
+    size = _RANGE_SIZE
+
+    def _one(label: str, spec: str):
+        raw = (b'GET ' + _RANGE_PATH.encode('ascii') + b' HTTP/1.1\r\n'
+               b'Host: probe\r\nRange: ' + spec.encode('ascii')
+               + b'\r\nConnection: close\r\n\r\n')
+        return probe.raw_request(f'range-002/{label}', raw)
+
+    result = _one('clip', f'bytes=0-{size + 64}')
+    resp = result.response
+    want = f'bytes 0-{size - 1}/{size}'.encode()
+    if resp is None or resp.status != 206 \
+            or _header(resp, b'content-range') != want:
+        return Verdict(FAIL, 'end beyond EOF: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else
+                          f'status {resp.status}, content-range '
+                          f'{_header(resp, b"content-range")!r}, '
+                          f'expected 206 {want!r} (BLA-525 regression?)'))
+    result = _one('last-byte', f'bytes={size - 1}-')
+    resp = result.response
+    want = f'bytes {size - 1}-{size - 1}/{size}'.encode()
+    if resp is None or resp.status != 206 \
+            or _header(resp, b'content-range') != want:
+        return Verdict(FAIL, 'last byte: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else
+                          f'status {resp.status}, content-range '
+                          f'{_header(resp, b"content-range")!r}, '
+                          f'expected 206 {want!r}'))
+    result = _one('past-eof', f'bytes={size}-')
+    resp = result.response
+    if resp is None or resp.status != 416:
+        return Verdict(FAIL, 'start past EOF: '
+                       + (_describe(result, probe.effective_timeout)
+                          if resp is None else
+                          f'status {resp.status}, expected 416'))
+    return Verdict(PASS, '206 clipped at EOF, 206 for the last byte, '
+                         '416 only past EOF')
+
+
 def _routes_001(probe: Probe) -> Verdict:
     """ROUTES-001 (G4-4): /docs and /openapi.json answer 404 — the fixture
     exposes no auto-generated API surface."""
@@ -2741,6 +2786,7 @@ CHECKS: tuple[Check, ...] = (
     Check('LANE-002', 'the h2-family lane negotiates HTTP/2 (ALPN h2 on h2; preface accepted on h2c)', 'High', 'CWE-444', _lane_002, 'h2'),
     Check('BASELINE-001', 'GET / returns 200 with body "ok"', 'High', 'CWE-400', _baseline_001, 'h1'),
     Check('BASELINE-002', 'GET /json returns 200 with JSON {"ok": true}', 'High', 'CWE-400', _baseline_002, 'h1'),
+    Check('RANGE-002', 'satisfiable ranges clip at EOF with 206 (RFC 9110 §14.1.2); 416 only past EOF', 'Medium', 'CWE-755', _range_002, 'h1'),
     Check('ROUTES-001', '/docs and /openapi.json answer 404 (no auto-generated API surface)', 'Medium', 'CWE-200', _routes_001, 'h1'),
     Check('ROUTES-002', 'deterministic streaming response /stream/{n} returns exactly n bytes', 'Medium', 'CWE-400', _routes_002, 'h1'),
     Check('ROUTES-003', 'JSON/dataclass and form parsing refuse invalid JSON with 4xx, never 5xx', 'Medium', 'CWE-20', _routes_003, 'h1'),

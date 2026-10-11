@@ -153,7 +153,13 @@ tier with the probe unchanged, and reports which clean PASS rows flip to
 FAIL/TIMEOUT.  A mutation with at least one flip is DETECTED.  The
 current mutations: the CL+TE smuggling rejection, the malformed
 Content-Length rejection, and the TE-list rejection (all in
-`server/http1_actor.py`'s framing).  Evidence on BLA-526 lists the
+`server/http1_actor.py`'s framing), plus the G5-3 **recall** entry
+`bla-525-range-revert` — it reverts the filed BLA-525 fix in
+`middleware/static.py` (a satisfiable range ending at or beyond EOF
+clipping to 206 becomes a 416 again) and the harness must catch the
+regression.  A filed fix with no revertable commit and no detecting row
+(BLA-345, gRPC unary message bounds) is a recall gap, recorded on
+BLA-526.  Evidence on BLA-526 lists the
 detecting rows; a flip only by an indirect row is recorded as such, and
 a mutation no row catches is a harness gap — the point of the measure.
 
@@ -301,6 +307,7 @@ open.
 | Check | Oracle (mechanical) |
 |---|---|
 | LANE-001 | negotiation baseline: the h1-family lane speaks HTTP/1.1; on `https1` the handshake must select exactly ALPN `http/1.1` (another protocol succeeding = FAIL) |
+| RANGE-002 | a Range whose end is at or beyond EOF answers 206 clipped to the last byte (`Content-Range: bytes 0-<size-1>/<size>`); the last byte alone is 206; 416 only when the start is at or past EOF (RFC 9110 §14.1.2, BLA-525's clip contract — the G5-3 recall target) |
 | ROUTES-001 | `/docs` and `/openapi.json` → 404 exactly (no auto-generated API surface) |
 | ROUTES-002 | `GET /stream/1000` → 200 and the body is exactly 1000 bytes |
 | ROUTES-003 | `POST /items` with valid JSON → 200 echoing the parsed dataclass; invalid JSON → 4xx (never 5xx); `POST /form` with a valid form → 200 |

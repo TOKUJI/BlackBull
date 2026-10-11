@@ -47,6 +47,7 @@ machinery — see the gate). Check IDs are validated against the registry by
 | Each lane negotiates exactly its protocol (ALPN/preface) | LANE-001, LANE-002 |
 | gRPC unary and server-streaming calls answer grpc-status 0 (over h2 and h2c) | GRPC-BASE-001, GRPC-BASE-002 |
 | No auto-generated API surface (/docs, /openapi.json stay 404) | ROUTES-001 |
+| Satisfiable ranges clip at EOF (RFC 9110 §14.1.2, BLA-525 watch) | RANGE-002 |
 | Deterministic streaming responses keep their exact length | ROUTES-002 |
 | JSON→dataclass and form parsing: invalid input is 4xx, never 5xx | ROUTES-003 |
 | Error responses leak no traceback or exception text | ROUTES-004 |

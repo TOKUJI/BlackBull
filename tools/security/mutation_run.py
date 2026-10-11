@@ -7,6 +7,12 @@ runs unchanged from the worktree.  A mutation is DETECTED when at least
 one check that passed on the clean baseline flips to FAIL/TIMEOUT — the
 harness catching the missing defense is the measurement.
 
+The ``bla-525-range-revert`` entry is G5-3 recall: it reverts a filed
+fix and the harness must catch the regression.  BLA-345 (gRPC unary
+message bounds) has no revertable fix commit citing it and no detecting
+row (GRPC-BASE-001/002 are happy paths) — recall is not measurable and
+the gap is recorded on BLA-526.
+
 Usage::
 
     python tools/security/mutation_run.py [--keep]
@@ -53,6 +59,13 @@ MUTATIONS = (
      """        if members == [(b'chunked', ())]:
             return declared  # RFC 9112 \u00a76.1 \u2014 the one accepted form""",
      """        return declared  # MUTATION: any TE list accepted"""),
+    # G5-3 recall: revert the BLA-525 fix (3025eb95) — a satisfiable range
+    # whose end is at or beyond EOF must clip to the last byte, not 416.
+    # Restoring the 416 is the regression the harness must catch.
+    ('bla-525-range-revert',
+     'middleware/static.py',
+     """    return (start, end if end < size else size - 1)""",
+     """    return (start, end) if end < size else (size, 0)  # MUTATION (BLA-525 revert): end beyond EOF -> 416"""),
 )
 
 
