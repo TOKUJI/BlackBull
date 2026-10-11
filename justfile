@@ -204,6 +204,21 @@ vuln-matrix:
     done
     exit $status
 
+# --- G1: fault_injection catalogue against the fixture -----------------
+# The 14 h1_client + 11 h2_client scenarios run unchanged; the G1-2
+# oracle passes answer-or-close and fails silence.
+
+vuln-catalogue:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export UV_CACHE_DIR=$PWD/.uv-cache XDG_RUNTIME_DIR=/tmp/xdg-runtime
+    mkdir -p bench/results/security
+    timeout 120 just vuln-target-up
+    trap 'timeout 60 just vuln-target-down' EXIT
+    uv run python tools/security/catalogue_run.py \
+        --host 127.0.0.1 --port 8000 --h2c-port 8000 \
+        | tee bench/results/security/catalogue.txt
+
 # --- G3-3: defense-site reachability (E1 AST method) -------------------
 # Extract defense sites from blackbull/ via AST, run the probe against a
 # fixture under branch coverage, and report which sites the runs reached.

@@ -122,6 +122,26 @@ gRPC rides on the h2 family's transports (h2 and h2c); its baselines are
 the gRPC lanes of M5-4's fixture work — see the unsupported list until
 those land.
 
+## Catalogue run (G1)
+
+`just vuln-catalogue` runs the **existing** `blackbull.fault_injection`
+catalogue against the fixture unchanged — the 14 `h1_client` scenarios
+(absent_host, two_content_lengths,
+content_length_and_transfer_encoding, duplicate_transfer_encoding,
+space_before_header_colon, bare_lf_terminators, obs_fold_header,
+negative_content_length, chunk_size_not_hex, nul_in_header_value,
+oversized_method_token, trickled_head, head_never_ends,
+body_shorter_than_declared) and the 11 `h2_client` scenarios
+(preface_never_arrives, preface_trickled, rapid_reset_burst, ping_flood,
+settings_flood, empty_continuation_flood, header_block_never_finished,
+data_frame_lies_about_length, unknown_frame_type,
+settings_ack_with_payload, abort_mid_header_block).  The G1-2 oracle
+judges every outcome mechanically: **answer-or-close passes, silence
+fails** — a response of any status is an answer, a transport-level error
+is a close, and a wait that expires with neither is a FAIL.  The report
+lands in `bench/results/security/catalogue.txt`; a unit test pins the
+14/11 inventory to the module callables.
+
 ## Defense-site reachability (G3-3)
 
 `just vuln-reachability tier=quick` measures how much of BlackBull's

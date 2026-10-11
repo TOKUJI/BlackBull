@@ -431,6 +431,31 @@ def test_every_skipped_lane_is_documented_with_its_reason():
                 f'{check.check_id} skip on {lane} has no documented reason'
 
 
+def test_catalogue_inventory_matches_the_modules():
+    from tools.security.catalogue_run import H1_SCENARIOS, H2_SCENARIOS, judge
+    from blackbull.fault_injection.catalogue import h1_client, h2_client
+    assert len(H1_SCENARIOS) == 14
+    assert len(H2_SCENARIOS) == 11
+    for name in H1_SCENARIOS:
+        assert callable(getattr(h1_client, name)), name
+    for name in H2_SCENARIOS:
+        assert callable(getattr(h2_client, name)), name
+
+    class Outcome:
+        def __init__(self, **kw):
+            self.response = None
+            self.exception = None
+            self.timed_out = False
+            for k, v in kw.items():
+                setattr(self, k, v)
+
+    assert judge(Outcome(response={'status': 400}), 1.0)[0] == 'PASS'
+    assert judge(Outcome(exception='ConnectionResetError'), 1.0)[0] == 'PASS'
+    assert judge(Outcome(timed_out=True), 1.0)[0] == 'FAIL'
+    assert judge(Outcome(), 30.0)[0] == 'FAIL'
+    assert judge(Outcome(), 0.0)[0] == 'SKIP'
+
+
 def test_defense_sites_cover_the_documented_kinds():
     from tools.security.reachability import defense_sites
     sites = defense_sites(Path('blackbull'))
