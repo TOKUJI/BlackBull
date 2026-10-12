@@ -8,7 +8,7 @@ from hpack import Decoder, Encoder
 import logging
 from .frame_types import (
     FrameBase, FrameTypes, FrameFlags,
-    HeaderFrameFlags, SettingFrameFlags, ErrorCodes, PushPromise,
+    HeaderFrameFlags, SettingFrameFlags, ErrorCodes, PushPromise, DEFAULT_MAX_FRAME_SIZE,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ class FrameFactory:
         if max_header_list_size is not None:
             self.decoder.max_header_list_size = max_header_list_size
         self.encoder = Encoder()
+        self.peer_max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._encoder_table_limit = self.encoder.header_table_size
 
     def apply_peer_header_table_size(self, settings) -> None:

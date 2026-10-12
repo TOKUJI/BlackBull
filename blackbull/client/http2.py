@@ -743,7 +743,8 @@ class HTTP2Client:
         its frame reached the peer.
         """
         self._refuse_if_closed()
-        await self._send_raw_frame(frame)
+        assert self._control_sender is not None
+        await self._control_sender._write(frame.save())
 
     async def receive_raw_frame(self) -> _InboundFrame | None:
         """Escape hatch: read one raw frame, bypassing the receive loop's dispatch.

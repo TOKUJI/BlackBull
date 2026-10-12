@@ -134,6 +134,36 @@ class FrameFormatError(ValueError):
         self.error_code = error_code
 
 
+def peer_max_frame_size(settings) -> int | None:
+    size = None
+    for identifier, value in settings:
+        if identifier == 5:
+            if not DEFAULT_MAX_FRAME_SIZE <= value <= MAX_FRAME_SIZE:
+                raise FrameFormatError(
+                    f'SETTINGS_MAX_FRAME_SIZE out of range: {value}',
+                    ErrorCodes.PROTOCOL_ERROR)
+            size = value
+    return size
+
+
+def serialize_field_block(payload: bytes, frame_type: bytes, flags: int,
+                          stream_id: int, max_frame_size: int) -> bytes:
+    """Serialize one complete field block for an uninterrupted writer handoff."""
+    sid = stream_id.to_bytes(4, 'big')
+    if len(payload) <= max_frame_size:
+        return (len(payload).to_bytes(3, 'big') + frame_type
+                + flags.to_bytes(1, 'big') + sid + payload)
+    parts = []
+    for offset in range(0, len(payload), max_frame_size):
+        chunk = payload[offset:offset + max_frame_size]
+        last = offset + len(chunk) == len(payload)
+        fragment_flags = (flags & ~4) if offset == 0 else (4 if last else 0)
+        parts.append(len(chunk).to_bytes(3, 'big')
+                     + (frame_type if offset == 0 else b'\x09')
+                     + fragment_flags.to_bytes(1, 'big') + sid + chunk)
+    return b''.join(parts)
+
+
 class FrameBase:
     """Common frame header and the subclass registry (RFC 9113 §4.1).
 
@@ -559,7 +589,7 @@ class Headers(FrameBase):
             logger.debug('Headers stream_id=%d malformed: %s', self.stream_id, reason)
 
     @log
-    def save(self):
+    def save(self, *, max_frame_size: int | None = None):
         if self.encoder is None:
             raise no_hpack_context(self, 'encoder')
         encoder = self.encoder
@@ -572,6 +602,10 @@ class Headers(FrameBase):
         else:
             payload = encoder.encode(chain(pseudo_items, self.headers))
         self.length = len(payload)
+
+        if max_frame_size is not None:
+            return serialize_field_block(payload, b'\x01', self.flags,
+                                         self.stream_id, max_frame_size)
 
         base = super().save()
         # Guarded: fires on every HEADERS write; the unguarded form also
@@ -652,7 +686,7 @@ class PushPromise(FrameBase):
             block = bytes(block) + bytes(continued)
         self.decoder.decode(block, raw=True)
 
-    def save(self) -> bytes:
+    def save(self, *, max_frame_size: int | None = None) -> bytes:
         if self.encoder is None:
             raise no_hpack_context(self, 'encoder')
         encoder = self.encoder
@@ -673,6 +707,9 @@ class PushPromise(FrameBase):
         payload = (self.promised_stream_id & 0x7FFFFFFF).to_bytes(4, 'big') + block
         self.length = len(payload)
         self.flags = HeaderFrameFlags.END_HEADERS
+        if max_frame_size is not None:
+            return serialize_field_block(payload, b'\x05', int(self.flags),
+                                         self.stream_id, max_frame_size)
         return super().save() + payload
 
 

@@ -135,6 +135,13 @@ Adapters must support both paths: testing only small responses misses the
 vectored backing contract.
 See `tests/architecture/test_writer_backing_contract.py`.
 
+HTTP/2 encodes each field block once and fragments it to the connection's
+peer frame-size limit. Enqueue the complete HEADERS/PUSH_PROMISE and
+CONTINUATION sequence before awaiting drain; writers must not suspend between
+its parts. A cancelled drain leaves the queued sequence intact; a failed write
+disables further writes. Raw `FrameBase.save()` and client `send_raw_frame()`
+preserve single-frame output for fault injection.
+
 Normalize ASGI events through `blackbull.native`, not separate handler and
 sender conversions. A conversion gives the result its own field lists, and
 senders read them in place without copying. Validate and lowercase response

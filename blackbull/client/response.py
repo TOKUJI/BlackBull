@@ -4,7 +4,8 @@ Each ``Responder`` subclass handles one ``FrameTypes`` value and mutates no
 protocol state of its own — it hands the frame back to the owning
 ``HTTP2Client``, which is what keeps that state in one place.
 """
-from ..protocol.frame_types import FrameTypes, PingFrameFlags, SettingFrameFlags
+from ..protocol.frame_types import (
+    FrameTypes, PingFrameFlags, SettingFrameFlags, FrameFormatError, peer_max_frame_size)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -96,8 +97,15 @@ class SettingsResponder(Responder):
         if self.frame.flags & SettingFrameFlags.ACK:
             client._on_settings_ack()
             return
+        try:
+            mfs = peer_max_frame_size(self.frame.settings)
+        except FrameFormatError as error:
+            await client._fail_connection(error.error_code, str(error))
+            return
         if getattr(self.frame, 'initial_window_size', None) is not None:
             client._on_initial_window_size(self.frame.initial_window_size)
+        if mfs is not None:
+            client._factory.peer_max_frame_size = mfs
         client._factory.apply_peer_header_table_size(self.frame.settings)
         ack = client._factory.create(FrameTypes.SETTINGS, SettingFrameFlags.ACK, 0)
         await client._send_raw_frame(ack)
