@@ -163,6 +163,26 @@ BLA-526.  Evidence on BLA-526 lists the
 detecting rows; a flip only by an indirect row is recorded as such, and
 a mutation no row catches is a harness gap — the point of the measure.
 
+## Aggregated results (JUnit XML)
+
+Every judgement-producing tool merges its rows into ONE results file,
+`bench/results/security/results.xml` (JUnit XML), so a single glance —
+or one CI upload — shows every check, catalogue scenario and mutation
+across runs.  `tools/security/junit_report.py` holds the common case
+schema; the probe writes one suite per lane (`probe.h1`, `probe.https1`,
+`probe.h2`, `probe.h2c`), the catalogue run writes `catalogue`, and the
+mutation run writes `mutation`.  Merging replaces whole suites by name:
+rerunning one tool refreshes its own suite and leaves the others
+untouched.  Every tool takes `--junit PATH` (empty disables).
+
+| Verdict | JUnit representation |
+|---|---|
+| `PASS` | `<testcase>` |
+| `FIXED` | `<testcase>` with the fixed issue in `<system-out>` |
+| `FAIL` / `TIMEOUT` | `<failure message=... type=verdict>` |
+| `SKIP` | `<skipped/>` |
+| `KNOWN` | `<skipped message="known: BLA-…">` — visible, but does not fail the consuming CI |
+
 ## Defense-site reachability (G3-3)
 
 `just vuln-reachability tier=quick workers=1` measures how much of

@@ -31,6 +31,9 @@ import time
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tools.security.junit_report import (DEFAULT_JUNIT_PATH, Case,
+                                         write_junit)
+
 VERDICTS = ('PASS', 'FAIL', 'TIMEOUT', 'SKIP')
 PORT, TLS_PORT = 8131, 8451
 
@@ -126,6 +129,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--keep', action='store_true',
                         help='keep the mutated trees in /tmp')
+    parser.add_argument('--junit', default=str(DEFAULT_JUNIT_PATH),
+                        help='merge verdicts into this JUnit XML (empty disables)')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     work = Path('/tmp/bla526-mut')
@@ -144,6 +149,7 @@ def main() -> int:
     print(f'baseline: {len(baseline)} rows, {len(passed)} PASS')
 
     detected = 0
+    mutation_rows: list[tuple[str, str, str]] = []
     for name, relpath, old, new in MUTATIONS:
         tree = work / name
         shutil.copytree(root / 'blackbull', tree / 'blackbull')
@@ -167,11 +173,20 @@ def main() -> int:
             detected += 1
             print(f'  {name:<28} DETECTED by {len(flips)} row(s): '
                   + ', '.join(flips[:6]))
+            mutation_rows.append((name, 'PASS',
+                                  f'detected by {", ".join(flips)}'))
         else:
             print(f'  {name:<28} NOT DETECTED')
+            mutation_rows.append(
+                (name, 'FAIL', 'not detected: no clean PASS row flipped'))
     if not args.keep:
         shutil.rmtree(work, ignore_errors=True)
     print(f'{len(MUTATIONS)} mutations, {detected} detected')
+    if args.junit:
+        path = write_junit(Path(args.junit), [
+            Case('mutation', 'mutation', name, verdict, detail, 0.0)
+            for name, verdict, detail in mutation_rows])
+        print(f'junit: {path}')
     return 0 if detected == len(MUTATIONS) else 1
 
 

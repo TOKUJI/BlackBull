@@ -24,6 +24,8 @@ if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from blackbull.client.http2 import HTTP2Client
+from tools.security.junit_report import (DEFAULT_JUNIT_PATH, Case,
+                                         write_junit)
 from blackbull.fault_injection.catalogue import h1_client, h2_client
 from blackbull.fault_injection.oracle_h1 import run_scenario
 
@@ -84,7 +86,8 @@ async def run_h2(host: str, port: int, name: str) -> tuple[str, str, float]:
     return verdict, detail, elapsed
 
 
-async def run_all(host: str, port: int, h2c_port: int) -> int:
+async def run_all(host: str, port: int, h2c_port: int,
+                  junit: str = str(DEFAULT_JUNIT_PATH)) -> int:
     failures = 0
     rows: list[tuple[str, str, str, str, float]] = []
     for name in H1_SCENARIOS:
@@ -109,6 +112,11 @@ async def run_all(host: str, port: int, h2c_port: int) -> int:
     skipped = sum(1 for _, _, v, _, _ in rows if v == 'SKIP')
     print(f'{len(rows)} scenarios, {len(rows) - failures - skipped} PASS, '
           f'{failures} FAIL, {skipped} SKIP')
+    if junit:
+        path = write_junit(Path(junit), [
+            Case('catalogue', cat, name, verdict, detail, elapsed)
+            for cat, name, verdict, detail, elapsed in rows])
+        print(f'junit: {path}')
     return failures
 
 
@@ -118,8 +126,11 @@ def main() -> int:
     parser.add_argument('--port', type=int, default=8000)
     parser.add_argument('--h2c-port', type=int, default=8000,
                     help='h2c prior-knowledge target: the cleartext listener')
+    parser.add_argument('--junit', default=str(DEFAULT_JUNIT_PATH),
+                    help='merge verdicts into this JUnit XML (empty disables)')
     args = parser.parse_args()
-    failures = asyncio.run(run_all(args.host, args.port, args.h2c_port))
+    failures = asyncio.run(run_all(args.host, args.port, args.h2c_port,
+                                  args.junit))
     return 1 if failures else 0
 
 

@@ -18,6 +18,14 @@ import ipaddress
 import math
 from datetime import datetime, timezone
 import os
+
+try:  # script execution puts tools/security/ on sys.path
+    from junit_report import (DEFAULT_JUNIT_PATH, Case as JUnitCase,
+                              write_junit as write_junit_xml)
+except ImportError:  # imported as tools.security.probe
+    from tools.security.junit_report import (DEFAULT_JUNIT_PATH,
+                                             Case as JUnitCase,
+                                             write_junit as write_junit_xml)
 import json
 from pathlib import Path
 import re
@@ -3064,6 +3072,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument('--server-pid', type=int, default=None,
                         help='observe this server process via /proc: per-check '
                              'samples and a residual (leak) judgement (G2-3)')
+    parser.add_argument('--junit', default=str(DEFAULT_JUNIT_PATH),
+                        help='merge verdicts into this JUnit XML '
+                             '(one aggregated file; empty disables)')
     parser.add_argument('--observe-settle', type=float, default=0.5,
                         help='seconds to wait after each check before the '
                              'post-check /proc sample (default 0.5)')
@@ -3137,6 +3148,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                           run_timeout=args.run_timeout, timestamp=timestamp,
                           tier=args.tier, excluded=excluded)
     print(f'report: {report}')
+    if args.junit:
+        junit_path = write_junit_xml(
+            args.junit,
+            [JUnitCase(f'probe.{lane.name}', 'probe', r.check_id, r.verdict,
+                       r.detail, r.elapsed_s)
+             for lane in lanes for r in lane.results])
+        print(f'junit: {junit_path}')
     return exit_code(lanes)
 
 

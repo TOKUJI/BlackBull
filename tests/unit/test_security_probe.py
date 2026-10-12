@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ipaddress
 from pathlib import Path
+import tempfile
 import re
 import time
 
@@ -429,6 +430,40 @@ def test_every_skipped_lane_is_documented_with_its_reason():
             assert any(check.check_id in line and lane in line
                        for line in text.splitlines()), \
                 f'{check.check_id} skip on {lane} has no documented reason'
+
+
+def test_junit_aggregation_maps_verdicts_and_merges_suites():
+    import xml.etree.ElementTree as ET
+    from tools.security.junit_report import Case, write_junit
+    cases = [
+        Case('probe.h1', 'probe', 'A-1', 'PASS', 'ok', 0.5),
+        Case('probe.h1', 'probe', 'A-2', 'FAIL', 'boom', 0.1),
+        Case('probe.h1', 'probe', 'A-3', 'SKIP', 'no lane', 0.0),
+        Case('probe.h1', 'probe', 'A-4', 'KNOWN', 'BLA-1: leak', 0.0),
+        Case('probe.h1', 'probe', 'A-5', 'FIXED', 'BLA-2: clipped', 0.0),
+        Case('catalogue', 'h1_client', 'absent_host', 'PASS', 'answered', 0.0),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'results.xml'
+        write_junit(path, cases)
+        root = ET.parse(path).getroot()
+        suites = {s.get('name'): s for s in root.findall('testsuite')}
+        assert set(suites) == {'probe.h1', 'catalogue'}
+        h1 = suites['probe.h1']
+        assert h1.get('tests') == '5' and h1.get('failures') == '1'
+        assert h1.get('skipped') == '2'
+        by_name = {c.get('name'): c for c in h1.findall('testcase')}
+        assert by_name['A-2'][0].tag == 'failure'
+        assert by_name['A-3'][0].tag == 'skipped'
+        assert by_name['A-4'][0].get('message', '').startswith('known:')
+        assert by_name['A-5'].find('system-out').text.startswith('fixed:')
+        # rerunning one tool refreshes its suite and keeps the others
+        write_junit(path, [Case('probe.h1', 'probe', 'A-1', 'PASS', 'ok', 0.2)])
+        root = ET.parse(path).getroot()
+        suites = {s.get('name'): s for s in root.findall('testsuite')}
+        assert set(suites) == {'probe.h1', 'catalogue'}
+        assert suites['probe.h1'].get('tests') == '1'
+        assert suites['catalogue'].get('tests') == '1'
 
 
 def test_issue_words_link_filed_defects():
