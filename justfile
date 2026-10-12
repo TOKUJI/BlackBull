@@ -235,27 +235,37 @@ vuln-catalogue:
 # Extract defense sites from blackbull/ via AST, run the probe against a
 # fixture under branch coverage, and report which sites the runs reached.
 
-vuln-reachability tier="quick":
+vuln-reachability tier="quick" workers="1":
     #!/usr/bin/env bash
     set -euo pipefail
     export UV_CACHE_DIR=$PWD/.uv-cache XDG_RUNTIME_DIR=/tmp/xdg-runtime
     rm -f .coverage .coverage.*
     mkdir -p bench/results/security /tmp/bla526-research
-    # every preforked fixture worker measures itself (covproc/sitecustomize.py);
-    # the env stays scoped to the fixture so probe-side code is not counted
+    # G3-3 refined: every fixture process (BB_WORKERS=1 serves in-process;
+    # >1 forks workers) measures itself via covproc/sitecustomize.py, and
+    # SIGINT reaches the whole process group so each interpreter exits
+    # cleanly and writes its own .coverage.* file before combine.
     (setsid env PYTHONPATH=$PWD/tools/security/covproc \
         COVERAGE_PROCESS_START=$PWD/.coveragerc-reach \
+        BB_WORKERS={{workers}} \
         uv run python tools/security/fixture_app.py --port 8123 \
         --tls-port 8444 > /tmp/bla526-research/reach-fixture.log 2>&1 &)
     for _ in $(seq 1 40); do
         uv run python -c "import socket; socket.create_connection(('127.0.0.1', 8123), 1).close()" 2>/dev/null && break
         sleep 0.5
     done
+    echo "fixture processes: $(pgrep -fc 'fixture_app.py --port 8123')"
     uv run python tools/security/probe.py --base-url http://127.0.0.1:8123 \
         --h2-url https://127.0.0.1:8444 --tier {{tier}} \
         > bench/results/security/reachability-probe.txt 2>&1 || true
     pgrep -f "fixture_app.py --port 8123" | xargs -r kill -INT
-    sleep 2
+    # wait for every interpreter to write its data file
+    for _ in $(seq 1 20); do
+        n1=$(find . -maxdepth 1 -name '.coverage.*' | wc -l)
+        sleep 0.5
+        n2=$(find . -maxdepth 1 -name '.coverage.*' | wc -l)
+        if [ "$n1" = "$n2" ]; then break; fi
+    done
     uv run coverage combine || true
     uv run coverage json -o /tmp/bla526-research/coverage.json
     uv run python tools/security/reachability.py \

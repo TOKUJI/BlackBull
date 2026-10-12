@@ -25,8 +25,9 @@ from pathlib import Path
 #: Startup configuration validation is not a runtime defense site.
 SKIP_FILES = frozenset({'config.py', 'env.py', '_env_vars.py'})
 
-#: Probe-side and client libraries are not the server's defense surface.
-SKIP_DIRS = frozenset({'client', 'fault_injection'})
+#: Probe-side and client libraries are not the server's defense surface;
+#: mqtt is out of the probe's scope (BLA-526) and testing is test tooling.
+SKIP_DIRS = frozenset({'client', 'fault_injection', 'mqtt', 'testing'})
 
 #: Runtime defenses invoked to shed load or fail a connection.
 DEFENSE_CALLS = frozenset({
@@ -189,6 +190,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f'lines: {covered}/{statements}'
               + (f'   branches: {covered_branches}/{branches}'
                  if statements and branches else ''))
+
+    per_module: dict[str, list[Site]] = {}
+    for site in sites:
+        per_module.setdefault(site.path, []).append(site)
+    rows = []
+    for path, group in per_module.items():
+        hit = sum(1 for s in group if (s.path, s.line) in reached)
+        rows.append((len(group) - hit, len(group), hit, path))
+    rows.sort(reverse=True)
+    print('per-module reachability (unreached first):')
+    for missing, total, hit, path in rows[:10]:
+        print(f'  {path:<34} {hit:>4}/{total:<4} ({missing} unreached)')
 
     unreached = [s for s in sites if (s.path, s.line) not in reached]
     if unreached and args.show_unreached:

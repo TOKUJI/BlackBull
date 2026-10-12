@@ -165,29 +165,36 @@ a mutation no row catches is a harness gap — the point of the measure.
 
 ## Defense-site reachability (G3-3)
 
-`just vuln-reachability tier=quick` measures how much of BlackBull's
-defense surface the probe exercises.  `tools/security/reachability.py`
-extracts the defense sites from `blackbull/` via AST (the E1 method):
-every `raise`, every defense call (`log_cap_hit`, `rst_stream`,
-`goaway`, `_connection_error`), and every reference to a rejection
-status or an HTTP/2 error code — excluding startup configuration
-validation (`config.py`, `env.py`, `_env_vars.py`).  The recipe runs the
-fixture under branch coverage, drives the probe tier against it, and
-reports which sites the run reached (a site is reached when its line
-executed), plus the covered-lines and covered-branches totals.  The
-report lands in `bench/results/security/reachability.txt`.  Reachability
-is a floor, not an oracle: an unreached site is a prompt for a new
-scenario, never a defect by itself.
+`just vuln-reachability tier=quick workers=1` measures how much of
+BlackBull's defense surface the probe exercises.  `tools/security/
+reachability.py` extracts the defense sites from `blackbull/` via AST
+(the E1 method): every `raise`, every defense call (`log_cap_hit`,
+`rst_stream`, `goaway`, `_connection_error`), and every reference to a
+rejection status or an HTTP/2 error code — excluding startup
+configuration validation (`config.py`, `env.py`, `_env_vars.py`) and
+non-surface packages (probe-side `client/`, `fault_injection/`,
+out-of-scope `mqtt/`, test tooling `testing/`).  The recipe runs the
+fixture under branch coverage and drives the probe tier against it.
 
-Known measurement limit (G3-3): the fixture preforks its serving
-processes, and only interpreter-exit writes coverage data — workers
-stopped by signal contribute nothing, so request-handling lines inside
-the serving processes are undercounted (the same 431 rejection path is
-proven exercised by the H2-ROBUST-005 oracle even when the report shows
-its site unreached).  Refinement: capture per-worker data (graceful
-worker shutdown, or a single-process serving mode) before drawing
-conclusions from the per-site list.  The site inventory and the
-per-kind totals are measurement-independent and valid as-is.
+The measurement is refined (G3-3): `BB_WORKERS=1` serves in-process so
+one interpreter holds the whole request path (the report proves it —
+`server/worker.py` executes nothing), SIGINT reaches the whole process
+group so every interpreter exits cleanly and writes its own
+`.coverage.*` file, and the recipe waits for the data files to settle
+before `coverage combine`.  Sites match coverage's recording unit
+(their statement's first line).  The report — per-kind reachability, the
+per-module table (unreached first), lines/branches — lands in
+`bench/results/security/reachability.txt`.
+
+Current floor (quick tier): 596 sites, 4 reached (0.7%); 3 777/19 950
+lines; 255/6 758 branches.  Read it as a floor and a map, not a score:
+the quick tier exercises the happy path plus light abuse whose oracles
+accept "400 or close", so the raise/rejection branches inside the
+serving modules (`server/recipient.py`, `server/http1_actor.py`,
+`server/http2_actor.py`) stay untripped — the per-module table is
+where new scenarios should aim, and tightening an "or close" oracle to
+require the refusal is what turns an unreached site into a watched
+one.  An unreached site is never a defect by itself.
 
 ## Fuzzing (G6)
 
