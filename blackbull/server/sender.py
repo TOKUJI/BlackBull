@@ -42,6 +42,7 @@ _DEBUG = debug_gate(logger)
 
 
 _CRLF = b'\r\n'
+_CHUNKED_LINE = b'transfer-encoding: chunked\r\n'
 
 # Fallback chunk size when ``sendfile`` isn't supported by the transport
 # (TLS, mocked tests).  Matches the static middleware's ``_CHUNK`` so
@@ -77,6 +78,17 @@ _CONTENT_LENGTH_CACHE_MAX = 8192
 _CONTENT_LENGTHS: tuple[bytes, ...] = tuple(
     str(n).encode() for n in range(_CONTENT_LENGTH_CACHE_MAX + 1)
 )
+
+
+#: Rendered ``content-length`` field lines for the same table.
+_CONTENT_LENGTH_LINES: tuple[bytes, ...] = tuple(
+    b'content-length: ' + n + b'\r\n' for n in _CONTENT_LENGTHS)
+
+
+def _content_length_line(n: int) -> bytes:
+    if 0 <= n <= _CONTENT_LENGTH_CACHE_MAX:
+        return _CONTENT_LENGTH_LINES[n]
+    return b'content-length: ' + str(n).encode() + b'\r\n'
 
 
 def _content_length_bytes(n: int) -> bytes:
@@ -665,7 +677,8 @@ class HTTP1Sender(BaseSender):
 
     def _ensure_framing_headers(self, status: HTTPStatus,
                                 head: _MinimalResponseHeaders,
-                                body_len: int, more_body: bool) -> list:
+                                body_len: int, more_body: bool
+                                ) -> tuple[list[tuple[bytes, bytes]], bytes]:
         """Derive the sole legal framing from status and body mode.
 
         Transfer-Encoding belongs to the server because it describes bytes on
@@ -673,7 +686,9 @@ class HTTP1Sender(BaseSender):
         before rebuilding the field list so duplicate values cannot create two
         competing message boundaries.
 
-        Returns a new field list; *head* is not modified.
+        Returns ``(fields, framing)``: the application's fields without any
+        framing field (*head* itself when it has none; it is never modified)
+        and the server's framing field lines, rendered.
         """
         code = int(status)
         self._chunked = False
@@ -705,39 +720,37 @@ class HTTP1Sender(BaseSender):
             for field in lengths:
                 pairs.remove(field)
         else:
-            pairs = list(head)
+            pairs = head
+        framing = b''
 
         if informational or code == 204:
             self._expect_trailers = False
         elif code == 205:
             self._expect_trailers = False
-            pairs.append((b'content-length', b'0'))
+            framing = b'content-length: 0\r\n'
         elif code == 304:
             self._expect_trailers = False
             if app_length is not None:
-                pairs.append((b'content-length',
-                              _content_length_bytes(app_length)))
+                framing = _content_length_line(app_length)
         elif self._expect_trailers and not self._head_mode:
-            pairs.append((b'transfer-encoding', b'chunked'))
+            framing = _CHUNKED_LINE
             self._chunked = True
         elif more_body:
             if app_length is None:
-                pairs.append((b'transfer-encoding', b'chunked'))
+                framing = _CHUNKED_LINE
                 self._chunked = True
             else:
-                pairs.append((b'content-length',
-                              _content_length_bytes(app_length)))
+                framing = _content_length_line(app_length)
                 self._content_length = app_length
         else:
             expected = body_len
             if app_length is not None and app_length != expected:
                 raise ValueError(
                     'Content-Length does not match the response body')
-            pairs.append((b'content-length',
-                          _content_length_bytes(expected)))
+            framing = _content_length_line(expected)
             self._content_length = expected
 
-        return pairs
+        return pairs, framing
 
     def _track_content_length(self, content_len: int, more_body: bool) -> None:
         """Reject a declared-length stream that crosses its wire boundary."""
@@ -754,23 +767,19 @@ class HTTP1Sender(BaseSender):
             raise ValueError('response body is shorter than Content-Length')
         self._body_bytes = total
 
-    @staticmethod
-    def _ensure_date_header(fields: list, head: _MinimalResponseHeaders) -> None:
-        # RFC 9110 §6.6.1 — origin server SHOULD generate Date.
-        if not head.date:
-            fields.append((b'date', _http_date()))
 
     async def _flush(self, status: HTTPStatus, head: _MinimalResponseHeaders,
                      body: bytes, more_body: bool = False) -> None:
-        headers = self._ensure_framing_headers(
+        fields, framing = self._ensure_framing_headers(
             status, head, len(body), more_body)
         self._track_content_length(len(body), more_body)
         if not self._informational:
             self._started = True
-        self._ensure_date_header(headers, head)
 
         # Coalesce the response head and body before the shared write gate.
-        head = self._render_start(status, headers)
+        # RFC 9110 §6.6.1 — origin server SHOULD generate Date.
+        head = self._render_start(status, fields, framing,
+                                  None if head.date else _http_date())
 
         # Headers still go out; only the body is suppressed (RFC 9110 §9.3.2
         # for HEAD, and the codes whose content is forbidden).
@@ -806,7 +815,7 @@ class HTTP1Sender(BaseSender):
         if self.supports_interim:
             await self._write(self._render_start(
                 status,
-                self._ensure_framing_headers(
+                *self._ensure_framing_headers(
                     status, headers, 0, more_body=False)))
         self._buffered_status = None
         self._buffered_headers = None
@@ -815,17 +824,23 @@ class HTTP1Sender(BaseSender):
         # body event cannot end it. The next `start` recomputes this.
         self._suppress_body = True
 
-    def _render_start(self, status: HTTPStatus, headers: HeaderList) -> bytes:
-        """Build the status line + headers + blank-line as a single bytes blob.
+    def _render_start(self, status: HTTPStatus, headers: HeaderList,
+                      framing: bytes = b'', date: bytes | None = None) -> bytes:
+        """Build the status line, *headers*, the server's rendered *framing*
+        lines and *date* (when given), and the blank line, as one bytes blob.
 
-        *headers* must already be validated: the arms that buffer a head
-        validate it, and the framing fields added here are the server's own.
+        *headers* keep the response-field contract.
         """
         parts: list[bytes] = [_status_line(status)]
         for k, v in headers:
             parts.append(k)
             parts.append(b': ')
             parts.append(v)
+            parts.append(_CRLF)
+        parts.append(framing)
+        if date is not None:
+            parts.append(b'date: ')
+            parts.append(date)
             parts.append(_CRLF)
         parts.append(_CRLF)
         return b''.join(parts)
@@ -849,14 +864,14 @@ class HTTP1Sender(BaseSender):
         size = os.path.getsize(path)
         head = self._buffered_headers
         status = self._buffered_status
-        headers = self._ensure_framing_headers(
+        fields, framing = self._ensure_framing_headers(
             status, head, size, more_body=False)
         self._track_content_length(size, more_body=False)
         if not self._informational:
             self._started = True
-        self._ensure_date_header(headers, head)
 
-        head = self._render_start(status, headers)
+        head = self._render_start(status, fields, framing,
+                                  None if head.date else _http_date())
         self._buffered_status = None
         self._buffered_headers = None
 
