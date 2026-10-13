@@ -95,3 +95,16 @@ def test_the_markdown_report_names_the_verdict(tmp_path):
                          capture_output=True, text=True, check=True).stdout
 
     assert 'slower' in out and '95 % CI' in out
+
+
+def test_a_large_clear_effect_is_not_mistaken_for_two_modes(tmp_path):
+    for effect, verdict in ((1.10, 'faster'), (0.90, 'slower')):
+        raw = _raw(tmp_path, {
+            'null': {'base': _noisy(100, 16, .004, 16), 'treat': _noisy(100, 16, .004, 17)},
+            'real': {'base': _noisy(100, 16, .004, 18), 'treat': _noisy(100 * effect, 16, .004, 19)},
+        })
+        s = _summary(raw)
+
+        assert s['bimodal'] is False
+        assert s['verdict'] == verdict
+        assert abs(s['phases']['real']['delta_pct'] - (effect - 1) * 100) < 1

@@ -49,12 +49,14 @@ job_preflight() {
     JOB_WAIT_SECONDS=$(( (arms * (${#H1_LANES[@]} * (DURATION + WARMUP + 15) + ${#H2_LANES[@]} * 45)) * 3 / 2 + 600 ))
     JOB_DEPLOY_GIT=1
     JOB_SETTINGS=(ref_base="$REF_BASE" ref_treat="$REF_TREAT" h1_lanes="$URL_PATHS"
-                  h2_lanes="$H2_PROFILES" phase_count="$phases")
+                  h2_lanes="$H2_PROFILES" phase_count="$phases" app_env="${APP_ENV:-}")
     local knob
     for knob in "${AB_KNOBS[@]}"; do JOB_SETTINGS+=("${knob,,}=${!knob:-}"); done
 }
 
-_ab_lane_dir() { printf '%s-%s' "$1" "$(printf '%s' "${2#/}" | tr -c 'A-Za-z0-9._-' '_')"; }
+# <h1|h2>-<lane without its leading slash, other bytes than [A-Za-z0-9._-] as _>;
+# job_collect derives the same names.
+_ab_lane_dir() { printf '%s-%s' "$1" "$(printf '%s' "${2#/}" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"; }
 
 job_runner() {
     local knob i
@@ -89,7 +91,8 @@ lanes = [('h1', u) for u in s['h1_lanes'].split(',') if u] + \
         [('h2', u) for u in s['h2_lanes'].split(',') if u]
 ok, reports = True, []
 for kind, url in lanes:
-    lane = run / (kind + '-' + re.sub(r'[^A-Za-z0-9._-]', '_', url.lstrip('/')))
+    name = re.sub(rb'[^A-Za-z0-9._-]', b'_', url.removeprefix('/').encode()).decode()
+    lane = run / f'{kind}-{name}'
     raw = lane / 'raw.tsv'
     rows = raw.read_text().splitlines() if raw.exists() else []
     if len(rows) != want or any('\tNaN\t' in r for r in rows):

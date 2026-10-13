@@ -114,9 +114,16 @@ def analyse(raw: Path, equiv: float) -> dict:
         if not all(arms.values()):
             continue
         threshold = mode_split([v for _, _, v in rows])
+        # A gap that separates the arms is the effect, not two modes: modes
+        # exist only when each arm has runs on both sides of it.
+        if threshold is not None and not all(
+                min(xs) < threshold < max(xs) for xs in arms.values()):
+            threshold = None
+        result = _per_mode(rows, threshold, rng) if threshold is not None else None
+        if result is None:
+            threshold = None
+            result = _paired(rows, rng)
         bimodal |= threshold is not None
-        result = (_per_mode(rows, threshold, rng) if threshold is not None
-                  else _paired(rows, rng))
         if result is None:
             continue
         d, boot, rounds = result
