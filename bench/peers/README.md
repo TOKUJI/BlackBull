@@ -16,7 +16,6 @@ best effort, not a polished or peer-reviewed benchmark.
 | `starlette_app.py` | Starlette `/ping` returning `Response(b'pong')` |
 | `fastapi_app.py` | FastAPI `/ping` returning `Response(b'pong')` |
 | `hypercorn.toml` | Hypercorn config — see comments inside the file |
-| `k6_one.sh` | Run one k6 stress pass and print `req/s | p50 | p95 | p99 | error%` |
 
 ## Install
 
@@ -46,5 +45,4 @@ hypercorn --config bench/peers/hypercorn.toml bench.peers.fastapi_app:app
 h2load -n 50000 -c 50 -m 1  https://localhost:8443/ping
 h2load -n 90000 -c 50 -m 10 https://localhost:8443/ping
 h2load -n 90000 -c 50 -m 50 https://localhost:8443/ping
-bash bench/peers/k6_one.sh <stack-name>
 ```

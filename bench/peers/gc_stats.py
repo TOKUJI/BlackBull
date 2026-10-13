@@ -20,8 +20,8 @@ Snapshot line (one JSON object):
 
 gen i: "colN" = ``gc.get_stats()[i]["collections"]`` (collections
 performed), "objN" = ``gc.get_stats()[i]["collected"]`` (objects
-reclaimed).  Deltas across a load window are computed offline by
-``phase1_analysis.py`` — never by this module.
+reclaimed).  Deltas across a load window are computed offline from this
+file — never by this module.
 
 Activation: set ``BB_GC_STATS_OUT=<file>`` before importing the app; the
 app imports this module env-gated.  A baseline line is written at import
