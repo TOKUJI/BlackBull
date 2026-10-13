@@ -1156,16 +1156,7 @@ class HTTP2Sender(BaseSender):
     async def send_response_headers(
         self, status: HTTPStatus, headers: list[tuple[bytes, bytes]],
     ) -> None:
-        """Write a standalone HEADERS frame (END_HEADERS, no END_STREAM) now.
-
-        Unlike the ``http.response.start`` event — which is buffered until a
-        body event so HEADERS + first DATA can coalesce into one write — this
-        flushes the response HEADERS immediately and leaves the stream open.
-        Required by the RFC 8441 WebSocket-over-HTTP/2 accept: the
-        ``:status 200`` response carries no body, so nothing would ever trigger
-        the deferred flush, and the stream must stay open bidirectionally for
-        the subsequent WebSocket DATA frames.
-        """
+        """Send a complete field section immediately, leaving the stream open."""
         # Encoding mutates the connection-wide HPACK table.  A retired stream
         # cannot advance it because the peer will never receive this block.
         if self._closed:
