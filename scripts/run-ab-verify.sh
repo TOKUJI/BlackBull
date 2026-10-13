@@ -9,8 +9,8 @@ case "${1:-}" in
         exit 0
         ;;
     --preflight)
-        bash -n "$ROOT/bench/aws/up.sh" "$ROOT/bench/aws/install.sh" \
-            "$ROOT/bench/aws/ab.sh" "$ROOT/bench/aws/down.sh"
+        bash -n "$ROOT/bench/cloud/up.sh" "$ROOT/bench/cloud/install.sh" \
+            "$ROOT/bench/cloud/ab.sh" "$ROOT/bench/cloud/down.sh"
         jq -nc '{workflow:"ab-verify",ready:true}'
         exit 0
         ;;
@@ -30,7 +30,7 @@ failsafe_minutes="${AB_FAILSAFE_MINUTES:-180}"
 }
 
 cd "$ROOT"
-state_file="${STATE_FILE:-$ROOT/bench/aws/.state}"
+state_file="${STATE_FILE:-$ROOT/bench/cloud/.state}"
 teardown_proof="${state_file}.clean"
 [ ! -e "$state_file" ] || {
     echo "run-ab-verify: an existing AWS harness state must be handled first" >&2
@@ -42,7 +42,7 @@ cleanup() {
     local rc=$?
     trap - EXIT HUP INT TERM
     if [ "$owns_run" -eq 1 ] && [ -f "$state_file" ]; then
-        if ! STATE_FILE="$state_file" bash bench/aws/down.sh; then
+        if ! STATE_FILE="$state_file" bash bench/cloud/down.sh; then
             rc=1
         fi
     fi
@@ -51,10 +51,10 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-STATE_FILE="$state_file" bash bench/aws/up.sh
+STATE_FILE="$state_file" bash bench/cloud/up.sh
 
-# shellcheck source=bench/aws/config.sh
-source bench/aws/config.sh
+# shellcheck source=bench/cloud/config.sh
+source bench/cloud/config.sh
 _bench_aws_load_state
 arm_failsafe() {
     local host="$1"
@@ -66,9 +66,9 @@ if [ -n "${LOADGEN_PUBLIC_IP:-}" ]; then
     arm_failsafe "$LOADGEN_PUBLIC_IP"
 fi
 
-STATE_FILE="$state_file" DEPLOY_GIT=1 bash bench/aws/install.sh
-STATE_FILE="$state_file" bash bench/aws/ab.sh launch
-STATE_FILE="$state_file" bash bench/aws/ab.sh finish
+STATE_FILE="$state_file" DEPLOY_GIT=1 bash bench/cloud/install.sh
+STATE_FILE="$state_file" bash bench/cloud/ab.sh launch
+STATE_FILE="$state_file" bash bench/cloud/ab.sh finish
 [ ! -e "$state_file" ] && [ -f "$teardown_proof" ] || {
     echo "run-ab-verify: verified teardown proof is missing" >&2
     exit 1

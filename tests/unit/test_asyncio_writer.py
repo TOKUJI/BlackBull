@@ -130,7 +130,7 @@ async def test_write_timeout_constructor_arg_stored():
 def _count_loop_touches(loop, monkeypatch) -> Counter:
     """Wrap the scheduling primitives on *loop* and count calls.
 
-    Same four primitives ``bench/loop_touches.py`` counts:
+    Same four primitives ``bench/micro/loop_touches.py`` counts:
     ``call_soon`` + ``call_at`` + ``call_later`` + ``create_future``.
     A count, not a duration — so this asserts the same quantity on any
     machine.

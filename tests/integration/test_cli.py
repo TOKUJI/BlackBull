@@ -200,7 +200,7 @@ def test_cli_serves_raw_asgi_callable(tmp_path: Path, child_env):
     """``blackbull`` can serve a plain ASGI callable (no BlackBull instance).
 
     This is the path the benchmark harness takes —
-    pointing the CLI at ``bench.peers.asgi_app:app`` (a raw ASGI app)
+    pointing the CLI at ``bench.apps.asgi_app:app`` (a raw ASGI app)
     just like every other peer server.
     """
     port = _free_port()

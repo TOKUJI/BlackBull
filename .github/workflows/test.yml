@@ -195,7 +195,7 @@ jobs:
         # BaseEventLoop, so the counters would read zero and pass vacuously.
         env:
           BB_UVLOOP: '0'
-        run: python bench/loop_touches.py --check
+        run: python bench/micro/loop_touches.py --check
 
   dual-path:
     name: Dual-path lane (BB_FORCE_ASGI_SCOPE=1)

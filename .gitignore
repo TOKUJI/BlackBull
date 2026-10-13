@@ -157,10 +157,10 @@ bench/results/baselines/pre_sprint9d/*
 /COMPARISON.md
 /provenance.md
 /driver.log
-# bench/aws — runtime state and SSH private keys created by up.sh
-bench/aws/.state
-bench/aws/.known_hosts
-bench/aws/*.pem
+# bench/cloud — runtime state and SSH private keys created by up.sh
+bench/cloud/.state
+bench/cloud/.known_hosts
+bench/cloud/*.pem
 # bench/httparena — local sandbox mounts (dataset + dev certs).  See
 # bench/httparena/README.md for the local smoke-test recipe.
 bench/httparena/_local/
@@ -170,9 +170,9 @@ bench/httparena/blackbull-*.whl
 # peer benchmark harness — work-in-progress automated runner.
 # Kept on disk for future development; not committed until the socket-state
 # contamination is solved cleanly.
-bench/peers/compare.sh
-bench/peers/httparena_calibrate.py
-bench/peers/bench/results/*
+bench/compare/compare.sh
+bench/compare/httparena_calibrate.py
+bench/compare/bench/results/*
 # peer benchmark harness — private development notes
 *.private.md
 
@@ -182,4 +182,4 @@ bench/peers/bench/results/*
 bench/conformance/results/*
 
 # Http11Probe run output (kept directory, ignore data files)
-bench/http11probe/results/*.json
+bench/probes/http11probe/results/*.json

@@ -58,11 +58,11 @@ def run(script: Path, *, env: dict[str, str]) -> subprocess.CompletedProcess[str
 
 
 def test_up_failure_after_instance_creation_runs_cleanup(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     write_executable(
         aws_dir / "down.sh",
@@ -115,11 +115,11 @@ esac
 
 
 def test_down_retains_state_when_verification_finds_resources(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     write_executable(bin_dir / "ssh", "#!/usr/bin/env bash\nexit 0\n")
     write_executable(
@@ -166,11 +166,11 @@ esac
 
 
 def test_down_retains_state_when_proof_publication_fails(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     write_executable(bin_dir / "aws", "#!/usr/bin/env bash\nprintf 'None\\n'\n")
     write_executable(
@@ -205,12 +205,12 @@ esac
 
 
 def test_up_recovers_instance_when_run_command_loses_its_response(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nprintf '203.0.113.1\\n'\n")
     write_executable(bin_dir / "ssh", "#!/usr/bin/env bash\nexit 0\n")
@@ -278,12 +278,12 @@ esac
 
 
 def test_up_recovers_key_pair_when_create_response_is_lost(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     write_executable(
         bin_dir / "aws",
@@ -322,12 +322,12 @@ esac
 
 
 def test_up_recovers_security_group_when_create_response_is_lost(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     (aws_dir / "mock-key").write_text("fixture")
     write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nprintf '203.0.113.1\\n'\n")
@@ -374,12 +374,12 @@ esac
 
 
 def test_up_does_not_modify_reused_security_group(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     (aws_dir / "mock-key").write_text("fixture")
     write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nprintf '203.0.113.1\\n'\n")
@@ -425,12 +425,12 @@ esac
 def test_up_rejects_reused_security_group_with_partial_benchmark_range(
     tmp_path: Path,
 ) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     (aws_dir / "mock-key").write_text("fixture")
     write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nprintf '203.0.113.1\\n'\n")
@@ -478,7 +478,7 @@ esac
 
 def test_httparena_wrapper_requires_teardown_proof(tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     meta_dir = tmp_path / "bench" / "httparena"
     scripts.mkdir()
     aws_dir.mkdir(parents=True)
@@ -507,10 +507,10 @@ def test_httparena_wrapper_requires_teardown_proof(tmp_path: Path) -> None:
 
 
 def test_httparena_driver_propagates_teardown_failure(tmp_path: Path) -> None:
-    driver = (ROOT / "bench/aws/httparena_compare.sh").read_text()
+    driver = (ROOT / "bench/cloud/httparena_compare.sh").read_text()
     function = re.search(r"(?ms)^_teardown\(\) \{\n.*?^\}\n", driver)
     assert function is not None
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     aws_dir.mkdir(parents=True)
     write_executable(aws_dir / "down.sh", "#!/usr/bin/env bash\nexit 9\n")
     test_driver = aws_dir / "driver.sh"
@@ -533,7 +533,7 @@ def test_httparena_driver_propagates_teardown_failure(tmp_path: Path) -> None:
 
 def test_ab_wrapper_requires_teardown_proof(tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     scripts.mkdir()
     aws_dir.mkdir(parents=True)

@@ -4,13 +4,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ "${1:-}" = "--plan" ]; then
-    jq -nc '{workflow:"bench-compare",command:["bash","bench/peers/compare_servers.sh"]}'
+    jq -nc '{workflow:"bench-compare",command:["bash","bench/compare/compare_servers.sh"]}'
     exit 0
 fi
 [ "$#" -eq 0 ] || { echo "unknown argument: $1" >&2; exit 2; }
 
 cd "$ROOT"
-bash bench/peers/compare_servers.sh
+bash bench/compare/compare_servers.sh
 
 report="$(ls -1t bench/results/compare_servers_*.md 2>/dev/null | head -1 || true)"
 [ -n "$report" ] || { echo "run-bench-compare: result report not found" >&2; exit 1; }
