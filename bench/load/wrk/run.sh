@@ -6,11 +6,11 @@
 # $OUTDIR/wrk_<scenario>.txt for forensics.
 #
 # Usage:
-#   BASE=https://localhost:8443 OUTDIR=bench/results bash bench/load/wrk/run.sh
+#   BASE=https://localhost:8443 bash bench/load/wrk/run.sh
 #
 # Env:
 #   BASE      target URL          (default https://localhost:8443)
-#   OUTDIR    raw-log directory   (default bench/results)
+#   OUTDIR    raw-log directory   (default: a new run directory)
 #   LABEL     stack label         (default <none> — header only)
 #   DURATION  per-scenario time   (default 30 — seconds)
 
@@ -20,8 +20,12 @@
 # emits an `err` row instead.
 
 BASE="${BASE:-https://localhost:8443}"
-OUTDIR="${OUTDIR:-bench/results}"
 LABEL="${LABEL:-}"
+if [ -z "${OUTDIR:-}" ]; then
+    source bench/lib/results.sh
+    bench_run_dir wrk base="$BASE" label="${LABEL:-}" || exit 1
+    OUTDIR="$BENCH_RUN_DIR"
+fi
 LABEL_PREFIX="${LABEL_PREFIX:-}"   # filename prefix so per-stack runs don't overwrite
 D="${DURATION:-30}"
 # RUNS_WRK > 1 enables multi-run aggregation —

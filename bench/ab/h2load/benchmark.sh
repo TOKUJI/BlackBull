@@ -2,7 +2,7 @@
 # bench/ab/h2load/benchmark.sh — comprehensive single-command benchmark entry point.
 #
 # Usage:
-#   bash bench/ab/h2load/benchmark.sh               # full run → bench/results/YYYYMMDD-HHMMSS.md
+#   bash bench/ab/h2load/benchmark.sh               # full run → <run>/YYYYMMDD-HHMMSS.md
 #   bash bench/ab/h2load/benchmark.sh --no-profile  # skip py-spy
 #   bash bench/ab/h2load/benchmark.sh --quick       # RUNS=1, K6_RUNS=1 (smoke-check)
 #
@@ -13,8 +13,9 @@
 set -e
 
 BASE="https://localhost:8443"
-RESULT_DIR="bench/results"
-mkdir -p "$RESULT_DIR"
+source bench/lib/results.sh
+bench_run_dir h2load_benchmark "$@" || exit 1
+RESULT_DIR="$BENCH_RUN_DIR"
 
 export TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 OUTFILE="$RESULT_DIR/${TIMESTAMP}.md"
@@ -98,7 +99,7 @@ echo ""
 echo "Running h2load scenarios (RUNS=$RUNS) ..."
 TIMESTAMP="$TIMESTAMP" RUNS="$RUNS" bash bench/ab/h2load/h2load_run.sh
 
-# h2load_run.sh created bench/results/$TIMESTAMP.md via summarize.py.
+# h2load_run.sh created $RESULT_DIR/$TIMESTAMP.md via summarize.py.
 # Inject a "run info" line at the top so it is visible in the report.
 H2_MD="$RESULT_DIR/${TIMESTAMP}.md"
 if [ -f "$H2_MD" ]; then

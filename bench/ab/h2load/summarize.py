@@ -2,9 +2,9 @@
 """Parse h2load_run.sh raw output and write a markdown result file.
 
 Usage:
-    python bench/ab/h2load/summarize.py bench/results/raw_20260517-201141.txt
+    python bench/ab/h2load/summarize.py <run>/raw_20260517-201141.txt
 Writes:
-    bench/results/20260517-201141.md
+    <run>/20260517-201141.md
 """
 import re
 import statistics

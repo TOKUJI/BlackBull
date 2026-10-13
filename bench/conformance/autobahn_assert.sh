@@ -3,7 +3,7 @@
 #
 # Shared by the CI Autobahn lanes (fast + heavy): one copy of the gate so the
 # two lanes cannot drift.  Accepts an explicit index.json path as $1; without
-# it, locates the freshest index.json under bench/conformance/results/autobahn_*/
+# it, uses the newest autobahn run's index.json
 # (the fast lane has exactly one run's results, so the default is unambiguous;
 # the heavy retry wrapper passes its own attempt's path so a failed attempt
 # can never be judged against a previous attempt's index).  Fails on any case
@@ -12,8 +12,9 @@
 
 set -euo pipefail
 
-INDEX="${1:-$(ls -1t bench/conformance/results/autobahn_*/index.json 2>/dev/null | head -1)}"
-if [ -z "$INDEX" ]; then
+. "$(dirname "$0")/../lib/results.sh"
+INDEX="${1:-$(bench_latest_run autobahn)/index.json}"
+if [ ! -f "$INDEX" ]; then
     echo "ERROR: no Autobahn index.json produced" >&2
     exit 1
 fi

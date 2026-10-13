@@ -7,7 +7,7 @@
  *
  * Run:
  *   k6 run bench/load/k6/http_rampup.js
- *   k6 run --out json=bench/results/rampup.json bench/load/k6/http_rampup.js
+ *   k6 run --out json="$BENCH_RUN_DIR/rampup.json" bench/load/k6/http_rampup.js
  */
 import http from 'k6/http';
 import { check, sleep } from 'k6';

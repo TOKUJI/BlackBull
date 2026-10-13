@@ -6,8 +6,8 @@ instruction it costs is inline, added to functions that already ran.  This
 prints the per-function bytecode size on both sides so the growth can be
 attributed to the specific plumbing the split introduced.
 
-    BB_REPO=/tmp/bb-instr-base python split_cost.py
-    BB_REPO=/tmp/bb-instr-103  python split_cost.py
+    BB_REPO=<worktree of the base ref> python split_cost.py
+    BB_REPO=<worktree of the change>   python split_cost.py
 """
 from __future__ import annotations
 

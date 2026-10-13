@@ -7,8 +7,7 @@
 # bench/probes/soak/mixed.lua, then waits COOLDOWN seconds with sampling
 # still running, then tears everything down and emits a summary.
 #
-# Output dir:
-#   bench/results/soak/sprint28-<ts>-w<WORKERS>/
+# Output, in the run directory (bench/lib/results.sh):
 #     server.log              stderr+stdout of bench/ab/h2load/app.py
 #     wrk.txt                 raw wrk output
 #     sample.csv              one row per sample (60 s default)
@@ -38,9 +37,9 @@ WORKERS="${WORKERS:-1}"
 PORT="${PORT:-8000}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-TS="$(date -u +%Y%m%d-%H%M%SZ)"
-OUT_DIR="$REPO_ROOT/bench/results/soak/sprint28-${TS}-w${WORKERS}"
-mkdir -p "$OUT_DIR"
+source "$REPO_ROOT/bench/lib/results.sh"
+bench_run_dir soak duration="$DURATION" connections="$C" workers="$WORKERS"
+OUT_DIR="$BENCH_RUN_DIR"
 
 PY="${PY:-$REPO_ROOT/.venv/bin/python}"
 

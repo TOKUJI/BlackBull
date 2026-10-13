@@ -37,11 +37,14 @@ echo "  static dir:  $STATIC_DIR"
 echo "  port:        $PORT"
 echo
 
+source bench/lib/results.sh
+bench_run_dir static_repro 
+
 # Boot the server in the background.
 BB_ACCESS_LOG=0 \
 STATIC_DIR="$STATIC_DIR" \
 DATASET_PATH="$DATASET_PATH" \
-    python3 bench/httparena/app.py --port "$PORT" >/tmp/static_repro_server.log 2>&1 &
+    python3 bench/httparena/app.py --port "$PORT" >"$BENCH_RUN_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 echo ">>> server pid: $SERVER_PID"
 trap 'kill -TERM $SERVER_PID 2>/dev/null || true' EXIT
@@ -54,7 +57,7 @@ for i in $(seq 1 30); do
     sleep 0.2
 done
 if ! curl -sf "http://localhost:$PORT/static/app.js" >/dev/null 2>&1; then
-    echo "FATAL: server didn't come up; see /tmp/static_repro_server.log" >&2
+    echo "FATAL: server didn't come up; see $BENCH_RUN_DIR/server.log" >&2
     exit 1
 fi
 
@@ -100,9 +103,9 @@ done
 
 echo ">>> done; server still alive (pid=$SERVER_PID)."
 echo "    To attach a profiler:"
-echo "      py-spy record --native --duration 10 -p $SERVER_PID -o /tmp/static_repro_profile.svg"
+echo "      py-spy record --native --duration 10 -p $SERVER_PID -o $BENCH_RUN_DIR/profile.svg"
 echo "      py-spy dump -p $SERVER_PID"
-echo "    Server log: /tmp/static_repro_server.log"
+echo "    Server log: $BENCH_RUN_DIR/server.log"
 echo "    Kill: kill $SERVER_PID"
 
 # Disable trap so the server survives this script's exit (so we can

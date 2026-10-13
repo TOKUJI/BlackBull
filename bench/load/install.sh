@@ -92,14 +92,13 @@ if ! command -v oha >/dev/null 2>&1; then
         sudo apt-get install -y oha || echo "  oha apt install failed (optional; skipping)"
     elif [ -n "$_oha_arch" ] && command -v curl >/dev/null 2>&1; then
         echo "  downloading oha-linux-$_oha_arch from GitHub releases ..."
-        tmp_oha=$(mktemp)
-        if curl -fsSL -o "$tmp_oha" \
+        if sudo curl -fsSL -o /usr/local/bin/oha.part \
                 "https://github.com/hatoo/oha/releases/latest/download/oha-linux-$_oha_arch"; then
-            sudo install -m 0755 "$tmp_oha" /usr/local/bin/oha
+            sudo install -m 0755 /usr/local/bin/oha.part /usr/local/bin/oha
         else
             echo "  oha download failed (optional; skipping)" >&2
         fi
-        rm -f "$tmp_oha"
+        sudo rm -f /usr/local/bin/oha.part
     elif command -v cargo >/dev/null 2>&1; then
         cargo install oha || echo "  oha cargo build failed (optional; skipping)"
     else

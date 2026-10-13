@@ -12,7 +12,7 @@ Measures the per-call cost of ``Router._resolve`` (cache bypassed) and
 Run:  python bench/micro/router_microbench.py [--repeat 7] [--number 20000]
 
 Numbers print as ns/call (min of repeats — standard timeit discipline).
-Results for sprint records go under bench/results/router-microbench/.
+Numbers a decision rests on go on its YouTrack issue.
 """
 import argparse
 import timeit

@@ -23,7 +23,7 @@
 # mounted instead (P.2 — CASES was once documented but ignored, and subset
 # runs silently ran all 517 cases).
 #
-# Reports land in bench/conformance/results/autobahn_<timestamp>/.
+# Reports land in the run directory (bench/lib/results.sh).
 
 set -euo pipefail
 
@@ -38,11 +38,10 @@ CONFIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 # before/after case counts in the message.
 #   digest of crossbario/autobahn-testsuite:latest as of 2026-08-10
 
-RESULT_BASE="bench/conformance/results"
-mkdir -p "$RESULT_BASE"
-TS="$(date +%Y%m%d-%H%M%S)"
-# A retry must not inherit a report even when both starts share a timestamp.
-OUT="$(mktemp -d "$RESULT_BASE/autobahn_${TS}.XXXXXX")"
+# A retry must not inherit a report: every run gets a fresh directory.
+. "$CONFIG_DIR/../lib/results.sh"
+bench_run_dir autobahn cases="${CASES:-*}" exclude_cases="${EXCLUDE_CASES:-}"
+OUT="$BENCH_RUN_DIR"
 CIDFILE="$OUT/container.cid"
 
 cleanup() {

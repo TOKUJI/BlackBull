@@ -18,7 +18,11 @@
 # from bench/load/wrk/run.sh.
 
 BASE="${BASE:-https://localhost:8443}"
-OUTDIR="${OUTDIR:-bench/results}"
+if [ -z "${OUTDIR:-}" ]; then
+    source bench/lib/results.sh
+    bench_run_dir wrk2 base="$BASE" label="${LABEL:-}" || exit 1
+    OUTDIR="$BENCH_RUN_DIR"
+fi
 LABEL_PREFIX="${LABEL_PREFIX:-}"
 D="${DURATION:-30}"
 RATE="${WRK2_RATE:-5000}"

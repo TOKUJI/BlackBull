@@ -44,7 +44,9 @@ PHASES="${PHASES:-1 3 2 4 5}"
 has_phase() { case " $PHASES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 TS=$(date -u +%Y%m%d-%H%M%SZ)
-OUT="${OUT:-$REPO/bench/results/hotpath-ab/$TS}"
+source bench/lib/results.sh
+bench_run_dir hotpath_ab phases="$PHASES" cycles="$CYCLES" duration="$DURATION" || exit 1
+OUT="$BENCH_RUN_DIR"
 mkdir -p "$OUT/raw"
 cp "$0" "$OUT/hotpath_ab.sh"
 

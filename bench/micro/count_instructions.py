@@ -19,7 +19,7 @@ these two percentages agree; if they do not, the residual is something else.
 Counts are attributed per file so "ours" (blackbull) can be separated from the
 generator-facing asyncio machinery.
 
-    BB_REPO=/tmp/bb-instr-base python count_instructions.py --lane h2 --n 400
+    BB_REPO=<worktree of the base ref> python count_instructions.py --lane h2 --n 400
 """
 from __future__ import annotations
 
@@ -28,11 +28,11 @@ import asyncio
 import collections
 import json
 import os
-import tempfile
 import sys
+from pathlib import Path
 
-REPO = os.environ.get('BB_REPO', '/home/toshio/work/BlackBull')
-MAIN = '/home/toshio/work/BlackBull'
+MAIN = str(Path(__file__).resolve().parents[2])
+REPO = os.environ.get('BB_REPO', MAIN)
 # The editable install's finder outranks sys.path; drop it, then prove below
 # which tree was imported.
 sys.meta_path = [f for f in sys.meta_path
@@ -59,6 +59,7 @@ if os.environ.get('BB_APP'):
         os.path.basename(_app_path).removesuffix('.py')).app
 else:
     from bench.apps.native_app import app          # noqa: E402
+from bench.lib.results import run_dir              # noqa: E402
 
 MON = sys.monitoring
 TOOL = MON.PROFILER_ID
@@ -192,10 +193,9 @@ async def _gen(lane: str, port: int, n: int) -> int:
             with open(f'{_HTTPARENA}/requests/static-h2-uris.txt') as fh:
                 uris = fh.read().replace('https://localhost:8443',
                                          f'http://127.0.0.1:{port}')
-            uri_file = tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False)
-            uri_file.write(uris)
-            uri_file.close()
-            target = ['-i', uri_file.name]
+            uri_file = run_dir('count_instructions') / 'tmp' / 'uris.txt'
+            uri_file.write_text(uris)
+            target = ['-i', str(uri_file)]
         else:
             target = [f'http://127.0.0.1:{port}{path}']
         cmd = ['h2load', '-c', os.environ.get('BB_H2_CONNS', '1'),

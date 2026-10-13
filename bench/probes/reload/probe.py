@@ -10,13 +10,15 @@ import signal
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from bench.lib.results import run_dir  # noqa: E402
 
 
 def exchange(sock, timeout=30):
@@ -270,20 +272,22 @@ def arguments(argv=None):
 def main(argv=None):
     args = arguments(argv)
     output = {'valid': False, 'configuration': {**vars(args), 'source': str(args.source)}}
-    with tempfile.TemporaryDirectory(prefix='blackbull-reload-') as temporary:
-        directory = Path(temporary)
-        try:
-            measure(args, directory, output)
-            output['valid'] = True
-        except (OSError, RuntimeError, http.client.HTTPException, ValueError) as error:
-            output['error'] = str(error)
-        finally:
-            log = directory / 'server.log'
-            if log.exists():
-                with log.open('rb') as stream:
-                    stream.seek(max(0, log.stat().st_size - 65536))
-                    output['server_log_tail'] = stream.read().decode(errors='replace')
-    print(json.dumps(output, indent=2))
+    run = run_dir('reload_probe', settings=output['configuration'])
+    directory = run / 'tmp'
+    try:
+        measure(args, directory, output)
+        output['valid'] = True
+    except (OSError, RuntimeError, http.client.HTTPException, ValueError) as error:
+        output['error'] = str(error)
+    finally:
+        log = directory / 'server.log'
+        if log.exists():
+            with log.open('rb') as stream:
+                stream.seek(max(0, log.stat().st_size - 65536))
+                output['server_log_tail'] = stream.read().decode(errors='replace')
+    report = json.dumps(output, indent=2)
+    (run / 'result.json').write_text(report + '\n')
+    print(report)
     return 0 if output['valid'] else 1
 
 

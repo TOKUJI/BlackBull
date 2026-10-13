@@ -3,7 +3,6 @@
 #
 # Usage:
 #   bash bench/ab/h2load/h2load_run.sh
-#   bash bench/ab/h2load/h2load_run.sh 2>&1 | tee bench/results/h2load_$(date +%Y%m%d_%H%M%S).txt
 #
 # h2load flags used:
 #   -n  total requests
@@ -17,9 +16,10 @@ set -e
 
 BASE="https://localhost:8443"
 
-# Create results directory and tee all output to a timestamped raw log
-RESULT_DIR="bench/results"
-mkdir -p "$RESULT_DIR"
+# Tee all output to a timestamped raw log in the run directory
+source bench/lib/results.sh
+bench_run_dir h2load_run || exit 1
+RESULT_DIR="$BENCH_RUN_DIR"
 TIMESTAMP="${TIMESTAMP:-$(date +%Y%m%d-%H%M%S)}"
 RUNS="${RUNS:-3}"
 RAW_LOG="$RESULT_DIR/raw_${TIMESTAMP}.txt"

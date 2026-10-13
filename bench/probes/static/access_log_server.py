@@ -10,7 +10,7 @@ Usage:
 Env vars consumed:
     STATIC_DIR, DATASET_PATH — same as ``server_probe.py``
     ACCESS_LOG_PATH          — file to write access log to (default
-                               /tmp/blackbull_access.log)
+                               access.log in the run directory)
     BB_ACCEPT_PAUSE_HIGH_WATERMARK / LOW_WATERMARK / MAX_CONNECTIONS —
                                passed through to BlackBull.
 
@@ -93,12 +93,15 @@ if __name__ == '__main__':
     # probe NEEDS it.
     os.environ['BB_ACCESS_LOG'] = '1'
 
-    log_path = os.environ.get('ACCESS_LOG_PATH', '/tmp/blackbull_access.log')
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.join(here, '..', '..', '..'))
+    from bench.lib.results import run_dir
+    log_path = (os.environ.get('ACCESS_LOG_PATH')
+                or str(run_dir('access_log_server') / 'access.log'))
     _setup_access_log(log_path)
     _patch_access_log_format()
     sys.stderr.write(f'access log → {log_path} (sub-ms precision)\n')
 
-    here = os.path.dirname(os.path.abspath(__file__))
     app_py = os.path.normpath(os.path.join(here, '..', '..', 'httparena', 'app.py'))
     sys.argv = [app_py] + sys.argv[1:]
     runpy.run_path(app_py, run_name='__main__')

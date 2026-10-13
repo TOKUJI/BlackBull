@@ -2,7 +2,7 @@
 
 Standalone so a finished run can be re-analysed without re-measuring:
 
-    uv run python bench/ab/ab_report.py bench/results/ab-commit-<ts>Z/raw.tsv
+    uv run python bench/ab/ab_report.py <run>/raw.tsv
 
 Why the mean and not the median
 -------------------------------

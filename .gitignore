@@ -131,16 +131,11 @@ CLAUDE.md
 # so a committed symlink would arrive dangling in every clone and in CI.
 .github/skills
 
-# benchmark result files (keep directory + READMEs, ignore data)
+# bench/lib is the bench tools' shared code, not a build artefact (lib/ above).
+!bench/lib/
+# bench run output — see bench/results/README.md
 bench/results/*
-!bench/results/aws/
-!bench/results/baselines/
-bench/results/aws/*
-bench/results/baselines/*
-!bench/results/aws/README.md
-!bench/results/baselines/pre_sprint9d/
-bench/results/baselines/pre_sprint9d/*
-!bench/results/baselines/pre_sprint9d/README.md
+!bench/results/README.md
 
 # Bench output that landed at the repo root instead of under
 # bench/results/<run>/.  The harness itself anchors every artifact to its
@@ -175,11 +170,3 @@ bench/compare/httparena_calibrate.py
 bench/compare/bench/results/*
 # peer benchmark harness — private development notes
 *.private.md
-
-
-
-# RFC conformance test output (kept directory, ignore data files)
-bench/conformance/results/*
-
-# Http11Probe run output (kept directory, ignore data files)
-bench/probes/http11probe/results/*.json
