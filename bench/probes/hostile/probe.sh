@@ -42,12 +42,15 @@ echo "  duration:    ${DURATION}s"
 echo "  port:        $PORT"
 echo
 
+source bench/lib/results.sh
+bench_run_dir hostile_probe attack="$ATTACK" concurrency="$CONCURRENCY" duration="$DURATION"
+
 # Boot a fresh server using the SIGUSR1-instrumented wrapper.
 BB_ACCESS_LOG=0 \
 STATIC_DIR="$STATIC_DIR" \
 DATASET_PATH="$DATASET_PATH" \
     python3 bench/probes/static/server_probe.py --port "$PORT" \
-    >/tmp/hostile_server.log 2>&1 &
+    >"$BENCH_RUN_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 trap 'kill -TERM $SERVER_PID 2>/dev/null || true' EXIT
 
@@ -56,7 +59,7 @@ for i in $(seq 1 30); do
     sleep 0.2
 done
 if ! curl -sf "http://localhost:$PORT/healthz" >/dev/null 2>&1; then
-    echo "FATAL: server didn't come up; see /tmp/hostile_server.log" >&2
+    echo "FATAL: server didn't come up; see $BENCH_RUN_DIR/server.log" >&2
     exit 1
 fi
 
@@ -86,14 +89,14 @@ echo ">>> starting attack: $ATTACK"
 python3 "$ATTACK_SCRIPT" \
     --host localhost --port "$PORT" \
     --connections "$CONCURRENCY" --duration "$DURATION" \
-    >/tmp/hostile_attack.log 2>&1 &
+    >"$BENCH_RUN_DIR/attack.log" 2>&1 &
 ATTACK_PID=$!
 
 # Sample mid-attack at t+5s, t+15s, t+(duration-2s)
 sleep 5
 healthcheck "t+5s"
 kill -USR1 $SERVER_PID 2>/dev/null && sleep 0.3 && \
-  tail -25 /tmp/hostile_server.log | grep -E "(task dump|tasks ----|\.py:|^=)" | head -10
+  tail -25 "$BENCH_RUN_DIR/server.log" | grep -E "(task dump|tasks ----|\.py:|^=)" | head -10
 
 if [ "$DURATION" -gt 20 ]; then
     sleep 10
@@ -104,7 +107,7 @@ if [ "$DURATION" -gt 5 ]; then
     sleep $(( DURATION - (DURATION > 20 ? 17 : 7) ))
     healthcheck "t+near-end"
     kill -USR1 $SERVER_PID 2>/dev/null && sleep 0.3 && \
-      tail -25 /tmp/hostile_server.log | grep -E "(task dump|tasks ----|\.py:|^=)" | head -10
+      tail -25 "$BENCH_RUN_DIR/server.log" | grep -E "(task dump|tasks ----|\.py:|^=)" | head -10
 fi
 
 # Wait for attack to fully finish
@@ -118,7 +121,7 @@ sleep 5
 healthcheck "t+recovery+6"
 
 echo
-echo "Server log: /tmp/hostile_server.log"
-echo "Attack log: /tmp/hostile_attack.log"
+echo "Server log: $BENCH_RUN_DIR/server.log"
+echo "Attack log: $BENCH_RUN_DIR/attack.log"
 
 # Trap will tear down the server.

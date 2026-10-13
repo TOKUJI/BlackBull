@@ -10,8 +10,12 @@
 # Assumes the target server is already running on $BASE.
 
 BASE="${BASE:-https://localhost:8443}"
-OUTDIR="${OUTDIR:-bench/results}"
 LABEL="${LABEL:-}"
+if [ -z "${OUTDIR:-}" ]; then
+    source bench/lib/results.sh
+    bench_run_dir wrk_lane_e base="$BASE" label="${LABEL:-}" || exit 1
+    OUTDIR="$BENCH_RUN_DIR"
+fi
 LABEL_PREFIX="${LABEL_PREFIX:-}"
 D="${DURATION:-60}"
 RUNS_WRK="${RUNS_WRK:-3}"

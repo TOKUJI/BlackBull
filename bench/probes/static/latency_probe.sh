@@ -42,8 +42,10 @@ case "$MODE" in
 esac
 
 TOTAL=$(( WARMUP + MEASURE ))
-ACCESS_LOG="/tmp/latency_probe_${MODE}.log"
-SERVER_LOG="/tmp/latency_server_${MODE}.log"
+source bench/lib/results.sh
+bench_run_dir latency_probe mode="$MODE" concurrency="$CONCURRENCY"
+ACCESS_LOG="$BENCH_RUN_DIR/access.log"
+SERVER_LOG="$BENCH_RUN_DIR/server.log"
 
 STATIC_DIR="$(pwd)/bench/httparena/_local/data/static/"
 DATASET_PATH="$(pwd)/bench/httparena/_local/data/dataset.json"
@@ -98,7 +100,7 @@ wrk -t8 -c"$CONCURRENCY" -d"${TOTAL}s" -s bench/probes/static/rotate.lua \
     -H 'Accept-Encoding: br;q=1, gzip;q=0.8' \
     --latency \
     "http://localhost:$PORT" 2>&1 \
-  | tee /tmp/wrk_${MODE}.log \
+  | tee "$BENCH_RUN_DIR/wrk.log" \
   | grep -E "Requests/sec|requests in|Latency"
 
 echo

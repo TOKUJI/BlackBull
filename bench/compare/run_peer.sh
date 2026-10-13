@@ -48,6 +48,9 @@ if [ -z "$stack" ]; then
     exit 1
 fi
 
+source bench/lib/results.sh
+bench_run_dir run_peer stack="$stack" port="$port"
+
 # --- Parse stack name: <base>[-<variant>] ---------------------------------
 # Variants are mutually exclusive (one suffix per stack name).  workers
 # defaults to 1; *-w<N> overrides it.
@@ -125,8 +128,9 @@ finalize() {
         local cert_abs key_abs conf
         cert_abs="$(readlink -f "$cert")"
         key_abs="$(readlink -f "$key")"
-        conf="/tmp/bench-nginx-proxy.$$.conf"
+        conf="$BENCH_TMP/nginx-proxy.conf"
         sed -e "s|__BB_CERT__|$cert_abs|" \
+            -e "s|__BB_TMP__|$BENCH_TMP|" \
             -e "s|__BB_KEY__|$key_abs|" \
             -e "s|__BB_UPSTREAM_PORT__|$upstream_port|" \
             -e "s|__BB_LISTEN_PORT__|$port|" \
@@ -229,7 +233,7 @@ case "$base" in
         # shell pipe entirely. Falls back to stdout (buffered through
         # stdbuf/PYTHONUNBUFFERED) when not set.
         if [ -n "${GRANIAN_LOG_TARGET:-}" ]; then
-            cfg="/tmp/granian_log_$$.json"
+            cfg="$BENCH_TMP/granian_log.json"
             mkdir -p "$(dirname "$GRANIAN_LOG_TARGET")"
             python3 -c "
 import json, sys
@@ -294,16 +298,17 @@ json.dump(cfg, open(sys.argv[2], 'w'))
         # Fixture files for the large-body GET routes.
         for sz in 1024:1kb 16000:16kb 65536:64kb 1048576:1mb; do
             size="${sz%%:*}"; tag="${sz##*:}"
-            f="/tmp/bench_${tag}.bin"
+            f="$BENCH_TMP/bench_${tag}.bin"
             [ -f "$f" ] || head -c "$size" /dev/urandom > "$f"
         done
-        # Substitute absolute cert/key paths into a /tmp copy of the conf.
+        # Substitute absolute paths into a copy of the conf.
         # (nginx resolves relative paths against its compiled-in prefix,
         # so the conf needs absolute paths.)
         cert_abs="$(readlink -f "$cert")"
         key_abs="$(readlink -f "$key")"
-        conf="/tmp/bench-nginx.$$.conf"
+        conf="$BENCH_TMP/nginx.conf"
         sed -e "s|__BB_CERT__|$cert_abs|" -e "s|__BB_KEY__|$key_abs|" \
+            -e "s|__BB_TMP__|$BENCH_TMP|" \
             bench/compare/nginx.conf > "$conf"
         nginx -c "$conf" -t 2>&1 || exit 1
         exec nginx -c "$conf"

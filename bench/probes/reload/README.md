@@ -10,18 +10,16 @@ From the repository root:
 
 ```sh
 uv sync --all-extras
-mkdir -p bench/results/reload
 
 # Concurrent arrivals during an artificial six-second startup delay.
-uv run python bench/probes/reload/probe.py > bench/results/reload/cold.json
+uv run python bench/probes/reload/probe.py
 
 # Reload with five idle keep-alive connections; use --active-warm to
 # keep requesting on them until the old worker drains.
-uv run python bench/probes/reload/probe.py --reload > bench/results/reload/reload.json
+uv run python bench/probes/reload/probe.py --reload
 
 # Schedule independent arrivals every 250 ms instead of one concurrent burst.
-uv run python bench/probes/reload/probe.py --reload --warm 0 --interval .25 --requests 80 \
-  > bench/results/reload/timeline.json
+uv run python bench/probes/reload/probe.py --reload --warm 0 --interval .25 --requests 80
 ```
 
 Use `--source /absolute/path/to/checkout` to test another checkout with the
@@ -55,9 +53,11 @@ connection. Held connection results distinguish observed EOF/errors from
 harness shutdown (`stopped`) and client timeout.
 
 `server_log_tail` retains up to 64 KiB of subprocess output for diagnosis.
-Generated apps, logs and socket paths use a unique temporary directory which
-is removed after teardown. Redirect JSON to `bench/results/` to keep local
-measurements out of Git.
+Each run prints its JSON and keeps it, with the generated app, server log and
+socket, in its run directory under `bench/results/reload_probe/` (see
+[bench/results](../../results/README.md)). A Unix socket path is limited to
+about 100 bytes; if the checkout is too deep for `--family unix`, set
+`BENCH_RESULTS_ROOT` to a shorter directory.
 
 These are sampled observations, not an exact outage duration or a throughput
 benchmark. A burst can reach the old worker before the watcher reacts, and

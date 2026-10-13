@@ -52,7 +52,9 @@ def test_failed_control_cannot_validate_measurement(probe):
     assert probe.summarize([{'fate': 'invalid-response'}])['affected'] == 1
 
 
-def test_failed_control_emits_invalid_json_and_nonzero_exit(probe, monkeypatch, capsys):
+def test_failed_control_emits_invalid_json_and_nonzero_exit(probe, monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv('BENCH_RESULTS_ROOT', str(tmp_path))
+    monkeypatch.delenv('BENCH_RUN_DIR', raising=False)
     phases = iter([[{'fate': 'served-fast', 'generation': 'v1'}],
                    [{'fate': 'invalid-response'}]])
     checked = []
@@ -66,6 +68,8 @@ def test_failed_control_emits_invalid_json_and_nonzero_exit(probe, monkeypatch, 
     assert output['valid'] is False
     assert 'control failed' in output['error']
     assert checked == ['v1']
+    run, = (tmp_path / 'reload_probe').iterdir()
+    assert probe.json.loads((run / 'result.json').read_text()) == output
 
 
 def test_trickling_headers_hit_exchange_deadline_as_timeout(probe, monkeypatch):

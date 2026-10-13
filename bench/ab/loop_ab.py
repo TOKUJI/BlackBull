@@ -32,7 +32,7 @@ Usage::
 
     python bench/ab/loop_ab.py                      # default sweep
     python bench/ab/loop_ab.py --conns 64 --reps 5
-    python bench/ab/loop_ab.py --baseline bench/results/loop-ab-20260729-120000
+    python bench/ab/loop_ab.py --baseline <run>
 """
 from __future__ import annotations
 
@@ -50,7 +50,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-RESULTS = REPO / 'bench' / 'results'
+sys.path.insert(0, str(REPO))
+
+from bench.lib.results import results_root, run_dir  # noqa: E402
 
 _RPS = re.compile(rb'Requests/sec:\s+([\d.]+)')
 
@@ -187,7 +189,7 @@ _VERDICTS = {
 def _find_baseline(explicit: str | None, current: Path) -> Path | None:
     if explicit:
         return Path(explicit)
-    runs = sorted(p for p in RESULTS.glob('loop-ab-*')
+    runs = sorted(p for p in (results_root() / 'loop_ab').glob('*')
                   if p.is_dir() and p != current
                   and (p / 'summary.json').exists())
     return runs[-1] if runs else None
@@ -206,13 +208,13 @@ def main() -> int:
     ap.add_argument('--gen-cpus', default=os.environ.get('GEN_CPUS', '6-11'))
     ap.add_argument('--noise-pct', type=float, default=DEFAULT_NOISE_PCT,
                     help='below this, a run-to-run difference is "unchanged"')
-    ap.add_argument('--tag', default=None, help='result directory suffix')
+    ap.add_argument('--tag', default=None, help='label for this run in reports')
     ap.add_argument('--repo', default=str(REPO),
                     help='checkout to serve from — point at a git worktree to '
                          'baseline a previous commit with this same harness')
     ap.add_argument('--baseline', default=None,
                     help='previous run dir to compare against '
-                         '(default: most recent loop-ab-* in bench/results)')
+                         '(default: the most recent loop_ab run)')
     ap.add_argument('--report', default=None,
                     help='re-render the table for an existing run dir instead '
                          'of measuring — cheap, and never perturbs a box that '
@@ -244,8 +246,7 @@ def main() -> int:
     print(f'serving from: {build}')
 
     stamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
-    outdir = RESULTS / f'loop-ab-{args.tag or stamp}'
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = run_dir('loop_ab', settings=vars(args))
 
     samples: dict[str, dict[str, list[float]]] = {}
     for rep in range(1, args.reps + 1):
@@ -260,7 +261,7 @@ def main() -> int:
 
     summary = {
         'stamp': stamp,
-        'tag': outdir.name,
+        'tag': args.tag or outdir.name,
         'path': args.path,
         'duration': args.duration,
         'threads': args.threads,

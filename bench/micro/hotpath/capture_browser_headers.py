@@ -22,7 +22,7 @@ get wrong, and that this captures for free:
 - **Header variation the model did not think of.**  Whatever Chrome actually
   does with `Priority`, `Sec-Fetch-*`, client hints and conditional requests.
 
-    python bench/micro/hotpath/capture_browser_headers.py --out capture.json
+    python bench/micro/hotpath/capture_browser_headers.py   # → <run>/capture.json
 """
 from __future__ import annotations
 
@@ -31,7 +31,10 @@ import asyncio
 import json
 import pathlib
 import subprocess
-import tempfile
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
+from bench.lib.results import run_dir  # noqa: E402
 
 # A page shaped like a real one: stylesheets, scripts, fonts, images, and an
 # XHR issued after load.  Counts are what matters, not the bytes.
@@ -113,7 +116,8 @@ EDGE = '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 
 async def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--out', type=pathlib.Path, required=True)
+    ap.add_argument('--out', type=pathlib.Path,
+                    help='default: capture.json in the run directory')
     ap.add_argument('--port', type=int, default=8788)
     ap.add_argument('--browser', default=EDGE)
     ap.add_argument('--settle', type=float, default=8.0)
@@ -122,7 +126,9 @@ async def main() -> int:
     sink: list[list[list[str]]] = []
     server = await serve(sink, args.port)
 
-    profile = tempfile.mkdtemp(prefix='hdrcap-')
+    run = run_dir('capture_browser_headers', settings={'port': args.port})
+    args.out = args.out or run / 'capture.json'
+    profile = run / 'tmp' / 'browser-profile'
     # Windows-side Chromium reaches a WSL2 listener through localhost
     # forwarding.  A throwaway profile keeps a warm cache or an existing
     # session from suppressing requests.

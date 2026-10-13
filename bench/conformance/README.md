@@ -25,9 +25,9 @@ The badge — not a number quoted in any doc — is the authoritative
 conformance claim; per-job artefacts (JUnit XML, reports) attach to each
 workflow run.
 
-The sections below cover running the suites **locally**.  Local first-run
-results are stored under `bench/conformance/results/` (gitignored) and are
-not published.
+The sections below cover running the suites **locally**.  Local runs write
+to their run directory under [`bench/results/`](../results/README.md)
+(`h2spec/`, `autobahn/`, `autobahn_heavy/`), which is not committed.
 
 ## Install h2spec
 
@@ -49,5 +49,5 @@ bash bench/conformance/h2spec_run.sh hpack    # HPACK section only
 bash bench/conformance/h2spec_run.sh http2/6.5  # specific section
 ```
 
-Output is teed to `bench/conformance/results/h2spec_<timestamp>.txt` and a
-JUnit XML report is written alongside.  Both are gitignored.
+Output is teed to `h2spec.txt` in the run directory and a JUnit XML report,
+`h2spec.xml`, is written alongside.

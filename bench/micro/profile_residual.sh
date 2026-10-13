@@ -6,7 +6,7 @@
 #   fix  = main tree (6ed22fa, the committed tip)
 #   base = e736c10, a git worktree so the editable install is never disturbed
 #
-# Output: bench/results/profile-residual-<TS>/<ref>_<lane>.prof + load logs.
+# Output: <ref>_<lane>.prof + load logs in the run directory (bench/lib/results.sh).
 set -uo pipefail
 
 REPO=/home/toshio/work/BlackBull
@@ -15,9 +15,9 @@ PORT="${PORT:-8450}"
 H1_N="${H1_N:-5000}"       # cProfile is ~100x slow; exact counts need no more
 H2_N="${H2_N:-5000}"
 CONNS=32
-TS=$(date -u +%Y%m%d-%H%M%SZ)
-OUT="${OUT:-bench/results/profile-residual-$TS}"
-mkdir -p "$OUT"
+source bench/lib/results.sh
+bench_run_dir profile_residual || exit 1
+OUT="$BENCH_RUN_DIR"
 cp "$0" "$OUT/profile_residual.sh"
 cp bench/micro/profile_server.py "$OUT/profile_server.py"
 

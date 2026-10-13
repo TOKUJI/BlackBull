@@ -3,14 +3,15 @@
 # given h2load markdown summary file.
 #
 # Usage:
-#   bash bench/ab/h2load/k6_run.sh bench/results/20260517-205529.md   # append to existing
-#   bash bench/ab/h2load/k6_run.sh                                     # create new file
+#   bash bench/ab/h2load/k6_run.sh <run>/20260517-205529.md   # append to existing
+#   bash bench/ab/h2load/k6_run.sh                             # create new file
 
 set -e
 
 BASE="https://localhost:8443"
-RESULT_DIR="bench/results"
-mkdir -p "$RESULT_DIR"
+source bench/lib/results.sh
+bench_run_dir h2load_k6 || exit 1
+RESULT_DIR="$BENCH_RUN_DIR"
 K6_RUNS="${K6_RUNS:-3}"
 
 # Use the supplied md file or create a new one

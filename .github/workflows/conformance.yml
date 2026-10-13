@@ -144,8 +144,7 @@ jobs:
         with:
           name: h2spec-results
           path: |
-            bench/conformance/results/h2spec_*.xml
-            bench/conformance/results/h2spec_*.txt
+            bench/results/h2spec/
             /tmp/h2spec_server.log
           retention-days: 30
           if-no-files-found: warn
@@ -223,7 +222,7 @@ jobs:
         with:
           name: autobahn-results
           path: |
-            bench/conformance/results/autobahn_*
+            bench/results/autobahn/
             /tmp/autobahn_server.log
           retention-days: 30
           # The tester writes reports at the end. Preserve progress logs and
@@ -295,7 +294,7 @@ jobs:
         with:
           name: autobahn-heavy-results
           path: |
-            bench/conformance/results/autobahn_*
+            bench/results/autobahn_heavy/
             /tmp/autobahn_server.log
           retention-days: 30
           # The tester writes reports at the end. Preserve progress logs and

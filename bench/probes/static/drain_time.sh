@@ -40,6 +40,9 @@ echo "  $EXTRA_ENV"
 echo "  c=$CONCURRENCY d=${DURATION}s"
 echo
 
+source bench/lib/results.sh
+bench_run_dir drain_time mode="$MODE"
+
 # Boot server.
 pkill -f static_repro/server_probe 2>/dev/null || true
 pkill -f bench/httparena/app 2>/dev/null || true
@@ -50,7 +53,7 @@ env $EXTRA_ENV \
     STATIC_DIR="$STATIC_DIR" \
     DATASET_PATH="$DATASET_PATH" \
     python3 bench/probes/static/server_probe.py --port "$PORT" \
-    >/tmp/drain_server.log 2>&1 &
+    >"$BENCH_RUN_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 trap 'kill -TERM $SERVER_PID 2>/dev/null || true' EXIT
 
@@ -65,7 +68,7 @@ echo "Idle FD count: $idle_fds"
 
 # Confirm setting took effect by inspecting the server log.
 grep -iE "use_custom_protocol|BlackBullProtocol|start_server|create_server" \
-    /tmp/drain_server.log | head -3 || true
+    "$BENCH_RUN_DIR/server.log" | head -3 || true
 echo
 
 # Run wrk for the burst.
@@ -112,7 +115,7 @@ else
 fi
 
 echo
-echo "Server log: /tmp/drain_server.log"
+echo "Server log: $BENCH_RUN_DIR/server.log"
 echo "Server still alive (pid=$SERVER_PID).  Caller: kill $SERVER_PID."
 
 # Don't kill on exit — let the next probe see a fresh state by

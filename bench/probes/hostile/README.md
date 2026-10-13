@@ -54,6 +54,10 @@ healthy?"** while the attack is active:
 
 ## Quick start
 
+`bash bench/probes/hostile/probe.sh` does all of this, keeping the server and
+attack logs in its run directory under [`bench/results/`](../../results/README.md).
+By hand:
+
 ```bash
 # Boot a local BlackBull server (uses bench/probes/static/server_probe.py
 # so SIGUSR1 task dumping works)
@@ -61,7 +65,7 @@ STATIC_DIR=$(pwd)/bench/httparena/_local/data/static/ \
 DATASET_PATH=$(pwd)/bench/httparena/_local/data/dataset.json \
 BB_ACCESS_LOG=0 \
   python3 bench/probes/static/server_probe.py --port 8080 \
-  >/tmp/hostile_server.log 2>&1 &
+  >server.log 2>&1 &
 export SERVER_PID=$!
 sleep 1
 

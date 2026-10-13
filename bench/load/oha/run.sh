@@ -12,11 +12,11 @@
 # We use a longer 30s measurement because WSL2 loopback is noisy.
 #
 # Usage:
-#   BASE=https://localhost:8443 OUTDIR=bench/results bash bench/load/oha/run.sh
+#   BASE=https://localhost:8443 bash bench/load/oha/run.sh
 #
 # Env:
 #   BASE      target URL          (default https://localhost:8443)
-#   OUTDIR    raw-log directory   (default bench/results)
+#   OUTDIR    raw-log directory   (default: a new run directory)
 #   LABEL     stack label         (default <none> — header only)
 #   DURATION  per-scenario time   (default 30 — seconds)
 
@@ -25,8 +25,12 @@
 # we don't want one scenario crash to abort the whole stack's run.
 
 BASE="${BASE:-https://localhost:8443}"
-OUTDIR="${OUTDIR:-bench/results}"
 LABEL="${LABEL:-}"
+if [ -z "${OUTDIR:-}" ]; then
+    source bench/lib/results.sh
+    bench_run_dir oha base="$BASE" label="${LABEL:-}" || exit 1
+    OUTDIR="$BENCH_RUN_DIR"
+fi
 LABEL_PREFIX="${LABEL_PREFIX:-}"
 D="${DURATION:-30}"
 
@@ -84,12 +88,12 @@ run_one "B5_64kb_c50"          50 ""                            "$BASE/64kb"
 # B6 + B7 — /echo POST. Skipped for static-only references (nginx).
 if [ "${SKIP_POST:-0}" != "1" ]; then
     # B6 — 1 KiB body via -D file (oha's -d string mangles binary bytes).
-    B6_BODY_FILE="/tmp/oha_1kb.bin"
+    B6_BODY_FILE="$OUTDIR/oha_1kb.bin"
     head -c 1024 /dev/urandom > "$B6_BODY_FILE"
     run_one "B6_echo_1kb"         100 "-m POST -T application/octet-stream -D $B6_BODY_FILE" "$BASE/echo"
     rm -f "$B6_BODY_FILE"
     # B7 — 100 KiB body.
-    B7_BODY_FILE="/tmp/oha_100kb.bin"
+    B7_BODY_FILE="$OUTDIR/oha_100kb.bin"
     head -c 102400 /dev/urandom > "$B7_BODY_FILE"
     run_one "B7_echo_100kb"        50 "-m POST -T application/octet-stream -D $B7_BODY_FILE" "$BASE/echo"
     rm -f "$B7_BODY_FILE"

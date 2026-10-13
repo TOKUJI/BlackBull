@@ -12,6 +12,7 @@ import pytest
 
 
 SCRIPTS = Path(__file__).parents[2] / 'bench/conformance'
+LIB = Path(__file__).parents[2] / 'bench/lib'
 PASS = {'BlackBull': {'13.3.10': {'behavior': 'OK', 'behaviorClose': 'OK'}}}
 
 
@@ -30,6 +31,7 @@ def harness(tmp_path):
         source = SCRIPTS / name
         if source.exists():
             shutil.copyfile(source, scripts / name)
+    shutil.copytree(LIB, tmp_path / 'bench/lib')
     bindir = tmp_path / 'bin'
     bindir.mkdir()
     _script(bindir / 'sleep', 'exit 0\n')
@@ -39,7 +41,8 @@ def harness(tmp_path):
             f'exec {shlex.quote(sys.executable)} "$@"\n')
     env = {**os.environ, 'PATH': f'{bindir}:{os.environ["PATH"]}',
            'CASES': '13.3.10', 'MAX_ATTEMPTS': '1', 'TMPDIR': str(tmp_path)}
-    env.pop('EXCLUDE_CASES', None)
+    for name in ('EXCLUDE_CASES', 'BENCH_RUN_DIR', 'BENCH_RESULTS_ROOT'):
+        env.pop(name, None)
     return tmp_path, scripts, bindir, env
 
 
@@ -197,6 +200,8 @@ counter.write_text(str(number))
 cases = os.environ['CASES'].split(',')
 with (root / 'runner-calls').open('a') as calls:
     calls.write(os.environ['CASES'] + '\\n')
+with (root / 'runner-dirs').open('a') as dirs:
+    dirs.write(os.environ['BENCH_RUN_DIR'] + '\\n')
 out = root / f'run-{number}'
 out.mkdir()
 mode = os.environ['RUNNER_MODE']
@@ -321,6 +326,8 @@ def test_heavy_retry_restarts_every_batch_without_carryover(harness):
     calls = (root / 'runner-calls').read_text().splitlines()
     assert len(calls) == 24
     assert calls[:12] == calls[12:]
+    dirs = (root / 'runner-dirs').read_text().splitlines()
+    assert len(set(dirs)) == 24
 
 
 @pytest.mark.parametrize(('report', 'accepted'), [
@@ -332,7 +339,7 @@ def test_heavy_retry_restarts_every_batch_without_carryover(harness):
 ])
 def test_assert_requires_nonempty_passing_report(harness, report, accepted):
     root, _, _, _ = harness
-    result = root / 'bench/conformance/results/autobahn_test'
+    result = root / 'bench/results/autobahn/20000101T000000Z-norev'
     result.mkdir(parents=True)
     if report is not None:
         (result / 'index.json').write_text(json.dumps(report))
@@ -345,7 +352,7 @@ def test_assert_requires_nonempty_passing_report(harness, report, accepted):
 ])
 def test_assert_preserves_accepted_case_verdicts(harness, behavior, close):
     root, _, _, _ = harness
-    result = root / 'bench/conformance/results/autobahn_test'
+    result = root / 'bench/results/autobahn/20000101T000000Z-norev'
     result.mkdir(parents=True)
     (result / 'index.json').write_text(json.dumps({
         'BlackBull': {'13.3.10': {'behavior': behavior, 'behaviorClose': close}},
@@ -413,7 +420,7 @@ def test_run_preserves_status_logs_and_container_state(harness, exit_code, creat
     _docker(harness, exit_code=exit_code, created=created)
     completed = _run(harness, 'autobahn_run.sh')
     assert completed.returncode == exit_code, completed.stderr
-    result, = (root / 'bench/conformance/results').iterdir()
+    result, = (root / 'bench/results/autobahn').iterdir()
     assert (result / 'exit-code.txt').read_text().strip() == str(exit_code)
     log = (result / 'tester.log').read_text()
     assert 'Running test case ID 13.3.10' in log
@@ -453,7 +460,7 @@ def test_run_cleanup_failures_cannot_turn_into_success_or_hide_runner_failure(
     completed = _run(harness, 'autobahn_run.sh')
 
     assert completed.returncode == expected_exit
-    result, = (root / 'bench/conformance/results').iterdir()
+    result, = (root / 'bench/results/autobahn').iterdir()
     assert (result / 'exit-code.txt').read_text().strip() == str(expected_exit)
 
 
@@ -470,7 +477,7 @@ def test_run_empty_cid_is_failure_without_hiding_runner_status(
     completed = _run(harness, 'autobahn_run.sh')
 
     assert completed.returncode == expected_exit
-    result, = (root / 'bench/conformance/results').iterdir()
+    result, = (root / 'bench/results/autobahn').iterdir()
     assert (result / 'exit-code.txt').read_text().strip() == str(expected_exit)
 
 
@@ -479,7 +486,7 @@ def test_run_directories_cannot_reuse_a_same_second_report(harness):
     _docker(harness)
     assert _run(harness, 'autobahn_run.sh').returncode == 0
     assert _run(harness, 'autobahn_run.sh').returncode == 0
-    results = list((root / 'bench/conformance/results').iterdir())
+    results = list((root / 'bench/results/autobahn').iterdir())
     assert len(results) == 2
 
 
@@ -489,5 +496,5 @@ def test_run_cleans_up_its_container_on_term(harness):
     completed = _run(harness, 'autobahn_run.sh')
     assert completed.returncode == 143
     assert (root / 'cleanup').read_text() == 'removed\n'
-    result, = (root / 'bench/conformance/results').iterdir()
+    result, = (root / 'bench/results/autobahn').iterdir()
     assert (result / 'exit-code.txt').read_text().strip() == '143'

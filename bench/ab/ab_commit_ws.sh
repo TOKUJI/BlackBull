@@ -38,7 +38,8 @@
 #                 Both are served by the same app, so switching this changes
 #                 the code path under test and nothing else.
 #
-# Output: bench/results/ab-ws-<UTC>/report.md + raw.tsv + k6 summaries.
+# Output: report.md + raw.tsv + k6 summaries in the run directory
+# (bench/lib/results.sh).
 
 set -uo pipefail
 
@@ -95,9 +96,10 @@ done
 
 cd "$REPO"
 
-TS="$(date -u +%Y%m%d-%H%M%S)"
-OUTDIR="bench/results/ab-ws-${TS}Z"
-mkdir -p "$OUTDIR"
+source bench/lib/results.sh
+bench_run_dir ab_commit_ws ref_base="$REF_BASE" ref_treat="$REF_TREAT" \
+    rounds="$ROUNDS" phases="$PHASES" ws_path="$WS_PATH" ws_vus="$WS_VUS" || exit 1
+OUTDIR="$BENCH_RUN_DIR"
 REPORT="$OUTDIR/report.md"
 RAW="$OUTDIR/raw.tsv"
 BASE_URL="http://127.0.0.1:${PORT}"

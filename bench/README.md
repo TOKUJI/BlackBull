@@ -5,6 +5,9 @@ HTTP/2 performance benchmarks for the BlackBull ASGI server.
 For connection behavior during startup and reload, see the
 [reload diagnostics](probes/reload/README.md).
 
+Every tool writes its output to its own run directory under
+[`bench/results/`](results/README.md); nothing goes to `/tmp`.
+
 ## Quick start
 
 ```bash
@@ -21,7 +24,7 @@ curl -sk https://localhost:8443/ping          # → pong
 curl -sk https://localhost:8443/metrics | python -m json.tool
 
 # 4. Run the full benchmark suite (in a second terminal)
-bash bench/ab/h2load/benchmark.sh               # → bench/results/YYYYMMDD-HHMMSS.md
+bash bench/ab/h2load/benchmark.sh               # → <run>/YYYYMMDD-HHMMSS.md
 bash bench/ab/h2load/benchmark.sh --quick       # RUNS=1, K6_RUNS=1 (smoke-check, ~3 min)
 bash bench/ab/h2load/benchmark.sh --no-profile  # skip py-spy
 ```
@@ -40,15 +43,15 @@ loop lag snapshot from `/metrics`, and writes everything to a single dated markd
 **Standalone use** (without `benchmark.sh`):
 
 ```bash
-bash bench/ab/h2load/h2load_run.sh                             # → bench/results/YYYYMMDD-HHMMSS.md
-bash bench/ab/h2load/k6_run.sh bench/results/YYYYMMDD-HHMMSS.md  # appends k6 section to same file
+bash bench/ab/h2load/h2load_run.sh                    # → <run>/YYYYMMDD-HHMMSS.md
+bash bench/ab/h2load/k6_run.sh <run>/YYYYMMDD-HHMMSS.md  # appends k6 section to same file
 k6 run bench/load/k6/websocket.js
 ```
 
 To regenerate a summary from an existing raw log:
 
 ```bash
-python bench/ab/h2load/summarize.py bench/results/raw_20260517-201141.txt
+python bench/ab/h2load/summarize.py <run>/raw_20260517-201141.txt
 ```
 
 ## Server configuration
@@ -91,7 +94,7 @@ scripts track this with a custom `http2_ok` Rate metric and a `threshold: rate >
 ### h2load_run.sh — HTTP/2 stream multiplexing
 
 Compares stream depth 1 (HTTP/1.1-equivalent), 10 (browser-like), and 50 (heavy mux) on the
-same connection count.  Outputs a markdown summary to `bench/results/`.
+same connection count.  Outputs a markdown summary to its run directory.
 
 Request counts are sized so every scenario runs ≥ 1.4 s at 12-worker+uvloop throughput,
 keeping TLS-setup fraction below 2%.  The summary file flags any scenario where TLS% > 2% with ⚠.
