@@ -5615,8 +5615,8 @@ on port 8443. Then run:</p>
 bash<span class="w"> </span>bench/conformance/h2spec_run.sh<span class="w"> </span>hpack
 bash<span class="w"> </span>bench/conformance/h2spec_run.sh<span class="w"> </span>http2/6.5
 </code></pre></div>
-<p>Results are saved as bench/conformance/results/h2spec_<timestamp>.txt and
-.xml. Read the final test/failure counts and process status; XML is JUnit.
+<p>Results are saved as h2spec.txt and h2spec.xml in the run directory,
+bench/results/h2spec/<UTC time>-<revision>/. Read the final test/failure counts and process status; XML is JUnit.
 RFC 8441, response validation and BlackBull resource-policy cases also need
 the in-tree tests.</p>
 <h2 id="websocket-autobahn">WebSocket — Autobahn<a class="headerlink" href="#websocket-autobahn" title="Permanent link">&para;</a></h2>
@@ -5627,7 +5627,7 @@ bash<span class="w"> </span>bench/conformance/autobahn_run.sh
 <p>Use <code>CASES='1.*'</code> for a subset. Full limits cases need messages up to 16 MiB;
 if you lower frame/message caps, record that configuration when interpreting
 those refusals.</p>
-<p>Reports are under bench/conformance/results/autobahn_<timestamp>.<unique>/.
+<p>Reports are under bench/results/autobahn/<UTC time>-<revision>/.
 Keep index.json/index.html, tester.log, exit-code.txt and container-state.json
 when present. Missing reports, timeout, OOM and protocol failure are distinct
 outcomes. A successful report from a failed process is not a pass; a failed
