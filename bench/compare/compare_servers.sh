@@ -128,11 +128,15 @@ compute_base() {
     esac
 }
 
-RESULT_DIR="bench/results"
-mkdir -p "$RESULT_DIR"
+source bench/lib/results.sh
+bench_run_dir compare_servers stacks="$STACKS" lanes="$LANES" runs="$RUNS" \
+    duration="$DURATION" topology="$([ "$BENCH_REMOTE_LIFECYCLE" = 1 ] && echo split || echo single)" \
+    || exit 1
 TS="$(date +%Y%m%d-%H%M%S)"
-OUT="$RESULT_DIR/compare_servers_${TS}.md"
-SCRATCH="$RESULT_DIR/scratch_${TS}"
+OUT="$BENCH_RUN_DIR/report.md"
+# Repo-relative: in split topology the server instance writes its own files
+# under the same path ($BENCH_REMOTE_REPO/$SCRATCH).
+SCRATCH="${BENCH_RUN_DIR#"$PWD"/}/scratch"
 mkdir -p "$SCRATCH"
 
 # Locate mkcert CA so curl/h2load/k6 trust the self-signed cert.
@@ -688,7 +692,7 @@ bench_stack() {
         fi
         {
             echo ""
-            echo "**$stack failed to start** — see \`scratch_${TS}/server_${stack}.log\`."
+            echo "**$stack failed to start** — see \`scratch/server_${stack}.log\`."
             echo ""
         } >> "$OUT"
         return 0

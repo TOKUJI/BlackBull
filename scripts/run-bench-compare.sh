@@ -10,18 +10,13 @@ fi
 [ "$#" -eq 0 ] || { echo "unknown argument: $1" >&2; exit 2; }
 
 cd "$ROOT"
+source bench/lib/results.sh
+bench_run_dir bench_compare
 bash bench/compare/compare_servers.sh
 
-report="$(ls -1t bench/results/compare_servers_*.md 2>/dev/null | head -1 || true)"
-[ -n "$report" ] || { echo "run-bench-compare: result report not found" >&2; exit 1; }
-marker="bench/results/bench-compare-$(date -u +%Y%m%dT%H%M%SZ)-$$.complete.json"
-marker_tmp="$(mktemp "bench/results/.bench-compare.XXXXXX")"
-trap 'rm -f -- "$marker_tmp"' EXIT HUP INT TERM
-jq -nc \
-    --arg report "$report" \
-    --arg revision "$(git rev-parse HEAD)" \
+[ -s "$BENCH_RUN_DIR/report.md" ] || { echo "run-bench-compare: result report not found" >&2; exit 1; }
+jq -nc --arg report "$BENCH_RUN_DIR/report.md" --arg revision "$(git rev-parse HEAD)" \
     '{workflow:"bench-compare",complete:true,report:$report,revision:$revision}' \
-    > "$marker_tmp"
-mv "$marker_tmp" "$marker"
-trap - EXIT HUP INT TERM
-echo "$marker"
+    > "$BENCH_TMP/complete.json"
+mv "$BENCH_TMP/complete.json" "$BENCH_RUN_DIR/complete.json"
+echo "$BENCH_RUN_DIR/complete.json"

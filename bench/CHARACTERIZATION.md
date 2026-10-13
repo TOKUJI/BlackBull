@@ -260,9 +260,9 @@ sprint scope:
 | 10-30 % | ~1× | Microbench % ≈ throughput % |
 | < 10 % | sub-cascade (~0.2-0.5×) | Don't pursue unless the change is trivial or buys something other than throughput (clarity, correctness) |
 
-Capture the share with `bench/cloud/profile_lanes.sh` (Sprint 27 — wrk-driven
-py-spy on EC2 split topology, one speedscope JSON per lane).  The
-"Left Heavy" view in speedscope.app reads off the share directly.
+Capture the share with `bench/micro/profile_under_load.sh` (py-spy, one
+speedscope JSON per run).  The "Left Heavy" view in speedscope.app reads off
+the share directly.
 
 ## Known limitations
 

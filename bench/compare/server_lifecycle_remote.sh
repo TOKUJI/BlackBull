@@ -106,7 +106,6 @@ case "$cmd" in
             "${taskset_prefix[@]}" \
             bash bench/compare/run_peer.sh "$stack" "$port" "$cert" "$key" \
             </dev/null >"$logfile_rel" 2>&1 &
-        echo $! > /tmp/bench_server.pid
         disown
         ;;
 
@@ -122,7 +121,6 @@ case "$cmd" in
         pkill -9 -f "uvicorn"              2>/dev/null || true
         pkill -9 -f "granian"              2>/dev/null || true
         pkill -9 -f "daphne"               2>/dev/null || true
-        pkill -9 -f "nginx.*bench/peers"   2>/dev/null || true
         for _ in $(seq 1 20); do
             if ! ss -tln 2>/dev/null | grep -q ":$BASE_PORT "; then
                 exit 0

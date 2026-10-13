@@ -17,7 +17,7 @@
 #   - aws ec2 create-security-group + authorize-security-group-ingress
 #   - aws ec2 create-placement-group         (TOPO=split only)
 #   - aws ec2 run-instances                  (1 or 2 instances)
-#   - bench/cloud/.state                       (full topology snapshot)
+#   - $STATE_FILE (bench/.state/aws)          (full topology snapshot)
 
 set -euo pipefail
 
@@ -32,6 +32,7 @@ if [ -f "$STATE_FILE" ]; then
     exit 1
 fi
 rm -f "${STATE_FILE}.clean"
+mkdir -p "$(dirname "$STATE_FILE")"
 
 case "$TOPO" in
     single|split) ;;
@@ -55,7 +56,7 @@ PLACEMENT_GROUP_OWNED=0
 persist_state() {
     local temporary
     umask 077
-    temporary="$(mktemp "${STATE_FILE}.tmp.XXXXXX")"
+    temporary="${STATE_FILE}.tmp.$$"
     cat > "$temporary" <<EOF
 # bench/cloud state written by up.sh
 TOPO="$TOPO"
@@ -73,8 +74,6 @@ RUN_TOKEN="$RUN_TOKEN"
 KEY_PAIR_OWNED="$KEY_PAIR_OWNED"
 SECURITY_GROUP_OWNED="$SECURITY_GROUP_OWNED"
 PLACEMENT_GROUP_OWNED="$PLACEMENT_GROUP_OWNED"
-INSTANCE_ID="$SERVER_INSTANCE_ID"
-PUBLIC_IP="$SERVER_PUBLIC_IP"
 EOF
     mv "$temporary" "$STATE_FILE"
 }

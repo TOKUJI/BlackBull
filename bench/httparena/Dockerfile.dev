@@ -5,10 +5,10 @@
 FROM python:3.13-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
-COPY blackbull-*.whl /tmp/
+COPY blackbull-*.whl /wheels/
 # asyncpg + redis back the async-db / crud profiles (Postgres + Redis sidecars).
-RUN cd /tmp && WHEEL=$(ls blackbull-*.whl) && \
-    pip install --no-cache-dir "/tmp/${WHEEL}[compression]" asyncpg redis
+RUN cd /wheels && WHEEL=$(ls blackbull-*.whl) && \
+    pip install --no-cache-dir "/wheels/${WHEEL}[compression]" asyncpg redis
 VOLUME /results
 COPY app.py launcher.py db.py grpc_bench.py ./
 EXPOSE 8080 8081 8443

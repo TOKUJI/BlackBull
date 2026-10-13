@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Executed bytecode instructions per request — the parameter-free instrument.
 
-The bytecode *size* diff (``disasm_hot.py``) counts instructions present in a
+A bytecode *size* diff counts instructions present in a
 code object, not instructions run, so turning it into a time needs two guesses:
 how much of each function executes, and how long an instruction takes.  Two
 free parameters fitted to one measured number is not evidence.

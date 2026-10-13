@@ -210,10 +210,9 @@ def _parse_args():
     p.add_argument('--cert', default='cert.pem')
     p.add_argument('--key',  default='key.pem')
     p.add_argument('--no-tls', action='store_true',
-                   help='Listen on plain HTTP (no TLS).  Used by the profile '
-                        'lanes to isolate framework cost from TLS-stack cost; mirrors '
-                        'the common production topology where TLS is offloaded to '
-                        'nginx.  See bench/cloud/profile_lanes.sh BB_TLS=0.')
+                   help='Listen on plain HTTP (no TLS): isolates framework cost '
+                        'from TLS-stack cost, as in the common production topology '
+                        'where nginx terminates TLS.')
     p.add_argument('--grpc', action='store_true',
                    help='Enable the benchmark.BenchmarkService/GetSum unary gRPC '
                         'method (bench/httparena/grpc_bench.py) alongside the HTTP '

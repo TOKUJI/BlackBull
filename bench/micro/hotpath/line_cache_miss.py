@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What the validated header-line cache costs when it never hits.
 
-`parser_micro.py` reuses one actor and one byte-identical request, which is the
+`../parser_microbench.py` reuses one actor and one byte-identical request, which is the
 keep-alive case the cache is designed for and therefore its best case.  This is
 the other end: every request carries header *values* this connection has never
 seen, so every lookup misses and the dict work is pure overhead.  A real client
