@@ -17,7 +17,7 @@ ROOT = Path(__file__).parents[2]
 
 def test_aws_drivers_are_valid_shell_and_use_detached_launch_contract():
     for name in ('ab.sh', 'run.sh'):
-        script = ROOT / 'bench' / 'aws' / name
+        script = ROOT / 'bench' / 'cloud' / name
         subprocess.run(('bash', '-n', str(script)), check=True)
         source = script.read_text()
         assert 'ssh -n "${SSH_OPTS[@]}"' in source
@@ -111,7 +111,7 @@ def test_ab_launch_detaches_remote_runner_and_returns(tmp_path):
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'launch'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'launch'),
         check=True,
         capture_output=True,
         text=True,
@@ -138,7 +138,7 @@ def test_ab_launch_records_expected_lines_for_selected_phases(tmp_path):
     })
 
     subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'launch'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'launch'),
         check=True,
         capture_output=True,
         text=True,
@@ -166,7 +166,7 @@ def test_ab_launch_counts_phases_across_shell_whitespace(tmp_path):
     })
 
     subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'launch'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'launch'),
         check=True,
         capture_output=True,
         text=True,
@@ -213,7 +213,7 @@ def test_ab_launch_rejects_invalid_measurement_configuration(
     env.update({'STATE_FILE': str(state), 'AB_LAUNCH_TIMEOUT': '2', **override})
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'launch'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'launch'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -256,7 +256,7 @@ def test_ab_launch_rejects_empty_profile_entries(tmp_path, override, message):
     env.update({'STATE_FILE': str(state), **override})
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'launch'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'launch'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -274,7 +274,7 @@ def test_ab_launch_reports_upload_failure(tmp_path):
     env.update({'STATE_FILE': str(state)})
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'launch'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'launch'),
         capture_output=True,
         text=True,
         env=env,
@@ -290,7 +290,7 @@ def test_ab_launch_reports_runner_exit_during_handshake(tmp_path):
     env.update({'STATE_FILE': str(state), 'AB_LAUNCH_TIMEOUT': '2'})
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'launch'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'launch'),
         capture_output=True,
         text=True,
         env=env,
@@ -310,7 +310,7 @@ def test_ab_launch_has_a_bounded_ssh_handshake(tmp_path):
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'launch'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'launch'),
         capture_output=True,
         text=True,
         timeout=8,
@@ -331,7 +331,7 @@ def test_ab_finish_uses_launch_expected_lines_when_rounds_differs(tmp_path):
     })
 
     subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'launch'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'launch'),
         check=True,
         capture_output=True,
         text=True,
@@ -355,7 +355,7 @@ def test_ab_finish_uses_launch_expected_lines_when_rounds_differs(tmp_path):
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         check=True,
         capture_output=True,
         text=True,
@@ -392,7 +392,7 @@ def test_ab_finish_multi_lane_complete_state(
     })
 
     subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'launch'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'launch'),
         check=True,
         capture_output=True,
         text=True,
@@ -422,7 +422,7 @@ def test_ab_finish_multi_lane_complete_state(
         'TEARDOWN': '0',
     })
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -459,7 +459,7 @@ def test_ab_finish_current_run_rejects_an_extra_result_directory(tmp_path):
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -489,7 +489,7 @@ def test_ab_finish_falls_back_when_launch_metadata_is_missing(tmp_path):
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         check=True,
         capture_output=True,
         text=True,
@@ -524,7 +524,7 @@ def test_ab_finish_legacy_run_requires_every_discovered_result(tmp_path):
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -554,7 +554,7 @@ def test_ab_finish_explicit_expected_lines_supports_legacy_recovery(tmp_path):
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         check=True,
         capture_output=True,
         text=True,
@@ -589,7 +589,7 @@ def test_ab_finish_explicit_expected_lines_overrides_launch_metadata(tmp_path):
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         check=True,
         capture_output=True,
         text=True,
@@ -633,7 +633,7 @@ def test_ab_finish_explicit_expected_lines_keeps_protocol_checks(
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -718,7 +718,7 @@ def test_ab_finish_complete_state_contract(
     })
 
     completed_process = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -748,7 +748,7 @@ def test_ab_finish_fails_when_remote_poll_fails(tmp_path, fail_env, log_msg):
     env.update(fail_env)
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -785,7 +785,7 @@ def test_ab_finish_fails_when_remote_result_list_fails(tmp_path, fail_env, log_m
     env.update(fail_env)
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -819,7 +819,7 @@ def test_ab_finish_fails_when_runner_status_is_nonzero(tmp_path):
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -852,7 +852,7 @@ def test_ab_finish_fails_when_new_runner_success_marker_is_missing(tmp_path):
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -884,7 +884,7 @@ def test_ab_finish_fails_on_malformed_launch_metadata(tmp_path, lines_content):
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -922,7 +922,7 @@ def test_ab_finish_rejects_invalid_expected_result_count_metadata(
     })
 
     completed = subprocess.run(
-        ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+        ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
         capture_output=True,
         text=True,
         timeout=5,
@@ -983,7 +983,7 @@ def test_ab_finish_ignores_a_foreign_runner_process(tmp_path):
     )
     try:
         completed = subprocess.run(
-            ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+            ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
             capture_output=True, text=True, timeout=10, env=env,
         )
     finally:
@@ -1023,7 +1023,7 @@ def test_ab_finish_waits_while_its_own_runner_is_alive(tmp_path):
 
     try:
         completed = subprocess.run(
-            ('bash', str(ROOT / 'bench/aws/ab.sh'), 'finish'),
+            ('bash', str(ROOT / 'bench/cloud/ab.sh'), 'finish'),
             capture_output=True, text=True, timeout=10, env=env,
         )
     finally:

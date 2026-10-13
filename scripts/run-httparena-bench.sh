@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 META="$ROOT/bench/httparena/meta.json"
-DRIVER="$ROOT/bench/aws/httparena_compare.sh"
+DRIVER="$ROOT/bench/cloud/httparena_compare.sh"
 
 profiles_json="$(jq -ce \
     'if (.tests | type == "array" and length > 0 and all(.[]; type == "string" and length > 0)) then .tests else error("invalid tests") end' \
@@ -17,8 +17,8 @@ case "${1:-}" in
         exit 0
         ;;
     --preflight)
-        bash -n "$ROOT/bench/aws/up.sh" "$ROOT/bench/aws/install.sh" \
-            "$DRIVER" "$ROOT/bench/aws/down.sh"
+        bash -n "$ROOT/bench/cloud/up.sh" "$ROOT/bench/cloud/install.sh" \
+            "$DRIVER" "$ROOT/bench/cloud/down.sh"
         jq -nc '{workflow:"httparena-bench",ready:true}'
         exit 0
         ;;
@@ -36,7 +36,7 @@ if [ "${KEEP_INSTANCE:-0}" != "0" ] || [ "${SKIP_PROVISION:-0}" != "0" ]; then
 fi
 
 cd "$ROOT"
-state_file="${STATE_FILE:-$ROOT/bench/aws/.state}"
+state_file="${STATE_FILE:-$ROOT/bench/cloud/.state}"
 teardown_proof="${state_file}.clean"
 [ ! -e "$state_file" ] || {
     echo "run-httparena-bench: an existing AWS harness state must be handled first" >&2
@@ -48,7 +48,7 @@ cleanup() {
     local rc=$?
     trap - EXIT HUP INT TERM
     if [ "$owns_run" -eq 1 ] && [ -f "$state_file" ]; then
-        if ! STATE_FILE="$state_file" bash bench/aws/down.sh; then
+        if ! STATE_FILE="$state_file" bash bench/cloud/down.sh; then
             rc=1
         fi
     fi

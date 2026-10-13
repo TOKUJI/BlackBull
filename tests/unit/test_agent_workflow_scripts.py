@@ -58,7 +58,7 @@ def test_bench_compare_delegates_defaults_to_authoritative_driver() -> None:
     result = plan("bench-compare")
     assert result == {
         "workflow": "bench-compare",
-        "command": ["bash", "bench/peers/compare_servers.sh"],
+        "command": ["bash", "bench/compare/compare_servers.sh"],
     }
 
 

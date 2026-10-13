@@ -12,7 +12,7 @@ import pytest
 
 @pytest.fixture
 def probe():
-    path = Path(__file__).resolve().parents[2] / 'bench/reload/probe.py'
+    path = Path(__file__).resolve().parents[2] / 'bench/probes/reload/probe.py'
     spec = importlib.util.spec_from_file_location('reload_probe', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

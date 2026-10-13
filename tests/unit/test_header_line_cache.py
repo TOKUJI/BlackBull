@@ -285,7 +285,7 @@ def test_admission_happens_on_the_first_request():
     gave -16.6 % where immediate admission gives -23.2 %, and at two requests
     it turned a break-even into +13.9 %.  Parse is ~11 % of server CPU, so the
     connection-per-request cost is ~+2 % CPU on a shape that is a minority of
-    real traffic.  Numbers: bench/hotpath/line_cache_churn.py.
+    real traffic.  Numbers: bench/micro/hotpath/line_cache_churn.py.
     """
     warm = _actor()
     warm._parse(_req(b'User-Agent: probe'))

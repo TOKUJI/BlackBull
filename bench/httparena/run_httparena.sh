@@ -2,7 +2,7 @@
 # bench/httparena/run_httparena.sh — runs on EC2 instance.
 #
 # Runs HttpArena validate.sh + benchmark.sh for the given frameworks
-# and profiles.  Called by bench/aws/httparena_compare.sh via scp + exec.
+# and profiles.  Called by bench/cloud/httparena_compare.sh via scp + exec.
 #
 # Args: <frameworks_csv> <profiles_csv> [skip_validate]
 #   frameworks_csv  — comma-separated: "blackbull,fastapi"

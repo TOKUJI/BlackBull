@@ -2,7 +2,7 @@
 # bench/httparena/build_wheel.sh — build a BlackBull wheel from a git ref for
 # the HttpArena local-validation / EC2 workflow.
 #
-# Same discipline as the EC2 path (bench/aws/httparena_compare.sh): the wheel
+# Same discipline as the EC2 path (bench/cloud/httparena_compare.sh): the wheel
 # is built from `git archive <ref>` — a clean tree of exactly that commit —
 # never from the working copy.  The wheel's sha256 is written alongside it so
 # the identity discipline holds end-to-end: WSL2 validates wheel W, EC2 uploads

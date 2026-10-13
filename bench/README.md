@@ -3,17 +3,17 @@
 HTTP/2 performance benchmarks for the BlackBull ASGI server.
 
 For connection behavior during startup and reload, see the
-[reload diagnostics](reload/README.md).
+[reload diagnostics](probes/reload/README.md).
 
 ## Quick start
 
 ```bash
 # 1. Install tools (once)
-bash bench/install.sh
+bash bench/load/install.sh
 pip install "blackbull[speed]"      # uvloop (optional, recommended)
 
 # 2. Start the benchmark server
-BB_WORKERS=12 BB_UVLOOP=1 python bench/app.py --port 8443 \
+BB_WORKERS=12 BB_UVLOOP=1 python bench/ab/h2load/app.py --port 8443 \
     --cert tests/cert.pem --key tests/key.pem
 
 # 3. Verify
@@ -21,9 +21,9 @@ curl -sk https://localhost:8443/ping          # → pong
 curl -sk https://localhost:8443/metrics | python -m json.tool
 
 # 4. Run the full benchmark suite (in a second terminal)
-bash bench/benchmark.sh               # → bench/results/YYYYMMDD-HHMMSS.md
-bash bench/benchmark.sh --quick       # RUNS=1, K6_RUNS=1 (smoke-check, ~3 min)
-bash bench/benchmark.sh --no-profile  # skip py-spy
+bash bench/ab/h2load/benchmark.sh               # → bench/results/YYYYMMDD-HHMMSS.md
+bash bench/ab/h2load/benchmark.sh --quick       # RUNS=1, K6_RUNS=1 (smoke-check, ~3 min)
+bash bench/ab/h2load/benchmark.sh --no-profile  # skip py-spy
 ```
 
 `benchmark.sh` is the recommended entry point.  It queries `/config` to record the actual
@@ -40,15 +40,15 @@ loop lag snapshot from `/metrics`, and writes everything to a single dated markd
 **Standalone use** (without `benchmark.sh`):
 
 ```bash
-bash bench/h2load_run.sh                             # → bench/results/YYYYMMDD-HHMMSS.md
-bash bench/k6_run.sh bench/results/YYYYMMDD-HHMMSS.md  # appends k6 section to same file
-k6 run bench/k6/websocket.js
+bash bench/ab/h2load/h2load_run.sh                             # → bench/results/YYYYMMDD-HHMMSS.md
+bash bench/ab/h2load/k6_run.sh bench/results/YYYYMMDD-HHMMSS.md  # appends k6 section to same file
+k6 run bench/load/k6/websocket.js
 ```
 
 To regenerate a summary from an existing raw log:
 
 ```bash
-python bench/summarize.py bench/results/raw_20260517-201141.txt
+python bench/ab/h2load/summarize.py bench/results/raw_20260517-201141.txt
 ```
 
 ## Server configuration
@@ -103,7 +103,7 @@ Shows the VU count at which p99 latency starts climbing — the saturation point
 worker count.
 
 ```bash
-k6 run bench/k6/http_rampup.js
+k6 run bench/load/k6/http_rampup.js
 ```
 
 ### http_stress.js — constant-load stress (HTTP/2)
@@ -112,8 +112,8 @@ k6 run bench/k6/http_rampup.js
 Finds the hard error ceiling and compares `/ping` vs `/64kb` throughput at the same concurrency.
 
 ```bash
-k6 run bench/k6/http_stress.js
-k6 run -e TARGET=/64kb bench/k6/http_stress.js
+k6 run bench/load/k6/http_stress.js
+k6 run -e TARGET=/64kb bench/load/k6/http_stress.js
 ```
 
 ### websocket.js — WebSocket RTT
@@ -142,7 +142,7 @@ each wakeup actually occurred.  Non-zero lag means the loop was busy and could n
 the timer on time.
 
 ```python
-from bench.lag_monitor import LoopLagMonitor
+from bench.ab.h2load.lag_monitor import LoopLagMonitor
 
 monitor = LoopLagMonitor(interval=0.05, window=400)
 
