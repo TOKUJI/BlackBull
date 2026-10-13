@@ -16,6 +16,7 @@ import itertools
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import time
@@ -36,15 +37,14 @@ def _git(*args: str) -> str:
         return ''
 
 
-def _sequence(run: Path) -> tuple[str, int]:
-    """``<stamp>-<rev>[-<n>]`` → (stamp, n): creation order."""
-    stamp, _, n = (run.name.split('-') + ['1'])[:3]
-    return stamp, int(n)
+_RUN_NAME = re.compile(r'(\d{8}T\d{6}Z)-\w+(?:-(\d+))?')
 
 
 def latest_run(tool: str) -> Path | None:
-    runs = [p for p in (results_root() / tool).glob('*') if p.is_dir()]
-    return max(runs, key=_sequence, default=None)
+    """The newest ``<stamp>-<rev>[-<n>]`` run of *tool*; other names are ignored."""
+    runs = [(m[1], int(m[2] or 1), p) for p in (results_root() / tool).glob('*')
+            if p.is_dir() and (m := _RUN_NAME.fullmatch(p.name))]
+    return max(runs, default=(None, None, None))[2]
 
 
 def run_dir(tool: str, settings: dict | None = None, argv: list[str] | None = None) -> Path:
@@ -53,6 +53,7 @@ def run_dir(tool: str, settings: dict | None = None, argv: list[str] | None = No
     if named := os.environ.get('BENCH_RUN_DIR'):
         run = Path(named)
         if run.exists():
+            (run / 'tmp').mkdir(exist_ok=True)
             return run
         run.mkdir(parents=True)
     else:

@@ -81,8 +81,19 @@ def test_the_latest_run_of_a_tool_is_found_without_naming_the_root(root):
     results.run_dir('probe')
     newest = results.run_dir('probe')
 
+    (root / 'probe' / 'my-hand-made-run').mkdir()
+    (root / 'probe' / 'zzz').mkdir()
+
     assert results.latest_run('probe') == newest
     assert _shell('bench_latest_run probe', root) == [str(newest)]
+
+
+def test_joining_an_existing_directory_provides_its_tmp(root):
+    existing = root / 'by-hand'
+    existing.mkdir()
+    tmp, = _shell('bench_run_dir x && echo "$TMPDIR"', root, BENCH_RUN_DIR=str(existing))
+
+    assert Path(tmp) == existing / 'tmp' and Path(tmp).is_dir()
 
 
 def test_the_default_root_is_bench_results(monkeypatch):
