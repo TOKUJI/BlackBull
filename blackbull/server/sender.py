@@ -17,8 +17,8 @@ from ..protocol import hpack_fastpath
 from ..env import get_settings
 from ..protocol.framing import (NO_CONTENT_GENERATED_STATUSES, is_informational,
                                 parse_content_length)
-from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
-                                    FrameBase,
+from ..protocol.frame_types import (HeaderFrameFlags, DataFrameFlags,
+                                    FrameBase, Headers, PushPromise, serialize_field_block,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
 from .cap_log import log_cap_hit
 from .constants import WSCloseCode
@@ -112,11 +112,9 @@ def _http_date() -> bytes:
     return _HTTP_DATE
 
 
-# Builders and frame objects must evolve the shared encoder identically.
-# Outbound field blocks currently fit one frame; fragmentation needs a shared fallback.
-
 def build_response_headers(encoder, stream_id: int, status,
-                           headers, *, end_stream: bool) -> bytes:
+                           headers, *, end_stream: bool,
+                           max_frame_size: int = DEFAULT_MAX_FRAME_SIZE) -> bytes:
     """Encode response HEADERS, adding Date when absent."""
     headers = _as_response_fields(headers)
     fields = headers if headers.date else (*headers, (b'date', _http_date()))
@@ -126,22 +124,16 @@ def build_response_headers(encoder, stream_id: int, status,
     flags = HeaderFrameFlags.END_HEADERS.value
     if end_stream:
         flags |= HeaderFrameFlags.END_STREAM.value
-    return (len(payload).to_bytes(3, 'big') + FrameTypes.HEADERS.value
-            + flags.to_bytes(1, 'big') + stream_id.to_bytes(4, 'big') + payload)
+    return serialize_field_block(payload, b'\x01', flags, stream_id, max_frame_size)
 
 
-def build_trailers(encoder, stream_id: int, headers) -> bytes:
-    """Encode a trailers HEADERS frame (END_HEADERS | END_STREAM, no
-    pseudo-headers) to wire bytes.
-
-    This is the basis for the gRPC ``grpc-status`` trailers path — a unary
-    RPC response carries a second HEADERS frame with regular fields only.
-    """
+def build_trailers(encoder, stream_id: int, headers, *,
+                   max_frame_size: int = DEFAULT_MAX_FRAME_SIZE) -> bytes:
+    """Encode a terminal field section without pseudo-headers."""
     headers = _as_response_fields(headers)
     payload = encoder.encode(headers)
     flags = HeaderFrameFlags.END_HEADERS.value | HeaderFrameFlags.END_STREAM.value
-    return (len(payload).to_bytes(3, 'big') + FrameTypes.HEADERS.value
-            + flags.to_bytes(1, 'big') + stream_id.to_bytes(4, 'big') + payload)
+    return serialize_field_block(payload, b'\x01', flags, stream_id, max_frame_size)
 
 
 class AbstractWriter(ABC):
@@ -959,15 +951,15 @@ class HTTP2Sender(BaseSender):
       ``await sender({'type': 'http.response.start', ...})``
       ``await sender({'type': 'http.response.body', ...})``
 
-    **Control-plane** (raw FrameBase instance):
+    **Frame object** (FrameBase instance):
       ``await sender(settings_frame)``
-      Serialises and writes the frame directly.
+      Field blocks are fragmented within the peer frame-size limit.
     """
 
     __slots__ = (
         '_factory', '_stream_id', '_push_callback',
         '_conn_window', 'stream_window_size',
-        'max_frame_size', '_window_open', '_end_stream_sent',
+        '_window_open', '_end_stream_sent',
         '_flow_control_timeout',
         '_flow_control_cap',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
@@ -995,7 +987,6 @@ class HTTP2Sender(BaseSender):
         # Use the peer SETTINGS window for senders created after negotiation.
         self.stream_window_size = (DEFAULT_INITIAL_WINDOW_SIZE
                                    if initial_window is None else initial_window)
-        self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._window_open: asyncio.Event | None = None
         # How long the peer may take to grant flow-control credit before the
         # stream gives up.
@@ -1019,6 +1010,14 @@ class HTTP2Sender(BaseSender):
         # arms below rather than through a capturing ``send`` wrapper, which is
         # dict-shaped and so would never match the native seam.
         self._log_record = None
+
+    @property
+    def max_frame_size(self) -> int:
+        return self._factory.peer_max_frame_size
+
+    @max_frame_size.setter
+    def max_frame_size(self, value: int) -> None:
+        self._factory.peer_max_frame_size = value
 
     @property
     def connection_window_size(self) -> int:
@@ -1081,7 +1080,8 @@ class HTTP2Sender(BaseSender):
         self._suppress_body = forbidden
         h_bytes = build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
-            end_stream=forbidden and not informational)
+            end_stream=forbidden and not informational,
+            max_frame_size=self.max_frame_size)
         if forbidden:
             await self._write(h_bytes)
             if not is_informational(status):
@@ -1171,23 +1171,14 @@ class HTTP2Sender(BaseSender):
     async def send_response_headers(
         self, status: HTTPStatus, headers: list[tuple[bytes, bytes]],
     ) -> None:
-        """Write a standalone HEADERS frame (END_HEADERS, no END_STREAM) now.
-
-        Unlike the ``http.response.start`` event — which is buffered until a
-        body event so HEADERS + first DATA can coalesce into one write — this
-        flushes the response HEADERS immediately and leaves the stream open.
-        Required by the RFC 8441 WebSocket-over-HTTP/2 accept: the
-        ``:status 200`` response carries no body, so nothing would ever trigger
-        the deferred flush, and the stream must stay open bidirectionally for
-        the subsequent WebSocket DATA frames.
-        """
+        """Send a complete field section immediately, leaving the stream open."""
         # Encoding mutates the connection-wide HPACK table.  A retired stream
         # cannot advance it because the peer will never receive this block.
         if self._closed:
             return
         await self._write(build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
-            end_stream=False))
+            end_stream=False, max_frame_size=self.max_frame_size))
 
     async def _write(self, data: bytes):
         """Write a frame to the transport.
@@ -1429,7 +1420,7 @@ class HTTP2Sender(BaseSender):
                 await self._write(build_response_headers(
                     self._factory.encoder, self._stream_id,
                     head_status, self._buffered_headers or [],
-                    end_stream=not informational))
+                    end_stream=not informational, max_frame_size=self.max_frame_size))
                 self._buffered_status = None
                 self._buffered_headers = None
                 if not informational:
@@ -1438,7 +1429,7 @@ class HTTP2Sender(BaseSender):
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id,
                 self._buffered_status, self._buffered_headers or [],
-                end_stream=False)
+                end_stream=False, max_frame_size=self.max_frame_size)
             if buffered_body is not None:
                 # Buffering reserves no credit: another stream can spend it
                 # before these trailers arrive. Recheck at handoff so the
@@ -1448,7 +1439,8 @@ class HTTP2Sender(BaseSender):
                         and len(buffered_body) <= self.max_frame_size):
                     total = len(buffered_body)
                     trailer_bytes = build_trailers(
-                        self._factory.encoder, self._stream_id, headers)
+                        self._factory.encoder, self._stream_id, headers,
+                        max_frame_size=self.max_frame_size)
                     d_bytes = (total.to_bytes(3, 'big') + b'\x00'
                                + b'\x00'  # DATA flags: no END_STREAM (trailers carry it)
                                + self._stream_id.to_bytes(4, 'big')
@@ -1462,16 +1454,19 @@ class HTTP2Sender(BaseSender):
                     # send HEADERS during it, and the HPACK table is shared.
                     if not self._closed:
                         await self._write(build_trailers(
-                            self._factory.encoder, self._stream_id, headers))
+                            self._factory.encoder, self._stream_id, headers,
+                            max_frame_size=self.max_frame_size))
             else:
                 trailer_bytes = build_trailers(
-                    self._factory.encoder, self._stream_id, headers)
+                    self._factory.encoder, self._stream_id, headers,
+                    max_frame_size=self.max_frame_size)
                 await self._write_many((h_bytes, trailer_bytes))
             self._buffered_status = None
             self._buffered_headers = None
         else:
             await self._write(build_trailers(
-                self._factory.encoder, self._stream_id, headers))
+                self._factory.encoder, self._stream_id, headers,
+                max_frame_size=self.max_frame_size))
         self._expect_trailers = False
         self._end_stream_sent = True
 
@@ -1484,7 +1479,9 @@ class HTTP2Sender(BaseSender):
         if isinstance(body, FrameBase):
             if _DEBUG:
                 logger.debug('HTTP2Sender raw frame: %r', body)
-            await self._write(body.save())
+            wire = (body.save(max_frame_size=self.max_frame_size)
+                    if isinstance(body, (Headers, PushPromise)) else body.save())
+            await self._write(wire)
             return
 
         if isinstance(body, dict):
@@ -1509,7 +1506,8 @@ class HTTP2Sender(BaseSender):
             self._suppress_body = forbidden
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id, status, headers,
-                end_stream=forbidden and not informational)
+                end_stream=forbidden and not informational,
+                max_frame_size=self.max_frame_size)
             if forbidden:
                 await self._write(h_bytes)
                 if not informational:

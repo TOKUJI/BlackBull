@@ -74,7 +74,7 @@ Request lifecycle events identify the dispatcher as `serve_grpc` in `handler`.
 
 Semantics that match the gRPC spec:
 
-- The status rides the trailing HEADERS frame after the last message. A handler
+- The status rides the trailing field section after the last message. A handler
   that fails **after** emitting messages reports its status in the trailers; one
   that fails **before** the first message produces a clean Trailers-Only error,
   exactly like a unary failure.

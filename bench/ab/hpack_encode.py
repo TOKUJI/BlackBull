@@ -76,7 +76,7 @@ def paired(roots, count, rounds):
     sys.path.insert(0, roots['B'])
     from hpack import Encoder
     from blackbull.server import sender
-    from blackbull.protocol.frame_types import PseudoHeaders
+    from blackbull.protocol.frame_types import FrameTypes, PseudoHeaders
     if not Path(sender.__file__).resolve().is_relative_to(roots['B']):
         raise RuntimeError('Imported sender outside the head worktree')
     logging.disable(logging.CRITICAL)
@@ -91,7 +91,8 @@ def paired(roots, count, rounds):
                  if isinstance(node, ast.FunctionDef) and node.name == 'build_response_headers']
         if len(nodes) != 1:
             raise ValueError('Expected one response builder')
-        namespace = dict(vars(sender), hpack_fastpath=module, chain=chain, PseudoHeaders=PseudoHeaders)
+        namespace = dict(vars(sender), hpack_fastpath=module, chain=chain,
+                         FrameTypes=FrameTypes, PseudoHeaders=PseudoHeaders)
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(root / 'blackbull/server/sender.py'), 'exec'), namespace)
         functions[arm] = namespace['build_response_headers']
         hashes[arm] = {'sender': hashlib.sha256(code).hexdigest(),
