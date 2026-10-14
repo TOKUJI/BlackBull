@@ -13,9 +13,10 @@ Only `grpc/asgi.py` varies, so verify that its shared dependencies have compatib
 semantics. This measures the bridge with a no-op response collector, not sockets.
 
 ```sh
+source bench/lib/results.sh && bench_run_dir grpc_bridge   # sets BENCH_RUN_DIR, BENCH_TMP
 PYTHONPATH=. timeout 90s uv run python bench/micro/grpc_bridge.py \
   --baseline 76e432cf --rounds 6 --calls 8000 --warmup 1000 \
-  --sizes 16 65536 > /tmp/grpc-micro.tsv 2> /tmp/grpc-settings.json
+  --sizes 16 65536 > "$BENCH_RUN_DIR/micro.tsv" 2> "$BENCH_RUN_DIR/settings.json"
 ```
 
 For the initial release comparison, check out `76e432cf`, use the reproduction
@@ -29,14 +30,15 @@ CPython 3.14.6. Samples alternate ABBA/BAAB and pin to the minimum allowed CPU.
 Use separate worktrees at the baseline and treatment commits. On each, serve a
 `BlackBull` app with `GrpcServiceRegistry` methods `/svc/Unary` and `/svc/Collect`,
 using the handlers in `grpc_bridge.py`. Enable it with `app.enable_grpc(registry)`.
-Copy this branch's `bench/micro/grpc_bridge.py` to `/tmp/grpc_bridge.py` before switching
-worktrees; historical commits do not contain it. The startup below imports that
+Copy this branch's `bench/micro/grpc_bridge.py` into `$BENCH_TMP` (the run's `tmp/`,
+from `bench_run_dir` above) before switching worktrees; historical commits do not
+contain it. The startup below imports that
 shared copy, while protocol code comes from the current worktree.
 Run one bounded server per sample in a separate terminal (replace `SERVER_CPU`
 and set `BB_FORCE_ASGI_SCOPE` to `0` or `1`):
 
 ```sh
-taskset -c SERVER_CPU timeout 30s env PYTHONPATH=.:/tmp BLACKBULL_ENV=production \
+taskset -c SERVER_CPU timeout 30s env PYTHONPATH=".:$BENCH_TMP" BLACKBULL_ENV=production \
   BB_ACCESS_LOG=0 BB_UVLOOP=0 BB_WORKERS=1 BB_FORCE_ASGI_SCOPE=0 uv run python - <<'PY'
 from blackbull import BlackBull
 from blackbull.grpc import GrpcServiceRegistry
@@ -59,12 +61,12 @@ PY
 ```
 
 Use `BB_FORCE_ASGI_SCOPE=0` and `1` as separate cells. Pin server and load generator
-to separate CPUs. Generate the 16-byte framed input once, outside Git:
+to separate CPUs. Generate the 16-byte framed input once, in the run's `tmp/`:
 
 ```sh
 PYTHONPATH=. uv run python -c \
-  'from blackbull.grpc import encode_message; from pathlib import Path; Path("/tmp/grpc-body.bin").write_bytes(encode_message(b"x" * 16))'
-timeout 30s h2load -n 5000 -c 8 -m 8 -d /tmp/grpc-body.bin \
+  'from blackbull.grpc import encode_message; import os, pathlib; pathlib.Path(os.environ["BENCH_TMP"], "grpc-body.bin").write_bytes(encode_message(b"x" * 16))'
+timeout 30s h2load -n 5000 -c 8 -m 8 -d "$BENCH_TMP/grpc-body.bin" \
   -H 'content-type: application/grpc' http://127.0.0.1:8080/svc/Unary
 ```
 

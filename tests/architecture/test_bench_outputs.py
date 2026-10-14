@@ -6,9 +6,8 @@ Results are evidence for an issue, not code: they are attached to YouTrack and
 never committed.  bench/ holds no loose scripts — every tool sits in a folder
 named for its purpose.
 
-``PENDING_COMMITTED`` lists what is not yet moved, with the issue that moves
-it, and ``CONTAINER_TMP`` the files whose ``/tmp`` is inside a container.  Both
-only shrink: a new violator fails, and so does an entry that no longer matches.
+``CONTAINER_TMP`` lists the files whose ``/tmp`` is inside a container; it only
+shrinks: a new violator fails, and so does an entry that no longer matches.
 """
 from __future__ import annotations
 
@@ -21,12 +20,6 @@ ROOT = Path(__file__).resolve().parents[2]
 #: Files whose /tmp is inside a container, not on the host.
 CONTAINER_TMP = {
     'bench/conformance/autobahn_heavy.sh',  # the CaseSet resolver in the tester image
-}
-
-#: Committed results not yet moved to YouTrack (BLA-543).
-PENDING_COMMITTED = {
-    'bench/results/v0811-bla341-abba/experiment.json', 'bench/results/v0811-bla341-abba/micro.tsv',
-    'bench/results/v0811-bla341-abba/report.md', 'bench/results/v0811-bla341-abba/wire.tsv',
 }
 
 #: An absolute /tmp; a run's own tmp/ ($run/tmp, ${X}/tmp) is where temporary files belong.
@@ -62,9 +55,8 @@ def test_only_the_helper_chooses_a_results_directory():
 
 
 def test_no_result_is_committed():
-    committed = set(_tracked('bench/results')) - {'bench/results/README.md'}
-    assert committed - PENDING_COMMITTED == set(), 'attach results to the issue instead'
-    assert PENDING_COMMITTED - committed == set(), 'moved: remove from PENDING_COMMITTED'
+    assert set(_tracked('bench/results')) == {'bench/results/README.md'}, \
+        'attach results to the issue instead'
 
 
 def test_bench_has_no_loose_files():
