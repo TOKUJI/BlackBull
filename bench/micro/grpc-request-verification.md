@@ -30,9 +30,15 @@ CPython 3.14.6. Samples alternate ABBA/BAAB and pin to the minimum allowed CPU.
 Use separate worktrees at the baseline and treatment commits. On each, serve a
 `BlackBull` app with `GrpcServiceRegistry` methods `/svc/Unary` and `/svc/Collect`,
 using the handlers in `grpc_bridge.py`. Enable it with `app.enable_grpc(registry)`.
-Copy this branch's `bench/micro/grpc_bridge.py` into `$BENCH_TMP` (the run's `tmp/`,
-from `bench_run_dir` above) before switching worktrees; historical commits do not
-contain it. The startup below imports that
+Copy this branch's `bench/micro/grpc_bridge.py` into the run's `tmp/` before switching
+worktrees; historical commits do not contain it:
+
+```sh
+source bench/lib/results.sh && bench_run_dir grpc_wire   # in the first terminal
+cp bench/micro/grpc_bridge.py "$BENCH_TMP"/ && echo "export BENCH_TMP=$BENCH_TMP"
+```
+
+Paste the printed `export BENCH_TMP=…` line into every other terminal below. The startup below imports that
 shared copy, while protocol code comes from the current worktree.
 Run one bounded server per sample in a separate terminal (replace `SERVER_CPU`
 and set `BB_FORCE_ASGI_SCOPE` to `0` or `1`):

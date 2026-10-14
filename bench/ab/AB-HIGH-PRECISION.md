@@ -161,21 +161,21 @@ The numbers behind this method live on their issues, not here:
 
 ## 7. Verdict rules
 
-A regression (the change being *slower*) is essentially ruled out when:
+`report.py` states one of five verdicts; act on it as follows.
 
-1. The real Δ point estimate is ≥ 0 or its 95 % CI is not below 0, **and**
-2. The real CI is inside the chosen equivalence bound (or at least inside
-   ±1 %), **and**
-3. The bytecode/hot-path analysis shows the measured path executes the same
-   instructions (the deterministic proof the benchmark can only approximate).
+1. **`unresolved`** — the null (A/A) phase does not fit inside the bound, so
+   this box cannot resolve a change of that size this session.  Read nothing
+   into the real phase: add rounds or move to EC2.
+2. **`slower`** — the real CI lies below 0 *and* below the null CI: a real
+   regression.  Revert or fix; do not re-measure hoping for a better draw.
+3. **`faster`** — the mirror image.
+4. **`equivalent`** — no change beyond the null floor, and the real CI fits
+   inside the bound.  Together with a bytecode / hot-path check showing the
+   measured path executes the same instructions (the deterministic proof the
+   benchmark can only approximate), a regression is ruled out.
+5. **`inconclusive`** — fewer than four rounds, or a real CI that neither
+   clears the null floor nor fits inside the bound.  Add rounds (§3.2), not
+   outlier removal.
 
-A ±0.5 % equivalence claim specifically needs the real-phase 95 % CI inside
-±0.5 % **and** the null phase to also pass (after outlier trim).  If the CI
-edge sits just outside the bound because the point estimate is not 0, more
-rounds (not outlier removal) are the only path.
-
-4. **Regression vs. no-resolve — read the null phase first.**  When the
-   null (A/A) phase passes equivalence but the real CI **exceeds** the
-   bound, the change is a real regression: revert or fix, do not re-measure.
-   When the null phase *fails* equivalence, the box cannot resolve ±Δ that
-   session — escalate or add rounds before trusting any real-phase verdict.
+A ±0.5 % equivalence claim needs `--equiv 0.5`: the null phase and the real
+phase must both fit inside ±0.5 %.
