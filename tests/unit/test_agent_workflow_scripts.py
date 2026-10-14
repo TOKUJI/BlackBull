@@ -31,11 +31,9 @@ def plan(name: str, *args: str) -> dict:
     return json.loads(result.stdout)
 
 
-def test_workflow_scripts_are_executable_shell() -> None:
+def test_workflow_scripts_are_executable() -> None:
     for script in SCRIPTS.values():
         assert script.stat().st_mode & 0o111
-        result = run("bash", "-n", str(script))
-        assert result.returncode == 0, result.stderr
 
 
 def test_http11probe_plan_pins_upstream_and_runs_both_lanes() -> None:

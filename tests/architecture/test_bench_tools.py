@@ -1,7 +1,9 @@
-"""Every bench tool at least parses, and every one with a command line answers --help.
+"""Every bench tool is in the index, parses, and answers --help.
 
-The tools are not run for real here (they need servers, load generators or
-cloud accounts); this is what keeps them from silently rotting between uses.
+A tool nobody can find is a tool somebody rewrites, and a tool nobody runs
+rots: bench/README.md names every tool by path, and each one is at least
+parsed here (the tools themselves need servers, load generators or cloud
+accounts, so they are not run for real).
 """
 from __future__ import annotations
 
@@ -15,17 +17,35 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-FILES = subprocess.run(['git', 'ls-files', 'bench', 'scripts/run-*.sh'], cwd=ROOT,
-                       capture_output=True, text=True, check=True).stdout.split()
-SHELL = [f for f in FILES if f.endswith('.sh')]
-PYTHON = [f for f in FILES if f.endswith('.py')]
+INDEX = ROOT / 'bench' / 'README.md'
+FILES = [f for f in subprocess.run(['git', 'ls-files', 'bench', 'scripts/run-*.sh'], cwd=ROOT,
+                                   capture_output=True, text=True, check=True).stdout.split()
+         if not f.endswith('__init__.py')]
+TOOLS = {f for f in FILES
+         if f.endswith(('.sh', '.py', '.js', '.lua', '.conf', '.toml', '.ini'))
+         or Path(f).name.startswith('Dockerfile')}
+SHELL = sorted(f for f in TOOLS if f.endswith('.sh'))
+PYTHON = sorted(f for f in TOOLS if f.endswith('.py'))
 #: Command lines: argparse tools, and wrappers that run one through runpy.
 CLI = [f for f in PYTHON
        if re.search(r'\bargparse\b|runpy\.run_path', text := (ROOT / f).read_text())
        and "__name__ == '__main__'" in text.replace('"', "'")]
-#: Bench modules imported by bare name; failing to find one is a bug, not a
+#: Bench modules imported by bare name: failing to find one is a bug, not a
 #: missing optional dependency.
 BENCH_MODULES = {Path(f).stem for f in PYTHON}
+
+
+def _named() -> set[str]:
+    return set(re.findall(r'`((?:bench|scripts)/[^`\s<]+)`', INDEX.read_text()))
+
+
+def test_every_tool_is_in_the_index():
+    assert TOOLS - _named() == set(), 'add the tool to bench/README.md'
+
+
+def test_every_indexed_path_exists():
+    missing = {p for p in _named() if not (ROOT / p.rstrip('/')).exists()}
+    assert missing == set(), 'remove or correct these entries in bench/README.md'
 
 
 @pytest.mark.parametrize('path', SHELL)

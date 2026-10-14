@@ -152,6 +152,7 @@ Entry points are in **bold**; everything else is a part of the tool on its row.
 
 ## Keeping it maintained
 
-- `tests/architecture/test_bench_index.py` — every tool is named in this index, and every named path exists.
+- `tests/architecture/test_bench_tools.py` — every tool is in this index, every indexed path exists, every tool parses or compiles, every Python command line answers `--help`.
 - `tests/architecture/test_bench_outputs.py` — no `/tmp`, no results directory but the helper's, nothing committed under `bench/results/`, no loose files in `bench/`.
-- `tests/unit/test_bench_smoke.py` — every shell tool parses, every Python tool compiles, every Python command line answers `--help`; it runs in CI's fast tier.
+
+Both run in CI's fast tier.
