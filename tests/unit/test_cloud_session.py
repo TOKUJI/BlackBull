@@ -35,7 +35,8 @@ UP = '''#!/usr/bin/env bash
 echo up >> "$CALLS"; mkdir -p "$(dirname "$STATE_FILE")"
 printf 'SERVER_PUBLIC_IP=fake\\nTOPO=single\\n' > "$STATE_FILE"
 '''
-INSTALL = '#!/usr/bin/env bash\necho "install DEPLOY_GIT=${DEPLOY_GIT:-0}" >> "$CALLS"\n'
+INSTALL = ('#!/usr/bin/env bash\necho "install DEPLOY_GIT=${DEPLOY_GIT:-0}" >> "$CALLS"\n'
+           '[ "${FAKE_INSTALL_FAILS:-0}" = 0 ]\n')
 DOWN = '''#!/usr/bin/env bash
 echo down >> "$CALLS"
 [ "${FAKE_DOWN_FAILS:-0}" = 1 ] && exit 1
@@ -232,3 +233,12 @@ def test_git_history_deploys_from_a_worktree(tmp_path):
     assert subprocess.run([*rgit, 'cat-file', '-e', 'HEAD~1^{commit}']).returncode == 0
     assert subprocess.run([*rgit, 'status', '--porcelain'], capture_output=True,
                           text=True).stdout == ''
+
+
+def test_a_session_failing_before_launch_tears_down_and_leaves_no_session(cloud):
+    done = _session(cloud, FAKE_INSTALL_FAILS='1')
+
+    assert done.returncode != 0
+    assert _calls(cloud)[-1] == 'down'
+    assert not (cloud[0] / 'bench/.state/aws').exists()
+    assert not (cloud[0] / 'bench/.state/session').exists()

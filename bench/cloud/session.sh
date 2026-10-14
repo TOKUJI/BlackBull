@@ -61,7 +61,9 @@ on_exit() {
     trap - EXIT
     if [ "$LAUNCHED" = 1 ] && [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then KEEP=1; fi
     if [ "$KEEP" = 0 ] && [ -f "$STATE_FILE" ]; then
-        if ! bash "$CLOUD_DIR/down.sh"; then
+        if bash "$CLOUD_DIR/down.sh"; then
+            rm -f "$SESSION_FILE"
+        else
             echo "session: teardown failed; $STATE_FILE is retained — rerun bash bench/cloud/down.sh" >&2
             rc=1
         fi

@@ -39,7 +39,11 @@ def test_a_run_directory_sits_under_its_tool_with_tmp_and_manifest(root):
     manifest = json.loads((run / 'manifest.json').read_text())
     assert manifest['tool'] == 'ab_commit'
     assert manifest['settings'] == {'rounds': 3}
-    assert manifest['revision']
+    # Outside a git checkout (an instance before its history is deployed) the
+    # revision is honestly empty.
+    head = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'],
+                          capture_output=True, text=True).stdout.strip()
+    assert manifest['revision'] == head
     assert manifest['argv']
 
 
