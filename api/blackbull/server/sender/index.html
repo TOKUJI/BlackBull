@@ -6712,9 +6712,9 @@ event types are logged and dropped; unsupported values raise TypeError.</p>
 <p><strong>Low-level</strong> (ASGI event dict):
   <code>await sender({'type': 'http.response.start', ...})</code>
   <code>await sender({'type': 'http.response.body', ...})</code></p>
-<p><strong>Control-plane</strong> (raw FrameBase instance):
+<p><strong>Frame object</strong> (FrameBase instance):
   <code>await sender(settings_frame)</code>
-  Serialises and writes the frame directly.</p>
+  Field blocks are fragmented within the peer frame-size limit.</p>
 
 
 
@@ -6837,14 +6837,7 @@ already parked inside this sender.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Write a standalone HEADERS frame (END_HEADERS, no END_STREAM) now.</p>
-<p>Unlike the <code>http.response.start</code> event — which is buffered until a
-body event so HEADERS + first DATA can coalesce into one write — this
-flushes the response HEADERS immediately and leaves the stream open.
-Required by the RFC 8441 WebSocket-over-HTTP/2 accept: the
-<code>:status 200</code> response carries no body, so nothing would ever trigger
-the deferred flush, and the stream must stay open bidirectionally for
-the subsequent WebSocket DATA frames.</p>
+        <p>Send a complete field section immediately, leaving the stream open.</p>
 
 
     </div>
@@ -6984,7 +6977,7 @@ consistency but are unused for WebSocket connections.</p>
 
 
 <h3 id="blackbull.server.sender.build_response_headers" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">build_response_headers</span><span class="p">(</span><span class="n">encoder</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">,</span> <span class="n">status</span><span class="p">,</span> <span class="n">headers</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">end_stream</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">build_response_headers</span><span class="p">(</span><span class="n">encoder</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">,</span> <span class="n">status</span><span class="p">,</span> <span class="n">headers</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">end_stream</span><span class="p">,</span> <span class="n">max_frame_size</span><span class="o">=</span><span class="n">DEFAULT_MAX_FRAME_SIZE</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.sender.build_response_headers" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -7002,17 +6995,14 @@ consistency but are unused for WebSocket connections.</p>
 
 
 <h3 id="blackbull.server.sender.build_trailers" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">build_trailers</span><span class="p">(</span><span class="n">encoder</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">,</span> <span class="n">headers</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">build_trailers</span><span class="p">(</span><span class="n">encoder</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">,</span> <span class="n">headers</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">max_frame_size</span><span class="o">=</span><span class="n">DEFAULT_MAX_FRAME_SIZE</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.sender.build_trailers" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Encode a trailers HEADERS frame (END_HEADERS | END_STREAM, no
-pseudo-headers) to wire bytes.</p>
-<p>This is the basis for the gRPC <code>grpc-status</code> trailers path — a unary
-RPC response carries a second HEADERS frame with regular fields only.</p>
+        <p>Encode a terminal field section without pseudo-headers.</p>
 
 
     </div>

@@ -5752,7 +5752,7 @@ it as an async generator that <code>yield</code>s each response message:</p>
 <p>Request lifecycle events identify the dispatcher as <code>serve_grpc</code> in <code>handler</code>.</p>
 <p>Semantics that match the gRPC spec:</p>
 <ul>
-<li>The status rides the trailing HEADERS frame after the last message. A handler
+<li>The status rides the trailing field section after the last message. A handler
   that fails <strong>after</strong> emitting messages reports its status in the trailers; one
   that fails <strong>before</strong> the first message produces a clean Trailers-Only error,
   exactly like a unary failure.</li>
