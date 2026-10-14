@@ -9069,8 +9069,8 @@ methods on the same route still receive the <code>Accept-Query</code> header.</p
     <div class="doc doc-contents ">
 
         <p>Run synchronously; do not wrap in asyncio.run.</p>
-<p>Unset options resolve through BLACKBULL_<em> environment variables, .env,
-AppConfig and defaults. BB_</em> controls server tuning. Multiple workers or
+<p>Unset options resolve through BLACKBULL_* environment variables, .env,
+AppConfig and defaults. BB_* controls server tuning. Multiple workers or
 reload use a blocking supervisor. External ASGI hosts can call the app;
 embedded event-loop use requires ASGIServer. See the Configuration guide.</p>
 
@@ -12071,7 +12071,7 @@ returned as if it were the complete text.</p>
 <p>One worker without reload runs in this process; multiple workers or reload
 use a blocking supervisor. listeners replaces port/unix_path/inherited_fd;
 passing both is refused. Unset workers, max_connections and queue depths
-use BB_<em> settings. Deployment options do not resolve BLACKBULL_</em> here.</p>
+use BB_* settings. Deployment options do not resolve BLACKBULL_* here.</p>
 
 
     </div>
