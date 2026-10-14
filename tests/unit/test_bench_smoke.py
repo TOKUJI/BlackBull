@@ -45,6 +45,9 @@ def test_python_tools_answer_help(path, tmp_path):
     env.pop('BENCH_RUN_DIR', None)
     done = subprocess.run([sys.executable, path, '--help'], cwd=ROOT, env=env,
                           capture_output=True, text=True, timeout=60)
+    needs = re.search(r'needs Python (\d+)\.(\d+)\+', done.stderr)
+    if needs and sys.version_info < (int(needs[1]), int(needs[2])):
+        pytest.skip(f'{path} needs Python {needs[1]}.{needs[2]}+')
     missing = re.search(r"No module named '([\w.]+)'", done.stderr)
     if missing and missing[1].split('.')[0] not in {'blackbull', 'bench', *BENCH_MODULES}:
         pytest.skip(f'optional dependency {missing[1]} is not installed')
