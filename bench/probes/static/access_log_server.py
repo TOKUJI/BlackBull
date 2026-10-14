@@ -104,4 +104,6 @@ if __name__ == '__main__':
 
     app_py = os.path.normpath(os.path.join(here, '..', '..', 'httparena', 'app.py'))
     sys.argv = [app_py] + sys.argv[1:]
+    # app.py imports its siblings (db, grpc_bench) by bare name.
+    sys.path.insert(0, os.path.dirname(app_py))
     runpy.run_path(app_py, run_name='__main__')

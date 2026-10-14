@@ -19,9 +19,13 @@ FILES = subprocess.run(['git', 'ls-files', 'bench', 'scripts/run-*.sh'], cwd=ROO
                        capture_output=True, text=True, check=True).stdout.split()
 SHELL = [f for f in FILES if f.endswith('.sh')]
 PYTHON = [f for f in FILES if f.endswith('.py')]
+#: Command lines: argparse tools, and wrappers that run one through runpy.
 CLI = [f for f in PYTHON
-       if re.search(r'\bargparse\b', text := (ROOT / f).read_text())
+       if re.search(r'\bargparse\b|runpy\.run_path', text := (ROOT / f).read_text())
        and "__name__ == '__main__'" in text.replace('"', "'")]
+#: Bench modules imported by bare name; failing to find one is a bug, not a
+#: missing optional dependency.
+BENCH_MODULES = {Path(f).stem for f in PYTHON}
 
 
 @pytest.mark.parametrize('path', SHELL)
@@ -42,7 +46,7 @@ def test_python_tools_answer_help(path, tmp_path):
     done = subprocess.run([sys.executable, path, '--help'], cwd=ROOT, env=env,
                           capture_output=True, text=True, timeout=60)
     missing = re.search(r"No module named '([\w.]+)'", done.stderr)
-    if missing and missing[1].split('.')[0] not in ('blackbull', 'bench'):
+    if missing and missing[1].split('.')[0] not in {'blackbull', 'bench', *BENCH_MODULES}:
         pytest.skip(f'optional dependency {missing[1]} is not installed')
     assert done.returncode == 0, done.stderr
     assert 'usage' in done.stdout.lower()

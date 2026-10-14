@@ -6,7 +6,7 @@ question.  A new tool is added to this index, given a test, and run in CI
 (see *Keeping it maintained*).
 
 - **Output**: every tool writes only to its run directory,
-  `bench/results/<tool>/<UTC>-<rev>/`, through [`bench/lib/`](results/README.md) —
+  `bench/results/<tool>/<UTC>-<rev>/`, through `bench/lib/` ([details](results/README.md)) —
   never `/tmp`, the repository root or `$HOME`.
 - **Evidence**: nothing under `bench/results/` is committed.  Attach the files
   a decision rests on to its YouTrack issue (`just yt-attach ISSUE FILE`) and
