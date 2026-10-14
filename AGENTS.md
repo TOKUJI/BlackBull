@@ -69,6 +69,20 @@ or an API changes, update `docs/guide/` for users or `docs/about/` for internals
   DEBUG and `blackbull.access` for INFO.
   See `docs/guide/logging.md`.
 
+## Measurements
+
+- Before measuring, find the question in `bench/README.md` and use its tool.
+  Extend an existing tool rather than add a second one for the same question;
+  a new tool gets an index entry and a test.
+- Every measurement, including a one-off script, writes only to its run
+  directory from `bench/lib/results` (`bench/results/<tool>/<UTC>-<rev>/`);
+  never `/tmp`, the repository root, or `$HOME`.
+- Results are evidence for an issue, not code: attach them with
+  `just yt-attach ISSUE FILE` and summarize them in a comment. Never commit
+  them; documents under `bench/` keep methods, not numbers.
+- Cloud measurements (`just ab-verify`, `just httparena-bench`) need the
+  user's explicit approval for each run.
+
 ## YouTrack safety
 
 - Use only the `just yt-*` commands in `justfile`; do not call the REST API
