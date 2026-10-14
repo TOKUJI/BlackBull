@@ -91,7 +91,7 @@ curl -sk "https://localhost:8081/baseline11?a=10"
 docker run --rm --network host \
   -v "$PWD/bench/httparena/_local/data:/data:ro" \
   -v "$PWD/bench/httparena/_local/certs:/certs:ro" \
-  blackbull-httparena 2>&1 | tee bench/results/httparena/smoke-$(date -u +%Y%m%d-%H%M%SZ).log
+  blackbull-httparena
 ```
 
 - `validate.sh` / `benchmark.sh` も標準出力にログを出します。保存先を明示したいときは `tee` で任意のファイルにリダイレクトしてください。
@@ -154,7 +154,7 @@ bash bench/httparena/build_wheel.sh HEAD
 
 # 2. その wheel に対して HttpArena の validate.sh を全プロファイル実行
 bash bench/httparena/validate_local.sh HEAD
-#    → bench/results/httparena-local/<UTC>/verdict.txt（PASS / FAIL / …）
+#    → 実行ディレクトリ（bench/lib/results.sh）の verdict.txt（PASS / FAIL / …）
 ```
 
 `validate_local.sh` は初回に `MDA2AV/HttpArena` を `~/HttpArena` へ clone し、

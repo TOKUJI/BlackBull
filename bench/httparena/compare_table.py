@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Emit a simple per-profile framework comparison table for an HttpArena run.
 
-Reads the result JSONs an ``httparena_compare.sh`` run pulled back to
+Reads the result JSONs a cloud ``httparena`` session pulled back to
 ``<result_dir>/httparena-tree/results/<profile>/<conns>/<framework>.json`` and
 writes a markdown table (``COMPARISON.md``) into the result dir, also echoing it
 to stdout.

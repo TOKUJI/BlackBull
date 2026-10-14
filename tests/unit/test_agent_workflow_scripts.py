@@ -50,7 +50,7 @@ def test_ab_plan_is_one_approved_self_driving_command() -> None:
     assert result == {
         "workflow": "ab-verify",
         "requires_approval": True,
-        "steps": ["up", "failsafe", "install", "launch", "finish", "marker"],
+        "steps": ["up", "failsafe", "install", "launch", "wait", "pull", "down", "marker"],
     }
 
 
@@ -58,7 +58,7 @@ def test_bench_compare_delegates_defaults_to_authoritative_driver() -> None:
     result = plan("bench-compare")
     assert result == {
         "workflow": "bench-compare",
-        "command": ["bash", "bench/peers/compare_servers.sh"],
+        "command": ["bash", "bench/compare/compare_servers.sh"],
     }
 
 

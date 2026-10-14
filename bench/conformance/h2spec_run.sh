@@ -10,8 +10,8 @@
 #   bash bench/conformance/h2spec_run.sh hpack          # HPACK section only
 #   bash bench/conformance/h2spec_run.sh http2/6.5      # specific section
 #
-# Output is teed to bench/conformance/results/h2spec_<timestamp>.txt
-# and a JUnit XML report to bench/conformance/results/h2spec_<timestamp>.xml.
+# Output is teed to h2spec.txt and a JUnit XML report to h2spec.xml in the run
+# directory (bench/lib/results.sh).
 
 set -e
 
@@ -19,11 +19,10 @@ PORT="${PORT:-8443}"
 HOST="${HOST:-localhost}"
 TIMEOUT="${TIMEOUT:-5}"
 
-RESULT_DIR="bench/conformance/results"
-mkdir -p "$RESULT_DIR"
-TS="$(date +%Y%m%d-%H%M%S)"
-OUT="$RESULT_DIR/h2spec_${TS}.txt"
-JUNIT="$RESULT_DIR/h2spec_${TS}.xml"
+. "$(dirname "$0")/../lib/results.sh"
+bench_run_dir h2spec host="$HOST" port="$PORT" sections="$*"
+OUT="$BENCH_RUN_DIR/h2spec.txt"
+JUNIT="$BENCH_RUN_DIR/h2spec.xml"
 
 command -v h2spec >/dev/null 2>&1 || {
     echo "ERROR: h2spec not on PATH. Install from:"

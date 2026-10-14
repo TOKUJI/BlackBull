@@ -73,18 +73,19 @@ class _MinimalResponseHeaders(list):
 
     def _locate(self, field: tuple[bytes, bytes]) -> None:
         name = field[0]
-        size = len(name)
-        if size == 14:
+        if name in _FRAMING_NAMES:
             if name == b'content-length':
                 if self.content_length is None:
                     self.content_length = []
                 self.content_length.append(field)
-        elif size == 17:
-            if name == b'transfer-encoding':
+            elif name == b'transfer-encoding':
                 self.transfer_encoding = True
-        elif size == 4:
-            if name == b'date':
+            else:
                 self.date = True
+
+
+#: The fields whose presence _MinimalResponseHeaders records.
+_FRAMING_NAMES = frozenset((b'content-length', b'transfer-encoding', b'date'))
 
 
 def _as_response_fields(fields: Iterable) -> _MinimalResponseHeaders:
@@ -111,17 +112,14 @@ def _as_response_fields(fields: Iterable) -> _MinimalResponseHeaders:
             head[i] = field = (name, value.strip(b' \t'))
         elif (trimmed := value.strip(b' \t')) is not value:  # CPython: same object when clean
             head[i] = field = (name, trimmed)
-        size = len(name)
-        if size == 14:
+        if name in _FRAMING_NAMES:
             if name == b'content-length':
                 if content_length is None:
                     content_length = []
                 content_length.append(field)
-        elif size == 17:
-            if name == b'transfer-encoding':
+            elif name == b'transfer-encoding':
                 transfer_encoding = True
-        elif size == 4:
-            if name == b'date':
+            else:
                 date = True
     head.content_length = content_length
     head.transfer_encoding = transfer_encoding

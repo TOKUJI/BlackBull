@@ -140,12 +140,11 @@ jobs:
 
       - name: Upload h2spec results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
           name: h2spec-results
           path: |
-            bench/conformance/results/h2spec_*.xml
-            bench/conformance/results/h2spec_*.txt
+            bench/results/h2spec/
             /tmp/h2spec_server.log
           retention-days: 30
           if-no-files-found: warn
@@ -219,11 +218,11 @@ jobs:
 
       - name: Upload Autobahn results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
           name: autobahn-results
           path: |
-            bench/conformance/results/autobahn_*
+            bench/results/autobahn/
             /tmp/autobahn_server.log
           retention-days: 30
           # The tester writes reports at the end. Preserve progress logs and
@@ -291,11 +290,11 @@ jobs:
 
       - name: Upload Autobahn results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
           name: autobahn-heavy-results
           path: |
-            bench/conformance/results/autobahn_*
+            bench/results/autobahn_heavy/
             /tmp/autobahn_server.log
           retention-days: 30
           # The tester writes reports at the end. Preserve progress logs and

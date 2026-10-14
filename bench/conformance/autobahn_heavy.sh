@@ -20,10 +20,9 @@ CASES="${CASES:?CASES must be set (e.g. 12.*.10,13.*)}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-2}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/autobahn_common.sh"
-RESULT_BASE=bench/conformance/results
-mkdir -p "$RESULT_BASE"
-TS="$(date +%Y%m%d-%H%M%S)"
-HEAVY_ROOT="$(mktemp -d "$RESULT_BASE/autobahn_heavy_${TS}.XXXXXX")" || exit 1
+. "$SCRIPT_DIR/../lib/results.sh"
+bench_run_dir autobahn_heavy cases="$CASES" max_attempts="$MAX_ATTEMPTS" || exit 1
+HEAVY_ROOT="$BENCH_RUN_DIR"
 RESOLVER_CIDFILE="$HEAVY_ROOT/resolver.cid"
 RESOLVER_CONTAINER=''
 
@@ -105,13 +104,13 @@ if [ "$RESOLVER_STATUS" -ne 0 ] || [ "$RESOLVER_COPY_STATUS" -ne 0 ] || \
     exit 1
 fi
 if ! python3 "$SCRIPT_DIR/autobahn_cases.py" manifest \
-    "$HEAVY_ROOT/resolved.json" "$HEAVY_ROOT/manifest.json"; then
+    "$HEAVY_ROOT/resolved.json" "$HEAVY_ROOT/batches.json"; then
     echo 'ERROR: Autobahn CaseSet manifest is invalid' >&2
     exit 1
 fi
 
-mapfile -t BATCHES < <(jq -r '.batches[].name' "$HEAVY_ROOT/manifest.json")
-EXPECTED_BATCHES="$(jq -r '.batch_count' "$HEAVY_ROOT/manifest.json")"
+mapfile -t BATCHES < <(jq -r '.batches[].name' "$HEAVY_ROOT/batches.json")
+EXPECTED_BATCHES="$(jq -r '.batch_count' "$HEAVY_ROOT/batches.json")"
 if [ "${#BATCHES[@]}" -ne "$EXPECTED_BATCHES" ] || \
     [ "$EXPECTED_BATCHES" -eq 0 ]; then
     echo 'ERROR: Autobahn CaseSet manifest has an invalid batch count' >&2
@@ -120,8 +119,9 @@ fi
 
 for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
     echo "=== Autobahn heavy lane: attempt $attempt/$MAX_ATTEMPTS ==="
-    ATTEMPT_ROOT="$(mktemp -d "$HEAVY_ROOT/attempt_${attempt}.XXXXXX")" || exit 1
-    cp "$HEAVY_ROOT/manifest.json" "$ATTEMPT_ROOT/manifest.json"
+    ATTEMPT_ROOT="$HEAVY_ROOT/attempt_${attempt}"
+    mkdir "$ATTEMPT_ROOT" || exit 1
+    cp "$HEAVY_ROOT/batches.json" "$ATTEMPT_ROOT/batches.json"
     ATTEMPT_PASSED=1
     COMPLETED_BATCHES=0
 
@@ -131,10 +131,10 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
         LOG="$ATTEMPT_ROOT/${SAFE_BATCH}.log"
         jq -c --arg batch "$batch" \
             '.batches[] | select(.name == $batch) | .cases' \
-            "$HEAVY_ROOT/manifest.json" > "$EXPECTED"
+            "$HEAVY_ROOT/batches.json" > "$EXPECTED"
         BATCH_CASES="$(jq -r --arg batch "$batch" \
             '.batches[] | select(.name == $batch) | .cases | join(",")' \
-            "$HEAVY_ROOT/manifest.json")"
+            "$HEAVY_ROOT/batches.json")"
         if [ -z "$BATCH_CASES" ]; then
             echo "attempt $attempt batch $batch has an empty manifest" >&2
             ATTEMPT_PASSED=0
@@ -142,7 +142,8 @@ for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
         fi
 
         echo "--- Autobahn subgroup $batch ---"
-        if CASES="$BATCH_CASES" bash "$SCRIPT_DIR/autobahn_run.sh" \
+        if CASES="$BATCH_CASES" BENCH_RUN_DIR="$ATTEMPT_ROOT/$SAFE_BATCH" \
+            bash "$SCRIPT_DIR/autobahn_run.sh" \
             2>&1 | tee "$LOG"; then
             RUN_STATUS=0
         else

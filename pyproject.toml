@@ -189,7 +189,7 @@ fault-injection = [
     "httpx[http2]",
 ]
 
-benchmark = []  # k6 and h2load are installed via bench/install.sh (not pip packages)
+benchmark = []  # k6 and h2load are installed via bench/load/install.sh (not pip packages)
 
 profiling = [
     "py-spy",
