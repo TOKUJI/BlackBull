@@ -3,7 +3,7 @@
 #
 # Installs a wrapper around /usr/bin/docker that injects tuning
 # (ulimit, WEB_WORKERS, WRK_CPUS, etc.) into every `docker run` call.
-# Called by bench/cloud/httparena_compare.sh via scp + exec.
+# Run on the instance by bench/cloud/jobs/httparena.sh.
 #
 # Args: WEB_WORKERS WEB_NOFILE WRK_CPUS WRK_NOFILE [BB_ACCESS_LOG] [BB_PHASE_TRACE]
 #       [BB_LOG_BATCH_SIZE] [BB_LOG_BATCH_TIMEOUT_MS]

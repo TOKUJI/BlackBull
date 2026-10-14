@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Does the header-line cache pay on *real* traffic, or only on benchmarks?
 
-`parser_micro.py` replays one byte-identical request and `wrk` sends the same
+`../parser_microbench.py` replays one byte-identical request and `wrk` sends the same
 bytes every time — both are 100 % hit rate, which is the cache's best case and
 not what a browser does.  A real client keeps the connection alive but varies
 part of its header set per request: `Accept`, `Referer` and the `Sec-Fetch-*`

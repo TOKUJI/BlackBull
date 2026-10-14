@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# bench/httparena/run_httparena.sh — runs on EC2 instance.
+# bench/httparena/run_httparena.sh — runs on the EC2 instance.
 #
-# Runs HttpArena validate.sh + benchmark.sh for the given frameworks
-# and profiles.  Called by bench/cloud/httparena_compare.sh via scp + exec.
+# Runs HttpArena validate.sh + benchmark.sh for the given frameworks and
+# profiles, logging into BENCH_RUN_DIR.  bench/cloud/jobs/httparena.sh runs it.
 #
 # Args: <frameworks_csv> <profiles_csv> [skip_validate]
 #   frameworks_csv  — comma-separated: "blackbull,fastapi"
@@ -21,8 +21,9 @@ IFS=',' read -ra FRAMEWORKS <<< "$FRAMEWORKS_CSV"
 IFS=',' read -ra PROFILES <<< "$PROFILES_CSV"
 
 HARENA_DIR="${HOME}/HttpArena"
-RESULTS_DIR="${HOME}/results"
+RESULTS_DIR="${BENCH_RUN_DIR:?run me through bench/cloud/session.sh httparena}/logs"
 mkdir -p "$RESULTS_DIR"
+READY_CHECK="$(cd "$(dirname "$0")" && pwd)/ready_check.sh"
 
 # Wall-clock bound on the *whole* validate.sh invocation, including its
 # post-test teardown.  HttpArena's external validate.sh can hang forever in
@@ -58,7 +59,7 @@ if [ "$SKIP_VALIDATE" != "1" ]; then
             fi
         fi
     done
-elif [ -x "$HOME/ready_check.sh" ]; then
+elif [ -f "$READY_CHECK" ]; then
     # SKIP_VALIDATE=1 is set when the wheel was already validated locally
     # (WSL2, bench/httparena/validate_local.sh).  The full 20-profile contract
     # was checked there; here we only smoke the EC2-environment residues the
@@ -66,7 +67,7 @@ elif [ -x "$HOME/ready_check.sh" ]; then
     echo "=== HttpArena ready-check (WSL2-validated wheel; minimal smoke) ==="
     for fw in "${FRAMEWORKS[@]}"; do
         echo "  - $fw"
-        if bash "$HOME/ready_check.sh" "$fw" 2>&1 \
+        if bash "$READY_CHECK" "$fw" 2>&1 \
                | tee "$RESULTS_DIR/readycheck-${fw}.log"; then
             echo "    ready-check $fw: PASS"
         else
@@ -74,7 +75,7 @@ elif [ -x "$HOME/ready_check.sh" ]; then
         fi
     done
 else
-    echo "SKIP_VALIDATE=1 but ~/ready_check.sh is missing — skipping the "
+    echo "SKIP_VALIDATE=1 but ready_check.sh is missing — skipping the "
          "correctness gate entirely."
 fi
 

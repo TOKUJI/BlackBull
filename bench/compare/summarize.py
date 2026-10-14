@@ -10,7 +10,7 @@ tables, and emits a summary section with:
   bottlenecked by the loopback/syscall floor, not its own code."
 
 Usage:
-    python bench/compare/summarize.py <run>/compare_servers_<ts>.md
+    python bench/compare/summarize.py <run>/report.md
 
 The summary is inserted right after the preamble (the `Duration:` line).
 The script is idempotent — re-running on a report that already has a

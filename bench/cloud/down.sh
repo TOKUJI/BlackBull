@@ -22,8 +22,7 @@ _bench_aws_load_state || exit 1
 TEARDOWN_PROOF="${STATE_FILE}.clean"
 rm -f "$TEARDOWN_PROOF"
 
-# Backward-compat: legacy state files only have INSTANCE_ID/PUBLIC_IP.
-SERVER_INSTANCE_ID="${SERVER_INSTANCE_ID:-${INSTANCE_ID:-}}"
+SERVER_INSTANCE_ID="${SERVER_INSTANCE_ID:-}"
 LOADGEN_INSTANCE_ID="${LOADGEN_INSTANCE_ID:-}"
 TOPO="${TOPO:-single}"
 PLACEMENT_GROUP_NAME="${PLACEMENT_GROUP_NAME:-blackbull-bench-cpg}"
@@ -198,14 +197,11 @@ if [ "$KEY_PAIR_OWNED" = "1" ] && [ -f "$LOCAL_KEY" ] && ! rm -f "$LOCAL_KEY"; t
     echo "Failed to remove the local key; retaining $STATE_FILE." >&2
     exit 1
 fi
-if ! rm -f "$AWS_DIR/.known_hosts"; then
+if ! rm -f "$KNOWN_HOSTS_FILE"; then
     echo "Failed to remove known-host state; retaining $STATE_FILE." >&2
     exit 1
 fi
-if ! proof_tmp="$(mktemp "${TEARDOWN_PROOF}.tmp.XXXXXX")"; then
-    echo "Failed to prepare teardown proof; retaining $STATE_FILE." >&2
-    exit 1
-fi
+proof_tmp="${TEARDOWN_PROOF}.tmp.$$"
 if ! printf 'verified\n' > "$proof_tmp"; then
     rm -f "$proof_tmp"
     echo "Failed to write teardown proof; retaining $STATE_FILE." >&2

@@ -6,9 +6,9 @@ Results are evidence for an issue, not code: they are attached to YouTrack and
 never committed.  bench/ holds no loose scripts — every tool sits in a folder
 named for its purpose.
 
-``PENDING_*`` lists the files not yet migrated, each with the issue that moves
-it.  The lists only shrink: a new violator fails, and so does an entry that no
-longer violates.
+``PENDING_COMMITTED`` lists what is not yet moved, with the issue that moves
+it, and ``CONTAINER_TMP`` the files whose ``/tmp`` is inside a container.  Both
+only shrink: a new violator fails, and so does an entry that no longer matches.
 """
 from __future__ import annotations
 
@@ -17,34 +17,6 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-
-#: Files that still use /tmp, mktemp or tempfile.
-PENDING_TMP = {
-    # BLA-542 — the AWS lifecycle and its remote result layout.
-    'bench/cloud/ab.sh', 'bench/cloud/down.sh', 'bench/cloud/httparena_compare.sh',
-    'bench/cloud/install.sh', 'bench/cloud/profile_lanes.sh', 'bench/cloud/run.sh',
-    'bench/cloud/up.sh', 'bench/compare/server_lifecycle_remote.sh',
-    'scripts/run-ab-verify.sh', 'scripts/run-httparena-bench.sh',
-    # BLA-542 — wraps compare_servers.sh and finds its report by name.
-    'scripts/run-bench-compare.sh',
-    # BLA-542 — HttpArena runs on the remote instance and in Docker.
-    'bench/httparena/Dockerfile.dev', 'bench/httparena/build_wheel.sh',
-    'bench/httparena/patch_wsl2_docker.sh', 'bench/httparena/ready_check.sh',
-    'bench/httparena/validate_local.sh',
-}
-
-#: Files that still choose a results directory themselves instead of asking the helper.
-PENDING_ROOT = {
-    # BLA-542 — the AWS lifecycle pulls remote results by these paths.
-    'bench/cloud/ab.sh', 'bench/cloud/compare_servers_aws.sh', 'bench/cloud/httparena_compare.sh',
-    'bench/cloud/install.sh', 'bench/cloud/profile.sh', 'bench/cloud/profile_lanes.sh',
-    'bench/cloud/run.sh', 'bench/cloud/sprint104_ab.sh', 'bench/httparena/validate_local.sh',
-    'scripts/run-ab-verify.sh', 'scripts/run-httparena-bench.sh',
-    'bench/httparena/run_httparena.sh', 'bench/httparena/runner.sh',
-    # BLA-542 — local tools whose output the AWS lifecycle fetches by path.
-    'bench/ab/ab_commit.sh', 'bench/ab/ab_commit_h2.sh', 'bench/compare/compare_servers.sh',
-    'bench/micro/profile_under_load.sh', 'scripts/run-bench-compare.sh',
-}
 
 #: Files whose /tmp is inside a container, not on the host.
 CONTAINER_TMP = {
@@ -57,7 +29,8 @@ PENDING_COMMITTED = {
     'bench/results/v0811-bla341-abba/report.md', 'bench/results/v0811-bla341-abba/wire.tsv',
 }
 
-_TMP = re.compile(r'/tmp\b|\bmktemp\b|\btempfile\b|gettempdir')
+#: An absolute /tmp; a run's own tmp/ ($run/tmp, ${X}/tmp) is where temporary files belong.
+_TMP = re.compile(r'(?<![\w}])/tmp\b|\bmktemp\b|\btempfile\b|gettempdir')
 _RESULTS_DIR = re.compile(r"bench/(?:[\w.-]+/)*results\b(?!\.)|'bench'\s*/\s*'results'|HOME\}?/results")
 
 
@@ -80,14 +53,12 @@ def _matching(pattern: re.Pattern) -> set[str]:
 
 def test_no_tool_writes_to_tmp():
     found = _matching(_TMP)
-    assert found - PENDING_TMP - CONTAINER_TMP == set(), 'use the run directory from bench/lib/results'
-    assert (PENDING_TMP | CONTAINER_TMP) - found == set(), 'migrated: remove from the list'
+    assert found - CONTAINER_TMP == set(), 'use the run directory from bench/lib/results'
+    assert CONTAINER_TMP - found == set(), 'no longer matches: remove from CONTAINER_TMP'
 
 
 def test_only_the_helper_chooses_a_results_directory():
-    found = _matching(_RESULTS_DIR)
-    assert found - PENDING_ROOT == set(), 'ask bench/lib/results for the run directory'
-    assert PENDING_ROOT - found == set(), 'migrated: remove from PENDING_ROOT'
+    assert _matching(_RESULTS_DIR) == set(), 'ask bench/lib/results for the run directory'
 
 
 def test_no_result_is_committed():

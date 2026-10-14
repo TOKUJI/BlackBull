@@ -1,6 +1,6 @@
 """Build-context placeholder.
 
-bench/cloud/httparena_compare.sh generates the framework Dockerfile with
+bench/cloud/jobs/httparena.sh generates the framework Dockerfile with
 ``COPY app.py launcher.py db.py grpc_bench.py /app/``, so this file must exist
 in the staged framework dir for the image build to succeed.
 

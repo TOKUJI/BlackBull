@@ -2,8 +2,8 @@
 """One environment stamp, shared by every hot-path harness.
 
 A microbenchmark number without its machine, interpreter and tree is not a
-result — it is an anecdote.  `bench/cloud/httparena_compare.sh` already writes a
-`provenance.md` for cloud runs; the local harnesses had nothing, so numbers
+result — it is an anecdote.  Cloud sessions record theirs in the run's
+`manifest.json`; the local harnesses had nothing, so numbers
 from them reached the docs with no way to check what produced them.
 
 Import and call :func:`stamp` (human-readable) or :func:`as_dict` (for JSON

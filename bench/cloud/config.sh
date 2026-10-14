@@ -1,6 +1,6 @@
 # bench/cloud/config.sh — shared configuration for the AWS bench harness.
 #
-# Sourced by up.sh / install.sh / run.sh / down.sh.  Keep environment
+# Sourced by session.sh, up.sh, install.sh and down.sh.  Keep environment
 # variables here, never hard-code them in the action scripts.
 #
 # Override anything by exporting before invoking the action script:
@@ -11,13 +11,14 @@
 
 # --- AWS targeting --------------------------------------------------------
 : "${REGION:=us-east-1}"
-: "${INSTANCE_TYPE:=c7i.xlarge}"            # server instance (legacy default)
+# The instance bench/ab/AB-HIGH-PRECISION.md's numbers rest on: 8 physical
+# cores (no SMT) fit one server worker, wrk -t4 and the OS without contention.
+: "${INSTANCE_TYPE:=m7a.2xlarge}"
 : "${LOADGEN_INSTANCE_TYPE:=c7i.2xlarge}"   # split-topology load generator
 : "${VOLUME_SIZE_GB:=20}"     # /dev/sda1 root volume — generous for venv + apt
 
 # --- Topology -------------------------------------------------------------
-# TOPO=single keeps the historical one-host loopback bench
-# unchanged (server and load generator share the c7i.xlarge); TOPO=split
+# TOPO=single: server and load generator share one instance; TOPO=split
 # launches a second LOADGEN instance in a cluster placement group and
 # drives the bench over VPC private networking.  Numbers from the two
 # topologies are NOT directly comparable — see bench/CHARACTERIZATION.md
@@ -40,21 +41,22 @@
 : "${LOADGEN_ROLE_VALUE:=loadgen}"
 
 # --- Local files ----------------------------------------------------------
-AWS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$AWS_DIR/../.." && pwd)"
-# STATE_FILE is overridable so the parallel-pair harness in
-# full_ab.sh can run up.sh / install.sh / down.sh M times against
-# distinct per-pair state files without races.  Default keeps the
-# single-pair workflow at the legacy path.
-: "${STATE_FILE:=$AWS_DIR/.state}"     # INSTANCE_ID, PUBLIC_IP, SG_ID, AMI_ID
-LOCAL_KEY="$AWS_DIR/${KEY_NAME}.pem"   # private SSH key — chmod 600 by up.sh
+# Runtime state lives in bench/.state/ (ignored), never with the tools or the
+# results: the up.sh snapshot, the session record, the key, the host keys.
+CLOUD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$CLOUD_DIR/../.." && pwd)"
+STATE_DIR="$REPO_ROOT/bench/.state"
+: "${STATE_FILE:=$STATE_DIR/aws}"
+export STATE_FILE
+LOCAL_KEY="$STATE_DIR/${KEY_NAME}.pem"   # private SSH key — chmod 600 by up.sh
 
 # --- Remote access --------------------------------------------------------
 SSH_USER="ubuntu"
+: "${REMOTE_REPO:=/home/$SSH_USER/BlackBull}"
 # Overridable so a run can keep its host keys somewhere other than the shared
 # default — two instances provisioned in sequence reuse an IP often enough that
 # a per-run file is sometimes what makes StrictHostKeyChecking usable.
-: "${KNOWN_HOSTS_FILE:=$AWS_DIR/.known_hosts}"
+: "${KNOWN_HOSTS_FILE:=$STATE_DIR/known_hosts}"
 SSH_OPTS=(
     -i "$LOCAL_KEY"
     -o StrictHostKeyChecking=accept-new

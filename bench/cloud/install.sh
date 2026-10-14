@@ -2,7 +2,7 @@
 # bench/cloud/install.sh — deploy BlackBull + the benchmark toolchain to the
 # running EC2 instance(s), then smoke-test.
 #
-# Expects bench/cloud/.state from up.sh.  Re-runnable: rsync overwrites, apt
+# Expects $STATE_FILE from up.sh.  Re-runnable: rsync overwrites, apt
 # is idempotent, pip --upgrade is fine to repeat.
 #
 # TOPO=single (default):
@@ -27,16 +27,12 @@ set -euo pipefail
 
 # shellcheck source=config.sh
 source "$(dirname "$0")/config.sh"
+# shellcheck source=remote.sh
+source "$(dirname "$0")/remote.sh"
 _bench_aws_check_env
 _bench_aws_load_state
-
-# Backward-compat with legacy state files.
-SERVER_INSTANCE_ID="${SERVER_INSTANCE_ID:-${INSTANCE_ID:-}}"
-SERVER_PUBLIC_IP="${SERVER_PUBLIC_IP:-${PUBLIC_IP:-}}"
 SERVER_PRIVATE_IP="${SERVER_PRIVATE_IP:-}"
-LOADGEN_INSTANCE_ID="${LOADGEN_INSTANCE_ID:-}"
 LOADGEN_PUBLIC_IP="${LOADGEN_PUBLIC_IP:-}"
-LOADGEN_PRIVATE_IP="${LOADGEN_PRIVATE_IP:-}"
 TOPO="${TOPO:-single}"
 
 if [ -z "$SERVER_PUBLIC_IP" ]; then
@@ -45,23 +41,20 @@ if [ -z "$SERVER_PUBLIC_IP" ]; then
 fi
 
 SERVER_REMOTE="$SSH_USER@$SERVER_PUBLIC_IP"
-REMOTE_REPO="/home/$SSH_USER/BlackBull"
 LOCAL_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
 
+# Deploy the working tree as git sees it: tracked files plus untracked ones
+# that are not ignored — so results, runtime state, the venv and caches stay
+# home, and it works from a worktree.
+deploy_tree() {
+    echo "Deploying to $1:$REMOTE_REPO ..."
+    git -C "$REPO_ROOT" ls-files -z --cached --others --exclude-standard \
+        | rsync -az --from0 --files-from=- --ignore-missing-args \
+            -e "ssh ${SSH_OPTS[*]}" "$REPO_ROOT/" "$1:$REMOTE_REPO/"
+}
+
 # --- Common: deploy + base install on the SERVER --------------------------
-echo "Deploying to $SERVER_REMOTE:$REMOTE_REPO ..."
-rsync -az --delete \
-    --exclude '.venv/' \
-    --exclude '__pycache__/' \
-    --exclude '*.pyc' \
-    --exclude '.pytest_cache/' \
-    --exclude 'bench/results/' \
-    --exclude 'bench/cloud/.state' \
-    --exclude 'bench/cloud/.known_hosts' \
-    --exclude 'bench/cloud/*.pem' \
-    --exclude '.git/' \
-    -e "ssh ${SSH_OPTS[*]}" \
-    "$REPO_ROOT/" "$SERVER_REMOTE:$REMOTE_REPO/"
+deploy_tree "$SERVER_REMOTE"
 
 # In split topology the server's cert needs SANs that include the
 # bench-server.internal DNS name AND the server's VPC private IP so that
@@ -189,7 +182,6 @@ echo "=== Smoke test ==="
 .venv/bin/python -m pytest -q tests/unit/ --timeout=30 -x 2>&1 | tail -5
 
 echo "=== Server CPU topology ==="
-mkdir -p bench/results
 {
     echo "# Server CPU topology — captured at bench install time."
     echo "# Used to interpret multi-worker scaling: vCPUs that share the"
@@ -206,7 +198,7 @@ mkdir -p bench/results
         cpu="${f#/sys/devices/system/cpu/}"; cpu="${cpu%%/*}"
         [ -r "$f" ] && printf '%s  %s\n' "$cpu" "$(cat "$f")"
     done
-} > bench/results/server-cpu-topology.txt
+}
 
 echo "=== Versions ==="
 .venv/bin/python --version
@@ -215,27 +207,16 @@ uv run blackbull --help >/dev/null 2>&1 && echo "uv run blackbull CLI OK"
 echo "blackbull HEAD (from local rsync source): ${LOCAL_HEAD:-unknown}"
 REMOTE_EOF
 
-# --- Deploy .git when an A/B commit comparison will run -------------------
-# bench/ab/ab_commit.sh swaps files via `git checkout` between two refs,
-# which requires the repo's .git history on the instance.  The main rsync
-# above excludes .git/ (~113 MB) to keep ordinary bench deploys lean; opt
-# in with DEPLOY_GIT=1 when the run is an A/B commit comparison.
+# --- Deploy the git history when an A/B commit comparison will run ---------
+# bench/ab/ab_commit.sh swaps files between two commits in place, so the
+# instance needs the history behind the rsynced tree (DEPLOY_GIT=1).
 if [ "${DEPLOY_GIT:-0}" = "1" ]; then
-    echo "=== Deploying .git (DEPLOY_GIT=1) for ab_commit.sh ==="
-    rsync -az -e "ssh ${SSH_OPTS[*]}" \
-        "$REPO_ROOT/.git/" "$SERVER_REMOTE:$REMOTE_REPO/.git/"
-    ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-        "cd $REMOTE_REPO && git rev-parse --short HEAD && \
-         git cat-file -e ${LOCAL_HEAD}^{commit} && echo 'git refs OK (ab_commit.sh ready)'" \
-        2>&1 | tail -3
+    echo "=== Deploying the git history (DEPLOY_GIT=1) ==="
+    remote_deploy_git "$SERVER_REMOTE" || { echo "bench/cloud: git deploy failed" >&2; exit 1; }
 fi
 
 # --- TOPO=single ends here ------------------------------------------------
-if [ "$TOPO" = "single" ]; then
-    echo
-    echo "Done.  Next: bash bench/cloud/run.sh"
-    exit 0
-fi
+[ "$TOPO" = "single" ] && exit 0
 
 # --- TOPO=split: provision the load generator ----------------------------
 if [ -z "$LOADGEN_PUBLIC_IP" ]; then
@@ -246,26 +227,15 @@ LOADGEN_REMOTE="$SSH_USER@$LOADGEN_PUBLIC_IP"
 
 # Pull the regenerated cert + key back from the server so we can hand them
 # to the loadgen (whose repo copy must match for the CA store install).
-LOCAL_CERT_TMP=$(mktemp -d)
+LOCAL_CERT_TMP="$STATE_DIR/split-cert"
+mkdir -p "$LOCAL_CERT_TMP"
 trap 'rm -rf "$LOCAL_CERT_TMP"' EXIT
 rsync -az -e "ssh ${SSH_OPTS[*]}" \
     "$SERVER_REMOTE:$REMOTE_REPO/tests/cert.pem" \
     "$SERVER_REMOTE:$REMOTE_REPO/tests/key.pem" \
     "$LOCAL_CERT_TMP/"
 
-echo "Deploying to $LOADGEN_REMOTE:$REMOTE_REPO ..."
-rsync -az --delete \
-    --exclude '.venv/' \
-    --exclude '__pycache__/' \
-    --exclude '*.pyc' \
-    --exclude '.pytest_cache/' \
-    --exclude 'bench/results/' \
-    --exclude 'bench/cloud/.state' \
-    --exclude 'bench/cloud/.known_hosts' \
-    --exclude 'bench/cloud/*.pem' \
-    --exclude '.git/' \
-    -e "ssh ${SSH_OPTS[*]}" \
-    "$REPO_ROOT/" "$LOADGEN_REMOTE:$REMOTE_REPO/"
+deploy_tree "$LOADGEN_REMOTE"
 
 # Overwrite the loadgen's checked-in cert/key with the server-regenerated
 # pair before the CA-store install step runs on the loadgen.
@@ -380,4 +350,4 @@ ssh -i "$HOME/.ssh/server.pem" \
 REMOTE_EOF
 
 echo
-echo "Done.  Next: bash bench/cloud/run.sh"
+echo "Done."

@@ -4,9 +4,10 @@ How to measure "did commit X cost anything" accurately enough to *rule out a
 regression* or *claim equivalence within ±Δ%*.  Distilled from the
 keep-alive-tail refactor verification (commit 6931b77, `a5422e0`..`9c24876`).
 
-The tools this documents: `ab_commit.sh` (measurement), `ab_report.py`
-(standard report), `ab_equiv_report.py` (equivalence verdict).  All in this
-directory.
+The tools this documents, all in this directory: `ab_commit.sh` (HTTP/1.1),
+`ab_commit_h2.sh` (HTTP/2) and `ab_commit_ws.sh` (WebSocket) share the
+measurement core `abba.sh`; `report.py` turns any of their `raw.tsv` files into
+the verdict.  On EC2 they run through `just ab-verify`.
 
 ---
 
@@ -41,21 +42,20 @@ not remove it.  Against a two-mode sample:
   differ by the full mode gap — the median Δ swings ±12 % with the code held
   byte-identical.  `MAD` stays small on a bimodal sample, so a fake delta
   reads as "outside the noise floor".  **Read the mean, never the median.**
-- **Detect it:** `ab_report.py`'s `hi-mode` column (fraction of samples above
-  the range midpoint).  Neither 0/n nor n/n ⇒ mixed ⇒ bimodal.
-- **Handle it:** compare *within* a mode.  Either per-mode, or the combined
-  estimator in `ab_equiv_report.py` (inverse-variance weighted delta across
-  modes, Satterthwaite df).
+- **Detect it:** `report.py` splits a phase at its largest relative gap when
+  that gap is ≥ 5 % and reports `hi-mode` (samples in the upper mode) per arm.
+- **Handle it:** compare *within* a mode.  `report.py` does so automatically
+  on a bimodal sample: Δ per mode, combined by inverse variance, with a
+  bootstrap CI.
 
 ### 2.2 Monomodality (EC2) — use the POOLED estimator
 
 On EC2 (m7a, dedicated vCPUs, stable frequency) throughput is **monomodal**.
-Here the bimodal split/combined estimator is the **wrong tool** — the
-midpoint heuristic cuts one continuous distribution in two and shifts the
-estimate (it falsely reported ±0.5 % equivalence on a monomodal sample).  For
-a monomodal box, use a **pooled two-sample TOST** (or the round-paired
-estimator below) on all samples.  Rule: split/combined only when `hi-mode`
-shows true ~15 % separated clusters.
+Here a split estimator is the **wrong tool** — cutting one continuous
+distribution in two shifts the estimate (a midpoint split once falsely
+reported ±0.5 % equivalence on a monomodal sample).  `report.py` therefore
+splits only at a real gap (≥ 5 %), and otherwise uses the round-paired
+estimator below on all samples.
 
 ### 2.3 Round-paired (blocked) estimator
 
@@ -134,44 +134,33 @@ phase's own |bias| + SE (or its CI sits outside the null CI).
 
 ## 4. EC2 workflow (reproducible + fail-safe)
 
-Instance lifecycle via `bench/cloud/up.sh` / `install.sh` / `down.sh`, with
-`bench/cloud/ab.sh` orchestrating the `ab_commit.sh` measurement:
+```bash
+REF_BASE=<base> REF_TREAT=<treatment> URL_PATHS=/conn,/plaintext H2_PROFILES=/1kb \
+    APPROVE_CLOUD=1 just ab-verify
+```
 
-1. **Instance:** `INSTANCE_TYPE=m7a.2xlarge TOPO=single bash bench/cloud/up.sh`
-   (8 vCPU, **no SMT** — each vCPU is a physical core; 8 cores fits 1 worker
-   + `wrk -t4` + OS.  xlarge = 4 cores is oversubscribed by `wrk -t4`.)
-2. **Fail-safe (set immediately after up):** instance-initiated shutdown →
-   `terminate`, plus a scheduled `sudo shutdown -h +180` on the instance, so
-   it self-terminates even if nothing else runs.  The agent is never the sole
-   teardown path.
-3. **`DEPLOY_GIT=1 bash bench/cloud/install.sh`** — deploys repo + venv + wrk +
-   toolchain, installs `uv` (PATH-symlinked to `/usr/local/bin` so
-   `ssh host "uv run …"` works), and deploys the repo's `.git` (the plain
-   rsync excludes it at ~113 MB, but `ab_commit.sh`'s git-checkout swap needs
-   the refs).  Smoke test verifies `uv run blackbull --help`.
-4. **Run:** `REF_BASE=.. REF_TREAT=.. URL_PATH=/conn ROUNDS=8
-   bash bench/cloud/ab.sh launch` — starts one or more profiles
-   (`URL_PATHS=/conn,/plaintext`) detached on the instance; the ssh call
-   returns immediately.  The launch handshake checks the uploaded runner's
-   PID and is bounded by `AB_LAUNCH_TIMEOUT` (default 30 seconds).
-5. **Finish:** `bash bench/cloud/ab.sh finish` (run nohup'd locally) polls the
-   remote `raw.tsv` files to their expected line count, scp's the result dirs
-   back, then runs `down.sh`.  The expected line count and result-lane count
-   are recorded at launch, so finish may use different `ROUNDS` or profile
-   values without changing the completeness check.  An explicit
-   `EXPECT_LINES` overrides only the line threshold; launch metadata and
-   runner-status checks remain mandatory.  The detached runner writes a
-   success marker only after every lane succeeds; missing, incomplete, or
-   extra result lanes and poll or result-copy failures abort before teardown.
-   (Instance self-termination is the backstop.)
+`just ab-verify` is one session (`bench/cloud/session.sh ab`): an
+**m7a.2xlarge** (8 vCPU, **no SMT** — each vCPU a physical core, enough for one
+worker + `wrk -t4` + the OS; an xlarge's 4 cores are oversubscribed by
+`wrk -t4`), a self-shutdown armed for the session's length, the working tree
+and its git history deployed, one `ab_commit.sh` per HTTP/1.1 lane and one
+`ab_commit_h2.sh` per HTTP/2 lane run detached, then the results pulled and
+the instance torn down.  The defaults (8 rounds, 15 s runs, null + real,
+server on cores 0–1, load on 2–5) are this document's recipe.  `REF_TREAT`
+must be the checked-out tree — that tree is what is deployed.
+
+A session that is still measuring at its wait limit, or loses ssh, keeps the
+instance and its results and prints `bash bench/cloud/session.sh ab finish`;
+see [bench/cloud/README.md](../cloud/README.md).  The verdict is in
+`bench/results/cloud_ab/<run>/report.md`, one section per lane.
 
 ## 5. Tools
 
 | Tool | Purpose |
 |---|---|
-| `ab_commit.sh` | ABBA measurement: swap+import-proof, null+real, pinning, per-round raw.tsv |
-| `ab_report.py` | Standard report: mean + 1 SE + hi-mode diagnostic; mean (not median) |
-| `ab_equiv_report.py` | TOST equivalence within ±Δ; bimodal split/combined (use pooled for monomodal) |
+| `abba.sh` | The shared core: commit resolution, in-place swap with import-hash proof, ABBA + null schedule, pinning, `raw.tsv` per round |
+| `ab_commit.sh` / `ab_commit_h2.sh` / `ab_commit_ws.sh` | The wrk / h2load / k6 lanes |
+| `report.py` | Verdict: round-paired Δ (per mode when bimodal), bootstrap 95 % CI, null floor, equivalence within `--equiv` |
 
 ## 6. Calibration numbers from the 6931b77 verification (2026-08-01)
 

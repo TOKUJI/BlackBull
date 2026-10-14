@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # bench/micro/profile_under_load.sh — capture a py-spy flame graph during k6 stress load.
 #
-# Launches the server *through* py-spy so no sudo/ptrace is needed.
-# Kills any existing bench/ab/h2load/app.py process first.
+# Launches the server *through* py-spy so no sudo/ptrace is needed, after
+# freeing port 8443.  The flame graph (speedscope JSON) and the k6 summary go
+# to the run directory (bench/lib/results.sh).
 #
 # Usage:
 #   BB_WORKERS=1 BB_UVLOOP=1 bash bench/micro/profile_under_load.sh
@@ -14,9 +15,6 @@
 set -e
 
 BASE="https://localhost:8443"
-RESULT_DIR="bench/results"
-mkdir -p "$RESULT_DIR"
-TS="$(date +%Y%m%d-%H%M%S)"
 
 # Default to 500 VU / 60 s — these match the C2 lane in the peer matrix.
 # Callers run this script twice with K6_VUS=200 (B1-like) and K6_VUS=500
@@ -25,11 +23,13 @@ K6_VUS="${K6_VUS:-500}"
 K6_DURATION="${K6_DURATION:-60s}"
 export K6_VUS K6_DURATION
 
-# Embed the VU count in output filenames so multiple passes don't collide.
+source bench/lib/results.sh
+bench_run_dir profile_under_load vus="$K6_VUS" duration="$K6_DURATION" \
+    workers="${BB_WORKERS:-1}" uvloop="${BB_UVLOOP:-1}"
 # speedscope JSON (not SVG): each sample is a full call-stack, so the file
 # opens directly in VS Code / speedscope.app and parses with stdlib json.
-PROFILE="$RESULT_DIR/profile_stress_${TS}_vu${K6_VUS}.speedscope.json"
-K6_JSON="$RESULT_DIR/k6_stress_profile_${TS}_vu${K6_VUS}.json"
+PROFILE="$BENCH_RUN_DIR/profile.speedscope.json"
+K6_JSON="$BENCH_RUN_DIR/k6.json"
 
 CERT="${CERT:-tests/cert.pem}"
 KEY="${KEY:-tests/key.pem}"
@@ -46,13 +46,8 @@ for path in \
 done
 [ -n "$MKCERT_CA" ] && export SSL_CERT_FILE="$MKCERT_CA"
 
-# --- stop any existing bench server ---
-EXISTING=$(pgrep -f "bench/ab/h2load/app.py" | head -1)
-if [ -n "$EXISTING" ]; then
-    echo "Stopping existing server (PID $EXISTING) ..."
-    kill "$EXISTING" 2>/dev/null || true
-    sleep 1
-fi
+# --- free the port ---
+fuser -k -n tcp 8443 2>/dev/null && sleep 1 || true
 
 # py-spy duration: server-startup (~5s) + warmup (~5s) + K6_DURATION
 # seconds of stress + ~15s buffer for graceful py-spy speedscope JSON write.
