@@ -188,7 +188,12 @@ abba_main() {
         scope="$BB_FORCE_ASGI_SCOPE" workers="$BB_WORKERS" base_env="$BASE_EXTRA_ENV" \
         treat_env="$TREAT_EXTRA_ENV" server_cpus="$SERVER_CPUS" load_cpus="$LOAD_CPUS" || exit 1
     AB_RUN="$BENCH_RUN_DIR"
-    trap _ab_cleanup EXIT INT TERM HUP
+    # A signal must end the run: cleanup alone would let the loop start the
+    # next arm's server after the tree was restored.
+    trap _ab_cleanup EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'exit 129' HUP
 
     printf 'phase\tround\tarm\trps\tproof\n' > "$AB_RUN/raw.tsv"
     echo "$AB_TOOL: ${SHA_BASE:0:8} (base) vs ${SHA_TREAT:0:8} (treat) -> $AB_RUN"
