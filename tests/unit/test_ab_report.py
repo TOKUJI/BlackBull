@@ -108,3 +108,20 @@ def test_a_large_clear_effect_is_not_mistaken_for_two_modes(tmp_path):
         assert s['bimodal'] is False
         assert s['verdict'] == verdict
         assert abs(s['phases']['real']['delta_pct'] - (effect - 1) * 100) < 1
+
+
+def test_a_real_delta_inside_the_null_bias_is_not_a_change(tmp_path):
+    # The A/A phase itself reads about -0.9 %; a real -0.7 % is the box, not the code.
+    raw = _raw(tmp_path, {
+        'null': {'base': _noisy(100, 16, .001, 20), 'treat': _noisy(99.1, 16, .001, 21)},
+        'real': {'base': _noisy(100, 16, .001, 22), 'treat': _noisy(99.3, 16, .001, 23)},
+    })
+
+    assert _summary(raw)['verdict'] not in ('slower', 'faster')
+
+
+def test_too_few_rounds_give_no_verdict(tmp_path):
+    raw = _raw(tmp_path, {'real': {'base': _noisy(100, 6, .001, 24),
+                                   'treat': _noisy(90, 6, .001, 25)}})
+
+    assert _summary(raw)['verdict'] == 'inconclusive'

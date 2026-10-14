@@ -12,13 +12,15 @@ Deltas are log-scale (treat vs base) and reported as percentages.
   variance, with a bootstrap 95 % CI.
 
 The null (A/A) phase serves identical bytes under both labels; its CI is this
-session's resolution floor.  Verdict, on the real phase:
+session's resolution floor — its bias as well as its width.  Verdict, on the
+real phase:
 
+* ``inconclusive`` fewer than MIN_ROUNDS rounds (a bootstrap over two or three
+  rounds is only their range), or none of the below;
 * ``unresolved``   the null CI does not fit inside ±equiv — this box cannot
   resolve a change of that size in this session;
-* ``slower`` / ``faster``  the CI excludes 0;
-* ``equivalent``   the CI includes 0 and fits inside ±equiv;
-* ``inconclusive`` otherwise — more rounds, or a quieter host.
+* ``slower`` / ``faster``  the CI lies beyond 0 *and* beyond the null CI;
+* ``equivalent``   otherwise, when the CI fits inside ±equiv.
 """
 from __future__ import annotations
 
@@ -33,6 +35,7 @@ from pathlib import Path
 #: phase into two modes; a monomodal sample's largest gap is a fraction of it.
 MODE_GAP = 0.05
 BOOTSTRAP = 4000
+MIN_ROUNDS = 4
 ARMS = ('base', 'treat')
 
 
@@ -147,25 +150,28 @@ def verdict(phases: dict, equiv: float) -> str:
         lo, hi = p['ci95']
         return -equiv < lo and hi < equiv
 
-    if 'null' in phases and not inside(phases['null']):
-        return 'unresolved'
-    if 'real' not in phases:
+    real, null = phases.get('real'), phases.get('null')
+    if real is None or real['rounds'] < MIN_ROUNDS:
         return 'inconclusive'
-    lo, hi = phases['real']['ci95']
-    if hi < 0:
+    if null is not None and not inside(null):
+        return 'unresolved'
+    lo, hi = real['ci95']
+    null_lo, null_hi = null['ci95'] if null is not None else (0.0, 0.0)
+    if hi < min(0.0, null_lo):
         return 'slower'
-    if lo > 0:
+    if lo > max(0.0, null_hi):
         return 'faster'
-    return 'equivalent' if inside(phases['real']) else 'inconclusive'
+    return 'equivalent' if inside(real) else 'inconclusive'
 
 
 EXPLAIN = {
     'unresolved': 'the null (A/A) CI does not fit inside ±{e} %, so this session '
                   'cannot resolve a change of that size — add rounds or use a quieter host',
-    'slower': 'the treatment is slower: the real CI lies below 0',
-    'faster': 'the treatment is faster: the real CI lies above 0',
-    'equivalent': 'no change resolved, and the real CI fits inside ±{e} %',
-    'inconclusive': 'the real CI includes 0 but is wider than ±{e} % — add rounds',
+    'slower': 'the treatment is slower: the real CI lies below 0 and below the null CI',
+    'faster': 'the treatment is faster: the real CI lies above 0 and above the null CI',
+    'equivalent': 'no change beyond the null floor, and the real CI fits inside ±{e} %',
+    'inconclusive': 'fewer than ' + str(MIN_ROUNDS) + ' rounds, or a real CI that neither '
+                    'clears the null floor nor fits inside ±{e} % — add rounds',
 }
 
 

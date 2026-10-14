@@ -144,10 +144,11 @@ _ab_arm() {  # $1 phase, $2 arm, $3 round
     echo "  [$1] round $3  $2  ${value:-NaN}/s   [${proof##* }]"
 }
 
+# EC2 Nitro instances name themselves in DMI: vendor "Amazon EC2", product
+# the instance type — no metadata-service token needed.
 _ab_host() {
-    if grep -qi 'amazon ec2' /sys/class/dmi/id/product_name 2>/dev/null; then
-        printf 'EC2 %s (nproc=%s)' "$(curl -s --max-time 2 \
-            http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null || echo '?')" "$(nproc)"
+    if grep -qi 'amazon ec2' /sys/class/dmi/id/sys_vendor 2>/dev/null; then
+        printf 'EC2 %s (nproc=%s)' "$(cat /sys/class/dmi/id/product_name)" "$(nproc)"
     else
         printf 'local %s (nproc=%s)' "$(uname -sr)" "$(nproc)"
     fi
