@@ -123,9 +123,17 @@ def main(argv: list[str] | None = None) -> int:
                 break
         probe_script = (
             'import pathlib\n'
+            # observe the server process itself, never the timeout wrapper
+            # or this probe's own python -c body (PR review P1)
+            'def _is_server(parts):\n'
+            '    return (b"python" in parts[0]\n'
+            '            and any(a.endswith(b"fixture_app.py") for a in parts)\n'
+            '            and b"-c" not in parts)\n'
             'pid = next(p.name for p in pathlib.Path("/proc").iterdir()\n'
             '           if p.name.isdigit()\n'
-            '           and b"fixture_app" in (p / "cmdline").read_bytes())\n'
+            '           and _is_server((p / "cmdline").read_bytes()\n'
+            '                          .split(b"\\0")))\n'
+            'print("G2-4 server-pid:", pid, flush=True)\n'
             'import subprocess, sys\n'
             'sys.exit(subprocess.call([\n'
             '    "python", "tools/security/probe.py",\n'
@@ -166,7 +174,16 @@ def main(argv: list[str] | None = None) -> int:
         detected = oom_kill > 0 or oomkilled or pids_max > 0
         print(f'G2-4 OOM detection: {"verified" if detected else "NOT DETECTED"}')
         return 0 if detected else 1
-    breached = oom_kill > 0 or pids_max > 0 or oomkilled or probe_rc != 0
+    # a server that died before collection, or unreadable metrics, is a
+    # breach — never a clean run (PR review P1)
+    exit_code = metrics.get('docker.ExitCode')
+    missing = [n for n in ('memory.peak', 'pids.peak') if n not in metrics]
+    if exit_code not in (None, 0):
+        print(f'G2-4: server exited before collection (exit {exit_code})')
+    if missing:
+        print(f'G2-4: metrics unavailable: {", ".join(missing)}')
+    breached = (oom_kill > 0 or pids_max > 0 or oomkilled or probe_rc != 0
+                or exit_code not in (None, 0) or bool(missing))
     leftovers = _docker('ps', '-aq', '--filter', 'label=bb-vuln=1',
                         check=False).split()
     if leftovers:
