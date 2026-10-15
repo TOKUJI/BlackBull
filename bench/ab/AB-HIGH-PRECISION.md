@@ -62,13 +62,12 @@ estimator below on all samples.
 The ABBA design blocks on *round*.  Compute the per-round delta
 (mean log treat − mean log base within each round) and average over rounds.
 This cancels round-level drift and **nearly halves the SE** vs pooled
-(0.127 vs 0.197 on the EC2 run) — the best use of the design, at no extra
-measurement cost.
+(§6) — the best use of the design, at no extra measurement cost.
 
 ### 2.4 Outliers / transients
 
-A single transient dip (e.g. −7.4 % in one null-phase run) can widen the CI
-enough to flip an equivalence verdict.  Run an **endpoint-trim robustness
+A single transient dip in one run can widen the CI enough to flip an
+equivalence verdict.  Run an **endpoint-trim robustness
 check** (trim k extremes per arm; k=1..3) and report whether the verdict
 survives.  If the *null* phase fails only because of one outlier, the floor
 is fine; if the *real* phase fails at every trim level, it is not an outlier
@@ -77,17 +76,12 @@ problem — it needs more samples.
 ### 2.5 Local (WSL2) = screener, EC2 = verdict — the asymmetry
 
 The two boxes do not play the same role.  The local WSL2 box's null floor
-is at or above the ±1 % bound — within-mode ±1.3 % on a good day
-(2026-07-31, 4 rounds), ±2.4 % combined on a bad day (2026-08-01) — and no
-local null pass at ±1 % has ever been recorded.  A box whose null cannot
-clear the bound can never certify equivalence: **local cannot produce an
-OK.**
+sits at or above a ±1 % bound (§6), and a box whose null cannot clear the
+bound can never certify equivalence: **local cannot produce an OK.**
 
 Local CAN flag a large regression — a delta larger than 2–3× that day's
-floor shows up in the mean — but even the flag is not always conclusive:
-the 2026-08-01 extraction read −4.85 % ± 2.71 pooled on local (95 % CI
-[−10.2 %, +0.5 %], still crossing 0) and only EC2 (−3.03 % ± 0.31) made
-the verdict.
+floor shows up in the mean — but even the flag is not always conclusive: a
+local CI can still cross 0 where EC2 resolves the same change (§6).
 
 Use the harness asymmetrically:
 
@@ -95,9 +89,8 @@ Use the harness asymmetrically:
   null floor) → revert consideration immediately.  Everything else (an OK
   candidate, a borderline NG) is inconclusive by construction: do not burn
   rounds waiting for a local OK, and never trust a local OK at ±1 %.
-- **EC2 (m7a.2xlarge)** — the authority for both OK and NG.  Its null has
-  passed ±1 % in every EC2 session so far (2026-07-31, 2026-08-01), so a
-  verdict from this box is meaningful.
+- **EC2 (m7a.2xlarge)** — the authority for both OK and NG: its null phase
+  passes ±1 % (§6), so a verdict from this box is meaningful.
 
 ## 3. Statistics — what "no regression" actually means
 
@@ -110,21 +103,14 @@ Use the harness asymmetrically:
   null** — you can only bound it.  So "prove no regression" = equivalence /
   CI-bounding, not hypothesis testing.
 
-### 3.2 Rounds required (1 round = 4 wrk runs ≈ 100 s)
+### 3.2 Rounds required (1 round = 4 runs per phase)
 
-Measured locally (bimodal, within-mode CV 0.3–0.5 %):
-
-| Goal | Rounds |
-|---|---|
-| Detect 1 % | ~4–5 |
-| Detect 0.5 % | ~8–16 |
-| Detect 0.2 % | ~30–80 |
-| Equivalence ±1 % | ~3–4 |
-| Equivalence ±0.5 % (combined / both-modes) | ~5–12 / ~12–32 |
-
-EC2 single-worker CV measured ~0.6–0.7 % (higher than local within-mode), so
-±0.5 % equivalence needs ~20–24 rounds there.  **Measure the box's actual
-CV from the null phase before committing to a round count.**
+The CI half-width shrinks as 1/√rounds.  Measure the box in the session you
+are in: run a few rounds, read the null phase's CI half-width *h*, and the
+rounds needed for a target half-width *t* are about rounds × (*h* / *t*)².
+Equivalence within ±Δ needs *t* comfortably below Δ, since the point
+estimate is rarely exactly 0.  `report.py` gives no verdict below four
+rounds.  Rounds measured on past boxes are on the issues in §6.
 
 ### 3.3 Report format
 
@@ -162,61 +148,34 @@ see [bench/cloud/README.md](../cloud/README.md).  The verdict is in
 | `ab_commit.sh` / `ab_commit_h2.sh` / `ab_commit_ws.sh` | The wrk / h2load / k6 lanes |
 | `report.py` | Verdict: round-paired Δ (per mode when bimodal), bootstrap 95 % CI, null floor, equivalence within `--equiv` |
 
-## 6. Calibration numbers from the 6931b77 verification (2026-08-01)
+## 6. Calibration evidence
 
-- **Local box:** bimodal; within-mode null floor ±1.3 % at 4 rounds; 4 rounds
-  cannot claim ±0.5 %.
-- **EC2 m7a.2xlarge, single worker:** monomodal, ~31k req/s, CV ~0.6–0.7 %,
-  12 rounds → 96 measurements.
-- **Real Δ (no-op refactor):** MLE +0.287 %; pooled SE 0.197
-  (CI [−0.11, +0.69]); round-paired SE 0.127 (CI [+0.007, +0.568]); t≈1.45,
-  p≈0.15 — not significant.  Equivalent within **±1 %**; **±0.5 % not
-  claimable** at 12 rounds (CI upper +0.57..+0.69 % at every trim level).
-- **Bytecode cross-check:** hot path instruction stream identical; only
-  OPTIONS*-only code removed (run() 1047→933 instr, branches 85→74).  This is
-  the strongest evidence a benchmark could never beat: a strict no-op on the
-  measured path.
+The numbers behind this method live on their issues, not here:
 
-### 6.1 Calibration — non-no-op refactor (2026-08-01, HTTP1Actor.run extraction)
-
-Contrast to §6: this refactor DID change the measured path, and the A/B
-caught it before merge.
-
-- **Change:** extracted two `async def` methods out of `HTTP1Actor.run`
-  (`_read_and_parse`, `_dispatch_one_request`) — +1 coroutine hop per request
-  each, everything else byte-identical.
-- **EC2 m7a.2xlarge, 8 rounds ABBA, 16 runs/arm:** null (A/A) Δ = −0.24 %,
-  CI [−0.62 %, +0.15 %] → **±1 % equivalent (box resolvable)**.  Real Δ =
-  **−3.03 % ± 0.31** — consistent in every round, zero overlap (base min
-  30481 > treat max 30272), 3× the null floor.  Per-request 32.37 → 33.38 µs
-  (+1.01 µs).
-- **Interpretation:** on the ~30k req/s request-ingest loop each added
-  `await` hop costs **~1.5 %** throughput.  A two-hop async extraction is a
-  measurable regression against BlackBull's "no call, no allocation" bar
-  (commit 88038e0 removed a per-event coroutine wrapper worth 7 % CPU).
-- **Outcome:** reverted (verdict rule 4).  The null phase passing is exactly
-  what made the real −3 % trustworthy instead of box noise.
+- **BLA-163** — the 6931b77 no-op verification on EC2: monomodal, CV ~0.6–0.7 %,
+  ±1 % equivalent at 12 rounds, ±0.5 % not claimable; the paired estimator's SE
+  against the pooled one.
+- **BLA-543** — local WSL2 against EC2 on the same changes, the rounds table,
+  and a two-`await` extraction caught at −3 % and reverted.
+- **BLA-542** — the first run of `just ab-verify` through `bench/cloud/session.sh`.
 
 ## 7. Verdict rules
 
-A regression (the change being *slower*) is essentially ruled out when:
+`report.py` states one of five verdicts; act on it as follows.
 
-1. The real Δ point estimate is ≥ 0 or its 95 % CI is not below 0, **and**
-2. The real CI is inside the chosen equivalence bound (or at least inside
-   ±1 %), **and**
-3. The bytecode/hot-path analysis shows the measured path executes the same
-   instructions (the deterministic proof the benchmark can only approximate).
+1. **`unresolved`** — the null (A/A) phase does not fit inside the bound, so
+   this box cannot resolve a change of that size this session.  Read nothing
+   into the real phase: add rounds or move to EC2.
+2. **`slower`** — the real CI lies below 0 *and* below the null CI: a real
+   regression.  Revert or fix; do not re-measure hoping for a better draw.
+3. **`faster`** — the mirror image.
+4. **`equivalent`** — no change beyond the null floor, and the real CI fits
+   inside the bound.  Together with a bytecode / hot-path check showing the
+   measured path executes the same instructions (the deterministic proof the
+   benchmark can only approximate), a regression is ruled out.
+5. **`inconclusive`** — fewer than four rounds, or a real CI that neither
+   clears the null floor nor fits inside the bound.  Add rounds (§3.2), not
+   outlier removal.
 
-A ±0.5 % equivalence claim specifically needs the real-phase 95 % CI inside
-±0.5 % **and** the null phase to also pass (after outlier trim).  If the CI
-upper bound sits at +0.57–0.69 % because the point estimate is +0.3 %, more
-rounds (not outlier removal) are the only path.
-
-4. **Regression vs. no-resolve — read the null phase first.**  When the
-   null (A/A) phase passes equivalence but the real CI **exceeds** the
-   bound, the change is a real regression: revert or fix, do not re-measure
-   (2026-08-01 §6.1: real −3.03 % with a passing null → reverted).  When
-   the null phase *fails* equivalence, the box cannot resolve ±Δ that
-   session — escalate or add rounds before trusting any real-phase verdict
-   (2026-08-01 local WSL2: null combined CI ±2.4 % at 4 rounds made the
-   real reading uninterpretable; EC2 resolved it).
+A ±0.5 % equivalence claim needs `--equiv 0.5`: the null phase and the real
+phase must both fit inside ±0.5 %.

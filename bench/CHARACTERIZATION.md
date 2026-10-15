@@ -199,7 +199,7 @@ Lane E exposes accept-loop + TLS-handshake costs that the
 keep-alive-dominated Lane B hides.  Run against `*-cleartext` stacks
 in addition to standalone-TLS to isolate the handshake cost from the
 accept-loop cost (cleartext drops TLS but keeps the accept-per-request
-cost).  See the Sprint 24 results section for first numbers.
+cost).
 
 ## Metrics
 
@@ -249,10 +249,9 @@ Python version, server version, load-gen version, kernel TCP settings
 
 Microbench numbers translate to throughput numbers at a multiplier that
 depends on the optimised path's share of py-spy samples on the target
-lane (typically B1 or B2).  Sprint 25 measured ~2-3× (path was a
-dominant slice); Sprint 26 measured ~0.21× (path had been reduced past
-dominance).  Predict the multiplier from the share **before** committing
-sprint scope:
+lane (typically B1 or B2): large while the path dominates the samples,
+well below 1× once it no longer does (the measurements are on BLA-543).
+Predict the multiplier from the share **before** committing sprint scope:
 
 | Profile share of optimised path (B1/B2 self-time + inclusive) | Expected multiplier | Decision rule |
 |---|---|---|
@@ -269,37 +268,12 @@ the share directly.
 | Limitation | Mitigation |
 |---|---|
 | WSL2 loopback hides real-NIC behaviour (no DMA, no driver, no syscall cost matching a real card) | Numbers are explicitly *relative*; absolute measurements on EC2 |
-| **WSL2 noise floor on B2r (~-R 5000)**: BlackBull single-stack 5-run spread is 1.3-5.1 ms mean with no code change. Any optimisation < ~15 % is invisible. | Run ≥ 5 runs per stack and report the *median*. Do not cite a B2r improvement from any single A/B unless the medians differ by > 15 %. Sub-ms-precision work belongs on EC2. |
+| **WSL2 noise floor**: restarts land in two throughput modes (bench/ab/AB-HIGH-PRECISION.md §2.1), and the run-to-run spread on a single stack is large enough to hide a change of ~15 % (measurements on BLA-543). | Measure the session's floor with the A/B null phase before citing a delta; sub-ms-precision work belongs on EC2. |
 | Single-host load gen + server share CPU | k6 and the server pinned to different CPU sets where possible; or run load gen on a second EC2 instance |
 | Different servers use different HTTP/2 libraries (h2 vs Rust impl in granian) | Documented per result; mux scaling differences are mostly library-driven |
 | uvicorn and daphne can't run lane A | Marked as N/A in the matrix; cross-protocol comparison handled by lane C |
 | `/echo` payload not standardized across HTTP/1.1 vs HTTP/2 lanes | Same 4 KiB body in both lanes; differences are protocol overhead, not body cost |
 
-
-## File layout (target)
-
-```
-bench/
-  CHARACTERIZATION.md          # this file
-  app.py                       # BlackBull bench target (exists)
-  benchmark.sh                 # BlackBull-only orchestrator (exists)
-  h2load_run.sh                # lane A driver (exists)
-  k6/                          # lanes C, D (exists)
-  wrk/                         # lane B driver (to add)
-    ping.lua
-    echo.lua
-    run.sh
-  peers/
-    blackbull_app.py           # symlink / re-export of bench.ab.h2load.app for parity (optional)
-    uvicorn_app.py             # to add
-    hypercorn_app.py / quart_app.py / starlette_app.py  # exists
-    granian_app.py             # to add
-    daphne_app.py              # to add
-    compare.sh                 # to extend
-    run_one.sh                 # to extend
-  results/
-    baseline_v0.md             # v0 WSL2 baseline (to add after implementation)
-```
 
 ## Reading the matrix
 
