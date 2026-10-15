@@ -43,14 +43,16 @@ def parse_cgroup_counters(text: str) -> dict[str, int]:
     return values
 
 
-def parse_verdicts(text: str) -> dict[str, str]:
-    """check -> verdict from the probe's stdout table."""
-    out: dict[str, str] = {}
-    for line in text.splitlines():
-        parts = line.split()
-        if len(parts) >= 3 and parts[2] in ('PASS', 'FAIL', 'TIMEOUT', 'SKIP'):
-            out[parts[0]] = parts[2]
-    return out
+def parse_verdicts(text: str) -> dict[tuple[str, str], str]:
+    """(lane, check) -> verdict from the probe's report text (PR review P2).
+
+    Delegates to the probe's own report parser — one definition of the
+    report grammar, lane identity preserved, every verdict word known.
+    """
+    if __package__ in (None, ''):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from tools.security.probe import parse_report_verdicts
+    return parse_report_verdicts(text)
 
 
 def _docker(*args: str, check: bool = True) -> str:
@@ -159,7 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     (out_dir / f'container-{stamp}.json').write_text(
         json.dumps(metrics, indent=2, sort_keys=True), encoding='utf-8')
     if args.verdicts_out:
-        lines = [f'{k}={v}' for k, v in sorted(parse_verdicts(probe_out).items())]
+        lines = [f'{lane}/{check}={v}' for (lane, check), v
+                 in sorted(parse_verdicts(probe_out).items())]
         Path(args.verdicts_out).write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
     oom_kill = metrics.get('memory.events', {}).get('oom_kill', 0) \

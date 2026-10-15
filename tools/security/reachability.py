@@ -147,7 +147,9 @@ def reached_lines(coverage_json: dict, root: Path) -> set[tuple[str, int]]:
         try:
             rel = path.resolve().relative_to(root.resolve()).as_posix()
         except ValueError:
-            rel = path.name
+            # outside the measured source root: never alias by file name,
+            # which would credit the wrong module (PR review P2)
+            continue
         for line in data.get('executed_lines', ()):
             reached.add((rel, line))
     return reached

@@ -72,14 +72,16 @@ MUTATIONS = (
 )
 
 
-def parse_verdicts(text: str) -> dict[str, str]:
-    """Map check id to verdict word from the probe's report table."""
-    found: dict[str, str] = {}
-    for line in text.splitlines():
-        parts = line.split()
-        if len(parts) >= 3 and parts[2] in VERDICTS:
-            found[parts[0]] = parts[2]
-    return found
+def parse_verdicts(text: str) -> dict[tuple[str, str], str]:
+    """Map (lane, check id) to verdict word (lane-preserving; PR review P2).
+
+    Delegates to the probe's own report parser so every consumer shares
+    one definition of the report grammar.
+    """
+    if __package__ in (None, ''):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from tools.security.probe import parse_report_verdicts
+    return parse_report_verdicts(text)
 
 
 def _wait_port(port: int, timeout: float = 15.0) -> None:
@@ -145,7 +147,7 @@ def main() -> int:
         baseline = parse_verdicts(run_probe(root))
     finally:
         stop_fixture(proc)
-    passed = [cid for cid, v in baseline.items() if v == 'PASS']
+    passed = [key for key, v in baseline.items() if v == 'PASS']
     print(f'baseline: {len(baseline)} rows, {len(passed)} PASS')
 
     detected = 0
@@ -167,8 +169,8 @@ def main() -> int:
             mutated = parse_verdicts(run_probe(root))
         finally:
             stop_fixture(proc)
-        flips = sorted(cid for cid in passed
-                       if mutated.get(cid) in ('FAIL', 'TIMEOUT'))
+        flips = sorted(f'{lane}/{cid}' for lane, cid in passed
+                       if mutated.get((lane, cid)) in ('FAIL', 'TIMEOUT'))
         if flips:
             detected += 1
             print(f'  {name:<28} DETECTED by {len(flips)} row(s): '

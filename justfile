@@ -154,8 +154,9 @@ vuln-container:
     just vuln-target-up >/dev/null
     just vuln-check > "$out/container-native.txt" 2>&1 || true
     just vuln-target-down >/dev/null
-    grep -E '^(BASELINE|H1-|SMUGGLE|CHUNK|TRAILER|STATE|RANGE|EXPECT|HOST|STATIC|SYMLINK|WS|HDR|H2-|TLS)' \
-        "$out/container-native.txt" | awk '{print $1 "=" $3}' | sort > "$out/container-native.verdicts"
+    awk '/^## /{lane=$2} $3 ~ /^(PASS|FAIL|TIMEOUT|SKIP|KNOWN|FIXED)$/ \
+        {print lane"/"$1"="$3}' \
+        "$out/container-native.txt" | sort > "$out/container-native.verdicts"
     if diff -q "$out/container-native.verdicts" "$out/container.verdicts" >/dev/null; then
         echo "G2-4 OK: container verdicts match the native run ($(wc -l < "$out/container.verdicts") rows)"
     else

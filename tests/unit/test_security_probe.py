@@ -564,10 +564,16 @@ def test_container_metrics_parsers():
     events = 'low 0 high 0 max 0 oom 0 oom_kill 2 oom_group_kill 0\n'
     assert parse_cgroup_counters(events)['oom_kill'] == 2
     assert parse_cgroup_counters('max 1\n')['max'] == 1
-    table = ('check  severity  verdict  detail\n'
+    table = ('## h1 lane — http://127.0.0.1:8000\n'
+             'check  severity  verdict  detail\n'
              'BASELINE-001  High  PASS  200, body "ok"\n'
+             '## https1 lane — https://127.0.0.1:8443\n'
+             'BASELINE-001  High  FAIL  500\n'
              'TLS-001  Medium  SKIP  not exercised\n')
-    assert parse_verdicts(table) == {'BASELINE-001': 'PASS', 'TLS-001': 'SKIP'}
+    # (lane, check) keys: the same id keeps its per-lane verdicts (PR review P2)
+    assert parse_verdicts(table) == {('h1', 'BASELINE-001'): 'PASS',
+                                     ('https1', 'BASELINE-001'): 'FAIL',
+                                     ('https1', 'TLS-001'): 'SKIP'}
 
 
 def test_registry_checks_all_appear_in_the_documented_tables():

@@ -3079,6 +3079,31 @@ def render_markdown(lanes: Sequence[Lane], *,
     return '\n'.join(lines)
 
 
+#: Verdict words that can appear in a rendered report row.
+REPORT_VERDICTS = frozenset({'PASS', 'FAIL', 'TIMEOUT', 'SKIP', 'KNOWN',
+                             'FIXED'})
+
+
+def parse_report_verdicts(text: str) -> dict[tuple[str, str], str]:
+    """Map (lane, check id) to the verdict word in the probe's report text.
+
+    Lane identity is preserved (PR review P2): a check id appears once per
+    lane and a mutant's lane-local failure must not hide behind another
+    lane's PASS.  Rows whose third column is not a verdict word are
+    ignored.
+    """
+    found: dict[tuple[str, str], str] = {}
+    lane = '?'
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] == '##' and parts[2] == 'lane':
+            lane = parts[1]
+            continue
+        if len(parts) >= 3 and parts[2] in REPORT_VERDICTS:
+            found[(lane, parts[0])] = parts[2]
+    return found
+
+
 def write_report(lanes: Sequence[Lane], *, check_timeout: float,
                  run_timeout: float, timestamp: str,
                  out_dir: Path | None = None, tier: str = 'quick',
