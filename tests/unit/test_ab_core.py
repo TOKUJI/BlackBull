@@ -22,7 +22,7 @@ FAKE_PROTOCOL = r'''#!/usr/bin/env bash
 source "$(dirname "$0")/abba.sh"
 AB_TOOL=fake_ab
 AB_LANE='fake lane'
-ab_start_server() { ab_spawn sleep 30.13; printf '%s\n' "$ARM_ENV" > "$BENCH_TMP/arm_env"; }
+ab_start_server() { ab_spawn sleep "${FAKE_SERVER_SLEEP:-30}"; printf '%s\n' "$ARM_ENV" > "$BENCH_TMP/arm_env"; }
 ab_measure() {
     sleep "${FAKE_MEASURE_SLEEP:-0}"
     if grep -q 'X=' "$BENCH_TMP/arm_env"; then
@@ -133,6 +133,7 @@ def test_identical_refs_compare_two_environments(repo):
 
 
 def test_a_terminated_run_stops_its_server_and_restores_the_tree(repo):
+    server = f'30.{os.getpid()}{time.monotonic_ns() % 100000}'
     base = {k: v for k, v in os.environ.items()
             if not k.startswith(('BENCH_', 'REF_', 'PHASES', 'ROUNDS'))}
     run = subprocess.Popen(
@@ -140,11 +141,13 @@ def test_a_terminated_run_stops_its_server_and_restores_the_tree(repo):
         stderr=subprocess.DEVNULL,
         env={**base, 'PY': sys.executable, 'SERVER_CPUS': '', 'LOAD_CPUS': '',
              'ROUNDS': '8', 'REF_BASE': 'HEAD~1', 'REF_TREAT': 'HEAD',
-             'FAKE_MEASURE_SLEEP': '0.5'})
+             'FAKE_MEASURE_SLEEP': '0.5', 'FAKE_SERVER_SLEEP': server})
     time.sleep(2)
     run.terminate()
 
     assert run.wait(timeout=15) != 0
-    alive = subprocess.run(['pgrep', '-f', 'sleep 30.13'], capture_output=True, text=True)
+    # Exact and unique to this run: other tests' fake servers may be alive
+    # in parallel workers.
+    alive = subprocess.run(['pgrep', '-fx', f'sleep {server}'], capture_output=True, text=True)
     assert alive.stdout == ''
     assert _git(repo, 'status', '--porcelain', '--untracked-files=no') == ''
