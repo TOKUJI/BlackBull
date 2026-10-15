@@ -5654,8 +5654,10 @@ race; do not manufacture a failure for a completed response. Peer GOAWAY
 stops new work while permitting accepted responses to drain. Connection errors
 retire output owners and pending credit work before closing.</p>
 <p>Preserve RFC connection-versus-stream error scope when validating fixed-size
-control frames. Unknown frame types are ignored only outside an open field
-block. Read <code>HTTP2Actor</code> and control responders in <code>blackbull/server/response.py</code>.</p>
+control frames. A frame whose length or padding breaks its type's layout
+raises <code>FrameFormatError</code> with the RFC's code, and the frame loop answers it
+with GOAWAY: every such case, HEADERS padding included, is a connection error.
+Unknown frame types are ignored only outside an open field block. Read <code>HTTP2Actor</code> and control responders in <code>blackbull/server/response.py</code>.</p>
 <h2 id="message-validation">Message validation<a class="headerlink" href="#message-validation" title="Permanent link">&para;</a></h2>
 <p>Use the same HTTP field grammar across transports. HTTP/2 additionally
 refuses uppercase names and leading/trailing field whitespace. Validate
