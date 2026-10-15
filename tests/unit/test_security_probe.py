@@ -18,6 +18,8 @@ from tools.security.probe import (
     ALLOWED_HOSTS,
     CHECKS,
     FAIL,
+    ScenarioResult,
+    _closed_verdict,
     LANES,
     PASS,
     SEVERITIES,
@@ -819,12 +821,30 @@ def test_h2_info_reduces_frames_and_none():
 def test_h2_ok_verdict_requires_clean_stream_response():
     infos = [h2_info(_FakeFrame(_FakeType('HEADERS'), stream_id=1,
                                 pseudo={':status': '200'})),
-             h2_info(_FakeFrame(_FakeType('DATA'), stream_id=1, payload=b'ok'))]
+             h2_info(_FakeFrame(_FakeType('DATA'), stream_id=1, payload=b'ok',
+                                end_stream=True))]
     assert h2_ok_verdict(infos, stream_id=1).verdict == PASS
     assert h2_ok_verdict(infos[:1], stream_id=1).verdict == FAIL
     bad = [infos[0], h2_info(_FakeFrame(_FakeType('DATA'), stream_id=1,
-                                        payload=b'no'))]
+                                        payload=b'no', end_stream=True))]
     assert h2_ok_verdict(bad, stream_id=1).verdict == FAIL
+    # a response the peer never terminates must not pass (PR review P2)
+    open_ended = [infos[0], h2_info(_FakeFrame(_FakeType('DATA'), stream_id=1,
+                                               payload=b'ok'))]
+    verdict = h2_ok_verdict(open_ended, stream_id=1)
+    assert verdict.verdict == FAIL and 'END_STREAM' in verdict.detail
+
+
+def test_close_verdict_distinguishes_parse_errors():
+    # a parser failure on malformed server output is NOT a clean rejection
+    result = ScenarioResult(exception="ProtocolError('invalid Content-Length')")
+    verdict = _closed_verdict(result)
+    assert verdict.verdict == FAIL and 'not a rejection' in verdict.detail
+    # a transport close stays a rejection-by-close
+    closed = ScenarioResult(exception="ConnectionResetError('reset')")
+    assert _closed_verdict(closed).verdict == PASS
+    assert _closed_verdict(ScenarioResult(), 'lab').detail \
+        == 'lab: rejected by connection close'
 
 
 def test_h2_error_verdict_accepts_matching_error_frames():

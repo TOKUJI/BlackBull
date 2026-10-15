@@ -725,6 +725,31 @@ _ACCEPT_METHOD = _ACCEPT_4XX | {501, 505}
 _ACCEPT_400 = frozenset({400})
 
 
+def _is_transport_close(exc: str) -> bool:
+    """True for a transport-level end of the connection (the peer closed).
+
+    Anything else recorded on a step — a parser ``ProtocolError`` on
+    malformed output, a probe bug — is NOT a clean rejection (PR review
+    P1: a peer answering with an invalid Content-Length must not score
+    PASS as 'rejected by connection close').
+    """
+    return (exc.startswith('ConnectionError(')
+            or exc.startswith('IncompleteReadError(')
+            or exc.startswith('ConnectionResetError(')
+            or exc.startswith('BrokenPipeError(')
+            or 'not reusable' in exc)
+
+
+def _closed_verdict(result: ScenarioResult, label: str = '') -> Verdict:
+    """Classify a missing response: transport close is a rejection-by-close;
+    a parse/step exception is malformed output or a probe failure."""
+    exc = result.exception or ''
+    prefix = f'{label}: ' if label else ''
+    if exc and not _is_transport_close(exc):
+        return Verdict(FAIL, f'{prefix}parse error, not a rejection: {exc}')
+    return Verdict(PASS, f'{prefix}rejected by connection close')
+
+
 def _abuse_oracle(result: ScenarioResult, timeout: float,
                   accept: frozenset[int], expected: str) -> Verdict:
     """PASS only on an accepted rejection status or connection close."""
@@ -732,7 +757,7 @@ def _abuse_oracle(result: ScenarioResult, timeout: float,
     if early is not None:
         return early
     if result.response is None:
-        return Verdict(PASS, 'rejected by connection close')
+        return _closed_verdict(result)
     status = result.response.status
     if status in accept:
         return Verdict(PASS, f'rejected with {status}')
@@ -763,8 +788,7 @@ def _stop_reason(result: ScenarioResult) -> str:
     if result.timed_out:
         return _STOP_TIMEOUT
     exc = result.exception or ''
-    if exc.startswith('ConnectionError(') or exc.startswith('IncompleteReadError(') \
-            or exc.startswith('ConnectionResetError(') or exc.startswith('BrokenPipeError('):
+    if exc and _is_transport_close(exc):
         return _STOP_CLOSED
     if not exc:
         return _STOP_DONE
@@ -1000,16 +1024,22 @@ def _routes_003(probe: Probe) -> Verdict:
     return Verdict(PASS, 'JSON->dataclass 200, invalid JSON 400, form 200')
 
 
+#: The fixture's /raise failure message; its absence from a 500 body is
+#: the ROUTES-004 contract (exception text leaks the implementation).
+_SENTINEL = b'bb526-fixture-sentinel-7c2e'
+
+
 def _routes_004(probe: Probe) -> Verdict:
     """ROUTES-004 (G4-4): the error route answers 500 and the body carries
-    no traceback or exception text (CWE-209)."""
+    no traceback, exception class text, or the fixture's private
+    sentinel message (CWE-209, PR review P2)."""
     result = probe.raw_request('routes-004', _get_request('/raise'))
     resp = result.response
     if resp is None:
         return Verdict(FAIL, _describe(result, probe.effective_timeout))
     if resp.status != 500:
         return Verdict(FAIL, f'/raise: status {resp.status}, expected 500')
-    for marker in (b'Traceback', b'RuntimeError', b'File "'):
+    for marker in (b'Traceback', b'RuntimeError', b'File "', _SENTINEL):
         if marker in resp.body:
             return Verdict(FAIL,
                            f'500 body leaks {marker.decode()!r} (CWE-209)')
@@ -1318,7 +1348,7 @@ def _crlf_variant_verdict(probe: Probe, label: str, raw: bytes) -> Verdict:
         return Verdict(early.verdict, f'{label}: {early.detail}')
     resp = result.response
     if resp is None:
-        return Verdict(PASS, f'{label}: rejected by connection close')
+        return _closed_verdict(result, label)
     if resp.status == 400:
         return Verdict(PASS, f'{label}: rejected with 400')
     if resp.status < 200 or resp.status >= 300:
@@ -1557,7 +1587,7 @@ def _obsfold_variant_verdict(probe: Probe, label: str, field: bytes,
         return Verdict(early.verdict, f'{label}: {early.detail}')
     resp = result.response
     if resp is None:
-        return Verdict(PASS, f'{label}: rejected by connection close')
+        return _closed_verdict(result, label)
     if resp.status == 400:
         return Verdict(PASS, f'{label}: rejected with 400 (obs-fold refused)')
     if resp.status < 200 or resp.status >= 300:
@@ -1600,7 +1630,7 @@ def _absform_verdict(probe: Probe, label: str, raw: bytes) -> Verdict:
         return Verdict(early.verdict, f'{label}: {early.detail}')
     resp = result.response
     if resp is None:
-        return Verdict(PASS, f'{label}: rejected by connection close')
+        return _closed_verdict(result, label)
     if resp.status == 400:
         return Verdict(PASS, f'{label}: rejected with 400')
     if resp.status == 200 and bytes(resp.body) == b'ok':
@@ -1781,6 +1811,10 @@ def h2_ok_verdict(infos: Sequence[H2Info], stream_id: int) -> Verdict:
             status = info.status
         elif info.kind == 'DATA':
             body += info.body
+    done = any(i.end_stream for i in infos if i.stream_id == stream_id)
+    if not done:
+        return Verdict(FAIL, f'status={status} body={body[:32]!r} without '
+                             f'END_STREAM (response never terminated)')
     if status == 200 and body == b'ok':
         return Verdict(PASS, '200, body "ok"')
     return Verdict(FAIL, f'status={status} body={body[:32]!r} (expected 200 "ok")')

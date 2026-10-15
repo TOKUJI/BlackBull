@@ -150,7 +150,7 @@ async def big() -> Response:
 
 @app.route(path='/raise', methods=['GET'])
 async def raise_route() -> Response:
-    raise RuntimeError('fixture failure')
+    raise RuntimeError('bb526-fixture-sentinel-7c2e')
 
 
 @app.route(path='/client-ip', methods=['GET'])
