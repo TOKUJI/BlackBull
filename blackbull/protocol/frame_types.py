@@ -494,10 +494,10 @@ class Headers(FrameBase):
             # payload length (otherwise pad would cover the pad-length octet
             # itself and there'd be no room for the header block).
             pad_length = int.from_bytes(payload.read(1), 'big', signed=False)
-            if pad_length >= self.length:
-                self._mark_malformed(
-                    f'HEADERS pad_length ({pad_length}) >= frame length ({self.length})')
-                return
+            if pad_length >= self.length:  # a connection error, not a stream one
+                raise FrameFormatError(
+                    f'HEADERS pad_length ({pad_length}) >= frame length ({self.length})',
+                    ErrorCodes.PROTOCOL_ERROR)
             remaining -= 1 + pad_length
 
         if self.priority:

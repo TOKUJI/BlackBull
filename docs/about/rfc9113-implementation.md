@@ -71,8 +71,10 @@ stops new work while permitting accepted responses to drain. Connection errors
 retire output owners and pending credit work before closing.
 
 Preserve RFC connection-versus-stream error scope when validating fixed-size
-control frames. Unknown frame types are ignored only outside an open field
-block. Read `HTTP2Actor` and control responders in `blackbull/server/response.py`.
+control frames. A frame whose length or padding breaks its type's layout
+raises `FrameFormatError` with the RFC's code, and the frame loop answers it
+with GOAWAY: every such case, HEADERS padding included, is a connection error.
+Unknown frame types are ignored only outside an open field block. Read `HTTP2Actor` and control responders in `blackbull/server/response.py`.
 
 ## Message validation
 

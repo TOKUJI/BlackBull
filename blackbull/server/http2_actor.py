@@ -21,7 +21,7 @@ from ..protocol.frame import FrameFactory
 from ..protocol.field_grammar import PROHIBITED_TRAILER_FIELDS
 from ..protocol.framing import method_is
 from ..protocol.frame_types import (
-    ErrorCodes, FrameBase, FrameTypes,
+    ErrorCodes, FrameBase, FrameFormatError, FrameTypes,
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
@@ -591,6 +591,20 @@ class HTTP2Actor(Actor):
                 logger.debug('writer.close raised on connection-error path',
                              exc_info=True)
 
+    async def _undecodable(self, exc: HPACKError | FrameFormatError) -> None:
+        """End the connection over a frame or field block that cannot be read.
+
+        Always a connection error: §4.3 for a field block (COMPRESSION_ERROR),
+        §4.2 and §6.x for a frame whose layout its type refuses (the code the
+        exception names).
+        """
+        if isinstance(exc, FrameFormatError):
+            await self._connection_error(exc.error_code, str(exc))
+        else:
+            await self._connection_error(
+                ErrorCodes.COMPRESSION_ERROR,
+                f'could not decode the field block: {exc}')
+
     def _make_done_cb(
         self, stream_id: int, *, is_ws: bool = False,
     ) -> Callable[[asyncio.Task], None]:
@@ -924,10 +938,8 @@ class HTTP2Actor(Actor):
                 return
             try:
                 frame = self.factory.load(data)
-            except HPACKError as exc:
-                await self._connection_error(
-                    ErrorCodes.COMPRESSION_ERROR,
-                    f'could not decode the field block: {exc}')
+            except (HPACKError, FrameFormatError) as exc:
+                await self._undecodable(exc)
                 continue  # let h2spec read the GOAWAY before we close
             frame_type = frame.FrameType()
 
@@ -1428,10 +1440,8 @@ class HTTP2Actor(Actor):
 
         try:
             header_frame.parse_payload()
-        except HPACKError as exc:
-            await self._connection_error(
-                ErrorCodes.COMPRESSION_ERROR,
-                f'could not decode the field block: {exc}')
+        except (HPACKError, FrameFormatError) as exc:
+            await self._undecodable(exc)
             return True
         return await self._complete_header_block(
             header_frame, stream, send, tg)
