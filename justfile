@@ -150,6 +150,9 @@ vuln-container:
     set -euo pipefail
     out=bench/results/security
     mkdir -p "$out"
+    # always test the CURRENT tree: a stale bb-vuln image hides missing
+    # checks from the parity diff (PR review P2 follow-up)
+    docker build -t bb-vuln -f tools/security/container.Dockerfile . >/dev/null
     uv run python tools/security/container_run.py --verdicts-out "$out/container.verdicts"
     just vuln-target-up >/dev/null
     just vuln-check > "$out/container-native.txt" 2>&1 || true
