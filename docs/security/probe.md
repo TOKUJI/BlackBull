@@ -312,14 +312,20 @@ example its TLS stack refuses to offer the version under test); it is
 recorded, never reported as `PASS`, and does not fail the run.
 
 `KNOWN` and `FIXED` (G5) link filed defects. A check carrying
-`known_issue='BLA-…'` reports `KNOWN` when it fails — the failure is an
-OPEN, filed defect (the issue is in the row), not news, and does not
-fail the run. A check carrying `fixed_issue='BLA-…'` reports `FIXED`
-when it passes — the row confirms the filed fix and watches for
-regression; if it FAILS it stays `FAIL` and the row is prefixed
-`REGRESSION, fixed in BLA-…`, loud on purpose. H1-ROBUST-001 carries
-its filed open question as `known_issue='BLA-527'` (the 405-vs-501
-decision; its oracle is untouched).
+`known_issue='BLA-…'` reports `KNOWN` when it fails *and the failure
+matches the filed defect's signature* (`known_signature` fragments —
+the shape that bug produces, e.g. `answered 405` for BLA-527): the
+failure is then an OPEN, filed defect (the issue is in the row), not
+news, and does not fail the run. A failure that does NOT match — a new
+timeout, crash or leak on the same check — stays `FAIL` and is marked
+`new failure, not the BLA-… shape` (PR review P1: never suppress a new
+failure just because the check carries a known_issue). A check carrying
+`fixed_issue='BLA-…'` reports `FIXED` when it passes — the row confirms
+the filed fix and watches for regression; if it FAILS it stays `FAIL`
+and the row is prefixed `REGRESSION, fixed in BLA-…`, loud on purpose.
+H1-ROBUST-001 carries its filed open question as
+`known_issue='BLA-527'` with signature `('answered 405', 'answered
+501')` (the 405-vs-501 decision; its oracle is untouched).
 
 The severity column is the rank a *failure* of that check
 carries, per [severity criteria](severity.md); a hang or crash escalates the
