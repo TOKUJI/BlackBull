@@ -21,7 +21,7 @@ from ..protocol.frame import FrameFactory
 from ..protocol.field_grammar import PROHIBITED_TRAILER_FIELDS
 from ..protocol.framing import method_is
 from ..protocol.frame_types import (
-    ErrorCodes, FrameBase, FrameTypes,
+    ErrorCodes, FrameBase, FrameFormatError, FrameTypes,
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
@@ -929,6 +929,11 @@ class HTTP2Actor(Actor):
                     ErrorCodes.COMPRESSION_ERROR,
                     f'could not decode the field block: {exc}')
                 continue  # let h2spec read the GOAWAY before we close
+            except FrameFormatError as exc:
+                # RFC 9113 §4.2 / §6.x: every layout the frame types refuse
+                # is a connection error, with the code the exception names.
+                await self._connection_error(exc.error_code, str(exc))
+                continue
             frame_type = frame.FrameType()
 
             # RFC 9113 §6.10 — inside a header block, unknown frame types
@@ -1432,6 +1437,9 @@ class HTTP2Actor(Actor):
             await self._connection_error(
                 ErrorCodes.COMPRESSION_ERROR,
                 f'could not decode the field block: {exc}')
+            return True
+        except FrameFormatError as exc:
+            await self._connection_error(exc.error_code, str(exc))
             return True
         return await self._complete_header_block(
             header_frame, stream, send, tg)
