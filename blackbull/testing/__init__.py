@@ -9,11 +9,14 @@ shutdown failures; see docs/guide/testing.md.
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager, suppress
 import logging
 import queue
 import threading
+import sys
 from typing import Any
 from urllib.parse import unquote
+from weakref import WeakSet
 
 from ..asgi import ASGIReceiveEvent
 from ..native import NativeWSMessage
@@ -35,6 +38,16 @@ logger = logging.getLogger(__name__)
 __all__ = ['TestClient', 'WebSocketTestSession', 'WebSocketDisconnect']
 
 
+@contextmanager
+def _cleanup(original_error):
+    try:
+        yield
+    except Exception:
+        if original_error is None:
+            raise
+        logger.exception('Test resource cleanup failed')
+
+
 class _LoopThread:
     """Own a background event loop; run_coro blocks, stop joins its thread.
     """
@@ -45,32 +58,93 @@ class _LoopThread:
         self.server_to_client: queue.Queue = queue.Queue()
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
+        self._stop_requested = threading.Event()
+        self._startup_error: BaseException | None = None
 
     def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            raise RuntimeError('Test loop is already running')
+        self._ready.clear()
+        self._stop_requested.clear()
+        self._startup_error = None
         self._thread = threading.Thread(target=self._run, daemon=True, name='blackbull-testclient-loop')
         self._thread.start()
-        self._ready.wait()
+        if not self._ready.wait(timeout=5.0):
+            error = TimeoutError('Timed out starting test loop')
+            with _cleanup(error):
+                self.stop()
+            raise error
+        if self._startup_error is not None:
+            self._thread.join(timeout=5.0)
+            raise self._startup_error
 
     def stop(self, timeout: float = 5.0) -> None:
-        if self.loop is not None and self.loop.is_running():
+        self._stop_requested.set()
+        if self.loop is not None and not self.loop.is_closed():
             self.loop.call_soon_threadsafe(self.loop.stop)
-        if self._thread is not None:
+        if self._thread is not None and self._thread.ident is not None:
             self._thread.join(timeout=timeout)
+            if self._thread.is_alive():
+                raise TimeoutError('Timed out stopping test loop')
 
     def run_coro(self, coro, timeout: float | None = 60.0):
         """Schedule ``coro`` on the loop thread and block until it returns."""
-        assert self.loop is not None
-        return asyncio.run_coroutine_threadsafe(coro, self.loop).result(timeout=timeout)
+        if self.loop is None or not self.loop.is_running():
+            coro.close()
+            raise RuntimeError('Test loop is not running')
+        task = None
+
+        async def run():
+            nonlocal task
+            task = asyncio.current_task()
+            return await coro
+
+        pending = run()
+        try:
+            future = asyncio.run_coroutine_threadsafe(pending, self.loop)
+        except BaseException:
+            pending.close()
+            coro.close()
+            raise
+        try:
+            return future.result(timeout=timeout)
+        except BaseException:
+            future.cancel()
+
+            async def drain():
+                if task is None:
+                    coro.close()  # Cancelled before its first event-loop turn.
+                else:
+                    with suppress(asyncio.CancelledError, Exception):
+                        await task
+
+            with _cleanup(sys.exception()):
+                pending = drain()
+                try:
+                    cleanup = asyncio.run_coroutine_threadsafe(pending, self.loop)
+                except BaseException:
+                    pending.close()
+                    raise
+                try:
+                    cleanup.result(timeout=5.0)
+                finally:
+                    cleanup.cancel()
+            raise
 
     def _run(self) -> None:
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        self.client_to_server = asyncio.Queue()
-        self._ready.set()
         try:
-            self.loop.run_forever()
+            with asyncio.Runner() as runner:
+                self.loop = runner.get_loop()
+                self.client_to_server = asyncio.Queue()
+                self.server_to_client = queue.Queue()
+                self.loop.call_soon(self._ready.set)
+                if self._stop_requested.is_set():
+                    self.loop.call_soon(self.loop.stop)
+                self.loop.run_forever()
+        except BaseException as exc:
+            self._startup_error = exc
         finally:
-            self.loop.close()
+            self._ready.set()
 
 
 class _LifespanManager:
@@ -194,6 +268,8 @@ class WebSocketTestSession:
         headers: list[tuple[str, str]] | None = None,
         cookies: dict[str, str] | None = None,
         timeout: float = 5.0,
+        *,
+        _loop_thread: _LoopThread | None = None,
     ):
         """Prepare a session; the handshake runs on ``__enter__``.
 
@@ -254,39 +330,55 @@ class WebSocketTestSession:
             client=('testclient', 50000),
             server=('testserver', 80),
         )
-        self._loop_thread = _LoopThread()
+        self._owns_loop = _loop_thread is None
+        self._loop_thread = _loop_thread or _LoopThread()
+        self._client_to_server: asyncio.Queue = asyncio.Queue()
+        self._server_to_client: queue.Queue = queue.Queue()
         self._app_task: asyncio.Task | None = None
         self._accepted = False
+        self._entered = False
+        self._closed = False
 
     def __enter__(self) -> 'WebSocketTestSession':
-        self._loop_thread.start()
+        if self._entered or self._closed:
+            raise RuntimeError('WebSocket session cannot be entered more than once')
+        self._entered = True
+        try:
+            return self._open()
+        except BaseException:
+            with _cleanup(sys.exception()):
+                self._teardown()
+            raise
+
+    def _open(self) -> 'WebSocketTestSession':
+        if self._owns_loop:
+            self._loop_thread.start()
 
         async def _spawn():
             async def receive():
-                return await self._loop_thread.client_to_server.get()
+                return await self._client_to_server.get()
 
             async def send(event):
-                self._loop_thread.server_to_client.put(event)
+                self._server_to_client.put(event)
 
             self._app_task = asyncio.create_task(self.app(self._conn, receive, send))
 
         self._loop_thread.run_coro(_spawn(), timeout=self.timeout)
         self._loop_thread.run_coro(
-            self._loop_thread.client_to_server.put({'type': 'websocket.connect'}),
+            self._client_to_server.put({'type': 'websocket.connect'}),
             timeout=self.timeout,
         )
         event = self._recv_event()
         if event['type'] == 'websocket.close':
-            self._teardown()
             raise WebSocketDisconnect(code=event.get('code', 1000), reason=event.get('reason', ''))
         if event['type'] != 'websocket.accept':
-            self._teardown()
             raise RuntimeError(f"Expected websocket.accept, got {event['type']!r}")
         self._accepted = True
         return self
 
     def __exit__(self, *exc_info) -> None:
-        self.close()
+        with _cleanup(exc_info[1]):
+            self.close()
 
     def send_text(self, text: str) -> None:
         """Send *text* to the application as a text message."""
@@ -362,7 +454,7 @@ class WebSocketTestSession:
         Idempotent, and safe on a session whose handshake never completed.
         ``__exit__`` calls it, so a ``with`` block needs no explicit close.
         """
-        if self._loop_thread.loop is None:
+        if self._closed:
             return
         if self._accepted:
             try:
@@ -372,8 +464,10 @@ class WebSocketTestSession:
         self._teardown()
 
     def _send_client_event(self, event: ASGIReceiveEvent) -> None:
+        if self._closed or not self._entered:
+            raise RuntimeError("WebSocket session is not open")
         self._loop_thread.run_coro(
-            self._loop_thread.client_to_server.put(event),
+            self._client_to_server.put(event),
             timeout=self.timeout,
         )
 
@@ -384,10 +478,12 @@ class WebSocketTestSession:
         a boundary: BlackBull's own path now emits ``NativeWSMessage`` and it
         is expanded here, at the one place server events enter the client.
         """
+        if self._closed or not self._entered:
+            raise RuntimeError("WebSocket session is not open")
         deadline = self.timeout
         while True:
             try:
-                event = self._loop_thread.server_to_client.get(timeout=0.05)
+                event = self._server_to_client.get(timeout=0.05)
                 if isinstance(event, NativeWSMessage):
                     return event.to_asgi()[0]
                 return event
@@ -402,19 +498,25 @@ class WebSocketTestSession:
                     raise TimeoutError('Timed out waiting for WebSocket event from app')
 
     def _teardown(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         try:
             if self._app_task is not None:
                 async def _await():
+                    if not self._accepted:
+                        self._app_task.cancel()
                     try:
                         await asyncio.wait_for(self._app_task, timeout=self.timeout)
-                    except (asyncio.TimeoutError, Exception):
+                    except (asyncio.CancelledError, Exception):
                         pass  # teardown: app task timed out or errored; nothing to surface.
                 try:
                     self._loop_thread.run_coro(_await(), timeout=self.timeout + 1.0)
                 except Exception:
                     pass  # teardown best-effort; ignore failures awaiting the app task.
         finally:
-            self._loop_thread.stop()
+            if self._owns_loop:
+                self._loop_thread.stop()
 
 
 def _shutdown_on_exit(lifespan, exc_info) -> None:
@@ -473,38 +575,56 @@ class TestClient:
         self._loop_thread = _LoopThread()
         self._lifespan: _LifespanManager | None = None
         self._async_client: httpx.AsyncClient | None = None
+        self._sessions: WeakSet[WebSocketTestSession] = WeakSet()
 
     def __enter__(self) -> 'TestClient':
         """Start the background loop and run the application's lifespan startup."""
-        self._loop_thread.start()
-        self._async_client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(
-                app=self.app,
-                raise_app_exceptions=self._raise_app_exceptions,
-                root_path=self._root_path,
-            ),
-            base_url=self.base_url,
-            cookies=self._cookies,
-            headers=self._headers,
-            follow_redirects=self._follow_redirects,
-        )
-        self._lifespan = _LifespanManager(self.app, self._loop_thread)
+        if self._async_client is not None:
+            raise RuntimeError('TestClient is already entered')
+        self._loop_thread = _LoopThread()
         try:
+            self._loop_thread.start()
+            self._async_client = httpx.AsyncClient(
+                transport=httpx.ASGITransport(
+                    app=self.app,
+                    raise_app_exceptions=self._raise_app_exceptions,
+                    root_path=self._root_path,
+                ),
+                base_url=self.base_url,
+                cookies=self._cookies,
+                headers=self._headers,
+                follow_redirects=self._follow_redirects,
+            )
+            self._lifespan = _LifespanManager(self.app, self._loop_thread)
             self._lifespan.startup()
-        except Exception:
-            self._loop_thread.stop()
+        except BaseException:
+            with _cleanup(sys.exception()):
+                self._close()
             raise
         return self
 
     def __exit__(self, *exc_info) -> None:
-        try:
-            _shutdown_on_exit(self._lifespan, exc_info)
-        finally:
+        with _cleanup(exc_info[1]):
             try:
-                if self._async_client is not None:
-                    self._loop_thread.run_coro(self._async_client.aclose())
-            finally:
-                self._loop_thread.stop()
+                for session in list(self._sessions):
+                    session.close()
+                _shutdown_on_exit(self._lifespan, exc_info)
+            except BaseException:
+                with _cleanup(sys.exception()):
+                    self._close()
+                raise
+            else:
+                self._close()
+
+    def _close(self) -> None:
+        try:
+            if self._async_client is not None:
+                self._loop_thread.run_coro(self._async_client.aclose())
+        finally:
+            self._async_client = None
+            self._lifespan = None
+            self._sessions.clear()
+            self._loop_thread.stop()
 
     # ----- HTTP methods -----------------------------------------------------
 
@@ -593,14 +713,19 @@ class TestClient:
         ``/ws?token=abc``.  Returns a [`WebSocketTestSession`][]
         that should itself be used as a context manager.
         """
-        return WebSocketTestSession(
+        if self._async_client is None:
+            raise RuntimeError("TestClient must be used as a context manager")
+        session = WebSocketTestSession(
             app=self.app,
             path=url,
             subprotocols=subprotocols,
             headers=headers,
             cookies=cookies,
             timeout=timeout,
+            _loop_thread=self._loop_thread,
         )
+        self._sessions.add(session)
+        return session
 
 
 # Import after defining _LoopThread and lifespan helpers used by native.
