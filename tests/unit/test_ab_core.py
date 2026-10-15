@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -21,8 +22,9 @@ FAKE_PROTOCOL = r'''#!/usr/bin/env bash
 source "$(dirname "$0")/abba.sh"
 AB_TOOL=fake_ab
 AB_LANE='fake lane'
-ab_start_server() { ab_spawn sleep 30; printf '%s\n' "$ARM_ENV" > "$BENCH_TMP/arm_env"; }
+ab_start_server() { ab_spawn sleep 30.13; printf '%s\n' "$ARM_ENV" > "$BENCH_TMP/arm_env"; }
 ab_measure() {
+    sleep "${FAKE_MEASURE_SLEEP:-0}"
     if grep -q 'X=' "$BENCH_TMP/arm_env"; then
         sed -n 's/.*X=\([0-9]*\).*/\1/p' "$BENCH_TMP/arm_env"
     else
@@ -128,3 +130,21 @@ def test_identical_refs_compare_two_environments(repo):
 
     rows = _rows(_only_run(repo))
     assert {(r[2], r[3]) for r in rows} == {('base', '100'), ('treat', '97')}
+
+
+def test_a_terminated_run_stops_its_server_and_restores_the_tree(repo):
+    base = {k: v for k, v in os.environ.items()
+            if not k.startswith(('BENCH_', 'REF_', 'PHASES', 'ROUNDS'))}
+    run = subprocess.Popen(
+        ['bash', 'bench/ab/fake.sh'], cwd=repo, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env={**base, 'PY': sys.executable, 'SERVER_CPUS': '', 'LOAD_CPUS': '',
+             'ROUNDS': '8', 'REF_BASE': 'HEAD~1', 'REF_TREAT': 'HEAD',
+             'FAKE_MEASURE_SLEEP': '0.5'})
+    time.sleep(2)
+    run.terminate()
+
+    assert run.wait(timeout=15) != 0
+    alive = subprocess.run(['pgrep', '-f', 'sleep 30.13'], capture_output=True, text=True)
+    assert alive.stdout == ''
+    assert _git(repo, 'status', '--porcelain', '--untracked-files=no') == ''

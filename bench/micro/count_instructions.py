@@ -31,6 +31,9 @@ import os
 import sys
 from pathlib import Path
 
+if sys.version_info < (3, 12):
+    raise SystemExit('count_instructions.py needs Python 3.12+ (sys.monitoring)')
+
 MAIN = str(Path(__file__).resolve().parents[2])
 REPO = os.environ.get('BB_REPO', MAIN)
 # The editable install's finder outranks sys.path; drop it, then prove below
