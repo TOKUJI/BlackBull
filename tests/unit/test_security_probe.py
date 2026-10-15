@@ -474,13 +474,18 @@ def test_issue_words_link_filed_defects():
     def base(verdict):
         return CheckResult('X-1', 'desc', 'High', verdict, 'the detail', 'CWE-1')
     known = Check('X-1', 'desc', 'High', 'CWE-1', lambda p: None, 'h1',
-                  known_issue='BLA-1')
+                  known_issue='BLA-1', known_signature=('the detail',))
     fixed = Check('X-1', 'desc', 'High', 'CWE-1', lambda p: None, 'h1',
                   fixed_issue='BLA-2')
     row = apply_issue_word(base(FAIL), known)
     assert row.verdict == KNOWN and 'BLA-1' in row.detail
     row = apply_issue_word(base(TIMEOUT), known)
     assert row.verdict == KNOWN
+    # a failure NOT matching the filed defect's shape stays FAIL and is
+    # marked new (PR review P1: never suppress a new failure)
+    row = apply_issue_word(
+        dataclasses.replace(base(FAIL), detail='a brand-new crash'), known)
+    assert row.verdict == FAIL and 'new failure' in row.detail
     row = apply_issue_word(base(PASS), fixed)
     assert row.verdict == FIXED and 'BLA-2' in row.detail
     row = apply_issue_word(base(FAIL), fixed)

@@ -368,7 +368,12 @@ class Check:
     #: docs/security/probe.md's lane applicability table.
     skip_lanes: frozenset[str] = frozenset()
     #: An OPEN defect this row's failure is already filed as (FAIL -> KNOWN).
+    #: A failure becomes KNOWN only when its detail matches one of
+    #: ``known_signature``'s fragments — the filed defect's own failure
+    #: shape; a new timeout, crash or leak stays FAIL (PR review P1).
     known_issue: str = ''
+    #: Detail fragments identifying the known defect's failure shape.
+    known_signature: tuple = ()
     #: A FIXED defect under regression watch (PASS -> FIXED; FAIL stays FAIL).
     fixed_issue: str = ''
     #: Tiers that run this check; long-only checks wait out documented
@@ -2834,7 +2839,7 @@ CHECKS: tuple[Check, ...] = (
     Check('ROUTES-003', 'JSON/dataclass and form parsing refuse invalid JSON with 4xx, never 5xx', 'Medium', 'CWE-20', _routes_003, 'h1'),
     Check('ROUTES-004', 'the error route answers 500 with no traceback in the body', 'Medium', 'CWE-209', _routes_004, 'h1'),
     Check('ROUTES-005', 'middleware contracts: compression, CORS preflight, cache headers, trusted proxy, precompressed static', 'Medium', 'CWE-400', _routes_005, 'h1'),
-    Check('H1-ROBUST-001', 'unknown method FOO answered with 4xx/501 or close', 'Info', 'CWE-755', _h1_robust_001, 'h1', 'High', known_issue='BLA-527'),
+    Check('H1-ROBUST-001', 'unknown method FOO answered with 4xx/501 or close', 'Info', 'CWE-755', _h1_robust_001, 'h1', 'High', known_issue='BLA-527', known_signature=('answered 405', 'answered 501')),
     Check('H1-ROBUST-002', '100 KiB header value answered with 4xx or close', 'Medium', 'CWE-400', _h1_robust_002, 'h1', 'High'),
     Check('H1-ROBUST-003', 'garbage request-line bytes answered with 400 or close', 'Info', 'CWE-755', _h1_robust_003, 'h1', 'High'),
     Check('H1-ROBUST-004', 'CRLF in a header value rejected, sanitized, or kept opaque (RFC 9110 §5.5)', 'High', 'CWE-113', _h1_robust_004, 'h1'),
@@ -2910,13 +2915,19 @@ def apply_canary(row: CheckResult, canary: Canary) -> CheckResult:
 def apply_issue_word(result: CheckResult,
                     check: Check | None) -> CheckResult:
     """G5: link filed defects — a known failure becomes KNOWN, a fixed one
-    that passes becomes FIXED, and a fixed one that fails stays loud."""
+    that passes becomes FIXED, and a fixed one that fails stays loud.
+    KNOWN requires the failure to match the filed defect signature."""
     if check is None:
         return result
     if result.verdict in (FAIL, TIMEOUT) and check.known_issue:
+        if any(f in result.detail for f in check.known_signature):
+            return dataclasses.replace(
+                result, verdict=KNOWN,
+                detail=f'{check.known_issue} (known): {result.detail}')
         return dataclasses.replace(
-            result, verdict=KNOWN,
-            detail=f'{check.known_issue} (known): {result.detail}')
+            result,
+            detail=f'new failure, not the {check.known_issue} shape: '
+                   f'{result.detail}')
     if result.verdict in (FAIL, TIMEOUT) and check.fixed_issue:
         return dataclasses.replace(
             result,
