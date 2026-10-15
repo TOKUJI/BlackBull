@@ -150,8 +150,7 @@ vuln-container:
     set -euo pipefail
     out=bench/results/security
     mkdir -p "$out"
-    # always test the CURRENT tree: a stale bb-vuln image hides missing
-    # checks from the parity diff (PR review P2 follow-up)
+    # always test the current tree: a stale image hides missing checks
     docker build -t bb-vuln -f tools/security/container.Dockerfile . >/dev/null
     uv run python tools/security/container_run.py --verdicts-out "$out/container.verdicts"
     just vuln-target-up >/dev/null
@@ -245,10 +244,9 @@ vuln-reachability tier="quick" workers="1":
     export UV_CACHE_DIR=$PWD/.uv-cache XDG_RUNTIME_DIR=/tmp/xdg-runtime
     rm -f .coverage .coverage.*
     mkdir -p bench/results/security /tmp/bla526-research
-    # G3-3 refined: every fixture process (BB_WORKERS=1 serves in-process;
-    # >1 forks workers) measures itself via covproc/sitecustomize.py, and
-    # SIGINT reaches the whole process group so each interpreter exits
-    # cleanly and writes its own .coverage.* file before combine.
+    # every fixture process measures itself via covproc/sitecustomize.py;
+    # SIGINT reaches the whole process group so each writes its own
+    # .coverage.* file before combine
     (setsid env PYTHONPATH=$PWD/tools/security/covproc \
         COVERAGE_PROCESS_START=$PWD/.coveragerc-reach \
         BB_WORKERS={{workers}} \

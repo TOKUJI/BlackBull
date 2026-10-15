@@ -166,14 +166,11 @@ a mutation no row catches is a harness gap — the point of the measure.
 ## Aggregated results (JUnit XML)
 
 Every judgement-producing tool merges its rows into ONE results file,
-`bench/results/security/results.xml` (JUnit XML), so a single glance —
-or one CI upload — shows every check, catalogue scenario and mutation
-across runs.  `tools/security/junit_report.py` holds the common case
-schema; the probe writes one suite per lane (`probe.h1`, `probe.https1`,
-`probe.h2`, `probe.h2c`), the catalogue run writes `catalogue`, and the
-mutation run writes `mutation`.  Merging replaces whole suites by name:
-rerunning one tool refreshes its own suite and leaves the others
-untouched.  Every tool takes `--junit PATH` (empty disables).
+`bench/results/security/results.xml` (JUnit XML): the probe writes one
+suite per lane (`probe.h1`, `probe.https1`, `probe.h2`, `probe.h2c`),
+the catalogue run writes `catalogue`, the mutation run writes `mutation`.
+Merging replaces whole suites by name; suites of other tools are kept.
+Every tool takes `--junit PATH` (empty disables).
 
 | Verdict | JUnit representation |
 |---|---|
@@ -190,31 +187,24 @@ BlackBull's defense surface the probe exercises.  `tools/security/
 reachability.py` extracts the defense sites from `blackbull/` via AST
 (the E1 method): every `raise`, every defense call (`log_cap_hit`,
 `rst_stream`, `goaway`, `_connection_error`), and every reference to a
-rejection status or an HTTP/2 error code — excluding startup
-configuration validation (`config.py`, `env.py`, `_env_vars.py`) and
-non-surface packages (probe-side `client/`, `fault_injection/`,
-out-of-scope `mqtt/`, test tooling `testing/`).  The recipe runs the
-fixture under branch coverage and drives the probe tier against it.
+rejection status or an HTTP/2 error code — excluding startup config
+validation (`config.py`, `env.py`, `_env_vars.py`) and non-surface
+packages (`client/`, `fault_injection/`, `mqtt/`, `testing/`).
 
-The measurement is refined (G3-3): `BB_WORKERS=1` serves in-process so
-one interpreter holds the whole request path (the report proves it —
-`server/worker.py` executes nothing), SIGINT reaches the whole process
-group so every interpreter exits cleanly and writes its own
-`.coverage.*` file, and the recipe waits for the data files to settle
-before `coverage combine`.  Sites match coverage's recording unit
-(their statement's first line).  The report — per-kind reachability, the
-per-module table (unreached first), lines/branches — lands in
-`bench/results/security/reachability.txt`.
+`BB_WORKERS=1` serves in-process so one interpreter holds the request
+path (the report proves it: `server/worker.py` executes nothing);
+SIGINT reaches the whole process group so each interpreter writes its
+own `.coverage.*` file before `coverage combine`.  The report — per-kind
+reachability, a per-module table (unreached first), lines/branches —
+lands in `bench/results/security/reachability.txt`.
 
 Current floor (quick tier): 596 sites, 4 reached (0.7%); 3 777/19 950
-lines; 255/6 758 branches.  Read it as a floor and a map, not a score:
-the quick tier exercises the happy path plus light abuse whose oracles
-accept "400 or close", so the raise/rejection branches inside the
-serving modules (`server/recipient.py`, `server/http1_actor.py`,
-`server/http2_actor.py`) stay untripped — the per-module table is
-where new scenarios should aim, and tightening an "or close" oracle to
-require the refusal is what turns an unreached site into a watched
-one.  An unreached site is never a defect by itself.
+lines; 255/6 758 branches.  A floor and a map, not a score: the quick
+tier's oracles accept "400 or close", so the serving modules' rejection
+branches stay untripped.  New scenarios should aim where the
+per-module table points; tightening an "or close" oracle to require the
+refusal is what watches an unreached site.  An unreached site is never
+a defect by itself.
 
 ## Fuzzing (G6)
 
@@ -311,21 +301,15 @@ exit code). `SKIP` — the check could not be exercised by this client (for
 example its TLS stack refuses to offer the version under test); it is
 recorded, never reported as `PASS`, and does not fail the run.
 
-`KNOWN` and `FIXED` (G5) link filed defects. A check carrying
-`known_issue='BLA-…'` reports `KNOWN` when it fails *and the failure
-matches the filed defect's signature* (`known_signature` fragments —
-the shape that bug produces, e.g. `answered 405` for BLA-527): the
-failure is then an OPEN, filed defect (the issue is in the row), not
-news, and does not fail the run. A failure that does NOT match — a new
-timeout, crash or leak on the same check — stays `FAIL` and is marked
-`new failure, not the BLA-… shape` (PR review P1: never suppress a new
-failure just because the check carries a known_issue). A check carrying
-`fixed_issue='BLA-…'` reports `FIXED` when it passes — the row confirms
-the filed fix and watches for regression; if it FAILS it stays `FAIL`
-and the row is prefixed `REGRESSION, fixed in BLA-…`, loud on purpose.
-H1-ROBUST-001 carries its filed open question as
-`known_issue='BLA-527'` with signature `('answered 405', 'answered
-501')` (the 405-vs-501 decision; its oracle is untouched).
+`KNOWN` and `FIXED` (G5) link filed defects.  A `known_issue` failure
+is `KNOWN` only when its detail matches the `known_signature` fragments
+(the filed defect's own failure shape); the issue number rides in the
+row and does not fail the run.  A failure that does not match stays
+`FAIL`, marked `new failure, not the BLA-… shape`.  A `fixed_issue`
+pass is `FIXED` (the fix holds, the row guards the regression); a
+`fixed_issue` failure stays `FAIL`, prefixed `REGRESSION, fixed in
+BLA-…`.  H1-ROBUST-001 carries `known_issue='BLA-527'` with signature
+`('answered 405', 'answered 501')`; its oracle is untouched.
 
 The severity column is the rank a *failure* of that check
 carries, per [severity criteria](severity.md); a hang or crash escalates the

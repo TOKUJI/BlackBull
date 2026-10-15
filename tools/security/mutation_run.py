@@ -73,11 +73,7 @@ MUTATIONS = (
 
 
 def parse_verdicts(text: str) -> dict[tuple[str, str], str]:
-    """Map (lane, check id) to verdict word (lane-preserving; PR review P2).
-
-    Delegates to the probe's own report parser so every consumer shares
-    one definition of the report grammar.
-    """
+    """(lane, check) -> verdict, delegated to the probe's report parser."""
     if __package__ in (None, ''):
         sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from tools.security.probe import parse_report_verdicts

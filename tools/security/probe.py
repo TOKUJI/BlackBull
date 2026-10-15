@@ -367,12 +367,11 @@ class Check:
     #: Lane instances that skip this check (G4-2); the reason lives in
     #: docs/security/probe.md's lane applicability table.
     skip_lanes: frozenset[str] = frozenset()
-    #: An OPEN defect this row's failure is already filed as (FAIL -> KNOWN).
-    #: A failure becomes KNOWN only when its detail matches one of
-    #: ``known_signature``'s fragments — the filed defect's own failure
-    #: shape; a new timeout, crash or leak stays FAIL (PR review P1).
+    #: An OPEN defect this row's failure is filed as (FAIL -> KNOWN).
+    #: KNOWN applies only when the failure matches ``known_signature``;
+    #: any other failure stays FAIL.
     known_issue: str = ''
-    #: Detail fragments identifying the known defect's failure shape.
+    #: Fragments identifying the filed defect's failure shape.
     known_signature: tuple = ()
     #: A FIXED defect under regression watch (PASS -> FIXED; FAIL stays FAIL).
     fixed_issue: str = ''
@@ -733,10 +732,8 @@ _ACCEPT_400 = frozenset({400})
 def _is_transport_close(exc: str) -> bool:
     """True for a transport-level end of the connection (the peer closed).
 
-    Anything else recorded on a step — a parser ``ProtocolError`` on
-    malformed output, a probe bug — is NOT a clean rejection (PR review
-    P1: a peer answering with an invalid Content-Length must not score
-    PASS as 'rejected by connection close').
+    Any other recorded exception is a parse failure on malformed output
+    and must never score as a clean rejection.
     """
     return (exc.startswith('ConnectionError(')
             or exc.startswith('IncompleteReadError(')
@@ -1037,7 +1034,7 @@ _SENTINEL = b'bb526-fixture-sentinel-7c2e'
 def _routes_004(probe: Probe) -> Verdict:
     """ROUTES-004 (G4-4): the error route answers 500 and the body carries
     no traceback, exception class text, or the fixture's private
-    sentinel message (CWE-209, PR review P2)."""
+    sentinel message (CWE-209)."""
     result = probe.raw_request('routes-004', _get_request('/raise'))
     resp = result.response
     if resp is None:
@@ -3087,10 +3084,8 @@ REPORT_VERDICTS = frozenset({'PASS', 'FAIL', 'TIMEOUT', 'SKIP', 'KNOWN',
 def parse_report_verdicts(text: str) -> dict[tuple[str, str], str]:
     """Map (lane, check id) to the verdict word in the probe's report text.
 
-    Lane identity is preserved (PR review P2): a check id appears once per
-    lane and a mutant's lane-local failure must not hide behind another
-    lane's PASS.  Rows whose third column is not a verdict word are
-    ignored.
+    A check id appears once per lane; rows whose third column is not a
+    verdict word are ignored.
     """
     found: dict[tuple[str, str], str] = {}
     lane = '?'

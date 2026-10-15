@@ -25,8 +25,8 @@ from pathlib import Path
 #: Startup configuration validation is not a runtime defense site.
 SKIP_FILES = frozenset({'config.py', 'env.py', '_env_vars.py'})
 
-#: Probe-side and client libraries are not the server's defense surface;
-#: mqtt is out of the probe's scope (BLA-526) and testing is test tooling.
+#: Not the server's defense surface: probe-side (client/,
+#: fault_injection/), out-of-scope mqtt/, test tooling testing/.
 SKIP_DIRS = frozenset({'client', 'fault_injection', 'mqtt', 'testing'})
 
 #: Runtime defenses invoked to shed load or fail a connection.
@@ -147,8 +147,8 @@ def reached_lines(coverage_json: dict, root: Path) -> set[tuple[str, int]]:
         try:
             rel = path.resolve().relative_to(root.resolve()).as_posix()
         except ValueError:
-            # outside the measured source root: never alias by file name,
-            # which would credit the wrong module (PR review P2)
+            # outside the source root: aliasing by file name would credit
+            # the wrong module
             continue
         for line in data.get('executed_lines', ()):
             reached.add((rel, line))

@@ -482,7 +482,7 @@ def test_issue_words_link_filed_defects():
     row = apply_issue_word(base(TIMEOUT), known)
     assert row.verdict == KNOWN
     # a failure NOT matching the filed defect's shape stays FAIL and is
-    # marked new (PR review P1: never suppress a new failure)
+    # marked new: a new failure is never suppressed
     row = apply_issue_word(
         dataclasses.replace(base(FAIL), detail='a brand-new crash'), known)
     assert row.verdict == FAIL and 'new failure' in row.detail
@@ -570,7 +570,7 @@ def test_container_metrics_parsers():
              '## https1 lane — https://127.0.0.1:8443\n'
              'BASELINE-001  High  FAIL  500\n'
              'TLS-001  Medium  SKIP  not exercised\n')
-    # (lane, check) keys: the same id keeps its per-lane verdicts (PR review P2)
+    # (lane, check) keys keep per-lane verdicts
     assert parse_verdicts(table) == {('h1', 'BASELINE-001'): 'PASS',
                                      ('https1', 'BASELINE-001'): 'FAIL',
                                      ('https1', 'TLS-001'): 'SKIP'}
@@ -839,7 +839,7 @@ def test_h2_ok_verdict_requires_clean_stream_response():
     bad = [infos[0], h2_info(_FakeFrame(_FakeType('DATA'), stream_id=1,
                                         payload=b'no', end_stream=True))]
     assert h2_ok_verdict(bad, stream_id=1).verdict == FAIL
-    # a response the peer never terminates must not pass (PR review P2)
+    # a response the peer never terminates must not pass
     open_ended = [infos[0], h2_info(_FakeFrame(_FakeType('DATA'), stream_id=1,
                                                payload=b'ok'))]
     verdict = h2_ok_verdict(open_ended, stream_id=1)

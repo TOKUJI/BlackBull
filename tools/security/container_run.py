@@ -44,11 +44,7 @@ def parse_cgroup_counters(text: str) -> dict[str, int]:
 
 
 def parse_verdicts(text: str) -> dict[tuple[str, str], str]:
-    """(lane, check) -> verdict from the probe's report text (PR review P2).
-
-    Delegates to the probe's own report parser — one definition of the
-    report grammar, lane identity preserved, every verdict word known.
-    """
+    """(lane, check) -> verdict, delegated to the probe's report parser."""
     if __package__ in (None, ''):
         sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from tools.security.probe import parse_report_verdicts
@@ -125,8 +121,8 @@ def main(argv: list[str] | None = None) -> int:
                 break
         probe_script = (
             'import pathlib\n'
-            # observe the server process itself, never the timeout wrapper
-            # or this probe's own python -c body (PR review P1)
+            # the server process itself — not the timeout wrapper or this
+            # probe's own python -c body
             'def _is_server(parts):\n'
             '    return (b"python" in parts[0]\n'
             '            and any(a.endswith(b"fixture_app.py") for a in parts)\n'
@@ -177,8 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         detected = oom_kill > 0 or oomkilled or pids_max > 0
         print(f'G2-4 OOM detection: {"verified" if detected else "NOT DETECTED"}')
         return 0 if detected else 1
-    # a server that died before collection, or unreadable metrics, is a
-    # breach — never a clean run (PR review P1)
+    # a server that died before collection, or unreadable metrics, is a breach
     exit_code = metrics.get('docker.ExitCode')
     missing = [n for n in ('memory.peak', 'pids.peak') if n not in metrics]
     if exit_code not in (None, 0):

@@ -1,21 +1,14 @@
 #!/usr/bin/env python3
-"""Aggregate every BLA-526 security tool's verdicts into ONE JUnit XML file.
+"""Aggregate the security tools' verdicts into ONE JUnit XML file.
 
-The judgement-producing tools (the probe, the catalogue run, the mutation
-run) map their rows onto a common case schema and merge them into one
-results file — default ``bench/results/security/results.xml`` — so one
-glance (or one CI upload) shows every check, catalogue scenario and
-mutation across runs.  Merging replaces whole suites by name: rerunning
-one tool refreshes its own suite and leaves the others untouched.
+Every judgement-producing tool merges its rows into one results file
+(default: ``bench/results/security/results.xml``).  Merging replaces
+whole suites by name; suites of other tools are kept.
 
-Verdict mapping (JUnit has no known-failure state):
-
-- ``PASS`` / ``FIXED`` -> ``<testcase>`` (FIXED's issue link rides in the
-  message body as ``system-out``)
-- ``FAIL`` / ``TIMEOUT`` -> ``<failure message=... type=verdict>``
-- ``SKIP`` -> ``<skipped/>``
-- ``KNOWN`` -> ``<skipped message="known: …">`` — a filed, open defect is
-  visible but does not fail the consuming CI
+Verdict mapping (JUnit has no known-failure state): PASS/FIXED ->
+``<testcase>`` (FIXED's issue in ``system-out``); FAIL/TIMEOUT ->
+``<failure>``; SKIP -> ``<skipped/>``; KNOWN -> ``<skipped
+message="known: …">`` (visible, does not fail CI).
 """
 from __future__ import annotations
 
@@ -84,8 +77,7 @@ def _suite_element(name: str, cases: list[Case]) -> ET.Element:
 def write_junit(path: Path, cases: list[Case]) -> Path:
     """Merge *cases* into the JUnit XML at *path*, replacing whole suites.
 
-    Suites named in *cases* are rewritten from those cases; suites already
-    in the file but not named are kept verbatim.
+    Suites not named in *cases* are kept verbatim.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
