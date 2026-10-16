@@ -109,6 +109,7 @@ ACCEPTED = {
        for v in (b'5', b'0', b'123')},
     'plain-chunked': (_head(b'/', b'Transfer-Encoding: chunked', method=b'POST') + b'0\r\n\r\n',
                       {'type': 'http'}),
+    'one-content-type': (_head(b'/', b'Content-Type: text/plain'), {'content-type': b'text/plain'}),
     'underscore-name-elsewhere': (_head(b'/', b'x_request_id: abc'), {'x_request_id': b'abc'}),
     'upgrade-h2c-is-ignored': (_head(b'/', b'Connection: Upgrade', b'Upgrade: h2c'), {'type': 'http'}),
     'forwarded-prefix-is-not-trusted': (_head(b'/', b'X-Forwarded-Prefix: /evil'), {'root_path': ''}),
@@ -176,8 +177,16 @@ def settings(monkeypatch):
 
 @pytest.fixture
 def caps(caplog):
+    """Each cap hit as (cap, protocol), after checking it reports what was refused."""
     caplog.set_level(logging.WARNING, logger='blackbull.caps')
-    return lambda: [r.cap for r in caplog.records if r.name == 'blackbull.caps']
+
+    def hits():
+        records = [r for r in caplog.records if r.name == 'blackbull.caps']
+        for r in records:
+            assert r.requested is not None and r.limit is not None
+            assert r.getMessage().startswith('cap hit: ')
+        return [(r.cap, r.protocol) for r in records]
+    return hits
 
 
 async def _noop(conn, receive, send):
@@ -198,7 +207,7 @@ async def test_head_size_limits(settings, caps, env, raw, status, cap):
         w = await s.wire()
         await w.send(raw)
         assert (await w.response()).status == status
-    assert caps() == ([cap] if cap else [])
+    assert caps() == ([(cap, 'http1')] if cap else [])
 
 
 async def test_a_head_that_never_completes_times_out(settings, caps):
@@ -208,7 +217,15 @@ async def test_a_head_that_never_completes_times_out(settings, caps):
         await w.send(b'GET / HTTP/1.1\r\nHost: x\r\n')
         assert (await w.response()).status == 408
         assert await w.closed()
-    assert caps() == ['header_timeout']
+    assert caps() == [('header_timeout', 'http1')]
+
+
+async def test_http_1_0_keep_alive_is_honoured():
+    async with served(_noop) as s:
+        w = await s.wire()
+        for _ in range(2):
+            await w.send(_head(b'/', b'Connection: keep-alive', version=b'HTTP/1.0', host=None))
+            assert (await w.response()).status == 200
 
 
 async def test_a_head_cut_short_by_eof_is_a_bad_request():

@@ -107,11 +107,15 @@ async def test_malformed_chunked_framing_is_refused_and_closes(wire):
     assert (resp.status, closed) == (400, True)
 
 
-async def test_an_over_long_chunk_line_is_a_counted_cap(caplog):
+@pytest.mark.parametrize('wire', [MALFORMED['chunk-line-over-bound'], b'5;e=' + b'a' * 20000],
+                         ids=['terminated', 'never-terminated'])
+async def test_an_over_long_chunk_line_is_refused_at_the_bound_and_counted(caplog, wire):
     caplog.set_level(logging.WARNING, logger='blackbull.caps')
-    await _send(_chunked(MALFORMED['chunk-line-over-bound']))
-    assert [r.cap for r in caplog.records if r.name == 'blackbull.caps'] == \
-        ['h1_chunk_line_length']
+    (resp, closed), _ = await _send(_chunked(wire))
+    assert (resp.status, closed) == (400, True)
+    [hit] = [r for r in caplog.records if r.name == 'blackbull.caps']
+    assert (hit.cap, hit.scope_path, hit.limit) == ('h1_chunk_line_length', '/echo', 8192)
+    assert hit.requested > 8192
 
 
 async def test_bodies_arriving_one_octet_at_a_time_are_reassembled():
@@ -148,6 +152,16 @@ async def test_a_content_length_body_is_sliced_at_the_chunk_cap(monkeypatch):
     assert resp.body == b'abcdefg'
     assert all(0 < len(e['body']) <= 3 for e in events)
     assert [e['more_body'] for e in events][-1] is False
+
+
+async def test_a_body_is_read_with_the_body_timeout_off(monkeypatch):
+    monkeypatch.setenv('BB_BODY_TIMEOUT', '0')
+    reset_settings_cache()
+    try:
+        (resp, _), _ = await _send(_post(b'Content-Length: 5', body=b'hello'))
+    finally:
+        reset_settings_cache()
+    assert resp.body == b'hello'
 
 
 async def test_each_keep_alive_request_reads_its_own_framing():

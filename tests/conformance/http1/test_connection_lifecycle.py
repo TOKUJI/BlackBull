@@ -104,7 +104,8 @@ async def test_a_request_timeout_answers_408_and_is_counted(monkeypatch, caplog)
             assert await w.closed()
     finally:
         reset_settings_cache()
-    assert [r.cap for r in caplog.records if r.name == 'blackbull.caps'] == ['request_timeout']
+    assert [(r.cap, r.protocol, r.scope_path) for r in caplog.records
+            if r.name == 'blackbull.caps'] == [('request_timeout', 'http1', '/')]
 
 
 # -- access log -----------------------------------------------------------
@@ -199,6 +200,21 @@ async def test_a_websocket_session_has_a_twenty_hex_connection_id():
         async with connect(f'ws://127.0.0.1:{s.server.port}/ws'):
             pass
     assert len(ids[0]) == 20 and set(ids[0]) <= set('0123456789abcdef')
+
+
+async def test_a_long_websocket_message_is_unmasked_whole():
+    async def echo(conn, receive, send):
+        await receive()
+        await send({'type': 'websocket.accept'})
+        event = await receive()
+        await send({'type': 'websocket.send', 'text': event['text']})
+        await receive()
+
+    message = ''.join(chr(0x41 + i % 26) for i in range(1001))
+    async with served(echo) as s:
+        async with connect(f'ws://127.0.0.1:{s.server.port}/ws') as ws:
+            await ws.send(message)
+            assert await ws.recv() == message
 
 
 @pytest.mark.parametrize('tls', [False, True])

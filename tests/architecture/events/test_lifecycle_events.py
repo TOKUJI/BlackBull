@@ -84,8 +84,10 @@ async def test_lifecycle_details_describe_the_request_and_response():
     app, seen = _app()
     await _http(app, _get())
     received, before, after, completed = (seen[n][0].detail for n in HTTP_EVENTS)
-    assert (received['method'], received['path'], before['path']) == ('GET', '/hello', '/hello')
-    assert isinstance(received['client_ip'], str) and isinstance(received['http_version'], str)
+    for d in (received, before, after):
+        assert (d['method'], d['path'], d['client_ip']) == ('GET', '/hello', '127.0.0.1')
+        assert d['conn'].path == '/hello'
+    assert received['headers'].get(b'host') == b'x' and received['http_version'] == '1.1'
     assert isinstance(before['handler'], str) and after['exception'] is None
     conn = completed['conn']
     assert (completed['method'], completed['path'], completed['http_version']) == \
@@ -124,7 +126,8 @@ async def test_interceptors_run_in_lifecycle_order(hooks, expected):
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b''})
 
-    app, _ = _app(**{'/order': handler})
+    app = BlackBull()
+    app.route(path='/order')(handler)
     for hook in hooks:
         @app.intercept(hook)
         async def record(event: Event, _hook=hook):
@@ -176,9 +179,39 @@ async def test_completion_follows_the_last_streamed_chunk():
     async def stream(conn, receive, send):
         await StreamingResponse(chunks())(conn, receive, send)
 
-    app, seen = _app(**{'/stream': stream})
-    await _http(app, _get(b'/stream'))
-    assert seen['request_completed'][0].detail['response_bytes'] == 18
+    async def declared(conn, receive, send):
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-length', b'4')]})
+        await send({'type': 'http.response.body', 'body': b'ab', 'more_body': True})
+        await send({'type': 'http.response.body', 'body': b'cd'})
+
+    app, seen = _app(**{'/stream': stream, '/declared': declared})
+    await _http(app, _get(b'/stream'), _get(b'/declared'))
+    assert [(e.detail['status'], e.detail['response_bytes'])
+            for e in seen['request_completed']] == [(200, 18), (200, 4)]
+
+
+async def test_a_lone_disconnect_listener_is_told():
+    async def waits(conn, receive, send):
+        await receive()
+        await receive()
+
+    app = BlackBull()
+    app.route(path='/slow')(waits)
+    got = []
+
+    @app.on('request_disconnected')
+    async def observe(event: Event):
+        got.append(event)
+
+    async with served(app) as s:
+        w = await s.wire()
+        await w.send(_get(b'/slow'))
+        for _ in range(200):
+            if got:
+                break
+            await asyncio.sleep(0.01)
+    assert len(got) == 1
 
 
 async def test_a_handler_that_finds_the_peer_gone_is_disconnected_not_completed():
@@ -274,6 +307,7 @@ async def test_an_external_dispatch_reports_the_record_the_host_left_in_state():
                              http_version='2', status=200, response_bytes=42)
     scope = {'type': 'http', 'method': 'GET', 'path': '/hello', 'http_version': '2',
              'client': ['10.0.0.1', 0], 'headers': [], 'state': {'access_log': record}}
+    assert 'server' not in scope
 
     async def receive():
         return {'type': 'http.request', 'body': b'', 'more_body': False}

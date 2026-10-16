@@ -1,5 +1,6 @@
 """What an application's send events become on an HTTP/1.1 connection."""
 import asyncio
+import re
 
 import pytest
 
@@ -64,8 +65,23 @@ async def test_headers_and_body_reach_the_wire():
 
 async def test_content_length_and_date_are_supplied():
     head, body = _split(await _wire(_replay(START, _body(b'hello world'))))
-    assert b'\r\ncontent-length: 11' in head and b'\r\ndate: ' in head
-    assert body == b'hello world'
+    assert b'\r\ncontent-length: 11' in head and body == b'hello world'
+    [date] = re.findall(rb'\r\ndate: ([^\r]*)', head)
+    assert re.fullmatch(rb'[a-z]{3}, \d\d [a-z]{3} \d{4} \d\d:\d\d:\d\d gmt', date), date
+
+
+async def test_a_declared_length_body_may_arrive_in_parts():
+    _, body = _split(await _wire(_replay(
+        _start(headers=[(b'content-length', b'4')]), _body(b'ab', True), _body(b'cd'))))
+    assert body == b'abcd'
+
+
+async def test_head_does_not_silence_the_next_response():
+    async with served(_replay(START, _body(b'hello'))) as s:
+        w = await s.wire()
+        await w.send(b'HEAD / HTTP/1.1\r\nHost: x\r\n\r\nGET / HTTP/1.1\r\nHost: x\r\n\r\n')
+        head, get = await w.response(head=True), await w.response()
+    assert (head.body, get.body) == (b'', b'hello')
 
 
 @pytest.mark.parametrize('name', [b'content-length', b'Content-Length', b'CONTENT-LENGTH'])
@@ -207,7 +223,7 @@ def _upgrade(*extra):
 async def _accept_head(accept, request=None, *, to_eof=False) -> list[bytes]:
     async def app(conn, receive, send):
         await receive()
-        await send(accept)
+        await send(accept() if callable(accept) else accept)
         await receive()
 
     async with served(app) as s:
@@ -222,7 +238,7 @@ ACCEPT = {'type': 'websocket.accept', 'subprotocol': None}
 
 @pytest.mark.parametrize('accept,wanted', [
     ({**ACCEPT, 'headers': [[b'x-review', b'ok']]}, [b'x-review: ok']),
-    (NativeWSMessage.accept(None, [(b'x-review', b'ok')]), [b'x-review: ok']),
+    (lambda: NativeWSMessage.accept(None, [(b'x-review', b'ok')]), [b'x-review: ok']),
     ({**ACCEPT, 'headers': [[b'set-cookie', b'a=1'], [b'x-mid', b'm'], [b'set-cookie', b'b=2']]},
      [b'set-cookie: a=1', b'x-mid: m', b'set-cookie: b=2']),
 ], ids=['asgi', 'native', 'repeated-fields-keep-order'])

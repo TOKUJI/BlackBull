@@ -280,6 +280,14 @@ def _receive_seq(events):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('parts', [[b'whole'], [b'who', b'le'], []])
+async def test_read_body_joins_a_complete_body(parts):
+    events = [{'type': 'http.request', 'body': p, 'more_body': i < len(parts) - 1}
+              for i, p in enumerate(parts)] or [{'type': 'http.request', 'body': b'', 'more_body': False}]
+    assert await read_body(_receive_seq(events)) == b''.join(parts)
+
+
+@pytest.mark.asyncio
 async def test_read_body_raises_on_mid_body_disconnect():
     receive = _receive_seq([
         {'type': 'http.request', 'body': b'par', 'more_body': True},
