@@ -107,6 +107,27 @@ async def test_a_raising_handler_still_completes_with_500():
     assert _counts(seen) == dict.fromkeys(HTTP_EVENTS, 1)
 
 
+async def test_an_exception_escaping_the_app_is_an_error_event():
+    app, _ = _app()
+    errors = []
+
+    @app.on('error')
+    async def on_error(event: Event):
+        errors.append(event.detail)
+
+    async def boom(scope, receive, send, call_next):
+        raise RuntimeError('middleware')
+
+    app.use(boom)
+    async with served(app) as s:
+        w = await s.wire()
+        await w.send(_get())
+        assert await w.closed()
+        await asyncio.sleep(SETTLE)
+    [d] = errors
+    assert d['conn'].path == '/hello' and isinstance(d['exception'], RuntimeError)
+
+
 async def test_an_unrouted_request_completes_with_404():
     app, seen = _app()
     await _http(app, _get(b'/nowhere'))
@@ -293,6 +314,25 @@ async def test_a_message_names_the_connection_its_session_was_given():
     assert message_ids == [connected.detail['connection_id']]
 
 
+async def test_a_raising_websocket_handler_is_an_error_event():
+    async def boom(conn, receive, send):
+        await receive()
+        await send({'type': 'websocket.accept'})
+        raise RuntimeError('ws handler')
+
+    app, _ = _app()
+    app.route(path='/ws', scheme=Scheme.websocket)(boom)
+    errors = []
+
+    @app.on('error')
+    async def on_error(event: Event):
+        errors.append(event.detail)
+
+    await _ws(app)
+    [d] = errors
+    assert d['conn'].path == '/ws' and isinstance(d['exception'], RuntimeError)
+
+
 async def test_an_http_request_fires_no_websocket_event():
     app, seen = _app()
     await _http(app, _get())
@@ -301,13 +341,13 @@ async def test_an_http_request_fires_no_websocket_event():
 
 # -- the external ASGI entry (one dispatch per HTTP/2 stream) -------------
 
-async def test_an_external_dispatch_reports_the_record_the_host_left_in_state():
+@pytest.mark.parametrize('client', [['10.0.0.1', 0], None])
+async def test_an_external_dispatch_reports_the_record_the_host_left_in_state(client):
     app, seen = _app()
     record = AccessLogRecord(client_ip='10.0.0.1', method='GET', path='/hello',
                              http_version='2', status=200, response_bytes=42)
     scope = {'type': 'http', 'method': 'GET', 'path': '/hello', 'http_version': '2',
-             'client': ['10.0.0.1', 0], 'headers': [], 'state': {'access_log': record}}
-    assert 'server' not in scope
+             'client': client, 'server': None, 'headers': [], 'state': {'access_log': record}}
 
     async def receive():
         return {'type': 'http.request', 'body': b'', 'more_body': False}

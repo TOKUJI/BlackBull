@@ -184,7 +184,9 @@ def caps(caplog):
         records = [r for r in caplog.records if r.name == 'blackbull.caps']
         for r in records:
             assert r.requested is not None and r.limit is not None
-            assert r.getMessage().startswith('cap hit: ')
+            message = r.getMessage()
+            assert message.startswith('cap hit: ')
+            assert f'requested={r.requested}' in message and f'limit={r.limit}' in message
         return [(r.cap, r.protocol) for r in records]
     return hits
 
