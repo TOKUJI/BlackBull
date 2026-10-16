@@ -24,6 +24,13 @@ description: a summary, not a second copy of the commit message.
 Run `just typecheck`, `just test`, and `just docs-build` as applicable. When behavior
 or an API changes, update `docs/guide/` for users or `docs/about/` for internals.
 
+Tests assert what crosses the wire or what an application observes: drive the
+server through `tests/harness.py`, not hand-written readers or writers. Private
+reach from tests is capped per file by
+`tests/architecture/private_access_allowlist.json`, which only shrinks. Delete a
+test only when `just mutate PATTERN TESTS...` shows the remaining tests kill its
+mutants.
+
 ## Architecture invariants
 
 - **Protocol ownership:** HTTP/1.1, HTTP/2, WebSocket, gRPC, and MQTT wire

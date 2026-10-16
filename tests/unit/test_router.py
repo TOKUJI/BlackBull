@@ -1690,3 +1690,17 @@ class TestGetRoutes:
         assert isinstance(r, RouteInfo)
         method, path, name = r          # unpackable
         assert (method, path, name) == ('GET', '/y', '')
+
+
+@pytest.mark.parametrize('path,refused', [('/a/{p:path}/b', True), ('/a/{p:path}', False)])
+def test_a_path_converter_must_be_the_last_segment(path, refused):
+    app = BlackBull()
+
+    async def handler():
+        return b''
+
+    if refused:
+        with pytest.raises(ConfigurationError, match='last segment'):
+            app.route(path=path)(handler)
+    else:
+        app.route(path=path)(handler)

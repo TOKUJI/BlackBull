@@ -285,3 +285,10 @@ async def test_read_head_skips_the_empty_scan():
         ReadBuffer.find_head_end = orig
     assert not empty_calls, \
         f'find_head_end ran on an empty buffer {len(empty_calls)}×'
+
+
+class TestAsyncioReader:
+    async def test_invalid_stream_raises_typeerror(self):
+        from blackbull.server.recipient import AsyncioReader
+        with pytest.raises(TypeError, match='read()'):
+            AsyncioReader(object())

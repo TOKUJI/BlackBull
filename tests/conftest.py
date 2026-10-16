@@ -45,6 +45,12 @@ def pytest_addoption(parser):
 
 
 def pytest_collection_modifyitems(config, items):
+    # `just mutate` scores a module against the tests named in BB_MUTATE_TESTS.
+    if keep := tuple(os.environ.get("BB_MUTATE_TESTS", "").split()):
+        config.hook.pytest_deselected(
+            items=[i for i in items if not i.nodeid.startswith(keep)])
+        items[:] = [i for i in items if i.nodeid.startswith(keep)]
+
     markexpr = (config.option.markexpr or "").strip()
 
     # -m 指定時は pytest 標準の marker selection を優先

@@ -5,7 +5,7 @@ IP-literal, and ``urllib.parse.urlsplit`` implements that production — the
 bracket scan, the ``ipaddress`` parse, and the "nothing after the bracket but
 a port" rule.  It parses and caches a whole URL, so it is an oracle here and
 never the call site (the same reasoning as the scheme oracle in
-``tests/unit/test_audit_sprint63.py``).
+``tests/conformance/http1/test_request_head.py``).
 
 Our verdict is allowed to be *stricter* than the oracle in exactly five
 ways, each stated in ``_we_are_stricter`` and asserted below rather than

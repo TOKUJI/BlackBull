@@ -1438,3 +1438,40 @@ class TestReceivePastTerminalConsistency:
                 seq.append(await asyncio.wait_for(wrapper.receive(), timeout=2.0))
             sequences.append(seq)
         assert sequences[0] == sequences[1]
+
+
+class TestWebSocketRecipientUnsupportedOpcode:
+    @pytest.mark.asyncio
+    async def test_unknown_opcode_sends_close_and_disconnects(self):
+        """RFC 6455 §5.2: unknown opcode must send CLOSE(1002) and return disconnect."""
+        from blackbull.server.recipient import WebSocketRecipient
+        from blackbull.server.ws_codec import WSFrameHeader
+
+        fake_header = WSFrameHeader(fin=True, rsv1=False, rsv2=False, rsv3=False,
+                                    opcode=0x03, masked=False, length=2)
+
+        writer = MagicMock(spec_set=AbstractWriter)
+        writer.write = AsyncMock()
+
+        r = WebSocketRecipient(_FakeReader(b''), writer, require_masked=False)
+        r._connect_sent = True
+
+        eof = asyncio.IncompleteReadError(b'', 2)
+        with patch('blackbull.server.recipient.read_frame_header',
+                   AsyncMock(side_effect=[fake_header, eof])):
+            with patch('blackbull.server.recipient.read_payload',
+                       AsyncMock(return_value=b'\x00\x00')):
+                event = await r()
+
+        assert event['type'] == 'websocket.disconnect'
+        assert event['code'] == 1002
+        # RFC 6455 §5.1 — this is the client end of the connection
+        # (require_masked=False says only the *peer* may skip masking), so its
+        # CLOSE frame must carry a mask.
+        writer.write.assert_called_once()
+        frame = writer.write.call_args.args[0]
+        assert frame[0] == 0x88                     # FIN | CLOSE
+        assert frame[1] & 0x80, 'a client MUST mask every frame it sends'
+        key, payload = frame[2:6], frame[6:]
+        assert bytes(b ^ key[i % 4] for i, b in enumerate(payload)) == \
+            (1002).to_bytes(2, 'big')

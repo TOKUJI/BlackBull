@@ -269,3 +269,33 @@ def test_parse_cookies_multiple_http2_fields():
         'chat_method': 'poll',
         'other': 'xyz',
     }
+
+
+def _receive_seq(events):
+    it = iter(events)
+
+    async def receive():
+        return next(it)
+    return receive
+
+
+@pytest.mark.asyncio
+async def test_read_body_raises_on_mid_body_disconnect():
+    receive = _receive_seq([
+        {'type': 'http.request', 'body': b'par', 'more_body': True},
+        {'type': 'http.disconnect'},
+    ])
+    with pytest.raises(ClientDisconnected) as exc_info:
+        await read_body(receive)
+    assert exc_info.value.partial == b'par'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('reader', [read_json, read_text])
+async def test_read_json_and_text_propagate_disconnect(reader):
+    receive = _receive_seq([
+        {'type': 'http.request', 'body': b'{', 'more_body': True},
+        {'type': 'http.disconnect'},
+    ])
+    with pytest.raises(ClientDisconnected):
+        await reader(receive)

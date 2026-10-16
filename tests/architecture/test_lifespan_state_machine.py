@@ -294,3 +294,25 @@ def test_restore_puts_sig_dfl_back_when_the_previous_handler_is_unknown():
         assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
     finally:
         signal.signal(signal.SIGTERM, before)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fails', [True, False])
+async def test_a_startup_hook_failure_fails_the_lifespan_without_hanging(fails):
+    app = BlackBull()
+    ran = []
+
+    @app.intercept('app_startup')
+    async def hook(event):
+        ran.append(True)
+        if fails:
+            raise RuntimeError('startup blew up')
+
+    mgr = LifespanManager(app)
+    if fails:
+        with pytest.raises(RuntimeError, match='startup blew up'):
+            await asyncio.wait_for(mgr.__aenter__(), timeout=3.0)
+    else:
+        await asyncio.wait_for(mgr.__aenter__(), timeout=3.0)
+    await mgr.__aexit__(None, None, None)
+    assert ran == [True]

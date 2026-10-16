@@ -1,0 +1,287 @@
+"""Request and WebSocket lifecycle events, observed through a served app.
+
+Contracts: docs/guide/events.md.  Each event fires exactly once per request
+or session, carries its documented detail, and never fires for the other kind.
+"""
+import asyncio
+
+import pytest
+from websockets.asyncio.client import connect
+
+from blackbull import BlackBull, StreamingResponse
+from blackbull.connection import Connection
+from blackbull.event import Event
+from blackbull.middleware import Compression
+from blackbull.server.access_log import AccessLogRecord
+from blackbull.utils import Scheme
+
+from tests.harness import served
+
+pytestmark = pytest.mark.asyncio
+
+HTTP_EVENTS = ('request_received', 'before_handler', 'after_handler', 'request_completed')
+WS_EVENTS = ('websocket_connected', 'websocket_disconnected')
+ALL = HTTP_EVENTS + ('request_disconnected',) + WS_EVENTS
+SETTLE = 0.05
+
+
+def _get(path=b'/hello', *fields, method=b'GET', body=b''):
+    if body:
+        fields += (b'Content-Length: %d' % len(body),)
+    return b'\r\n'.join([method + b' ' + path + b' HTTP/1.1', b'Host: x', *fields]) + b'\r\n\r\n' + body
+
+
+def _app(**routes) -> tuple[BlackBull, dict[str, list[Event]]]:
+    app = BlackBull()
+    seen: dict[str, list[Event]] = {name: [] for name in ALL}
+    for name in ALL:
+        @app.on(name)
+        async def observe(event: Event, _name=name):
+            seen[_name].append(event)
+
+    async def ok(conn, receive, send):
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'ok'})
+
+    for path, handler in {'/hello': ok, **routes}.items():
+        app.route(path=path, methods=['GET', 'POST', 'QUERY'])(handler)
+    return app, seen
+
+
+async def _http(app, *requests) -> None:
+    async with served(app) as s:
+        w = await s.wire()
+        for raw in requests:
+            await w.send(raw)
+            await w.response()
+        await asyncio.sleep(SETTLE)
+
+
+async def _ws(app, path='/ws', **kw) -> None:
+    async with served(app) as s:
+        async with connect(f'ws://127.0.0.1:{s.server.port}{path}', **kw) as ws:
+            await ws.wait_closed()
+        await asyncio.sleep(SETTLE)
+
+
+def _counts(seen) -> dict[str, int]:
+    return {name: len(events) for name, events in seen.items() if events}
+
+
+@pytest.mark.parametrize('requests,n', [
+    ((_get(),), 1),
+    ((_get(),) * 3, 3),
+    ((_get(b'/hello', method=b'QUERY', body=b'select *'),), 1),
+], ids=['one', 'keep-alive-three', 'query-method'])
+async def test_every_http_lifecycle_event_fires_once_per_request(requests, n):
+    app, seen = _app()
+    await _http(app, *requests)
+    assert _counts(seen) == dict.fromkeys(HTTP_EVENTS, n)
+    assert seen['request_received'][0].detail['method'] == requests[0].split()[0].decode()
+
+
+async def test_lifecycle_details_describe_the_request_and_response():
+    app, seen = _app()
+    await _http(app, _get())
+    received, before, after, completed = (seen[n][0].detail for n in HTTP_EVENTS)
+    assert (received['method'], received['path'], before['path']) == ('GET', '/hello', '/hello')
+    assert isinstance(received['client_ip'], str) and isinstance(received['http_version'], str)
+    assert isinstance(before['handler'], str) and after['exception'] is None
+    conn = completed['conn']
+    assert (completed['method'], completed['path'], completed['http_version']) == \
+        (conn.method, conn.path, conn.http_version)
+    assert (completed['status'], completed['response_bytes']) == (200, 2)
+    assert isinstance(completed['duration_ms'], float) and completed['duration_ms'] >= 0
+
+
+async def test_a_raising_handler_still_completes_with_500():
+    async def boom(conn, receive, send):
+        raise ValueError('intentional')
+
+    app, seen = _app(**{'/boom': boom})
+    await _http(app, _get(b'/boom'))
+    assert isinstance(seen['after_handler'][0].detail['exception'], ValueError)
+    assert seen['request_completed'][0].detail['status'] == 500
+    assert _counts(seen) == dict.fromkeys(HTTP_EVENTS, 1)
+
+
+async def test_an_unrouted_request_completes_with_404():
+    app, seen = _app()
+    await _http(app, _get(b'/nowhere'))
+    assert [(e.detail['status'], e.detail['path']) for e in seen['request_completed']] == \
+        [(404, '/nowhere')]
+
+
+@pytest.mark.parametrize('hooks,expected', [
+    (('after_handler', 'request_completed'), ['handler', 'after_handler', 'request_completed']),
+    (('request_received', 'before_handler'), ['request_received', 'before_handler', 'handler']),
+])
+async def test_interceptors_run_in_lifecycle_order(hooks, expected):
+    order: list[str] = []
+
+    async def handler(conn, receive, send):
+        order.append('handler')
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b''})
+
+    app, _ = _app(**{'/order': handler})
+    for hook in hooks:
+        @app.intercept(hook)
+        async def record(event: Event, _hook=hook):
+            order.append(_hook)
+
+    await _http(app, _get(b'/order'))
+    assert order == expected
+
+
+async def test_a_raising_before_handler_interceptor_skips_the_handler():
+    ran = []
+
+    async def handler(conn, receive, send):
+        ran.append(True)
+
+    app, _ = _app(**{'/guarded': handler})
+
+    @app.intercept('before_handler')
+    async def guard(event: Event):
+        raise PermissionError('blocked')
+
+    async with served(app) as s:
+        w = await s.wire()
+        await w.send(_get(b'/guarded'))
+        assert (await w.response()).status >= 400
+    assert ran == []
+
+
+async def test_completion_reports_what_buffering_middleware_sent():
+    body = b'<html>' + b'hello world ' * 50 + b'</html>'
+
+    async def page(conn, receive, send):
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-type', b'text/html')]})
+        await send({'type': 'http.response.body', 'body': body})
+
+    app, seen = _app(**{'/gz': page})
+    app.use(Compression())
+    await _http(app, _get(b'/gz', b'Accept-Encoding: gzip'))
+    detail = seen['request_completed'][0].detail
+    assert detail['status'] == 200 and 0 < detail['response_bytes'] < len(body)
+
+
+async def test_completion_follows_the_last_streamed_chunk():
+    async def chunks():
+        for c in (b'chunk0', b'chunk1', b'chunk2'):
+            yield c
+
+    async def stream(conn, receive, send):
+        await StreamingResponse(chunks())(conn, receive, send)
+
+    app, seen = _app(**{'/stream': stream})
+    await _http(app, _get(b'/stream'))
+    assert seen['request_completed'][0].detail['response_bytes'] == 18
+
+
+async def test_a_handler_that_finds_the_peer_gone_is_disconnected_not_completed():
+    async def waits(conn, receive, send):
+        await receive()
+        await receive()
+
+    app, seen = _app(**{'/slow': waits})
+    async with served(app) as s:
+        w = await s.wire()
+        await w.send(_get(b'/slow'))
+        for _ in range(200):
+            if seen['request_disconnected']:
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(SETTLE)
+    [event] = seen['request_disconnected']
+    d = event.detail
+    conn = d['conn'] if isinstance(d['conn'], Connection) else Connection.from_scope(d['conn'])
+    assert (d['method'], d['path'], conn.path) == ('GET', '/slow', '/slow')
+    assert 'client_ip' in d and 'http_version' in d
+    assert not {'status', 'response_bytes', 'duration_ms'} & d.keys()
+    assert seen['request_completed'] == []
+
+
+async def test_an_answered_request_is_not_disconnected():
+    app, seen = _app()
+    await _http(app, _get())
+    assert seen['request_disconnected'] == []
+
+
+# -- WebSocket sessions ---------------------------------------------------
+
+def _ws_handler(subprotocol=None, *, echo=False):
+    async def handler(conn, receive, send):
+        await receive()
+        await send({'type': 'websocket.accept', 'subprotocol': subprotocol})
+        if echo:
+            await receive()
+        await send({'type': 'websocket.close'})
+    return handler
+
+
+def _ws_app(**kw):
+    app, seen = _app()
+    app.route(path='/ws', scheme=Scheme.websocket)(_ws_handler(**kw))
+    return app, seen
+
+
+async def test_a_session_fires_only_the_websocket_events_once():
+    app, seen = _ws_app()
+    await _ws(app)
+    assert _counts(seen) == dict.fromkeys(WS_EVENTS, 1)
+    d = seen['websocket_connected'][0].detail
+    assert d['path'] == '/ws' and d['subprotocol'] is None and isinstance(d['client_ip'], str)
+    assert isinstance(d['connection_id'], str) and d['connection_id'] and 'conn' in d
+
+
+async def test_the_accepted_subprotocol_is_reported():
+    app, seen = _ws_app(subprotocol='chat')
+    await _ws(app, subprotocols=['chat'])
+    assert seen['websocket_connected'][0].detail['subprotocol'] == 'chat'
+
+
+async def test_a_message_names_the_connection_its_session_was_given():
+    app, seen = _ws_app(echo=True)
+    message_ids = []
+
+    @app.on('websocket_message')
+    async def on_message(event: Event):
+        message_ids.append(event.detail['conn'].connection_id)
+
+    async with served(app) as s:
+        async with connect(f'ws://127.0.0.1:{s.server.port}/ws') as ws:
+            await ws.send('hello')
+            await ws.wait_closed()
+        await asyncio.sleep(SETTLE)
+    [connected] = seen['websocket_connected']
+    assert message_ids == [connected.detail['connection_id']]
+
+
+async def test_an_http_request_fires_no_websocket_event():
+    app, seen = _app()
+    await _http(app, _get())
+    assert not any(seen[n] for n in WS_EVENTS)
+
+
+# -- the external ASGI entry (one dispatch per HTTP/2 stream) -------------
+
+async def test_an_external_dispatch_reports_the_record_the_host_left_in_state():
+    app, seen = _app()
+    record = AccessLogRecord(client_ip='10.0.0.1', method='GET', path='/hello',
+                             http_version='2', status=200, response_bytes=42)
+    scope = {'type': 'http', 'method': 'GET', 'path': '/hello', 'http_version': '2',
+             'client': ['10.0.0.1', 0], 'headers': [], 'state': {'access_log': record}}
+
+    async def receive():
+        return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+    async def send(event, *a, **kw):
+        pass
+
+    await app(scope, receive, send)
+    await asyncio.sleep(SETTLE)
+    d = seen['request_completed'][0].detail
+    assert (d['path'], d['status'], d['response_bytes']) == ('/hello', 200, 42)

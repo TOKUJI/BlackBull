@@ -1,21 +1,10 @@
-"""Regression tests for an HTTP/2 flow-control + lifecycle audit batch.
+"""HTTP/2 flow control and stream lifecycle (RFC 9113 §5.1, §6.9).
 
-Pins the bugs from the 2026-07-07 comprehensive audit:
-
-- 1.2  HTTP/2 connection-level send window is never shared
-- 1.8  GOAWAY early-return skips recipient disconnect signalling
-- 1.9  ``_closed_streams`` grows without bound per connection
-- 1.10 PRIORITY frame with unknown dependency crashes the connection
-- 1.14 (#1) HEADERS on an OPEN stream respawns a second request (trailers)
-- 1.14 (#3) 16 MiB allocation before frame-size validation
-- 2.5  stream_window_size dict-of-one → int
-
-Plus the deferral that landed later: consume-based inbound flow control
-(proposals/consume-based-inbound-flow-control.md) — WINDOW_UPDATE credit for a
-DATA frame is replayed when the app pops the event off the recipient queue,
-not when the frame is enqueued, so a stalled handler closes the window and
-back-pressures the peer instead of overflowing a 64-deep frame-count queue
-into RST_STREAM(ENHANCE_YOUR_CALM).
+One connection window shared by every stream's sender; bounded closed-stream
+history; PRIORITY with an unknown dependency; trailers that must not respawn a
+request; frame-size checks before allocation; and inbound credit returned on
+consumption, so a stalled handler back-pressures the peer instead of
+overflowing its queue into RST_STREAM(ENHANCE_YOUR_CALM).
 """
 import asyncio
 from unittest.mock import AsyncMock, MagicMock

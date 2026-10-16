@@ -153,3 +153,6 @@ bench/compare/httparena_calibrate.py
 bench/compare/bench/results/*
 # peer benchmark harness — private development notes
 *.private.md
+
+# mutation testing workspace (just mutate)
+mutants/
