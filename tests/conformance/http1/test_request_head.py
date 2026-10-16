@@ -9,6 +9,7 @@ import pytest
 
 from blackbull.connection import Connection
 from blackbull.env import reset_settings_cache
+from blackbull.server.recipient import _parse_chunk_size  # noqa: F401  ratchet demonstration, reverted next
 
 from tests.harness import served
 
