@@ -30,24 +30,33 @@ def _private_string(node) -> bool:
 
 
 def _blackbull_names(tree) -> set[str]:
+    """Names bound to BlackBull objects or modules, then local classes deriving from them."""
     names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and (node.module or '').startswith('blackbull'):
             names.update(a.asname or a.name for a in node.names)
+        elif isinstance(node, ast.Import):
+            names.update(a.asname or a.name.split('.')[0]
+                         for a in node.names if a.name.startswith('blackbull'))
+    classes = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+    while grown := {c.name for c in classes if c.name not in names and _subclasses(c, names)}:
+        names |= grown
     return names
 
 
-def _subclasses_blackbull(cls: ast.ClassDef, names: set[str]) -> bool:
-    return any((isinstance(b, ast.Name) and b.id in names)
-               or (isinstance(b, ast.Attribute) and ast.unparse(b).startswith('blackbull.'))
-               for b in cls.bases)
+def _subclasses(cls: ast.ClassDef, names: set[str]) -> bool:
+    def root(b):
+        while isinstance(b, ast.Attribute):
+            b = b.value
+        return b.id if isinstance(b, ast.Name) else None
+    return any(root(b) in names for b in cls.bases)
 
 
 def private_references(source: str) -> int:
     tree = ast.parse(source)
     names = _blackbull_names(tree)
     inherited = {id(n) for cls in ast.walk(tree)
-                 if isinstance(cls, ast.ClassDef) and _subclasses_blackbull(cls, names)
+                 if isinstance(cls, ast.ClassDef) and _subclasses(cls, names)
                  for n in ast.walk(cls)}
     count = 0
     for node in ast.walk(tree):
@@ -58,7 +67,8 @@ def private_references(source: str) -> int:
             f = node.func
             if (isinstance(f, ast.Name) and f.id in _BY_NAME) or (
                     isinstance(f, ast.Attribute) and f.attr in _BY_STRING):
-                count += any(map(_private_string, node.args[:2]))
+                count += any(map(_private_string, [*node.args[:2], *(
+                    k.value for k in node.keywords if k.arg in ('attribute', 'name'))]))
             elif (isinstance(f, ast.Name) and f.id == 'patch') or (
                     isinstance(f, ast.Attribute) and f.attr == 'patch'):
                 count += any(map(_private_string, node.args[:1]))
@@ -82,10 +92,16 @@ actor._w; getattr(actor, "_w"); setattr(actor, "_w", 1); vars(actor)["_w"]; acto
 monkeypatch.setattr(actor, "_w", 1); patch.object(HTTP1Actor, "_w"); patch("blackbull.server._x")
 class Fake(HTTP1Actor):
     def f(self): return self._w
+class Deeper(Fake):
+    def f(self): return self._w
 class Own:
     def f(self): return self._w
+patch.object(HTTP1Actor, attribute="_w")
+import blackbull.server.http1_actor as h
+class ViaModule(h.HTTP1Actor):
+    def f(self): return self._w
 '''
-    assert private_references(probe) == 9
+    assert private_references(probe) == 12
 
 
 def test_private_reach_stays_within_its_shrinking_allowance():
