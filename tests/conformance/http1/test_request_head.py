@@ -46,8 +46,10 @@ REFUSED = {
                                b'Sec-WebSocket-Version: 13'), 400),
     **{f'scheme-{t.decode()}': (_head(t + b'://example.com/echo'), 400)
        for t in (b'1http', b'ht,tp', b'ht_tp', b'-http', b'')},
-    **{f'content-length-{v!r}': (_head(b'/', b'Content-Length:' + v, method=b'POST'), 400)
-       for v in (b' 005', b' 00', b' 010', b'5 ', b'  5', b'\t5', b' 5 ')},
+    **{f'content-length-{name}': (_head(b'/', b'Content-Length:' + v, method=b'POST'), 400)
+       for name, v in {'leading-zeros': b' 005', 'double-zero': b' 00', 'octal-looking': b' 010',
+                       'trailing-space': b'5 ', 'two-leading-spaces': b'  5', 'tab': b'\t5',
+                       'spaces-both-sides': b' 5 '}.items()},
 }
 
 
