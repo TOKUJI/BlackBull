@@ -64,6 +64,12 @@ async def _ws(app, path='/ws', **kw) -> None:
         await asyncio.sleep(SETTLE)
 
 
+def _conn(detail) -> Connection:
+    """The detail's connection; a scope dict on the forced-ASGI lane."""
+    c = detail['conn']
+    return c if isinstance(c, Connection) else Connection.from_scope(c)
+
+
 def _counts(seen) -> dict[str, int]:
     return {name: len(events) for name, events in seen.items() if events}
 
@@ -125,7 +131,7 @@ async def test_an_exception_escaping_the_app_is_an_error_event():
         assert await w.closed()
         await asyncio.sleep(SETTLE)
     [d] = errors
-    assert d['conn'].path == '/hello' and isinstance(d['exception'], RuntimeError)
+    assert _conn(d).path == '/hello' and isinstance(d['exception'], RuntimeError)
 
 
 async def test_an_unrouted_request_completes_with_404():
@@ -251,8 +257,7 @@ async def test_a_handler_that_finds_the_peer_gone_is_disconnected_not_completed(
         await asyncio.sleep(SETTLE)
     [event] = seen['request_disconnected']
     d = event.detail
-    conn = d['conn'] if isinstance(d['conn'], Connection) else Connection.from_scope(d['conn'])
-    assert (d['method'], d['path'], conn.path) == ('GET', '/slow', '/slow')
+    assert (d['method'], d['path'], _conn(d).path) == ('GET', '/slow', '/slow')
     assert 'client_ip' in d and 'http_version' in d
     assert not {'status', 'response_bytes', 'duration_ms'} & d.keys()
     assert seen['request_completed'] == []
@@ -330,7 +335,7 @@ async def test_a_raising_websocket_handler_is_an_error_event():
 
     await _ws(app)
     [d] = errors
-    assert d['conn'].path == '/ws' and isinstance(d['exception'], RuntimeError)
+    assert _conn(d).path == '/ws' and isinstance(d['exception'], RuntimeError)
 
 
 async def test_an_http_request_fires_no_websocket_event():

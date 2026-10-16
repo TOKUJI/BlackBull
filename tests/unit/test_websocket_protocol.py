@@ -1453,7 +1453,7 @@ class TestWebSocketRecipientUnsupportedOpcode:
         writer = MagicMock(spec_set=AbstractWriter)
         writer.write = AsyncMock()
 
-        r = WebSocketRecipient(_FakeReader(b''), writer, require_masked=False)
+        r = WebSocketRecipient(MagicMock(spec=AbstractReader), writer, require_masked=False)
         r._connect_sent = True
 
         eof = asyncio.IncompleteReadError(b'', 2)
