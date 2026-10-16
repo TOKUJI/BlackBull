@@ -120,7 +120,7 @@ class TestTheAuthorityGrammarMatchesTheStdlibUrlParser:
         assert conn.query_string == (b'q=ok' if suffix == b'?q=ok' else b'')
         assert not _accepts_as_host(candidate)
 
-    @pytest.mark.parametrize('authority', list(_authorities()), ids=repr)
+    @pytest.mark.parametrize('authority', list(_authorities()), ids=bytes.hex)
     def test_every_bracketed_candidate(self, authority):
         assert _accepts(authority) is _expected(authority)
 
@@ -262,7 +262,7 @@ class TestAnInvalidRegNameIsRejected:
                        b'Host: localhost\r\n\r\n'),
             id='absolute-form'),
     ])
-    @pytest.mark.parametrize('authority', _INVALID, ids=repr)
+    @pytest.mark.parametrize('authority', _INVALID, ids=bytes.hex)
     def test_the_absolute_form_authority_rejects_it(self, build, authority):
         with pytest.raises(BadRequestError):
             _ACTOR._parse(build(authority))
