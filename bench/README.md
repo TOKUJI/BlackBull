@@ -23,6 +23,7 @@ question.  A new tool is added to this index, given a test, and run in CI
 | Where does BlackBull stand on HttpArena? | `just httparena-bench`; correctness first with `bench/httparena/validate_local.sh` | [httparena/README.md](httparena/README.md) |
 | How does one server behave under HTTP/2 multiplexing and k6 load? | `bench/ab/h2load/benchmark.sh` | [ab/h2load/README.md](ab/h2load/README.md) |
 | What does one piece cost — parser, router, middleware, bytecode? | `bench/micro/` instruments | [micro/README.md](micro/README.md) |
+| Did TestClient lifecycle or request overhead change? | `bench/micro/testing_client.py --base PATH --head PATH` | [micro/README.md](micro/README.md) |
 | Where does the time go under load? | `bench/micro/profile_under_load.sh` | [micro/README.md](micro/README.md) |
 | Did the hot path gain event-loop touches? (CI gate) | `bench/micro/loop_touches.py --check` | [micro/README.md](micro/README.md) |
 | Is the protocol implementation conformant? | `bench/conformance/h2spec_run.sh`, `bench/conformance/autobahn_run.sh`, `just http11probe` | [conformance/README.md](conformance/README.md) |
@@ -124,6 +125,7 @@ Entry points are in **bold**; everything else is a part of the tool on its row.
 | File | Role |
 |---|---|
 | **`bench/micro/count_instructions.py`** | executed bytecode instructions per request |
+| **`bench/micro/testing_client.py`** | TestClient A/A and ABBA, bytecode comparison and executed helper instructions |
 | **`bench/micro/loop_touches.py`** | event-loop touches per request; `--check` is the CI budget |
 | **`bench/micro/parser_microbench.py`**, **`bench/micro/router_microbench.py`**, **`bench/micro/middleware_stack.py`**, **`bench/micro/streams_vs_protocol.py`**, **`bench/micro/grpc_bridge.py`** | parser, router, middleware, transport, gRPC bridge |
 | **`bench/micro/profile_under_load.sh`** | py-spy flame graph under k6 stress |

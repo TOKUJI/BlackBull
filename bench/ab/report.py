@@ -108,7 +108,7 @@ def _pct(d: float) -> float:
     return math.expm1(d) * 100
 
 
-def analyse(raw: Path, equiv: float) -> dict:
+def analyse(raw: Path, equiv: float, *, split_modes: bool = True) -> dict:
     rng = random.Random(0)
     phases = {}
     bimodal = False
@@ -116,7 +116,7 @@ def analyse(raw: Path, equiv: float) -> dict:
         arms = {arm: [v for _, a, v in rows if a == arm] for arm in ARMS}
         if not all(arms.values()):
             continue
-        threshold = mode_split([v for _, _, v in rows])
+        threshold = mode_split([v for _, _, v in rows]) if split_modes else None
         # A gap that separates the arms is the effect, not two modes: modes
         # exist only when each arm has runs on both sides of it.
         if threshold is not None and not all(
