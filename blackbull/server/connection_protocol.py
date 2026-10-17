@@ -297,7 +297,9 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
     BufferReader decides pause/resume policy; this object applies it.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, served=None) -> None:
+        #: What a subclass needs to serve this connection; opaque here.
+        self.served = served
         self._rb = ReadBuffer()
         self.reader = BufferReader(self._rb, self)
         self.transport: asyncio.Transport | None = None
