@@ -9,10 +9,12 @@ install:
 test:
     uv run pytest -q -n auto
 
-# Mutation score of the mutants matching PATTERN against the tests under TESTS
+# Mutation score of the mutants matching PATTERN against the tests under TESTS.
+# Two workers, 3.5 GB of address space each: a mutant that allocates without
+# bound fails its test instead of exhausting the machine.
 mutate pattern +tests:
     rm -rf mutants
-    BB_MUTATE_TESTS="{{tests}}" uv run --extra mutation mutmut run "{{pattern}}"
+    ulimit -v 3500000 && BB_MUTATE_TESTS="{{tests}}" uv run --extra mutation mutmut run --max-children 2 "{{pattern}}"
     uv run --extra mutation mutmut results --all true
 
 # Type-check with beartype instrumentation
