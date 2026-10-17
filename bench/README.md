@@ -125,6 +125,7 @@ Entry points are in **bold**; everything else is a part of the tool on its row.
 | File | Role |
 |---|---|
 | **`bench/micro/count_instructions.py`** | executed bytecode instructions per request |
+| **`bench/micro/testing_client.py`** | TestClient A/A and ABBA, bytecode comparison and executed helper instructions |
 | **`bench/micro/loop_touches.py`** | event-loop touches per request; `--check` is the CI budget |
 | **`bench/micro/parser_microbench.py`**, **`bench/micro/router_microbench.py`**, **`bench/micro/middleware_stack.py`**, **`bench/micro/streams_vs_protocol.py`**, **`bench/micro/grpc_bridge.py`** | parser, router, middleware, transport, gRPC bridge |
 | **`bench/micro/profile_under_load.sh`** | py-spy flame graph under k6 stress |
