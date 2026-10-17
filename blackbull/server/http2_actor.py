@@ -549,7 +549,9 @@ class HTTP2Actor(Actor):
 
         if state == StreamState.HALF_CLOSED_REMOTE:
             if frame_type in (FrameTypes.PRIORITY, FrameTypes.WINDOW_UPDATE,
-                              FrameTypes.RST_STREAM):
+                              FrameTypes.RST_STREAM,
+                              FrameTypes.HEADERS, FrameTypes.CONTINUATION):
+                # Field sections are refused only after their HPACK updates.
                 return None
             return (ErrorCodes.STREAM_CLOSED, 'stream')
 
@@ -1285,6 +1287,11 @@ class HTTP2Actor(Actor):
         bit owns the request-body transition even when END_HEADERS arrives on
         a later CONTINUATION frame.
         """
+        if stream.state == StreamState.HALF_CLOSED_REMOTE:
+            await self.send_frame(self.factory.rst_stream(
+                stream.stream_id, ErrorCodes.STREAM_CLOSED))
+            return True
+
         if stream.conn is not None:
             # A second field section is trailers: it must end the request,
             # carry no pseudo-header or prohibited field (RFC 9110 §6.5.1),
