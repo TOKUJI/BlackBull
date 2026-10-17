@@ -6316,10 +6316,14 @@ real transport when asserting client timeout behavior.</p>
 </code></pre></div>
 <h3 id="websocket-sessions">WebSocket sessions<a class="headerlink" href="#websocket-sessions" title="Permanent link">&para;</a></h3>
 <p><code>client.websocket_connect(path)</code> returns a synchronous
-context-managed session.  The session lives inside its own
-background event loop, so all of <code>send_text</code> / <code>send_bytes</code> /
-<code>send_json</code> and the matching receive methods are blocking
-synchronous calls:</p>
+context-managed session inside an active <code>TestClient</code> context. Lifespan,
+HTTP requests and WebSocket sessions share the client’s background event loop.
+All send and receive methods block the calling thread.</p>
+<p>Closing a session leaves other sessions and the client usable. Exiting the
+client closes its sessions before lifespan shutdown. Sessions cannot be
+re-entered; create a new session for each connection. A standalone
+<code>WebSocketTestSession(app, path)</code> owns and closes its own loop.
+Failed handshakes also reclaim the application task and any owned loop.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.router</span><span class="w"> </span><span class="kn">import</span> <span class="n">Scheme</span>
 
 
