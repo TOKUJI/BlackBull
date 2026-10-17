@@ -106,7 +106,7 @@ _REQUEST_DICT_ALLOWED: dict[str, str] = {
 _WS_DICT_ALLOWED: dict[str, str] = {
     'blackbull/native.py::NativeWSMessage.to_asgi':
         'boundary — this is the conversion',
-    'blackbull/testing/__init__.py::WebSocketTestSession._open':
+    'blackbull/testing/__init__.py::WebSocketTestSession._open._spawn':
         'boundary — Tier-2 speaks the ASGI WebSocket contract to the app',
     'blackbull/testing/__init__.py::WebSocketTestSession.send_text':
         'boundary — Tier-2 client → app',

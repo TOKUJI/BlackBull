@@ -26,15 +26,6 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# ``WebSocketDisconnect`` is re-exported, not redefined.  The
-# server side a handler object that raises the same "the other end closed"
-# exception, and two identically-named classes would mean an ``except``
-# written against one silently missing the other.  One class, both sides:
-# ``from blackbull.testing import WebSocketDisconnect`` keeps working, and it
-# is the same object as ``blackbull.WebSocketDisconnect``.
-#
-# The native-tier names are appended at the bottom of this module, after
-# ``_LoopThread`` and ``_LifespanManager`` exist — ``native`` builds on both.
 __all__ = ['TestClient', 'WebSocketTestSession', 'WebSocketDisconnect']
 
 
@@ -55,7 +46,7 @@ class _LoopThread:
     def __init__(self) -> None:
         self.loop: asyncio.AbstractEventLoop | None = None
         self.client_to_server: asyncio.Queue | None = None
-        self.server_to_client: queue.Queue = queue.Queue()
+        self.server_to_client: queue.Queue | None = None
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
         self._stop_requested = threading.Event()
@@ -178,13 +169,10 @@ class _LifespanManager:
             async def send(event):
                 self.loop_thread.server_to_client.put(event)
 
+            self.loop_thread.client_to_server.put_nowait({'type': 'lifespan.startup'})
             self._app_task = asyncio.create_task(self.app(scope, receive, send))
 
         self.loop_thread.run_coro(_spawn(), timeout=self.startup_timeout)
-        self.loop_thread.run_coro(
-            self.loop_thread.client_to_server.put({'type': 'lifespan.startup'}),
-            timeout=self.startup_timeout,
-        )
 
         event = self._wait_for_lifespan_event(self.startup_timeout)
         if event is None:
@@ -293,21 +281,11 @@ class WebSocketTestSession:
         if cookies:
             cookie_str = '; '.join(f'{k}={v}' for k, v in cookies.items())
             encoded_headers.append((b'cookie', cookie_str.encode('latin-1')))
-        # Offer the requested subprotocols the way a real client does — via the
-        # Sec-WebSocket-Protocol request header. WebSocket is native now
-        #: ``conn.subprotocols`` derives from this header, so the
-        # header (not a scope key) is what the server reads.
+        # Connection.subprotocols derives from the request header.
         if subprotocols:
             encoded_headers.append(
                 (b'sec-websocket-protocol',
                  ', '.join(subprotocols).encode('latin-1')))
-        # WebSocket is native: drive the app the way BlackBull's own
-        # server does — ``app(conn, receive, send)`` with a typed Connection — so
-        # the test path never round-trips through an ASGI scope dict (no
-        # ``as_scope`` → ``from_scope`` bounce; that conversion is the external
-        # ASGI boundary's job, exercised by the HTTP TestClient's httpx transport).
-        # ``subprotocols`` are derived from the request header (added above),
-        # matching how a real client offers them over the wire.
         from ..connection import Connection  # noqa: PLC0415
         from ..headers import Headers  # noqa: PLC0415
         self._conn = Connection(
@@ -361,13 +339,10 @@ class WebSocketTestSession:
             async def send(event):
                 self._server_to_client.put(event)
 
+            self._client_to_server.put_nowait({'type': 'websocket.connect'})
             self._app_task = asyncio.create_task(self.app(self._conn, receive, send))
 
         self._loop_thread.run_coro(_spawn(), timeout=self.timeout)
-        self._loop_thread.run_coro(
-            self._client_to_server.put({'type': 'websocket.connect'}),
-            timeout=self.timeout,
-        )
         event = self._recv_event()
         if event['type'] == 'websocket.close':
             raise WebSocketDisconnect(code=event.get('code', 1000), reason=event.get('reason', ''))
@@ -472,12 +447,7 @@ class WebSocketTestSession:
         )
 
     def _recv_event(self) -> dict:
-        """The next server event, as an ASGI dict.
-
-        Tier-2 drives the app through the ASGI WebSocket contract, so this is
-        a boundary: BlackBull's own path now emits ``NativeWSMessage`` and it
-        is expanded here, at the one place server events enter the client.
-        """
+        """Expand native server messages at the test-client boundary."""
         if self._closed or not self._entered:
             raise RuntimeError("WebSocket session is not open")
         deadline = self.timeout
@@ -572,7 +542,7 @@ class TestClient:
         self._cookies = cookies
         self._headers = headers
         self._follow_redirects = follow_redirects
-        self._loop_thread = _LoopThread()
+        self._loop_thread: _LoopThread | None = None
         self._lifespan: _LifespanManager | None = None
         self._async_client: httpx.AsyncClient | None = None
         self._sessions: WeakSet[WebSocketTestSession] = WeakSet()
@@ -624,7 +594,8 @@ class TestClient:
             self._async_client = None
             self._lifespan = None
             self._sessions.clear()
-            self._loop_thread.stop()
+            if self._loop_thread is not None:
+                self._loop_thread.stop()
 
     # ----- HTTP methods -----------------------------------------------------
 

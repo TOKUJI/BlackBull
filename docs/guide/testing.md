@@ -322,7 +322,7 @@ with TestClient(app, headers={'X-Test-Tag': 'integration'}) as client:
 `client.websocket_connect(path)` returns a synchronous
 context-managed session inside an active `TestClient` context. Lifespan,
 HTTP requests and WebSocket sessions share the client’s background event loop.
-All send and receive methods block the calling thread:
+All send and receive methods block the calling thread.
 
 Closing a session leaves other sessions and the client usable. Exiting the
 client closes its sessions before lifespan shutdown. Sessions cannot be

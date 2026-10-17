@@ -321,3 +321,50 @@ def test_failed_submission_closes_both_coroutines(monkeypatch):
         for coro in submitted:
             coro.close()
         loop.stop()
+
+
+@pytest.mark.parametrize('sync', [False, True])
+@pytest.mark.parametrize('asgi', ['0', '1'])
+def test_native_server_lifespan_resources_work_on_both_http_versions(sync, asgi, monkeypatch):
+    from blackbull import BlackBull
+    from blackbull.client.http1 import HTTP1Client
+    from blackbull.client.http2 import HTTP2Client
+    from blackbull.env import reset_settings_cache
+    from blackbull.testing import NativeTestServer
+
+    monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', asgi)
+    reset_settings_cache()
+    app = BlackBull()
+    loops = []
+
+    @app.on_startup
+    async def startup():
+        loops.append(asyncio.get_running_loop())
+
+    @app.route(path='/')
+    async def resource(conn):
+        future = loops[0].create_future()
+        loops[0].call_soon(future.set_result, 'ok')
+        return await future
+
+    async def requests(server):
+        for client_type in (HTTP1Client, HTTP2Client):
+            async with client_type('127.0.0.1', server.port) as client:
+                for _ in range(2):
+                    async with asyncio.timeout(3):
+                        response = await client.request('GET', '/')
+                    assert response.status == 200
+                    assert response.body == b'ok'
+
+    async def asynchronous():
+        async with NativeTestServer(app) as server:
+            await requests(server)
+
+    try:
+        if sync:
+            with NativeTestServer(app) as server:
+                asyncio.run(requests(server))
+        else:
+            asyncio.run(asynchronous())
+    finally:
+        reset_settings_cache()
