@@ -1,8 +1,4 @@
-"""Request and WebSocket lifecycle events, observed through a served app.
-
-Contracts: docs/guide/events.md.  Each event fires exactly once per request
-or session, carries its documented detail, and never fires for the other kind.
-"""
+"""Lifecycle events through a served app; the contracts are in docs/guide/events.md."""
 import asyncio
 
 import pytest

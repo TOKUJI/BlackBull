@@ -1,11 +1,4 @@
-"""HTTP/2 flow control and stream lifecycle (RFC 9113 §5.1, §6.9).
-
-One connection window shared by every stream's sender; bounded closed-stream
-history; PRIORITY with an unknown dependency; trailers that must not respawn a
-request; frame-size checks before allocation; and inbound credit returned on
-consumption, so a stalled handler back-pressures the peer instead of
-overflowing its queue into RST_STREAM(ENHANCE_YOUR_CALM).
-"""
+"""HTTP/2 flow control and stream lifecycle (RFC 9113 §5.1, §6.9)."""
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 

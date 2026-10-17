@@ -1,8 +1,4 @@
-"""Raw bytes to BlackBull's real server over loopback, and the bytes it answers.
-
-Every layer between the socket and the app is production code; a test states
-only what crosses the wire and what the app observes.
-"""
+"""Raw bytes to BlackBull's real server over loopback, and the bytes it answers."""
 from __future__ import annotations
 
 import asyncio

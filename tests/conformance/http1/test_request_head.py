@@ -1,7 +1,4 @@
-"""RFC 9112 request heads: what is refused, and what the application sees.
-
-Every row crosses the wire into the production server.
-"""
+"""RFC 9112 request heads: what is refused, and what the application sees."""
 import asyncio
 import logging
 

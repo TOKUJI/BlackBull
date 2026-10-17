@@ -1,13 +1,5 @@
-"""Tests reach BlackBull through public seams; private reach is a shrinking allowance.
-
-Counted per test file: ``x._name`` on anything but ``self``/``cls``; ``self._name``
-inside a test class that subclasses a BlackBull class; a private name given as a
-string to ``getattr``/``setattr``/``hasattr``/``delattr``, ``monkeypatch.setattr``
-or ``patch.object``, or indexed out of ``vars(x)``/``x.__dict__``; a ``patch``
-target with a private segment; and imports of private names or modules from
-``blackbull``.  A file may not exceed its allowance in
-``private_access_allowlist.json``, and an allowance that is no longer used must
-be lowered, so the list only shrinks.
+"""Private reach from tests may only shrink: each file's count is capped by
+``private_access_allowlist.json``.  ``test_every_reach_form_is_counted`` lists what counts.
 """
 import ast
 import json
