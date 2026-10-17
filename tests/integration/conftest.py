@@ -10,11 +10,15 @@ build an app, bind an ephemeral port, fork a worker, hit the bound port
 with an HTTP client, kill the worker.  The boilerplate is consolidated
 here so individual tests stay focused on their assertions.
 """
+from __future__ import annotations
+
 import asyncio
 from contextlib import contextmanager
 from multiprocessing import Process
+from typing import TYPE_CHECKING
 
-from blackbull.server import ASGIServer
+if TYPE_CHECKING:
+    from blackbull.server import ASGIServer
 
 
 class _LiveAppHandle:
@@ -51,6 +55,9 @@ def live_server(app, **server_kwargs):
     ``BlackBull`` instance) and construct URLs against
     ``http://127.0.0.1:{live.port}``.
     """
+    # Load BlackBull after pytest installs its typechecking hook.
+    from blackbull.server import ASGIServer
+
     server = ASGIServer(app, **server_kwargs)
     server.open_socket(0)
     p = Process(target=lambda: asyncio.run(server.run()))
