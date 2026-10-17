@@ -156,3 +156,21 @@ async def test_no_trust_or_non_http_passes_through(shape, peer, trusted, type_):
 async def test_parameterless_forwarded_element_is_barrier(shape):
     value = b'for=198.51.100.99;proto=https, ;, for=10.0.0.2;proto=https'
     assert await apply(shape, [(b'forwarded', value)]) == (('10.0.0.2', 0), 'http', '/original')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('trusted,peer,root_path', [
+    ('127.0.0.1', '127.0.0.1', '/app'),
+    ('10.0.0.1', '192.0.2.9', ''),
+])
+async def test_forwarded_prefix_needs_a_trusted_peer(trusted, peer, root_path):
+    mw = TrustedProxy([trusted])
+    scope = {'type': 'http', 'client': [peer, 1234],
+             'headers': Headers([(b'x-forwarded-prefix', b'/app')])}
+    seen = {}
+
+    async def call_next(scope, receive, send):
+        seen['root_path'] = scope.get('root_path', '')
+
+    await mw(scope, None, None, call_next)
+    assert seen['root_path'] == root_path

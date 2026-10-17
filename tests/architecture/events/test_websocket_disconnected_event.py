@@ -1,7 +1,6 @@
 """Tests for the websocket_disconnected Level B event.
 
 Affected-tests baseline (must not regress after implementation):
-- test_websocket_connected_event.py::* (websocket_connected must still fire)
 - test_websocket_message_event.py::* (websocket_message must still fire)
 """
 import asyncio
@@ -18,7 +17,7 @@ from blackbull.headers import Headers
 
 
 # ---------------------------------------------------------------------------
-# Shared test infrastructure  (mirrors test_websocket_connected_event.py)
+# Shared test infrastructure
 # ---------------------------------------------------------------------------
 
 class _FakeReader(AbstractReader):

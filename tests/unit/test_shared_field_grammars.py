@@ -7,6 +7,8 @@ of these fields reaches the same answer.
 """
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import pytest
 
 from blackbull import BlackBull
@@ -15,7 +17,7 @@ from blackbull.grpc import GrpcServiceRegistry, encode_message
 from blackbull.middleware.cache import Cache
 from blackbull.middleware.static import StaticFiles
 from blackbull.protocol.field_grammar import (
-    if_none_match_hit, list_members, media_type)
+    URI_SCHEME_RE, if_none_match_hit, list_members, media_type)
 
 
 class TestTheGrammars:
@@ -180,3 +182,12 @@ async def _through(middleware, handler, headers):
 
 def _status(sent):
     return next(e['status'] for e in sent if e['type'] == 'http.response.start')
+
+
+def test_the_scheme_grammar_matches_the_stdlib_url_parser():
+    """RFC 3986 §3.1 over every visible-ASCII pair, with urlsplit as the oracle."""
+    candidates = [bytes([a]) + t for a in range(0x21, 0x7F)
+                  for t in (b'',) + tuple(bytes([b]) for b in range(0x21, 0x7F))]
+    assert [c for c in candidates
+            if bool(URI_SCHEME_RE.fullmatch(c))
+            is not (urlsplit(c.decode() + '://x').scheme.encode() == c.lower())] == []

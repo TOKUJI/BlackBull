@@ -5,7 +5,14 @@ from blackbull import BlackBull
 from blackbull.env import reset_settings_cache
 from blackbull.utils import Scheme
 
-from .test_dual_path_identity import _drive
+from tests.harness import served
+
+
+async def _drive(app, request: bytes) -> bytes:
+    async with served(app) as s:
+        w = await s.wire()
+        await w.send(request)
+        return await (w.recv_until() if b'Upgrade: websocket' in request else w.recv_all())
 
 
 @pytest.mark.asyncio

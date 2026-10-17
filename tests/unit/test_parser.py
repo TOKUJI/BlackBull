@@ -151,7 +151,7 @@ class TestParse:
         # Spec change: a client-controlled
         # X-Forwarded-Prefix must NOT set root_path at the parser layer —
         # it is only honoured behind TrustedProxy (see
-        # tests/unit/test_audit_sprint63.py::TestXForwardedPrefixTrust).
+        # tests/unit/test_proxy_chain.py).
         scope = _get_scope(_http_request(
             headers={'Host': 'localhost:8000', 'X-Forwarded-Prefix': prefix}
         ))
@@ -384,7 +384,7 @@ class TestHTTP2ScopeFields:
         # Same contract on the H2 path — the frame-level
         # parser must not trust a client-supplied X-Forwarded-Prefix.  Only
         # the TrustedProxy middleware may set root_path, after verifying the
-        # peer (see tests/unit/test_audit_sprint63.py::TestXForwardedPrefixTrust).
+        # peer (see tests/unit/test_proxy_chain.py).
         frame = _make_h2_headers_frame_dispatch(
             extra_headers=[(b'x-forwarded-prefix', prefix.encode())]
         )
@@ -868,3 +868,32 @@ class TestH1H2MethodAcceptSetParity:
                     f'transports disagree on method {method!r}')
         assert not self._h1_accepts(b'')
         assert not self._h2_accepts(b'')
+
+
+def _h2_conn(fields):
+    from hpack import Encoder
+    from blackbull.protocol.frame import FrameFactory
+    from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
+    block = Encoder().encode(fields)
+    flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
+    frame = FrameFactory().load(len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
+                                + bytes([flags]) + (1).to_bytes(4, 'big') + block)
+    conn = _real_parse_headers(frame)
+    assert not frame.malformed
+    return conn
+
+
+@pytest.mark.parametrize('fields,host', [
+    ([(b':authority', b'real.example'), (b'host', b'spoofed.example')], b'real.example'),
+    ([(b':authority', b'example.com:8443')], b'example.com:8443'),
+])
+def test_h2_authority_becomes_the_host_as_on_http1(fields, host):
+    """tests/conformance/http1/test_request_head.py pins the same hosts for HTTP/1.1."""
+    conn = _h2_conn([(b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'), *fields])
+    assert conn.headers.get(b'host') == host
+
+
+def test_h2_does_not_trust_a_forwarded_prefix():
+    conn = _h2_conn([(b':method', b'GET'), (b':path', b'/'), (b':scheme', b'https'),
+                     (b':authority', b'example.com'), (b'x-forwarded-prefix', b'/evil')])
+    assert conn.root_path == ''

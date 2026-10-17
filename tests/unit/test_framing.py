@@ -1,5 +1,5 @@
 """The one reading of a ``Transfer-Encoding`` list (BLA-459).  Each side's
-policy over it keeps its own tests, in ``tests/unit/`` and ``test_audit_sprint63``.
+policy over it keeps its own tests, in ``tests/unit/`` and ``tests/conformance/http1/``.
 """
 import pytest
 

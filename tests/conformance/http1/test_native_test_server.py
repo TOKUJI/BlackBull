@@ -301,7 +301,7 @@ def test_sync_form_serves_many_requests(app):
 # --- the two lanes agree, over the shared corpus ----------------------------
 #
 # ``_dual_path_corpus`` is the single definition of "the request shapes the
-# compat lane must be invisible for".  ``test_dual_path_identity`` asserts
+# compat lane must be invisible for".  ``test_connection_lifecycle`` asserts
 # byte identity over all of it by driving the actor directly; this asserts the
 # same claim one layer out — over a real socket, through a real HTTP client —
 # for the subset a conformant client can actually issue.
@@ -357,7 +357,7 @@ async def test_both_lanes_agree_over_the_shared_corpus(corpus_app, name,
     """Native and ``BB_FORCE_ASGI_SCOPE=1`` agree on what a client observes.
 
     The vectors come from ``_dual_path_corpus.CLIENT_DRIVABLE`` — the same
-    definition ``test_dual_path_identity`` draws from — so the claim is stated
+    definition ``test_connection_lifecycle`` draws from — so the claim is stated
     once and asserted at two depths, rather than re-specified here.
     """
     spec = CLIENT_DRIVABLE[name]

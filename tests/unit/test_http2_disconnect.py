@@ -110,3 +110,16 @@ async def test_h2_disconnect_receiver_idempotent():
     await wrapped()   # second call — already flagged, must not emit again
 
     aggregator.on_request_disconnected.assert_awaited_once()
+
+
+class TestHTTP2Recipient:
+    @pytest.mark.asyncio
+    async def test_with_initial_frame_enqueues_event(self):
+        from blackbull.server.recipient import HTTP2Recipient
+        from blackbull.protocol.frame_types import Data
+        frame = MagicMock(spec=Data)
+        frame.payload = b'body'
+        frame.end_stream = True
+        r = HTTP2Recipient(frame)
+        event = await r()
+        assert event == {'type': 'http.request', 'body': b'body', 'more_body': False}
