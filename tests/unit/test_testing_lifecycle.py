@@ -1,33 +1,65 @@
 import asyncio
+from concurrent.futures import Future
 import threading
 
+import httpx
 import pytest
 
-from blackbull.testing import WebSocketDisconnect, WebSocketTestSession, _LoopThread
+from blackbull.testing import TestClient, WebSocketDisconnect, WebSocketTestSession
+
+
+@pytest.fixture
+def loop_resources(monkeypatch):
+    threads, loops = [], []
+    start, join = threading.Thread.start, threading.Thread.join
+    get_loop = asyncio.Runner.get_loop
+
+    def record_start(thread):
+        threads.append(thread)
+        return start(thread)
+
+    def record_loop(runner):
+        loop = get_loop(runner)
+        loops.append(loop)
+        return loop
+
+    monkeypatch.setattr(threading.Thread, 'start', record_start)
+    monkeypatch.setattr(asyncio.Runner, 'get_loop', record_loop)
+    yield threads, loops
+    for loop in loops:
+        if loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
+    for thread in threads:
+        join(thread, timeout=2)
+        assert not thread.is_alive()
 
 
 @pytest.mark.parametrize('error', [RuntimeError('startup'), asyncio.CancelledError(),
                                   KeyboardInterrupt(), SystemExit(), GeneratorExit(),
                                   BaseExceptionGroup('startup', [asyncio.CancelledError()]),
                                   type('StartupFailure', (BaseException,), {})()])
-def test_loop_start_failure_reaches_caller_and_joins_thread(monkeypatch, error):
+def test_loop_start_failure_reaches_caller_and_joins_thread(monkeypatch, error, loop_resources):
 
     def fail_startup(runner):
         raise error
 
     monkeypatch.setattr(asyncio.Runner, 'get_loop', fail_startup)
-    loop = _LoopThread()
     with pytest.raises(type(error)) as caught:
-        loop.start()
+        with TestClient(None):
+            pytest.fail('startup should fail before entering the client')
     assert caught.value is error
-    assert not loop._thread.is_alive()
+    threads, _ = loop_resources
+    assert len(threads) == 1
+    assert not threads[0].is_alive()
 
 
 @pytest.mark.parametrize('failure', ['raise', 'return', 'timeout', 'cancel', 'unexpected'])
-def test_websocket_failed_entry_reclaims_app_and_loop(failure):
+def test_websocket_failed_entry_reclaims_app_and_loop(failure, loop_resources):
     finished = threading.Event()
+    tasks = []
 
     async def app(conn, receive, send):
+        tasks.append(asyncio.current_task())
         try:
             assert (await receive())['type'] == 'websocket.connect'
             if failure == 'raise':
@@ -46,41 +78,54 @@ def test_websocket_failed_entry_reclaims_app_and_loop(failure):
     expected = {'raise': ValueError, 'return': WebSocketDisconnect,
                 'timeout': TimeoutError, 'cancel': asyncio.CancelledError,
                 'unexpected': RuntimeError}[failure]
-    try:
-        with pytest.raises(expected):
-            session.__enter__()
-        assert finished.is_set()
-        assert not session._loop_thread._thread.is_alive()
-        assert session._loop_thread.loop.is_closed()
-        assert session._app_task.done()
-        session.close()
-        session.close()
-    finally:
-        if session._loop_thread._thread.is_alive():
-            session._loop_thread.stop()
+    with pytest.raises(expected):
+        with session:
+            pytest.fail('handshake should fail')
+    assert finished.is_set()
+    threads, loops = loop_resources
+    assert len(threads) == len(loops) == len(tasks) == 1
+    assert not threads[0].is_alive()
+    assert loops[0].is_closed()
+    assert tasks[0].done()
+    session.close()
+    session.close()
 
 
-def test_loop_timeout_waits_for_coroutine_cancellation():
-    loop = _LoopThread()
+def test_request_timeout_drains_cancellation_before_parent_close(monkeypatch, loop_resources):
     finished = threading.Event()
-    async def work():
-        try:
-            await asyncio.Event().wait()
-        finally:
-            await asyncio.sleep(.01)
-            finished.set()
-    loop.start()
-    try:
-        with pytest.raises(TimeoutError):
-            loop.run_coro(work(), timeout=.05)
+    tasks = []
+
+    async def app(conn, receive, send):
+        if conn['type'] != 'http':
+            return
+        if conn['path'] == '/wait':
+            tasks.append(asyncio.current_task())
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(.01)
+                finished.set()
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'ok'})
+
+    result = Future.result
+
+    def short_timeout(future, timeout=None):
+        return result(future, timeout=.05 if timeout == 60.0 else timeout)
+
+    with TestClient(app) as client:
+        with monkeypatch.context() as patch:
+            patch.setattr(Future, 'result', short_timeout)
+            with pytest.raises(TimeoutError):
+                client.get('/wait')
         assert finished.is_set()
-        assert loop.run_coro(asyncio.sleep(0, result='usable')) == 'usable'
-    finally:
-        loop.stop()
+        assert len(tasks) == 1 and tasks[0].done()
+        _, loops = loop_resources
+        assert loops[0].is_running()
+        assert client.get('/ok').text == 'ok'
 
 
-def test_owned_loop_drains_tasks_and_async_generators():
-    loop = _LoopThread()
+def test_owned_loop_drains_tasks_and_async_generators(loop_resources):
     task_done, generator_done = threading.Event(), threading.Event()
     retained = []
     async def values():
@@ -95,23 +140,30 @@ def test_owned_loop_drains_tasks_and_async_generators():
         finally:
             await asyncio.sleep(0)
             task_done.set()
-    async def start():
+    async def app(conn, receive, send):
+        await receive()
         gen = values()
         retained.append(gen)
         assert await anext(gen) == 1
         retained.append(asyncio.create_task(pending()))
         await asyncio.sleep(0)
-    loop.start()
-    loop.run_coro(start())
-    loop.stop()
+        await send({'type': 'websocket.accept'})
+        await receive()
+    with WebSocketTestSession(app, '/'):
+        pass
     assert task_done.is_set()
     assert generator_done.is_set()
-    assert not loop._thread.is_alive()
-    assert loop.loop.is_closed()
+    threads, loops = loop_resources
+    assert len(threads) == len(loops) == 1
+    assert not threads[0].is_alive()
+    assert loops[0].is_closed()
 
 
-def test_websocket_receive_failure_reclaims_loop():
+def test_websocket_receive_failure_reclaims_loop(loop_resources):
+    tasks = []
+
     async def app(conn, receive, send):
+        tasks.append(asyncio.current_task())
         await receive()
         await send({'type': 'websocket.accept'})
         await receive()
@@ -121,26 +173,32 @@ def test_websocket_receive_failure_reclaims_loop():
         with session:
             session.send_text('fail')
             session.receive_text()
-    assert session._app_task.done()
-    assert not session._loop_thread._thread.is_alive()
+    threads, loops = loop_resources
+    assert len(tasks) == len(threads) == len(loops) == 1
+    assert tasks[0].done()
+    assert not threads[0].is_alive()
+    assert loops[0].is_closed()
 
 
-def test_websocket_handshake_rejection_and_close_are_idempotent():
+def test_websocket_handshake_rejection_and_close_are_idempotent(loop_resources):
     async def app(conn, receive, send):
         await receive()
         await send({'type': 'websocket.close', 'code': 1008})
     session = WebSocketTestSession(app, '/')
     with pytest.raises(WebSocketDisconnect) as error:
-        session.__enter__()
+        with session:
+            pytest.fail('handshake should be rejected')
     assert error.value.code == 1008
     session.close()
     session.close()
-    assert not session._loop_thread._thread.is_alive()
+    threads, loops = loop_resources
+    assert len(threads) == len(loops) == 1
+    assert not threads[0].is_alive()
+    assert loops[0].is_closed()
 
 
 @pytest.mark.parametrize('async_wrapper', [False, True])
 def test_client_lifespan_http_and_websockets_share_resources(async_wrapper):
-    from blackbull.testing import TestClient
     from blackbull.connection import Connection
 
     active = set()
@@ -216,9 +274,8 @@ def test_client_lifespan_http_and_websockets_share_resources(async_wrapper):
 
 @pytest.mark.parametrize('target', ['websocket', 'client'])
 @pytest.mark.parametrize('phase', ['entry', 'body'])
-def test_cleanup_failure_preserves_original_exception(monkeypatch, caplog, target, phase):
-    from blackbull.testing import TestClient
-
+def test_cleanup_failure_preserves_original_exception(monkeypatch, caplog, target, phase,
+                                                      loop_resources):
     async def app(conn, receive, send):
         await receive()
         if phase == 'entry':
@@ -231,11 +288,15 @@ def test_cleanup_failure_preserves_original_exception(monkeypatch, caplog, targe
             await send({'type': 'websocket.accept'})
             await receive()
 
-    stop = _LoopThread.stop
-    def failing_stop(self, *args, **kwargs):
-        stop(self, *args, **kwargs)
-        raise TimeoutError('cleanup failure')
-    monkeypatch.setattr(_LoopThread, 'stop', failing_stop)
+    join = threading.Thread.join
+    threads, _ = loop_resources
+
+    def failing_join(thread, timeout=None):
+        join(thread, timeout)
+        if thread in threads:
+            raise TimeoutError('cleanup failure')
+
+    monkeypatch.setattr(threading.Thread, 'join', failing_join)
     context = TestClient(app) if target == 'client' else WebSocketTestSession(app, '/')
     with pytest.raises((ValueError, RuntimeError), match='original failure'):
         with context:
@@ -243,35 +304,43 @@ def test_cleanup_failure_preserves_original_exception(monkeypatch, caplog, targe
     assert 'cleanup failure' in caplog.text
 
 
-def test_start_timeout_cannot_leave_a_late_loop_running(monkeypatch):
-    loop = _LoopThread()
+def test_start_timeout_cannot_leave_a_late_loop_running(monkeypatch, loop_resources):
+    from blackbull.testing import NativeClient
+
     release = threading.Event()
     get_loop = asyncio.Runner.get_loop
-    stop = loop.stop
+    join = threading.Thread.join
+    wait = threading.Event.wait
 
     def delayed_get_loop(runner):
         assert release.wait(2)
         return get_loop(runner)
 
-    def release_and_stop(*args, **kwargs):
+    def release_and_join(thread, timeout=None):
         release.set()
-        return stop(*args, **kwargs)
+        return join(thread, timeout)
+
+    def expire_startup(event, timeout=None):
+        return False if timeout == 5.0 else wait(event, timeout)
 
     monkeypatch.setattr(asyncio.Runner, 'get_loop', delayed_get_loop)
-    monkeypatch.setattr(loop._ready, 'wait', lambda timeout: False)
-    monkeypatch.setattr(loop, 'stop', release_and_stop)
+    monkeypatch.setattr(threading.Event, 'wait', expire_startup)
+    monkeypatch.setattr(threading.Thread, 'join', release_and_join)
     try:
         with pytest.raises(TimeoutError, match='starting'):
-            loop.start()
-        assert not loop._thread.is_alive()
+            with NativeClient(None):
+                pytest.fail('startup should time out')
+        threads, loops = loop_resources
+        assert len(threads) == len(loops) == 1
+        assert not threads[0].is_alive()
+        assert loops[0].is_closed()
     finally:
         release.set()
-        stop()
 
 
 @pytest.mark.parametrize('target', ['websocket', 'client'])
-def test_normal_context_exit_does_not_hide_cleanup_error_in_except(monkeypatch, target):
-    from blackbull.testing import TestClient
+def test_normal_context_exit_does_not_hide_cleanup_error_in_except(monkeypatch, target,
+                                                                  loop_resources):
     async def app(conn, receive, send):
         await receive()
         if target == 'client':
@@ -282,11 +351,15 @@ def test_normal_context_exit_does_not_hide_cleanup_error_in_except(monkeypatch, 
             await send({'type': 'websocket.accept'})
             await receive()
 
-    stop = _LoopThread.stop
-    def failing_stop(self):
-        stop(self)
-        raise RuntimeError('cleanup failure')
-    monkeypatch.setattr(_LoopThread, 'stop', failing_stop)
+    join = threading.Thread.join
+    threads, _ = loop_resources
+
+    def failing_join(thread, timeout=None):
+        join(thread, timeout)
+        if thread in threads:
+            raise RuntimeError('cleanup failure')
+
+    monkeypatch.setattr(threading.Thread, 'join', failing_join)
     try:
         raise ValueError('already handled')
     except ValueError:
@@ -305,39 +378,54 @@ def test_drain_submission_failure_preserves_app_error(monkeypatch):
         if calls == 2:
             raise RuntimeError('submission failed')
         return submit(coro, loop)
-    async def fail():
-        raise ValueError('app failed')
-    loop = _LoopThread()
-    loop.start()
-    try:
-        monkeypatch.setattr(asyncio, 'run_coroutine_threadsafe', failing_submit)
-        with pytest.raises(ValueError, match='app failed'):
-            loop.run_coro(fail())
-    finally:
-        loop.stop()
+
+    async def app(conn, receive, send):
+        if conn['type'] != 'http':
+            return
+        if conn['path'] == '/fail':
+            raise ValueError('app failed')
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'ok'})
+
+    with TestClient(app) as client:
+        with monkeypatch.context() as patch:
+            patch.setattr(asyncio, 'run_coroutine_threadsafe', failing_submit)
+            with pytest.raises(ValueError, match='app failed'):
+                client.get('/fail')
+        assert client.get('/ok').text == 'ok'
 
 
 def test_failed_submission_closes_both_coroutines(monkeypatch):
     import inspect
 
-    submitted = []
+    submitted, requests = [], []
     def fail_submit(coro, loop):
         submitted.append(coro)
         raise RuntimeError('submission failed')
-    loop = _LoopThread()
-    loop.start()
-    work = asyncio.sleep(0)
-    try:
-        monkeypatch.setattr(asyncio, 'run_coroutine_threadsafe', fail_submit)
-        with pytest.raises(RuntimeError, match='submission failed'):
-            loop.run_coro(work)
-        assert inspect.getcoroutinestate(work) == inspect.CORO_CLOSED
-        assert inspect.getcoroutinestate(submitted[0]) == inspect.CORO_CLOSED
-    finally:
-        work.close()
-        for coro in submitted:
-            coro.close()
-        loop.stop()
+
+    async def app(conn, receive, send):
+        return
+
+    request = httpx.AsyncClient.request
+
+    def record_request(client, *args, **kwargs):
+        coro = request(client, *args, **kwargs)
+        requests.append(coro)
+        return coro
+
+    with TestClient(app) as client:
+        with monkeypatch.context() as patch:
+            patch.setattr(httpx.AsyncClient, 'request', record_request)
+            patch.setattr(asyncio, 'run_coroutine_threadsafe', fail_submit)
+            try:
+                with pytest.raises(RuntimeError, match='submission failed'):
+                    client.get('/')
+                assert len(requests) == len(submitted) == 1
+                assert inspect.getcoroutinestate(requests[0]) == inspect.CORO_CLOSED
+                assert inspect.getcoroutinestate(submitted[0]) == inspect.CORO_CLOSED
+            finally:
+                for coro in requests + submitted:
+                    coro.close()
 
 
 @pytest.mark.parametrize('sync', [False, True])
