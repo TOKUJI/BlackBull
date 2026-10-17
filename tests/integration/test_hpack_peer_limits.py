@@ -1,4 +1,5 @@
 import asyncio
+from http import HTTPStatus
 
 from hpack import Decoder, Encoder
 import pytest
@@ -27,7 +28,7 @@ async def test_response_fields_match_across_transports(monkeypatch, force_asgi, 
 
     @app.route(path='/{status:int}')
     async def respond(conn, status):
-        return Response(b'ok', status=status, headers=[
+        return Response(b'ok', status=HTTPStatus(status), headers=[
             (b'x-state', b'reused-value'), (b'set-cookie', b'a=1'), (b'set-cookie', b'b=2')])
 
     async with _serve(app) as port:
