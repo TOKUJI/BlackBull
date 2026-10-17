@@ -38,5 +38,6 @@ async def test_a_stopped_server_and_its_app_are_freed():
         refs = [await _serve_one_request() for _ in range(3)]
     finally:
         logging.disable(logging.NOTSET)
+    await asyncio.sleep(0)   # a queued connection_lost would still hold its server
     gc.collect()
     assert [ref() for pair in refs for ref in pair] == [None] * 6
