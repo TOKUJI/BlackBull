@@ -9,7 +9,7 @@ shutdown failures; see docs/guide/testing.md.
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 import logging
 import queue
 import threading
@@ -106,8 +106,7 @@ class _LoopThread:
                 if task is None:
                     coro.close()  # Cancelled before its first event-loop turn.
                 else:
-                    with suppress(asyncio.CancelledError, Exception):
-                        await task
+                    await asyncio.gather(task, return_exceptions=True)
 
             with _cleanup(sys.exception()):
                 pending = drain()
@@ -133,6 +132,7 @@ class _LoopThread:
                     self.loop.call_soon(self.loop.stop)
                 self.loop.run_forever()
         except BaseException as exc:
+            # start() re-raises on the caller thread after joining this thread.
             self._startup_error = exc
         finally:
             self._ready.set()

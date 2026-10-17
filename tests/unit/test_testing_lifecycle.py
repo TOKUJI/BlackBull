@@ -6,6 +6,23 @@ import pytest
 from blackbull.testing import WebSocketDisconnect, WebSocketTestSession, _LoopThread
 
 
+@pytest.mark.parametrize('error', [RuntimeError('startup'), asyncio.CancelledError(),
+                                  KeyboardInterrupt(), SystemExit(), GeneratorExit(),
+                                  BaseExceptionGroup('startup', [asyncio.CancelledError()]),
+                                  type('StartupFailure', (BaseException,), {})()])
+def test_loop_start_failure_reaches_caller_and_joins_thread(monkeypatch, error):
+
+    def fail_startup(runner):
+        raise error
+
+    monkeypatch.setattr(asyncio.Runner, 'get_loop', fail_startup)
+    loop = _LoopThread()
+    with pytest.raises(type(error)) as caught:
+        loop.start()
+    assert caught.value is error
+    assert not loop._thread.is_alive()
+
+
 @pytest.mark.parametrize('failure', ['raise', 'return', 'timeout', 'cancel', 'unexpected'])
 def test_websocket_failed_entry_reclaims_app_and_loop(failure):
     finished = threading.Event()
