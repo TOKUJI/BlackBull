@@ -15,10 +15,12 @@ two brackets, and the colon that opens those shapes.
 """
 import pytest
 
-from blackbull.server.http1_actor import (
+from blackbull.protocol.field_grammar import (
     _AUTHORITY_SCAN_BYTES,
     _AUTHORITY_SCAN_RE,
-    _HOST_FORBIDDEN_BYTES,
+    HOST_FORBIDDEN_BYTES,
+)
+from blackbull.server.http1_actor import (
     _TARGET_ALLOWED_OCTETS,
     BadRequestError,
     HTTP1Actor,
@@ -71,8 +73,8 @@ def test_authority_scan_classifies_all_256_octets_identically():
 def test_authority_scan_is_derived_from_the_forbidden_set():
     # The two must not be able to drift; the forbidden set is the source of
     # truth and the brackets are what §3.2.2 adds to it.
-    assert _AUTHORITY_SCAN_BYTES == _HOST_FORBIDDEN_BYTES | {0x5B, 0x5D}
-    for b in _HOST_FORBIDDEN_BYTES:
+    assert _AUTHORITY_SCAN_BYTES == HOST_FORBIDDEN_BYTES | {0x5B, 0x5D}
+    for b in HOST_FORBIDDEN_BYTES:
         assert _AUTHORITY_SCAN_RE.search(b'example.com' + bytes([b]))
     assert _AUTHORITY_SCAN_RE.search(b'[')
     assert _AUTHORITY_SCAN_RE.search(b']')

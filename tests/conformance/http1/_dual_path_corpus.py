@@ -9,8 +9,8 @@ draws from it rather than re-specifying its own vectors.
 
 Two consumers, two depths:
 
-- ``test_dual_path_identity`` drives every vector's raw bytes straight into
-  ``HTTP1Actor`` and asserts the two lanes emit **byte-identical** responses.
+- ``test_connection_lifecycle`` sends every vector's raw bytes to the served
+  app and asserts the two lanes emit **byte-identical** responses.
 - ``test_native_test_server`` replays the client-expressible subset through
   ``NativeTestServer`` over a real socket and asserts the lanes agree on what
   a real HTTP client observes.

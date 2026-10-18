@@ -353,7 +353,7 @@ async def test_wrap_native_send_preserves_more_trailers():
     })
     n = calls[0]
     assert isinstance(n, NativeResponse)
-    assert n.trailers == [(b'x-first', b'1')]
+    assert list(n.trailers) == [(b'x-first', b'1')]
     assert n.more_trailers is True
 
 
@@ -423,6 +423,18 @@ async def test_native_conversion_copies_headers_before_middleware_mutates_them(k
 
     await _wrap_send_native(middleware)({'type': kind, 'headers': headers})
     assert headers == [(b'x-original', b'1')]
+
+
+@pytest.mark.asyncio
+async def test_native_conversion_copies_headers_a_native_response_already_checked():
+    start = NativeResponse(status=200, header=[(b'x-original', b'1')]).to_asgi()[0]
+
+    async def middleware(event):
+        event.header.append((b'x-middleware', b'2'))
+
+    await _wrap_send_native(middleware)(start)
+    await _wrap_send_native(middleware)(start)
+    assert list(start['headers']) == [(b'x-original', b'1')]
 
 
 @pytest.mark.asyncio

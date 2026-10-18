@@ -17,6 +17,7 @@ from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.router import HTTPException
 from blackbull.server.recipient import AsyncioReader, HTTP1Recipient
+from blackbull.server.http1_actor import request_framing
 
 SLICE = 4096
 
@@ -71,7 +72,7 @@ def _chunked_conn() -> Connection:
 
 
 def _recipient(src: _RecordingSource) -> HTTP1Recipient:
-    return HTTP1Recipient(AsyncioReader(src), _chunked_conn(), chunk_size=SLICE)
+    return HTTP1Recipient(AsyncioReader(src), _chunked_conn(), chunk_size=SLICE, framing=request_framing(_chunked_conn().headers))
 
 
 async def _drain_body(r: HTTP1Recipient) -> bytes:

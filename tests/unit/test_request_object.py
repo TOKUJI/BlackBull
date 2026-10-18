@@ -81,10 +81,9 @@ class TestHeaders:
         assert isinstance(req.headers, Headers)
         assert req.headers.get(b'content-type') == b'text/plain'
 
-    def test_headers_instance_passed_through(self):
-        h = Headers([(b'host', b'example.com')])
-        req = _conn({'headers': h})
-        assert req.headers is h
+    def test_a_headers_instance_is_normalised_like_pairs(self):
+        req = _conn({'headers': Headers([(b'Host', b' example.com ')])})
+        assert list(req.headers) == [(b'host', b'example.com')]
 
     def test_multi_value_lookup(self):
         req = _conn({'headers': [(b'set-thing', b'a'), (b'set-thing', b'b')]})

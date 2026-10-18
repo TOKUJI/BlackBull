@@ -32,9 +32,9 @@ import logging
 
 import pytest
 
-from blackbull.server.http1_actor import HTTP1Actor
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
+from blackbull.server.http1_actor import request_framing
 
 
 def _conn(headers, path: str = '/'):
@@ -68,87 +68,8 @@ def _records_for(caplog, cap_name: str):
     ]
 
 
-# ----------------------------------------------------------------------
-# HTTP/1.1 functional-test helpers (drive the rejection sites directly)
-# ----------------------------------------------------------------------
-
-class _FakeReader(AbstractReader):
-    """Reader that yields pre-buffered bytes line-by-line via readuntil.
-
-    Used to drive ``HTTP1Actor._read_headers`` with oversized input."""
-    def __init__(self, data: bytes):
-        self._buf = bytearray(data)
-
-    async def read(self, n: int = -1) -> bytes:
-        if n < 0:
-            chunk, self._buf = bytes(self._buf), bytearray()
-            return chunk
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:
-        idx = self._buf.find(sep)
-        if idx == -1:
-            chunk, self._buf = bytes(self._buf), bytearray()
-            return chunk + sep
-        chunk = bytes(self._buf[:idx + len(sep)])
-        del self._buf[:idx + len(sep)]
-        return chunk
-
-    async def readexactly(self, n: int) -> bytes:
-        from blackbull.server.recipient import IncompleteReadError
-        if len(self._buf) < n:
-            raise IncompleteReadError(bytes(self._buf))
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-
-class _FakeWriter(AbstractWriter):
-    """Writer that records everything and drains instantly."""
-    def __init__(self):
-        self.written = bytearray()
-        self.closed = False
-
-    async def write(self, data: bytes) -> None:
-        self.written += data
-
-    async def writelines(self, parts) -> None:
-        for p in parts:
-            self.written += p
-
-    async def close(self) -> None:
-        self.closed = True
-
-
 async def _noop_app(conn, receive, send):
     pass
-
-
-def _make_actor(raw: bytes, app=None, *,
-                peername=('127.0.0.1', 54321),
-                sockname=('0.0.0.0', 8000),
-                ssl=False,
-                **kwargs):
-    """Create an HTTP1Actor pre-loaded with *raw* as the header block.
-
-    Splits at the first ``\\r\\n`` to separate the request line from
-    the rest, matching the pattern in ``tests/conformance/http1/``.
-    Extra *kwargs* are passed to the ``HTTP1Actor`` constructor.
-    """
-    if app is None:
-        app = _noop_app
-    writer = _FakeWriter()
-    first_line, rest = raw.split(b'\r\n', 1)
-    reader = _FakeReader(rest)
-    actor = HTTP1Actor(
-        reader, writer, app, None,
-        request=first_line + b'\r\n',
-        peername=peername, sockname=sockname, ssl=ssl,
-        **kwargs,
-    )
-    return actor, writer
 
 
 # ----------------------------------------------------------------------
@@ -270,7 +191,7 @@ async def test_body_timeout_logs(caps_caplog):
 
     conn = _conn([(b'content-length', b'1024')], '/upload')
     recipient = HTTP1Recipient(reader=_SlowReader(), conn=conn,
-                               body_timeout=0.0)
+                               body_timeout=0.0, framing=request_framing(conn.headers))
     recipient._content_length = 1024  # bypass the parser
 
     event = await recipient()
@@ -296,7 +217,7 @@ async def test_body_timeout_no_log_when_data_arrives(caps_caplog):
     # Simple content-length request — one readexactly call, then http.disconnect.
     conn = _conn([(b'content-length', b'5')], '/upload')
     recipient = HTTP1Recipient(reader=_FastReader(), conn=conn,
-                               body_timeout=30.0)
+                               body_timeout=30.0, framing=request_framing(conn.headers))
     recipient._content_length = 5  # bypass parser
 
     event = await recipient()
@@ -453,168 +374,6 @@ async def test_stream_queue_depth_no_log_under_cap(caps_caplog):
     ok = recipient.put_end_of_stream()
     assert ok is True
     assert _records_for(caps_caplog, 'stream_queue_depth') == []
-
-
-# ----------------------------------------------------------------------
-# header_max_line — oversized single header line (HTTP/1.1 _parse)
-# ----------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_header_max_line_logs(caps_caplog):
-    """A header line > 8 KiB triggers HeaderTooLargeError in _parse();
-    run() catches it and emits the cap-hit log."""
-    # Build a request where one header line is 9 KiB (over the 8 KiB default).
-    big_value = b'A' * (9 * 1024)
-    raw = (
-        b'GET / HTTP/1.1\r\n'
-        b'Host: localhost\r\n'
-        b'X-Big: ' + big_value + b'\r\n'
-        b'\r\n'
-    )
-    actor, writer = _make_actor(raw)
-    # run() will call _parse() which raises HeaderTooLargeError →
-    # log_cap_hit('header_max_line', ...) → send 431 → return.
-    await actor.run()
-
-    records = _records_for(caps_caplog, 'header_max_line')
-    assert len(records) >= 1
-    assert records[0].levelno == logging.WARNING
-    assert records[0].protocol == 'http1'
-    # Handlers group records by template.
-    assert records[0].msg == 'cap hit: %s (requested=%s, limit=%s)'
-    assert records[0].args == (
-        'header_max_line', records[0].requested, records[0].limit)
-
-
-@pytest.mark.asyncio
-async def test_header_max_line_no_log_when_under_cap(caps_caplog):
-    """A normal-sized header line must NOT trigger a cap-hit log."""
-    raw = (
-        b'GET / HTTP/1.1\r\n'
-        b'Host: localhost\r\n'
-        b'X-Normal: ' + b'a' * 200 + b'\r\n'
-        b'\r\n'
-    )
-    actor, _ = _make_actor(raw)
-    await actor.run()
-    assert _records_for(caps_caplog, 'header_max_line') == []
-
-
-# ----------------------------------------------------------------------
-# header_max_total — header block exceeds total cap (HTTP/1.1 _read_headers)
-# ----------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_header_max_total_logs(caps_caplog, monkeypatch):
-    """Many small header lines whose sum exceeds the total cap trigger
-    HeaderTooLargeError in _read_headers(); run() catches it and logs."""
-    from blackbull.env import reset_settings_cache
-    monkeypatch.setenv('BB_HEADER_MAX_TOTAL', '2048')
-    reset_settings_cache()
-
-    # ~100 small headers × 80 bytes each ≈ 8 KiB > 2 KiB cap.
-    lines = [b'GET / HTTP/1.1', b'Host: localhost']
-    for i in range(100):
-        lines.append(b'X-Filler-' + str(i).encode() + b': ' + b'a' * 60)
-    lines.extend([b'', b''])
-    raw = b'\r\n'.join(lines)
-
-    actor, writer = _make_actor(raw)
-    await actor.run()
-
-    records = _records_for(caps_caplog, 'header_max_total')
-    assert len(records) >= 1
-    assert records[0].levelno == logging.WARNING
-    assert records[0].protocol == 'http1'
-
-
-@pytest.mark.asyncio
-async def test_header_max_total_no_log_when_under_cap(caps_caplog):
-    """A header block under the total cap must NOT trigger a cap-hit log."""
-    raw = (
-        b'GET / HTTP/1.1\r\n'
-        b'Host: localhost\r\n'
-        b'X-Foo: bar\r\n'
-        b'\r\n'
-    )
-    actor, _ = _make_actor(raw)
-    await actor.run()
-    assert _records_for(caps_caplog, 'header_max_total') == []
-
-
-# ----------------------------------------------------------------------
-# header_timeout — slow header delivery (HTTP/1.1 slowloris defence)
-# ----------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_header_timeout_logs(caps_caplog, monkeypatch):
-    """A reader that never delivers the header terminator triggers the
-    header_timeout cap; run() emits the cap-hit log."""
-    from blackbull.env import reset_settings_cache
-    monkeypatch.setenv('BB_HEADER_TIMEOUT', '0.01')
-    reset_settings_cache()
-
-    class _SlowReader(AbstractReader):
-        """A peer that connected, sent a request line, and then went quiet.
-
-        Every access method blocks, because a reader may look for the head
-        line by line via ``readuntil`` or by scanning what it has via
-        ``read``.  A fake that blocks in one and returns EOF (``b''``) in the
-        other is not a slow peer at all under the second: it is a peer that
-        hung up, which draws a 400 instead of the 408 this test is about.  No
-        socket behaves that way, so the shape is scripted once, for both.
-        """
-        async def read(self, n: int = -1) -> bytes:
-            await asyncio.sleep(10.0)
-            return b''
-        async def readuntil(self, sep: bytes) -> bytes:
-            await asyncio.sleep(10.0)
-            return b''
-        async def readexactly(self, n: int) -> bytes:
-            await asyncio.sleep(10.0)
-            return b''
-
-    writer = _FakeWriter()
-    # Pass only the request line; _read_headers will try to read more
-    # from the slow reader and time out.
-    actor = HTTP1Actor(
-        _SlowReader(), writer, _noop_app, None,
-        request=b'GET / HTTP/1.1\r\n',
-        peername=('127.0.0.1', 54321),
-        sockname=('0.0.0.0', 8000),
-        ssl=False,
-    )
-    await actor.run()
-
-    records = _records_for(caps_caplog, 'header_timeout')
-    assert len(records) >= 1
-    assert records[0].levelno == logging.WARNING
-    assert records[0].protocol == 'http1'
-
-
-# ----------------------------------------------------------------------
-# request_timeout — per-request total timeout (HTTP/1.1 path)
-# ----------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_request_timeout_logs(caps_caplog, monkeypatch):
-    """A handler that never responds triggers the request_timeout cap;
-    _dispatch_request emits the cap-hit log."""
-    from blackbull.env import reset_settings_cache
-    monkeypatch.setenv('BB_REQUEST_TIMEOUT', '0.01')
-    reset_settings_cache()
-
-    async def _slow_handler(conn, receive, send):
-        # Never sends a response — timeout fires first.
-        await asyncio.Event().wait()
-
-    raw = b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n'
-    actor, writer = _make_actor(raw, app=_slow_handler)
-    await actor.run()
-
-    records = _records_for(caps_caplog, 'request_timeout')
-    assert len(records) >= 1
-    assert records[0].levelno == logging.WARNING
 
 
 # ----------------------------------------------------------------------

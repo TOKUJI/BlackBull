@@ -9,14 +9,9 @@ import struct
 
 # 1-byte compressed flag + 4-byte big-endian length.
 _PREFIX = struct.Struct('>BI')
-_PREFIX_LEN = 5
+_PREFIX_LEN = _PREFIX.size
 
-# Defense-in-depth safety limit (16 MiB).  The 4-byte length prefix can
-# declare up to 4 GiB; without a bound a forged prefix would make the decoder
-# attempt a multi-gigabyte slice.  ``decode_messages`` rejects any declared
-# length above this *before* touching the buffer.  The primary, configurable
-# per-message limit lives at the gRPC layer (``serve_grpc``); this is the
-# floor that protects the codec regardless of caller.
+# Encoded-message ceiling, separate from the configurable decoded-message cap.
 MAX_MESSAGE_LENGTH = 16 * 1024 * 1024
 
 

@@ -375,3 +375,39 @@ async def test_h2_fault_server_serves_settings_max_frame_size_catalogue():
         f'expected setting id 0x05, got {settings_payload.hex()}'
     value = int.from_bytes(settings_payload[2:6], 'big')
     assert value < 16_384, f'expected illegal value, got {value}'
+
+
+@pytest.mark.parametrize('env,refused', [
+    ({'BLACKBULL_ENV': 'production'}, True),
+    ({'BLACKBULL_ENV': 'development', 'BB_PRODUCTION': '1'}, True),
+    ({'BLACKBULL_ENV': 'development'}, False),
+])
+def test_the_fault_server_refuses_to_run_in_production(monkeypatch, env, refused):
+    from blackbull.env import reset_settings_cache
+    from blackbull.fault_injection.h2_server import H2FaultServerError, _refuse_in_production
+    monkeypatch.delenv('BB_PRODUCTION', raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    reset_settings_cache()
+    try:
+        if refused:
+            with pytest.raises(H2FaultServerError):
+                _refuse_in_production()
+        else:
+            _refuse_in_production()
+    finally:
+        reset_settings_cache()
+
+
+def test_self_signed_tls_context_cleans_up_its_key_directory():
+    import gc
+    from pathlib import Path
+    pytest.importorskip('cryptography')
+    from blackbull.fault_injection._tls import make_self_signed_h2_context
+
+    ctx = make_self_signed_h2_context()
+    keydir = Path(ctx.bb_ca_cert_path).parent
+    assert keydir.exists()
+    del ctx
+    gc.collect()
+    assert not keydir.exists()

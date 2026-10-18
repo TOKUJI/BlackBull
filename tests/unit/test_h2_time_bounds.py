@@ -24,6 +24,7 @@ import asyncio
 import pytest
 from hpack import Encoder
 
+from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
     ErrorCodes, FrameTypes, HeaderFrameFlags, PingFrameFlags,
 )
@@ -280,7 +281,7 @@ class TestIdleLiveness:
         reset_settings_cache()
 
         wire = _Wire([])
-        sender = HTTP2Sender(AsyncioWriter(wire), None, 1,
+        sender = HTTP2Sender(AsyncioWriter(wire), FrameFactory(), 1,
                              conn_window=ConnectionWindow(0))
         sender.stream_window_size = 0
 
@@ -296,7 +297,7 @@ class TestIdleLiveness:
 
         wire = _Wire([])
         window = ConnectionWindow(0)
-        sender = HTTP2Sender(AsyncioWriter(wire), None, 1, conn_window=window)
+        sender = HTTP2Sender(AsyncioWriter(wire), FrameFactory(), 1, conn_window=window)
         sender.stream_window_size = 0
 
         async def _grant():
@@ -317,7 +318,7 @@ class TestIdleLiveness:
         reset_settings_cache()
 
         wire = _Wire([])
-        sender = HTTP2Sender(AsyncioWriter(wire), None, 1,
+        sender = HTTP2Sender(AsyncioWriter(wire), FrameFactory(), 1,
                              conn_window=ConnectionWindow(0))
         sender.stream_window_size = 0
 

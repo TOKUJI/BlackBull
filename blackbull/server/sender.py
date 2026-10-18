@@ -11,15 +11,14 @@ from http import HTTPStatus
 from functools import cache
 from inspect import iscoroutinefunction
 from email.utils import formatdate
-from itertools import chain
 from typing import NoReturn
 
 from ..protocol import hpack_fastpath
 from ..env import get_settings
 from ..protocol.framing import (NO_CONTENT_GENERATED_STATUSES, is_informational,
                                 parse_content_length)
-from ..protocol.frame_types import (FrameTypes, HeaderFrameFlags, DataFrameFlags,
-                                    FrameBase, PseudoHeaders,
+from ..protocol.frame_types import (HeaderFrameFlags, DataFrameFlags,
+                                    FrameBase, Headers, PushPromise, serialize_field_block,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
 from .cap_log import log_cap_hit
 from .constants import WSCloseCode
@@ -34,7 +33,7 @@ from ..asgi import (
     WebSocketSendEvent,
 )
 from ..headers import (
-    Headers, HeaderList, _MinimalResponseHeaders, _minimal_response_headers)
+    HeaderList, _MinimalResponseHeaders, _as_response_fields)
 from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
 
 from ..logger import debug_gate  # noqa: E402
@@ -43,6 +42,7 @@ _DEBUG = debug_gate(logger)
 
 
 _CRLF = b'\r\n'
+_CHUNKED_LINE = b'transfer-encoding: chunked\r\n'
 
 # Fallback chunk size when ``sendfile`` isn't supported by the transport
 # (TLS, mocked tests).  Matches the static middleware's ``_CHUNK`` so
@@ -80,6 +80,17 @@ _CONTENT_LENGTHS: tuple[bytes, ...] = tuple(
 )
 
 
+#: Rendered ``content-length`` field lines for the same table.
+_CONTENT_LENGTH_LINES: tuple[bytes, ...] = tuple(
+    b'content-length: ' + n + b'\r\n' for n in _CONTENT_LENGTHS)
+
+
+def _content_length_line(n: int) -> bytes:
+    if 0 <= n <= _CONTENT_LENGTH_CACHE_MAX:
+        return _CONTENT_LENGTH_LINES[n]
+    return b'content-length: ' + str(n).encode() + b'\r\n'
+
+
 def _content_length_bytes(n: int) -> bytes:
     """Decimal ASCII for *n*, from the table when it is small enough."""
     if 0 <= n <= _CONTENT_LENGTH_CACHE_MAX:
@@ -101,58 +112,28 @@ def _http_date() -> bytes:
     return _HTTP_DATE
 
 
-# The two builders below must stay byte-for-byte equivalent to the frame-object
-# path they replace — ``protocol.frame_types.Headers.save()``, not this module's
-# field-collection ``Headers`` — including how the shared HPACK dynamic table
-# evolves; ``tests/conformance/http2/test_headers_fastpath_builder.py`` asserts
-# both.  ``status_fast_bytes`` is static-indexed, so it never touches that table
-# (RFC 7541 §6.1).
-#
-# Assumption: the encoded block fits one frame (END_HEADERS always set).
-# BlackBull does not split outbound HEADERS across CONTINUATION; if that
-# ever changes these builders need a fallback.
-
 def build_response_headers(encoder, stream_id: int, status,
-                           headers, *, end_stream: bool) -> bytes:
-    """Encode a response HEADERS frame (carrying ``:status``) to wire bytes.
-
-    Injects a ``date`` header when the app did not supply one, mirroring the
-    ``Headers.save()`` send path.  ``status`` may be an ``HTTPStatus``, an
-    ``int``, or a ``str`` — it is normalised via ``str()`` exactly as the
-    object path does.  *headers* that is not yet a
-    ``_MinimalResponseHeaders`` goes through that pass here.
-    """
-    if not isinstance(headers, _MinimalResponseHeaders):
-        headers = _minimal_response_headers(headers)
+                           headers, *, end_stream: bool,
+                           max_frame_size: int = DEFAULT_MAX_FRAME_SIZE) -> bytes:
+    """Encode response HEADERS, adding Date when absent."""
+    headers = _as_response_fields(headers)
     fields = headers if headers.date else (*headers, (b'date', _http_date()))
 
-    fast = hpack_fastpath.status_fast_bytes(str(status))
-    if fast is not None:
-        payload = fast + encoder.encode(fields)
-    else:
-        payload = encoder.encode(
-            chain(((PseudoHeaders.STATUS, str(status)),), fields))
+    payload = hpack_fastpath.encode_status(encoder, str(status), fields)
 
     flags = HeaderFrameFlags.END_HEADERS.value
     if end_stream:
         flags |= HeaderFrameFlags.END_STREAM.value
-    return (len(payload).to_bytes(3, 'big') + FrameTypes.HEADERS.value
-            + flags.to_bytes(1, 'big') + stream_id.to_bytes(4, 'big') + payload)
+    return serialize_field_block(payload, b'\x01', flags, stream_id, max_frame_size)
 
 
-def build_trailers(encoder, stream_id: int, headers) -> bytes:
-    """Encode a trailers HEADERS frame (END_HEADERS | END_STREAM, no
-    pseudo-headers) to wire bytes.
-
-    This is the basis for the gRPC ``grpc-status`` trailers path — a unary
-    RPC response carries a second HEADERS frame with regular fields only.
-    """
-    if not isinstance(headers, _MinimalResponseHeaders):
-        headers = _minimal_response_headers(headers)
+def build_trailers(encoder, stream_id: int, headers, *,
+                   max_frame_size: int = DEFAULT_MAX_FRAME_SIZE) -> bytes:
+    """Encode a terminal field section without pseudo-headers."""
+    headers = _as_response_fields(headers)
     payload = encoder.encode(headers)
     flags = HeaderFrameFlags.END_HEADERS.value | HeaderFrameFlags.END_STREAM.value
-    return (len(payload).to_bytes(3, 'big') + FrameTypes.HEADERS.value
-            + flags.to_bytes(1, 'big') + stream_id.to_bytes(4, 'big') + payload)
+    return serialize_field_block(payload, b'\x01', flags, stream_id, max_frame_size)
 
 
 class AbstractWriter(ABC):
@@ -545,7 +526,7 @@ class HTTP1Sender(BaseSender):
             return
 
         if isinstance(body, dict):
-            body = _native_from_asgi(body, copy_headers=False)
+            body = _native_from_asgi(body)
 
         if (isinstance(body, NativeResponse) and body._extension is not None
                 and body.push is not None):
@@ -564,7 +545,7 @@ class HTTP1Sender(BaseSender):
         match body:
             case bytes():
                 self._response_started = True
-                h = _minimal_response_headers(headers)
+                h = _as_response_fields(headers)
                 if self._log_record is not None:
                     self._log_record.status = int(status)
                     self._log_record.response_bytes += len(body)
@@ -574,7 +555,7 @@ class HTTP1Sender(BaseSender):
 
             case NativeResponse():
                 if body._header is not None:
-                    head = _minimal_response_headers(body._header)
+                    head = body._header
                     self._response_started = True
                     await self._settle_buffered_head()
                     self._buffered_status = (_STATUS_BY_CODE.get(body.status)
@@ -600,10 +581,10 @@ class HTTP1Sender(BaseSender):
                 if body.body is not None:
                     self._response_started = True
                     await self._handle_body_content(body._body, body.more_body)
-                if body.trailers is not None and not self._completed:
+                if body._trailers is not None and not self._completed:
                     self._response_started = True
                     await self._handle_trailers(
-                        body.trailers, body.more_trailers)
+                        body._trailers, body.more_trailers)
 
             case {'type': str() as event_type}:
                 logger.warning('HTTP1Sender: unknown event type %r', event_type)
@@ -652,12 +633,11 @@ class HTTP1Sender(BaseSender):
                 and (not self._expect_trailers or self._head_mode)):
             self._completed = True
 
-    async def _handle_trailers(self, headers: HeaderList,
+    async def _handle_trailers(self, headers: _MinimalResponseHeaders,
                                more_trailers: bool = False) -> None:
-        """Write one part of the trailer section for dict and native paths."""
+        """Write one part of the trailer section."""
         if not (self._expect_trailers or self._chunked):
             return
-        headers = _minimal_response_headers(headers)
         if not self._trailers_started:
             await self._write(b'0\r\n')
             self._trailers_started = True
@@ -689,7 +669,8 @@ class HTTP1Sender(BaseSender):
 
     def _ensure_framing_headers(self, status: HTTPStatus,
                                 head: _MinimalResponseHeaders,
-                                body_len: int, more_body: bool) -> list:
+                                body_len: int, more_body: bool
+                                ) -> tuple[list[tuple[bytes, bytes]], bytes]:
         """Derive the sole legal framing from status and body mode.
 
         Transfer-Encoding belongs to the server because it describes bytes on
@@ -697,8 +678,9 @@ class HTTP1Sender(BaseSender):
         before rebuilding the field list so duplicate values cannot create two
         competing message boundaries.
 
-        When *head* carries no framing field the server's is appended to it
-        in place.
+        Returns ``(fields, framing)``: the application's fields without any
+        framing field (*head* itself when it has none; it is never modified)
+        and the server's framing field lines, rendered.
         """
         code = int(status)
         self._chunked = False
@@ -731,38 +713,36 @@ class HTTP1Sender(BaseSender):
                 pairs.remove(field)
         else:
             pairs = head
+        framing = b''
 
         if informational or code == 204:
             self._expect_trailers = False
         elif code == 205:
             self._expect_trailers = False
-            pairs.append((b'content-length', b'0'))
+            framing = b'content-length: 0\r\n'
         elif code == 304:
             self._expect_trailers = False
             if app_length is not None:
-                pairs.append((b'content-length',
-                              _content_length_bytes(app_length)))
+                framing = _content_length_line(app_length)
         elif self._expect_trailers and not self._head_mode:
-            pairs.append((b'transfer-encoding', b'chunked'))
+            framing = _CHUNKED_LINE
             self._chunked = True
         elif more_body:
             if app_length is None:
-                pairs.append((b'transfer-encoding', b'chunked'))
+                framing = _CHUNKED_LINE
                 self._chunked = True
             else:
-                pairs.append((b'content-length',
-                              _content_length_bytes(app_length)))
+                framing = _content_length_line(app_length)
                 self._content_length = app_length
         else:
             expected = body_len
             if app_length is not None and app_length != expected:
                 raise ValueError(
                     'Content-Length does not match the response body')
-            pairs.append((b'content-length',
-                          _content_length_bytes(expected)))
+            framing = _content_length_line(expected)
             self._content_length = expected
 
-        return pairs
+        return pairs, framing
 
     def _track_content_length(self, content_len: int, more_body: bool) -> None:
         """Reject a declared-length stream that crosses its wire boundary."""
@@ -779,23 +759,19 @@ class HTTP1Sender(BaseSender):
             raise ValueError('response body is shorter than Content-Length')
         self._body_bytes = total
 
-    @staticmethod
-    def _ensure_date_header(fields: list, head: _MinimalResponseHeaders) -> None:
-        # RFC 9110 §6.6.1 — origin server SHOULD generate Date.
-        if not head.date:
-            fields.append((b'date', _http_date()))
 
     async def _flush(self, status: HTTPStatus, head: _MinimalResponseHeaders,
                      body: bytes, more_body: bool = False) -> None:
-        headers = self._ensure_framing_headers(
+        fields, framing = self._ensure_framing_headers(
             status, head, len(body), more_body)
         self._track_content_length(len(body), more_body)
         if not self._informational:
             self._started = True
-        self._ensure_date_header(headers, head)
 
         # Coalesce the response head and body before the shared write gate.
-        head = self._render_start(status, headers)
+        # RFC 9110 §6.6.1 — origin server SHOULD generate Date.
+        head = self._render_start(status, fields, framing,
+                                  None if head.date else _http_date())
 
         # Headers still go out; only the body is suppressed (RFC 9110 §9.3.2
         # for HEAD, and the codes whose content is forbidden).
@@ -831,7 +807,7 @@ class HTTP1Sender(BaseSender):
         if self.supports_interim:
             await self._write(self._render_start(
                 status,
-                self._ensure_framing_headers(
+                *self._ensure_framing_headers(
                     status, headers, 0, more_body=False)))
         self._buffered_status = None
         self._buffered_headers = None
@@ -840,17 +816,23 @@ class HTTP1Sender(BaseSender):
         # body event cannot end it. The next `start` recomputes this.
         self._suppress_body = True
 
-    def _render_start(self, status: HTTPStatus, headers: HeaderList) -> bytes:
-        """Build the status line + headers + blank-line as a single bytes blob.
+    def _render_start(self, status: HTTPStatus, headers: HeaderList,
+                      framing: bytes = b'', date: bytes | None = None) -> bytes:
+        """Build the status line, *headers*, the server's rendered *framing*
+        lines and *date* (when given), and the blank line, as one bytes blob.
 
-        *headers* must already be validated: the arms that buffer a head
-        validate it, and the framing fields added here are the server's own.
+        *headers* keep the response-field contract.
         """
         parts: list[bytes] = [_status_line(status)]
         for k, v in headers:
             parts.append(k)
             parts.append(b': ')
             parts.append(v)
+            parts.append(_CRLF)
+        parts.append(framing)
+        if date is not None:
+            parts.append(b'date: ')
+            parts.append(date)
             parts.append(_CRLF)
         parts.append(_CRLF)
         return b''.join(parts)
@@ -874,14 +856,14 @@ class HTTP1Sender(BaseSender):
         size = os.path.getsize(path)
         head = self._buffered_headers
         status = self._buffered_status
-        headers = self._ensure_framing_headers(
+        fields, framing = self._ensure_framing_headers(
             status, head, size, more_body=False)
         self._track_content_length(size, more_body=False)
         if not self._informational:
             self._started = True
-        self._ensure_date_header(headers, head)
 
-        head = self._render_start(status, headers)
+        head = self._render_start(status, fields, framing,
+                                  None if head.date else _http_date())
         self._buffered_status = None
         self._buffered_headers = None
 
@@ -969,15 +951,15 @@ class HTTP2Sender(BaseSender):
       ``await sender({'type': 'http.response.start', ...})``
       ``await sender({'type': 'http.response.body', ...})``
 
-    **Control-plane** (raw FrameBase instance):
+    **Frame object** (FrameBase instance):
       ``await sender(settings_frame)``
-      Serialises and writes the frame directly.
+      Field blocks are fragmented within the peer frame-size limit.
     """
 
     __slots__ = (
         '_factory', '_stream_id', '_push_callback',
         '_conn_window', 'stream_window_size',
-        'max_frame_size', '_window_open', '_end_stream_sent',
+        '_window_open', '_end_stream_sent',
         '_flow_control_timeout',
         '_flow_control_cap',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
@@ -1005,7 +987,6 @@ class HTTP2Sender(BaseSender):
         # Use the peer SETTINGS window for senders created after negotiation.
         self.stream_window_size = (DEFAULT_INITIAL_WINDOW_SIZE
                                    if initial_window is None else initial_window)
-        self.max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._window_open: asyncio.Event | None = None
         # How long the peer may take to grant flow-control credit before the
         # stream gives up.
@@ -1029,6 +1010,14 @@ class HTTP2Sender(BaseSender):
         # arms below rather than through a capturing ``send`` wrapper, which is
         # dict-shaped and so would never match the native seam.
         self._log_record = None
+
+    @property
+    def max_frame_size(self) -> int:
+        return self._factory.peer_max_frame_size
+
+    @max_frame_size.setter
+    def max_frame_size(self, value: int) -> None:
+        self._factory.peer_max_frame_size = value
 
     @property
     def connection_window_size(self) -> int:
@@ -1091,7 +1080,8 @@ class HTTP2Sender(BaseSender):
         self._suppress_body = forbidden
         h_bytes = build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
-            end_stream=forbidden and not informational)
+            end_stream=forbidden and not informational,
+            max_frame_size=self.max_frame_size)
         if forbidden:
             await self._write(h_bytes)
             if not is_informational(status):
@@ -1181,23 +1171,14 @@ class HTTP2Sender(BaseSender):
     async def send_response_headers(
         self, status: HTTPStatus, headers: list[tuple[bytes, bytes]],
     ) -> None:
-        """Write a standalone HEADERS frame (END_HEADERS, no END_STREAM) now.
-
-        Unlike the ``http.response.start`` event — which is buffered until a
-        body event so HEADERS + first DATA can coalesce into one write — this
-        flushes the response HEADERS immediately and leaves the stream open.
-        Required by the RFC 8441 WebSocket-over-HTTP/2 accept: the
-        ``:status 200`` response carries no body, so nothing would ever trigger
-        the deferred flush, and the stream must stay open bidirectionally for
-        the subsequent WebSocket DATA frames.
-        """
+        """Send a complete field section immediately, leaving the stream open."""
         # Encoding mutates the connection-wide HPACK table.  A retired stream
         # cannot advance it because the peer will never receive this block.
         if self._closed:
             return
         await self._write(build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
-            end_stream=False))
+            end_stream=False, max_frame_size=self.max_frame_size))
 
     async def _write(self, data: bytes):
         """Write a frame to the transport.
@@ -1396,13 +1377,10 @@ class HTTP2Sender(BaseSender):
 
     async def _handle_trailers(
         self,
-        headers: list[tuple[bytes, bytes]],
+        headers: _MinimalResponseHeaders,
         more_trailers: bool = False,
     ) -> None:
-        """Write the trailing HEADERS — shared by the dict and native H2 paths.
-
-        Takes a plain ``list`` of pairs (the H2 variant; ``HTTP1Sender``'s
-        same-named helper takes a ``HeaderList``).
+        """Write the trailing HEADERS.
 
         HPACK's dynamic table is stateful, so header blocks MUST be encoded in
         wire order: the response HEADERS block first, then the trailing HEADERS
@@ -1411,10 +1389,9 @@ class HTTP2Sender(BaseSender):
         """
         if self._closed:
             return
-        headers = _minimal_response_headers(headers)
         if more_trailers:
             if self._buffered_trailers is None:
-                self._buffered_trailers = headers
+                self._buffered_trailers = headers.copy()
             else:
                 self._buffered_trailers.extend(headers)
             return
@@ -1443,7 +1420,7 @@ class HTTP2Sender(BaseSender):
                 await self._write(build_response_headers(
                     self._factory.encoder, self._stream_id,
                     head_status, self._buffered_headers or [],
-                    end_stream=not informational))
+                    end_stream=not informational, max_frame_size=self.max_frame_size))
                 self._buffered_status = None
                 self._buffered_headers = None
                 if not informational:
@@ -1452,7 +1429,7 @@ class HTTP2Sender(BaseSender):
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id,
                 self._buffered_status, self._buffered_headers or [],
-                end_stream=False)
+                end_stream=False, max_frame_size=self.max_frame_size)
             if buffered_body is not None:
                 # Buffering reserves no credit: another stream can spend it
                 # before these trailers arrive. Recheck at handoff so the
@@ -1462,7 +1439,8 @@ class HTTP2Sender(BaseSender):
                         and len(buffered_body) <= self.max_frame_size):
                     total = len(buffered_body)
                     trailer_bytes = build_trailers(
-                        self._factory.encoder, self._stream_id, headers)
+                        self._factory.encoder, self._stream_id, headers,
+                        max_frame_size=self.max_frame_size)
                     d_bytes = (total.to_bytes(3, 'big') + b'\x00'
                                + b'\x00'  # DATA flags: no END_STREAM (trailers carry it)
                                + self._stream_id.to_bytes(4, 'big')
@@ -1476,16 +1454,19 @@ class HTTP2Sender(BaseSender):
                     # send HEADERS during it, and the HPACK table is shared.
                     if not self._closed:
                         await self._write(build_trailers(
-                            self._factory.encoder, self._stream_id, headers))
+                            self._factory.encoder, self._stream_id, headers,
+                            max_frame_size=self.max_frame_size))
             else:
                 trailer_bytes = build_trailers(
-                    self._factory.encoder, self._stream_id, headers)
+                    self._factory.encoder, self._stream_id, headers,
+                    max_frame_size=self.max_frame_size)
                 await self._write_many((h_bytes, trailer_bytes))
             self._buffered_status = None
             self._buffered_headers = None
         else:
             await self._write(build_trailers(
-                self._factory.encoder, self._stream_id, headers))
+                self._factory.encoder, self._stream_id, headers,
+                max_frame_size=self.max_frame_size))
         self._expect_trailers = False
         self._end_stream_sent = True
 
@@ -1498,11 +1479,13 @@ class HTTP2Sender(BaseSender):
         if isinstance(body, FrameBase):
             if _DEBUG:
                 logger.debug('HTTP2Sender raw frame: %r', body)
-            await self._write(body.save())
+            wire = (body.save(max_frame_size=self.max_frame_size)
+                    if isinstance(body, (Headers, PushPromise)) else body.save())
+            await self._write(wire)
             return
 
         if isinstance(body, dict):
-            body = _native_from_asgi(body, copy_headers=False)
+            body = _native_from_asgi(body)
 
         if isinstance(body, bytes):
             # RFC 9113 §8.1, as in the dict branch below.
@@ -1523,7 +1506,8 @@ class HTTP2Sender(BaseSender):
             self._suppress_body = forbidden
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id, status, headers,
-                end_stream=forbidden and not informational)
+                end_stream=forbidden and not informational,
+                max_frame_size=self.max_frame_size)
             if forbidden:
                 await self._write(h_bytes)
                 if not informational:
@@ -1562,7 +1546,7 @@ class HTTP2Sender(BaseSender):
                     logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
-                head = _minimal_response_headers(body._header)
+                head = body._header
                 await self._settle_buffered_head()
                 self._buffered_status = HTTPStatus(body.status)
                 self._buffered_headers = head
@@ -1578,9 +1562,9 @@ class HTTP2Sender(BaseSender):
                     self._log_record.mark('start_arm_out')
             if body.body is not None:
                 await self._handle_body_content(body._body, not body.more_body)
-            if body.trailers is not None and not self._end_stream_sent:
+            if body._trailers is not None and not self._end_stream_sent:
                 await self._handle_trailers(
-                    list(body.trailers), body.more_trailers)
+                    body._trailers, body.more_trailers)
 
         elif isinstance(body, dict):
             event_type = body.get('type', '')

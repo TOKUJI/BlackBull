@@ -189,7 +189,12 @@ fault-injection = [
     "httpx[http2]",
 ]
 
-benchmark = []  # k6 and h2load are installed via bench/install.sh (not pip packages)
+# Mutation testing (`just mutate`).
+mutation = [
+    "mutmut",
+]
+
+benchmark = []  # k6 and h2load are installed via bench/load/install.sh (not pip packages)
 
 profiling = [
     "py-spy",
@@ -230,3 +235,26 @@ exclude = ["bench*", "tests*", "examples*", "docs*", "site*", "templates*"]
 [tool.setuptools.package-data]
 # PEP 561 — distribute inline type hints to downstream type-checkers.
 blackbull = ["py.typed"]
+
+[tool.mutmut]
+source_paths = ["blackbull"]
+also_copy = ["bench", "scripts", "examples", "templates", "docs", "README.md", "KNOWN_LIMITATIONS.md", "justfile", "mkdocs.yml", ".github", "AGENTS.md"]
+# Tests that read source or typing output cannot see through mutmut's trampolines.
+pytest_add_cli_args = [
+    "-p", "no:cacheprovider",
+    "--ignore=tests/architecture/test_bench_outputs.py",
+    "--ignore=tests/architecture/test_typing_gate.py",
+    "--deselect=tests/architecture/test_h2_stream_retirement.py::test_create_task_is_referenced_nowhere_but_those_two_calls",
+    "--deselect=tests/architecture/test_h2_stream_retirement.py::test_every_create_task_call_lives_in_a_scheduling_helper",
+    "--deselect=tests/architecture/test_host_ascii_single_scan.py::test_authority_is_valid_reads_the_value_once",
+    "--deselect=tests/architecture/test_host_ascii_single_scan.py::test_host_field_value_reads_the_value_only_through_the_authority_rule",
+    "--deselect=tests/architecture/test_mqtt_codes_by_name.py::test_raw_hex_stays_in_definitions_and_wire_bytes",
+    "--deselect=tests/architecture/test_public_api_surface.py::test_no_public_name_is_missing_from_all",
+    "--deselect=tests/architecture/test_single_native_world.py::test_request_dicts_only_at_enumerated_boundaries",
+    "--deselect=tests/architecture/test_ws_outbound_mask.py::test_the_recipient_encodes_through_its_one_mask_site",
+    "--deselect=tests/unit/test_cap_log_sites.py::test_client_caps_are_wired_on_every_protocol_that_enforces_them",
+    "--deselect=tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line",
+    "--deselect=tests/unit/test_namedtuple_typechecking.py::test_namedtuple_contract_under_package_typechecking",
+    "--deselect=tests/unit/test_ws_native_through_middleware.py::test_every_public_middleware_is_covered",
+]
+pytest_add_cli_args_test_selection = ["tests/unit", "tests/architecture", "tests/properties", "tests/conformance"]

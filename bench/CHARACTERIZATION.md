@@ -72,20 +72,20 @@ isolate a specific layer of cost.
 | Server     | Version pinned in | HTTP/1.1 | HTTP/2 | WebSocket | Diagnostic role |
 |------------|---|---|---|---|---|
 | BlackBull  | repo head        | ✅ | ✅ | ✅ | Implementation under regression-tracking. |
-| uvicorn    | `bench/peers/`   | ✅ | ❌ | ✅ | **Python ASGI decomposition reference.**  Pure-Python (h11/wsproto) HTTP/1.1 with a mature parser pipeline; BlackBull-vs-uvicorn deltas isolate per-request framework overhead on the same runtime substrate. |
-| hypercorn  | `bench/peers/`   | ✅ | ✅ | ✅ | **Python ASGI decomposition reference (HTTP/2).**  Pure-Python h2-library based; BlackBull-vs-hypercorn deltas isolate HTTP/2-specific framework overhead independent of hpack codec cost (both use the same `hpack` package). |
-| granian    | `bench/peers/`   | ✅ | ✅ | ✅ | **Architectural contrast reference.**  Rust runtime + Rust parser; BlackBull-vs-granian deltas attribute cost to the pure-Python runtime as a whole, not to any specific BlackBull layer. |
-| nginx      | `bench/peers/`   | ✅ | ❌ | ❌ | **Architectural contrast reference (static).**  C event-driven, no ASGI dispatch; BlackBull-vs-nginx deltas indicate the floor cost of doing Python-application work at all. |
-| daphne     | `bench/peers/`   | ✅ | ❌ | ✅ | **Compatibility reference.**  Django's canonical ASGI implementation — included for compatibility tracking, not cost comparison. |
+| uvicorn    | `bench/compare/`   | ✅ | ❌ | ✅ | **Python ASGI decomposition reference.**  Pure-Python (h11/wsproto) HTTP/1.1 with a mature parser pipeline; BlackBull-vs-uvicorn deltas isolate per-request framework overhead on the same runtime substrate. |
+| hypercorn  | `bench/compare/`   | ✅ | ✅ | ✅ | **Python ASGI decomposition reference (HTTP/2).**  Pure-Python h2-library based; BlackBull-vs-hypercorn deltas isolate HTTP/2-specific framework overhead independent of hpack codec cost (both use the same `hpack` package). |
+| granian    | `bench/compare/`   | ✅ | ✅ | ✅ | **Architectural contrast reference.**  Rust runtime + Rust parser; BlackBull-vs-granian deltas attribute cost to the pure-Python runtime as a whole, not to any specific BlackBull layer. |
+| nginx      | `bench/compare/`   | ✅ | ❌ | ❌ | **Architectural contrast reference (static).**  C event-driven, no ASGI dispatch; BlackBull-vs-nginx deltas indicate the floor cost of doing Python-application work at all. |
+| daphne     | `bench/compare/`   | ✅ | ❌ | ✅ | **Compatibility reference.**  Django's canonical ASGI implementation — included for compatibility tracking, not cost comparison. |
 
 ASGI app is identical across uvicorn/hypercorn/granian/daphne;
-BlackBull uses its own `bench/app.py` with the same routes.  See
+BlackBull uses its own `bench/ab/h2load/app.py` with the same routes.  See
 *Test target* below.
 
 ## Test target
 
-One **shared minimal ASGI module** at `bench/peers/asgi_app.py` is loaded
-by uvicorn / hypercorn / granian / daphne. BlackBull's `bench/app.py` is
+One **shared minimal ASGI module** at `bench/apps/asgi_app.py` is loaded
+by uvicorn / hypercorn / granian / daphne. BlackBull's `bench/ab/h2load/app.py` is
 extended with the same routes. Same handler bodies, different runner.
 
 Two route sets — public-comparable and internal-only:
@@ -193,13 +193,13 @@ Applies to: all five servers.  Opt-in: pass `LANES="… E-wrk"`.
 
 | Scenario | Route | Tool | Threads | Conns | Duration | Keepalive | Diagnostic purpose |
 |---|---|---|---|---|---|---|---|
-| E1 | `/plaintext` | wrk + [`bench/wrk/no_keepalive.lua`](wrk/no_keepalive.lua) | 4 | 256 | 60 s | **off** (`Connection: close` per request) | Connection-lifecycle cost: isolates TLS handshake + accept-loop cost from steady-state work.  Comparing E1 against B1 attributes the connection-setup tax. |
+| E1 | `/plaintext` | wrk + [`bench/load/wrk/no_keepalive.lua`](load/wrk/no_keepalive.lua) | 4 | 256 | 60 s | **off** (`Connection: close` per request) | Connection-lifecycle cost: isolates TLS handshake + accept-loop cost from steady-state work.  Comparing E1 against B1 attributes the connection-setup tax. |
 
 Lane E exposes accept-loop + TLS-handshake costs that the
 keep-alive-dominated Lane B hides.  Run against `*-cleartext` stacks
 in addition to standalone-TLS to isolate the handshake cost from the
 accept-loop cost (cleartext drops TLS but keeps the accept-per-request
-cost).  See the Sprint 24 results section for first numbers.
+cost).
 
 ## Metrics
 
@@ -249,10 +249,9 @@ Python version, server version, load-gen version, kernel TCP settings
 
 Microbench numbers translate to throughput numbers at a multiplier that
 depends on the optimised path's share of py-spy samples on the target
-lane (typically B1 or B2).  Sprint 25 measured ~2-3× (path was a
-dominant slice); Sprint 26 measured ~0.21× (path had been reduced past
-dominance).  Predict the multiplier from the share **before** committing
-sprint scope:
+lane (typically B1 or B2): large while the path dominates the samples,
+well below 1× once it no longer does (the measurements are on BLA-543).
+Predict the multiplier from the share **before** committing sprint scope:
 
 | Profile share of optimised path (B1/B2 self-time + inclusive) | Expected multiplier | Decision rule |
 |---|---|---|
@@ -260,46 +259,21 @@ sprint scope:
 | 10-30 % | ~1× | Microbench % ≈ throughput % |
 | < 10 % | sub-cascade (~0.2-0.5×) | Don't pursue unless the change is trivial or buys something other than throughput (clarity, correctness) |
 
-Capture the share with `bench/aws/profile_lanes.sh` (Sprint 27 — wrk-driven
-py-spy on EC2 split topology, one speedscope JSON per lane).  The
-"Left Heavy" view in speedscope.app reads off the share directly.
+Capture the share with `bench/micro/profile_under_load.sh` (py-spy, one
+speedscope JSON per run).  The "Left Heavy" view in speedscope.app reads off
+the share directly.
 
 ## Known limitations
 
 | Limitation | Mitigation |
 |---|---|
 | WSL2 loopback hides real-NIC behaviour (no DMA, no driver, no syscall cost matching a real card) | Numbers are explicitly *relative*; absolute measurements on EC2 |
-| **WSL2 noise floor on B2r (~-R 5000)**: BlackBull single-stack 5-run spread is 1.3-5.1 ms mean with no code change. Any optimisation < ~15 % is invisible. | Run ≥ 5 runs per stack and report the *median*. Do not cite a B2r improvement from any single A/B unless the medians differ by > 15 %. Sub-ms-precision work belongs on EC2. |
+| **WSL2 noise floor**: restarts land in two throughput modes (bench/ab/AB-HIGH-PRECISION.md §2.1), and the run-to-run spread on a single stack is large enough to hide a change of ~15 % (measurements on BLA-543). | Measure the session's floor with the A/B null phase before citing a delta; sub-ms-precision work belongs on EC2. |
 | Single-host load gen + server share CPU | k6 and the server pinned to different CPU sets where possible; or run load gen on a second EC2 instance |
 | Different servers use different HTTP/2 libraries (h2 vs Rust impl in granian) | Documented per result; mux scaling differences are mostly library-driven |
 | uvicorn and daphne can't run lane A | Marked as N/A in the matrix; cross-protocol comparison handled by lane C |
 | `/echo` payload not standardized across HTTP/1.1 vs HTTP/2 lanes | Same 4 KiB body in both lanes; differences are protocol overhead, not body cost |
 
-
-## File layout (target)
-
-```
-bench/
-  CHARACTERIZATION.md          # this file
-  app.py                       # BlackBull bench target (exists)
-  benchmark.sh                 # BlackBull-only orchestrator (exists)
-  h2load_run.sh                # lane A driver (exists)
-  k6/                          # lanes C, D (exists)
-  wrk/                         # lane B driver (to add)
-    ping.lua
-    echo.lua
-    run.sh
-  peers/
-    blackbull_app.py           # symlink / re-export of bench.app for parity (optional)
-    uvicorn_app.py             # to add
-    hypercorn_app.py / quart_app.py / starlette_app.py  # exists
-    granian_app.py             # to add
-    daphne_app.py              # to add
-    compare.sh                 # to extend
-    run_one.sh                 # to extend
-  results/
-    baseline_v0.md             # v0 WSL2 baseline (to add after implementation)
-```
 
 ## Reading the matrix
 

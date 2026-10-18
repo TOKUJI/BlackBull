@@ -28,6 +28,8 @@ HARENA_DIR="${HARENA_DIR:-$HOME/HttpArena}"
 REPO_DIR="${REPO_DIR:-$HOME/BlackBull}"
 WAIT_SECS="${WAIT_SECS:-60}"
 CID="httparena-readycheck-${FW}"
+READY_TMP="${BENCH_RUN_DIR:?ready_check.sh runs inside a bench run}/tmp/ready_check-${FW}"
+mkdir -p "$READY_TMP"
 
 # docker invocation: WSL2 runs it as the user; the EC2 instance runs it via
 # sudo (the shim at /usr/bin/docker passes non-run subcommands through, and
@@ -69,7 +71,8 @@ else
     DATA_DIR="$(find "$HARENA_DIR" -maxdepth 2 -type d -name data 2>/dev/null | head -1 || true)"
     CERTS_DIR="$(find "$HARENA_DIR" -maxdepth 2 -type d -name certs 2>/dev/null | head -1 || true)"
     if [ -z "$CERTS_DIR" ] || [ ! -f "$CERTS_DIR/server.crt" ]; then
-        CERT_TMP="$(mktemp -d)"
+        CERT_TMP="$READY_TMP/certs"
+        mkdir -p "$CERT_TMP"
         cp "$REPO_DIR/tests/cert.pem" "$CERT_TMP/server.crt" 2>/dev/null || true
         cp "$REPO_DIR/tests/key.pem"  "$CERT_TMP/server.key" 2>/dev/null || true
         CERTS_DIR="$CERT_TMP"
@@ -192,7 +195,7 @@ fi
 # grpc-status rides the trailers).  The request frame is written to a temp
 # file: neither bash $'...' nor $(...) can carry NUL bytes.
 if [ "$_HAS_GRPC" = 1 ]; then
-    GRPC_REQ="$(mktemp)"
+    GRPC_REQ="$READY_TMP/grpc-request.bin"
     printf '\x00\x00\x00\x00\x04\x08\x01\x10\x02' > "$GRPC_REQ"
     GRPC_BODY="$(curl -s --http2-prior-knowledge \
         -H 'content-type: application/grpc' -H 'te: trailers' \

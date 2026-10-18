@@ -1,0 +1,113 @@
+# bench/cloud/config.sh — shared configuration for the AWS bench harness.
+#
+# Sourced by session.sh, up.sh, install.sh and down.sh.  Keep environment
+# variables here, never hard-code them in the action scripts.
+#
+# Override anything by exporting before invoking the action script:
+#   REGION=us-west-2 bash bench/cloud/up.sh
+#
+# Resources created by up.sh are tagged with Project=$TAG_VALUE so a
+# describe-instances sweep can find leftovers if down.sh ever misses them.
+
+# --- AWS targeting --------------------------------------------------------
+: "${REGION:=us-east-1}"
+# The instance bench/ab/AB-HIGH-PRECISION.md's numbers rest on: 8 physical
+# cores (no SMT) fit one server worker, wrk -t4 and the OS without contention.
+: "${INSTANCE_TYPE:=m7a.2xlarge}"
+: "${LOADGEN_INSTANCE_TYPE:=c7i.2xlarge}"   # split-topology load generator
+: "${VOLUME_SIZE_GB:=20}"     # /dev/sda1 root volume — generous for venv + apt
+
+# --- Topology -------------------------------------------------------------
+# TOPO=single: server and load generator share one instance; TOPO=split
+# launches a second LOADGEN instance in a cluster placement group and
+# drives the bench over VPC private networking.  Numbers from the two
+# topologies are NOT directly comparable — see bench/CHARACTERIZATION.md
+# Topology section for the rationale.
+: "${TOPO:=single}"
+: "${PLACEMENT_GROUP_NAME:=blackbull-bench-cpg}"
+# Both instances put this DNS name in /etc/hosts pointing at the server's
+# VPC private IP; the regenerated tests/cert.pem carries it as a SAN so
+# https://$SERVER_DNS_NAME:$PORT validates without --insecure.
+: "${SERVER_DNS_NAME:=bench-server.internal}"
+
+# --- Named resources (must be unique per concurrent run) ------------------
+: "${KEY_NAME:=blackbull-bench-key}"
+: "${SG_NAME:=blackbull-bench-sg}"
+: "${TAG_KEY:=Project}"
+: "${TAG_VALUE:=BlackBull-bench}"
+: "${RUN_TAG_KEY:=BlackBullRun}"
+: "${ROLE_TAG_KEY:=Role}"
+: "${SERVER_ROLE_VALUE:=server}"
+: "${LOADGEN_ROLE_VALUE:=loadgen}"
+
+# --- Local files ----------------------------------------------------------
+# Runtime state lives in bench/.state/ (ignored), never with the tools or the
+# results: the up.sh snapshot, the session record, the key, the host keys.
+CLOUD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$CLOUD_DIR/../.." && pwd)"
+STATE_DIR="$REPO_ROOT/bench/.state"
+: "${STATE_FILE:=$STATE_DIR/aws}"
+export STATE_FILE
+LOCAL_KEY="$STATE_DIR/${KEY_NAME}.pem"   # private SSH key — chmod 600 by up.sh
+
+# --- Remote access --------------------------------------------------------
+SSH_USER="ubuntu"
+: "${REMOTE_REPO:=/home/$SSH_USER/BlackBull}"
+# Overridable so a run can keep its host keys somewhere other than the shared
+# default — two instances provisioned in sequence reuse an IP often enough that
+# a per-run file is sometimes what makes StrictHostKeyChecking usable.
+: "${KNOWN_HOSTS_FILE:=$STATE_DIR/known_hosts}"
+SSH_OPTS=(
+    -i "$LOCAL_KEY"
+    -o StrictHostKeyChecking=accept-new
+    -o UserKnownHostsFile="$KNOWN_HOSTS_FILE"
+    -o ConnectTimeout=10
+    -o ServerAliveInterval=30
+)
+
+# --- AMI selection --------------------------------------------------------
+# Ubuntu 24.04 LTS (Noble) — owner 099720109477 is Canonical.
+# Filter resolved at runtime in up.sh via aws ec2 describe-images.
+# Architecture-overridable (default x86_64).  Set AMI_ARCH=arm64 for
+# Graviton instances (c8g, c7g, …); the AMI name token and the
+# describe-images architecture filter (up.sh) both follow AMI_ARCH.
+AMI_OWNER="099720109477"
+: "${AMI_ARCH:=x86_64}"
+_ami_arch_name=$([ "$AMI_ARCH" = "arm64" ] && echo arm64 || echo amd64)
+: "${AMI_NAME_PATTERN:=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-${_ami_arch_name}-server-*}"
+
+# --- aws CLI defaults -----------------------------------------------------
+# Honour AWS_PROFILE if set; otherwise use whatever `aws configure` did.
+AWS_BASE=(aws --region "$REGION" --output json)
+
+# --- Sanity-checks (run when a script sources us) -------------------------
+_bench_aws_require() {
+    command -v "$1" >/dev/null 2>&1 || {
+        echo "bench/cloud: missing required command: $1" >&2
+        echo "  install hint: $2" >&2
+        return 1
+    }
+}
+
+_bench_aws_check_env() {
+    _bench_aws_require aws  "https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html" || return 1
+    _bench_aws_require ssh  "apt-get install openssh-client" || return 1
+    _bench_aws_require rsync "apt-get install rsync"          || return 1
+    _bench_aws_require jq   "apt-get install jq"              || return 1
+
+    # Confirm caller credentials work before we try to spend money.
+    if ! "${AWS_BASE[@]}" sts get-caller-identity >/dev/null 2>&1; then
+        echo "bench/cloud: aws CLI cannot reach AWS — run 'aws login' (or 'aws sso login' / 'aws configure') first" >&2
+        return 1
+    fi
+}
+
+# Helper used by all the action scripts.
+_bench_aws_load_state() {
+    [ -f "$STATE_FILE" ] || {
+        echo "bench/cloud: no state file at $STATE_FILE — has up.sh been run?" >&2
+        return 1
+    }
+    # shellcheck disable=SC1090
+    source "$STATE_FILE"
+}

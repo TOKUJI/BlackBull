@@ -184,7 +184,7 @@ def _import_app(spec: str) -> Any:
     if ':' not in spec:
         raise ValueError(
             f"{spec!r} is not a valid app path — expected 'module:attribute' "
-            "(e.g. 'myapp:app' or 'bench.peers.asgi_app:app')"
+            "(e.g. 'myapp:app' or 'bench.apps.asgi_app:app')"
         )
     module_path, _, attr = spec.partition(':')
     if not module_path or not attr:

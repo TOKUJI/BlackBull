@@ -135,14 +135,15 @@ def test_equivalent_origin_spelling_retains_cache_hits(first_host, second_host, 
     assert len(calls) == 1
 
 
-def test_ip_literal_and_registered_name_are_different_origins():
+def test_an_unsupported_ip_literal_is_refused_before_the_cache():
+    """IPvFuture is refused at the boundary, so it never aliases the name."""
     app, calls = make_app()
     with TestClient(app) as client:
         literal = client.get('/item', headers={'Host': '[v1.example]'})
         name = client.get('/item', headers={'Host': 'v1.example'})
-    assert literal.headers['x-origin'] == 'http://[v1.example]'
+    assert literal.status_code == 400
     assert name.headers['x-origin'] == 'http://v1.example'
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio
@@ -211,16 +212,14 @@ async def test_distinct_server_origins_without_host_do_not_share_cache():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('headers', [
-    [], [(b'host', b'')], [(b'host', b'a.example'), (b'host', b'b.example')],
-    [(b'host', b'a.example:invalid')], [(b'host', b'[::1]suffix')],
-])
-async def test_unresolved_or_ambiguous_origin_bypasses_cache_without_rejecting(headers):
+async def test_an_unresolved_origin_bypasses_cache_without_rejecting():
+    """No Host and no server address: nothing to key the cache on.  An empty,
+    repeated or invalid Host never gets this far: the boundary refuses it."""
     from blackbull.connection import Connection
     from blackbull.headers import Headers
 
     app, calls = make_app()
-    conn = Connection(method='GET', path='/item', raw_path=b'/item', headers=Headers(headers))
+    conn = Connection(method='GET', path='/item', raw_path=b'/item', headers=Headers([]))
     first = await native.request(app, conn)
     second = await native.request(app, conn)
     assert first.status == second.status == 200

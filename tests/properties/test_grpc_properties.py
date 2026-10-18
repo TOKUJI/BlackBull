@@ -17,6 +17,7 @@ Properties tested:
 from __future__ import annotations
 
 import struct
+from urllib.parse import unquote
 
 import pytest
 from hypothesis import assume, given, strategies as st
@@ -198,19 +199,24 @@ class TestPercentEncoding:
                 i += 1
 
     @given(text=st.text(min_size=0, max_size=128))
-    def test_printable_ascii_passes_through(self, text):
-        """Characters 0x20–0x7E (except '%') must appear verbatim
-        in the output.  We verify by re-decoding: a percent-encoded
-        ASCII-only string must round-trip to the original."""
-        # For ASCII-only input (minus '%'), encoding must be identity.
+    def test_printable_ascii_passes_through_away_from_the_edges(self, text):
+        """Characters 0x20–0x7E (except '%') appear verbatim when no space
+        sits at either edge."""
         ascii_text = ''.join(
             c for c in text
             if '\x20' <= c <= '\x7e' and c != '%'
-        )
+        ).strip(' ')
         result = _pct_encode_message(ascii_text)
-        # All chars are in the 0x20-0x7E range and not '%', so no encoding needed
         assert result == ascii_text.encode('ascii'), (
             f'ASCII text {ascii_text!r} was modified: got {result!r}')
+
+    @given(text=st.text(min_size=0, max_size=128))
+    def test_the_result_decodes_to_the_text_and_has_no_edge_whitespace(self, text):
+        """A field value cannot carry edge SP/HTAB (RFC 9110 §5.5), so the
+        detail survives only if those are encoded."""
+        result = _pct_encode_message(text)
+        assert unquote(result.decode('ascii'), errors='strict') == text
+        assert result.strip(b' \t') == result
 
     @given(text=st.text(min_size=0, max_size=128))
     def test_empty_string_yields_empty_bytes(self, text):

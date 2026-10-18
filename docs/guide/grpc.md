@@ -70,18 +70,22 @@ The registry detects the async-generator form automatically — no flag needed.
 (If a decorator hides the generator nature of your handler, force it with
 `grpc.method(path, streaming=True)` or `add_method(path, fn, streaming=True)`.)
 
+Request lifecycle events identify the dispatcher as `serve_grpc` in `handler`.
+
 Semantics that match the gRPC spec:
 
-- The status rides the trailing HEADERS frame after the last message. A handler
+- The status rides the trailing field section after the last message. A handler
   that fails **after** emitting messages reports its status in the trailers; one
   that fails **before** the first message produces a clean Trailers-Only error,
   exactly like a unary failure.
 - `context.set_trailing_metadata(...)` / `set_code(...)` apply to the final
   trailers.
-- The generator is always finalised (its `finally`/cleanup runs) when the client
-  cancels or disconnects mid-stream, so long streams stop producing promptly.
-- A `grpc-timeout` deadline bounds the **whole** stream (`DEADLINE_EXCEEDED` on
-  expiry).
+- One `grpc-timeout` deadline covers input, handler work and response completion
+  for all four RPC forms. Expiry cancels the call and reports `DEADLINE_EXCEEDED`;
+  a handler's own `TimeoutError` reports `INTERNAL`.
+  On deadline expiry, cleanup and expiry reporting each have a 100 ms grace period.
+  If reporting stalls, an exception lets the host terminate the stream. Handlers
+  must cooperate with cancellation; synchronous work cannot be preempted.
 
 ## Client-streaming and bidirectional RPCs
 
@@ -249,11 +253,26 @@ you: pass the message bytes your servicer expects, not an encoded frame.
 
 | Field | |
 |---|---|
-| `status` | the `grpc-status` trailer, as a `GrpcStatus` |
-| `grpc_message` | the `grpc-message` trailer — the human-readable detail |
+| `status` | the `grpc-status`, as a `GrpcStatus` — synthesized for a malformed reply |
+| `grpc_message` | the `grpc-message`, percent-decoded |
 | `message` | the first response message, unframed |
 | `messages` | every response message, for server-streaming calls |
 | `response` | the raw `ClientResponse`, for anything the above does not surface |
+| `violation` | `None` for a well-formed reply; otherwise what is wrong with it |
+
+A malformed reply is never `OK`. `status` follows what a gRPC client must
+report ([PROTOCOL-HTTP2](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md)):
+
+| Reply | `status` |
+|---|---|
+| no `grpc-status` | from the HTTP status ([mapping](https://grpc.github.io/grpc/core/md_doc_http-grpc-status-mapping.html)): `200` → `UNKNOWN`, `503` → `UNAVAILABLE`, … |
+| a repeated, non-decimal or undefined `grpc-status` | `UNKNOWN` |
+| `grpc-status: 0`, but a non-`200` HTTP status or a non-gRPC `content-type` | from the HTTP status |
+| `grpc-status: 0`, but broken framing, a compressed message, or a unary reply without exactly one message | `INTERNAL` |
+| any other valid `grpc-status` | as sent |
+
+The helper accepts identity encoding only. Whether a method is unary comes
+from the app's gRPC registry.
 
 An error asserts the same way, because a gRPC error *is* a response:
 
@@ -288,6 +307,14 @@ users will actually use.
 
 - **All four RPC shapes are served**: unary, server-streaming,
   client-streaming, and bidirectional (see above).
+- A request reaches gRPC when its media type is `application/grpc` or
+  `application/grpc+<subtype>`, in any case and with any parameters.  Any other
+  `content-type`, `application/grpc-web` included, goes to your HTTP routes.
+- `BB_GRPC_MAX_MESSAGE_SIZE` (default 4 MiB) bounds each decoded request and
+  response message. Incoming encoded messages also have a 16 MiB safety cap.
+  Declared oversize is rejected at the prefix. Unary and server-streaming
+  accept one request message. Streaming caps apply per message; transport body
+  and time limits still apply.
 - **gzip message compression** is supported (`grpc-encoding: gzip` /
   `identity`); a compressed request in any other coding is rejected with
   `UNIMPLEMENTED`, and the response advertises

@@ -5,7 +5,7 @@ IP-literal, and ``urllib.parse.urlsplit`` implements that production — the
 bracket scan, the ``ipaddress`` parse, and the "nothing after the bracket but
 a port" rule.  It parses and caches a whole URL, so it is an oracle here and
 never the call site (the same reasoning as the scheme oracle in
-``tests/unit/test_audit_sprint63.py``).
+``tests/conformance/http1/test_request_head.py``).
 
 Our verdict is allowed to be *stricter* than the oracle in exactly five
 ways, each stated in ``_we_are_stricter`` and asserted below rather than
@@ -25,8 +25,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from blackbull.protocol.field_grammar import HOST_FORBIDDEN_BYTES
 from blackbull.server.http1_actor import (
-    _HOST_FORBIDDEN_BYTES, BadRequestError, HTTP1Actor, _parse_host_header,
+    BadRequestError, HTTP1Actor, _parse_host_header,
 )
 
 _ACTOR = HTTP1Actor.__new__(HTTP1Actor)
@@ -85,7 +86,7 @@ def _we_are_stricter(authority: bytes) -> bool:
     """
     if not authority or _IPV_FUTURE.match(authority):
         return True
-    if any(byte in _HOST_FORBIDDEN_BYTES for byte in authority):
+    if any(byte in HOST_FORBIDDEN_BYTES for byte in authority):
         return True
     if authority.count(b'[') > 1 or authority.count(b']') > 1:
         return True
@@ -119,7 +120,7 @@ class TestTheAuthorityGrammarMatchesTheStdlibUrlParser:
         assert conn.query_string == (b'q=ok' if suffix == b'?q=ok' else b'')
         assert not _accepts_as_host(candidate)
 
-    @pytest.mark.parametrize('authority', list(_authorities()), ids=repr)
+    @pytest.mark.parametrize('authority', list(_authorities()), ids=bytes.hex)
     def test_every_bracketed_candidate(self, authority):
         assert _accepts(authority) is _expected(authority)
 
@@ -156,7 +157,7 @@ class TestTheAuthorityGrammarMatchesTheStdlibUrlParser:
     @settings(max_examples=300, deadline=None)
     @given(authority=st.text(
         alphabet=''.join(chr(b) for b in range(0x21, 0x7F)
-                         if b not in _HOST_FORBIDDEN_BYTES), max_size=14,
+                         if b not in HOST_FORBIDDEN_BYTES), max_size=14,
     ).map(lambda text: b'[' + text.encode('ascii') + b']'))
     def test_both_h1_authority_paths_agree(self, authority):
         """The absolute-form authority and the ``Host`` field are the same
@@ -261,7 +262,7 @@ class TestAnInvalidRegNameIsRejected:
                        b'Host: localhost\r\n\r\n'),
             id='absolute-form'),
     ])
-    @pytest.mark.parametrize('authority', _INVALID, ids=repr)
+    @pytest.mark.parametrize('authority', _INVALID, ids=bytes.hex)
     def test_the_absolute_form_authority_rejects_it(self, build, authority):
         with pytest.raises(BadRequestError):
             _ACTOR._parse(build(authority))

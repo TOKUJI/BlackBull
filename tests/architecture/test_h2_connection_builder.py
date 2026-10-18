@@ -4,8 +4,8 @@ builder.
 
 ``blackbull/server/parser.py::_build_h2_connection`` bypasses the
 dataclass-generated ``Connection.__init__`` via ``object.__new__`` + explicit
-slot stores, to cut construction from ~549 ns to ~208 ns/req (measured in
-``bench/results/h2-alloc-cpu-ab/20260723-161201Z-conn-decomp/``). Hand-writing
+slot stores, to cut construction from ~549 ns to ~208 ns/req (measured on
+BLA-124). Hand-writing
 every slot store duplicates ``Connection``'s field list — a future field added
 to the dataclass would otherwise leave a slot unset on the builder's output
 (``AttributeError`` at first read, possibly deep in dispatch/middleware, far

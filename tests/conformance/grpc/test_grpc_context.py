@@ -18,6 +18,8 @@ from blackbull.grpc import (
 )
 from blackbull.grpc.asgi import serve_grpc, GrpcContext
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
+from blackbull.protocol.field_grammar import FieldError
 
 
 # --------------------------------------------------------------------------
@@ -25,7 +27,7 @@ from blackbull.native import NativeResponse
 # --------------------------------------------------------------------------
 
 def _grpc_scope(path, headers=None, client=None):
-    base = [(b'content-type', b'application/grpc'), (b':method', b'POST')]
+    base = [(b'content-type', b'application/grpc')]
     scope = {'type': 'http', 'path': path,
              'headers': headers if headers is not None else base}
     if client is not None:
@@ -83,11 +85,11 @@ class TestPeer:
     ])
     def test_ipv4_peer(self, client, expected):
         """ctx.peer() formats IPv4/IPv6 literals per the gRPC spec."""
-        ctx = GrpcContext(_grpc_scope('/svc/M', client=client))
+        ctx = GrpcContext(Connection.from_scope(_grpc_scope('/svc/M', client=client)))
         assert ctx.peer() == expected
 
     def test_missing_client_is_empty(self):
-        assert GrpcContext(_grpc_scope('/svc/M')).peer() == ''
+        assert GrpcContext(Connection.from_scope(_grpc_scope('/svc/M'))).peer() == ''
 
 
 # --------------------------------------------------------------------------
@@ -95,17 +97,16 @@ class TestPeer:
 # --------------------------------------------------------------------------
 
 class TestInvocationMetadata:
-    def test_returns_headers_without_pseudo_headers(self):
-        headers = [
-            (b':method', b'POST'), (b':path', b'/svc/M'),
-            (b'content-type', b'application/grpc'),
-            (b'x-token', b'abc'),
-        ]
-        ctx = GrpcContext(_grpc_scope('/svc/M', headers=headers))
-        md = ctx.invocation_metadata()
-        assert (b'x-token', b'abc') in md
-        assert (b'content-type', b'application/grpc') in md
-        assert all(not k.startswith(b':') for k, _ in md)
+    def test_returns_the_request_fields_with_lowercase_names(self):
+        headers = [(b'content-type', b'application/grpc'), (b'X-Token', b'abc')]
+        ctx = GrpcContext(Connection.from_scope(_grpc_scope('/svc/M', headers=headers)))
+        assert ctx.invocation_metadata() == [
+            (b'content-type', b'application/grpc'), (b'x-token', b'abc')]
+
+    def test_a_pseudo_header_never_reaches_the_call(self):
+        headers = [(b':method', b'POST'), (b'content-type', b'application/grpc')]
+        with pytest.raises(FieldError):
+            Connection.from_scope(_grpc_scope('/svc/M', headers=headers))
 
 
 # --------------------------------------------------------------------------
@@ -124,7 +125,7 @@ class TestTimeRemaining:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/M'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/M')),
                          _receive_with(encode_message(b'')), send)
         assert seen['tr'] is None
 
@@ -141,14 +142,14 @@ class TestTimeRemaining:
         scope = _grpc_scope('/svc/M', headers=[
             (b'content-type', b'application/grpc'), (b'grpc-timeout', b'10S')])
         events, send = _collector()
-        await serve_grpc(reg, scope, _receive_with(encode_message(b'')), send)
+        await serve_grpc(reg, Connection.from_scope(scope), _receive_with(encode_message(b'')), send)
         # Measured immediately, so almost the full 10 s remains.
         assert 9.0 < seen['tr'] <= 10.0
 
     @pytest.mark.asyncio
     async def test_never_negative(self):
         # A hand-bound context past its deadline reports 0, not a negative.
-        ctx = GrpcContext(_grpc_scope('/svc/M'))
+        ctx = GrpcContext(Connection.from_scope(_grpc_scope('/svc/M')))
         ctx._bind(send=None, content_type=b'application/grpc',
                   response_encoding=None, deadline=-5.0)
         assert ctx.time_remaining() == 0.0
@@ -169,7 +170,7 @@ class TestSendInitialMetadata:
             return b'ok'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/M'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/M')),
                          _receive_with(encode_message(b'')), send)
 
         # Exactly one start event, carrying the leading metadata.
@@ -197,7 +198,7 @@ class TestSendInitialMetadata:
 
         events, send = _collector()
         await serve_grpc(
-            reg, _grpc_scope('/svc/BinaryMetadata'),
+            reg, Connection.from_scope(_grpc_scope('/svc/BinaryMetadata')),
             _receive_with(encode_message(b'')), send)
 
         assert _start_headers(events)[name] == expected
@@ -214,7 +215,7 @@ class TestSendInitialMetadata:
             context.abort(GrpcStatus.INTERNAL, 'boom')  # raises GrpcError
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/M'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/M')),
                          _receive_with(encode_message(b'')), send)
 
         # HEADERS already went out (with the metadata), so the error must ride
@@ -227,7 +228,7 @@ class TestSendInitialMetadata:
 
     @pytest.mark.asyncio
     async def test_second_call_raises_value_error(self):
-        ctx = GrpcContext(_grpc_scope('/svc/M'))
+        ctx = GrpcContext(Connection.from_scope(_grpc_scope('/svc/M')))
         events, send = _collector()
         ctx._bind(send, b'application/grpc', None, None)
         await ctx.send_initial_metadata([(b'a', b'1')])
@@ -245,7 +246,7 @@ class TestSendInitialMetadata:
             yield b'b'
 
         events, send = _collector()
-        await serve_grpc(reg, _grpc_scope('/svc/Down'),
+        await serve_grpc(reg, Connection.from_scope(_grpc_scope('/svc/Down')),
                          _receive_with(encode_message(b'')), send)
 
         assert sum(e['type'] == 'http.response.start' for e in events) == 1

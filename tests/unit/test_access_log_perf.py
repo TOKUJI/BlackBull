@@ -15,6 +15,7 @@ import time
 
 import pytest
 
+from blackbull.connection import Connection
 from blackbull.logger import (
     _DeferredFormatQueueHandler, setup_async_logging, teardown_async_logging,
 )
@@ -220,6 +221,15 @@ def test_the_phase_trace_line_escapes_captured_headers(monkeypatch, payload):
     line = rec.format()
     assert line.splitlines() == [line]
     assert line.isprintable()
+
+
+def test_the_phase_trace_reads_a_list_field_on_every_line(monkeypatch):
+    monkeypatch.setattr(access_log, 'PHASE_TRACE', True)
+    conn = Connection.from_scope({'type': 'http', 'method': 'GET', 'path': '/', 'headers': [
+        (b'accept-encoding', b'gzip'), (b'accept-encoding', b'br'),
+        (b'range', b'bytes=0-1')]})
+    rec = AccessLogRecord.from_conn(conn)
+    assert (rec.req_accept_encoding, rec.req_range) == (b'gzip, br', b'bytes=0-1')
 
 
 def test_a_hostile_path_reaches_the_sink_as_one_line(_cleanup):

@@ -9,7 +9,7 @@ import gzip
 import threading
 from collections.abc import Callable
 from ..connection import Connection
-from ..headers import Headers
+from ..headers import _MinimalResponseHeaders
 from ..native import NativeResponse
 from ..protocol.framing import is_informational
 from ..server.cap_log import log_cap_hit
@@ -24,6 +24,7 @@ _BROTLI_QUALITY = 4
 # eligible responses are served *uncompressed* rather than queued — bounded
 # fall-back instead of unbounded executor queue growth.  ``0`` disables.
 import os as _os  # noqa: PLC0415
+from ..protocol.field_grammar import list_members, media_type
 _MAX_INFLIGHT = max((_os.cpu_count() or 1) * 2, 4)
 
 # Skip compressed/binary media. Do not skip font/ wholesale: TTF, OTF and
@@ -68,14 +69,15 @@ def _detect_codecs(brotli_quality: int = _BROTLI_QUALITY) -> dict[str, Callable[
     return available
 
 
-def _is_compressible_content_type(headers: Headers) -> bool:
-    """Return False when the Content-Type signals already-compressed content."""
-    ct = headers.get(b'content-type', b'').split(b';')[0].strip().lower()
-    ct_str = ct.decode('ascii', errors='ignore')
+def _is_compressible_content_type(fields: list[tuple[bytes, bytes]]) -> bool:
+    """Return False when the Content-Type in response *fields* (lowercase
+    names) signals already-compressed content."""
+    ct = next((value for name, value in fields if name == b'content-type'), b'')
+    ct_str = media_type(ct).decode('ascii', errors='ignore')
     return not any(ct_str.startswith(prefix) for prefix in _SKIP_CONTENT_TYPES)
 
 
-def _merge_vary(headers: list[tuple[bytes, bytes]],
+def _merge_vary(headers: _MinimalResponseHeaders,
                 field: bytes = b'Accept-Encoding') -> None:
     """Ensure the response ``Vary`` header lists *field* (RFC 9110 §12.5.5).
 
@@ -88,16 +90,16 @@ def _merge_vary(headers: list[tuple[bytes, bytes]],
     """
     field_l = field.lower()
     for i, (k, v) in enumerate(headers):
-        if k.lower() == b'vary':
-            tokens = [t.strip().lower() for t in v.split(b',')]
+        if k == b'vary':
+            tokens = list_members(v)
             if b'*' in tokens or field_l in tokens:
                 return
             headers[i] = (k, v + b', ' + field)
             return
-    headers.append((b'vary', field))
+    headers.add(b'vary', field)
 
 
-def _stamp_vary_if_compressible(header: list[tuple[bytes, bytes]]) -> bool:
+def _stamp_vary_if_compressible(header: _MinimalResponseHeaders) -> bool:
     """Whether *header* describes a body worth compressing; stamps ``Vary``.
 
     The decision point shared by every native exit: a compressible
@@ -107,9 +109,9 @@ def _stamp_vary_if_compressible(header: list[tuple[bytes, bytes]]) -> bool:
     stamped here rather than only where compression succeeds.  Mutates
     *header* in place (zero-copy; the caller owns the list).
     """
-    if not _is_compressible_content_type(Headers(header)):
+    if not _is_compressible_content_type(header):
         return False
-    if any(k.lower() == b'content-encoding' for k, _ in header):
+    if any(k == b'content-encoding' for k, _ in header):
         return False
     _merge_vary(header)
     return True
@@ -259,9 +261,9 @@ class Compression:
             if (isinstance(event, NativeResponse)
                     and (event._extension is None or event.push is None)):
                 if event._header is not None:
-                    headers = Headers(event._header)
-                    if _is_compressible_content_type(headers) and \
-                            not headers.get(b'content-encoding'):
+                    header = event._header
+                    if _is_compressible_content_type(header) and not any(
+                            k == b'content-encoding' for k, _ in header):
                         _merge_vary(event._header)
             await send(event)
         return vary_send
@@ -315,15 +317,12 @@ class Compression:
                     # upstream content-length and replace it with the
                     # post-compression length (keeps H1 keepalive framing and
                     # strict H2 clients correct).
-                    existing = [(k, v) for k, v in header
-                                if k.lower() != b'content-length']
-                    existing.append(
-                        (b'content-encoding', codec_name.encode()))
-                    existing.append(
-                        (b'content-length', str(len(compressed)).encode()))
+                    existing = header.copy()
+                    existing.discard(b'content-length')
+                    existing.add(b'content-encoding', codec_name.encode())
+                    existing.add(b'content-length', str(len(compressed)).encode())
                     _merge_vary(existing)
-                    await send(NativeResponse(status=status, header=existing,
-                                              body=compressed))
+                    await send(NativeResponse.complete(status, existing, compressed))
                     return
             # Uncompressed forward: pre-encoded / non-compressible / too-small
             # / executor-at-cap.  Vary is already stamped on *header* when this
@@ -362,7 +361,7 @@ class Compression:
                     if (event._header is None and event._body is not None
                             and not event.more_body
                             and not event.expects_trailers
-                            and event.trailers is None):
+                            and event._trailers is None):
                         # The terminal body for the held header: the two
                         # halves are a complete response again.
                         await _emit_native_complete(
@@ -381,7 +380,7 @@ class Compression:
                         and event._body is not None
                         and not event.more_body
                         and not event.expects_trailers
-                        and event.trailers is None):
+                        and event._trailers is None):
                     await _emit_native_complete(
                         event.status, event._header, event._body,
                         original=event)
@@ -399,7 +398,7 @@ class Compression:
                         and event._header is not None
                         and event._body is None
                         and not event.expects_trailers
-                        and event.trailers is None):
+                        and event._trailers is None):
                     # Header arm alone.  Hold it — the body that follows
                     # completes the response, and the compress decision needs
                     # both.  Nothing is on the wire yet, so holding costs no

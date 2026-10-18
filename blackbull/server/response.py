@@ -5,7 +5,7 @@ acting; preserve required connection-versus-stream error scope.
 """
 from ..protocol.stream import StreamState
 from ..protocol.frame_types import (
-    ErrorCodes, FrameTypes, MAX_FRAME_SIZE, PingFrameFlags, SettingFrameFlags,
+    ErrorCodes, FrameTypes, FrameFormatError, peer_max_frame_size, PingFrameFlags, SettingFrameFlags,
 )
 import logging
 from ..logger import log
@@ -169,8 +169,6 @@ class SettingsResponder(Responder):
     """
     # RFC 9113 §6.5.2 — SETTINGS parameter ranges.
     _MAX_FLOW_WINDOW = 2**31 - 1           # SETTINGS_INITIAL_WINDOW_SIZE
-    _MIN_MAX_FRAME_SIZE = 16384            # SETTINGS_MAX_FRAME_SIZE lower bound
-    _MAX_MAX_FRAME_SIZE = MAX_FRAME_SIZE     # SETTINGS_MAX_FRAME_SIZE upper bound
 
     async def respond(self, handler):
         # RFC 9113 §6.5 — SETTINGS MUST be sent on stream 0.
@@ -213,11 +211,10 @@ class SettingsResponder(Responder):
                 f'SETTINGS_INITIAL_WINDOW_SIZE overflow: {iws}')
             return
 
-        mfs = getattr(self.frame, 'max_frame_size', None)
-        if mfs is not None and (mfs < self._MIN_MAX_FRAME_SIZE or mfs > self._MAX_MAX_FRAME_SIZE):
-            await handler._connection_error(
-                ErrorCodes.PROTOCOL_ERROR,
-                f'SETTINGS_MAX_FRAME_SIZE out of range: {mfs}')
+        try:
+            mfs = peer_max_frame_size(self.frame.settings)
+        except FrameFormatError as error:
+            await handler._connection_error(error.error_code, str(error))
             return
 
         # Applied only after every check above passes: an invalid SETTINGS
@@ -240,11 +237,8 @@ class SettingsResponder(Responder):
                 for sender in handler._senders.values():
                     sender.adjust_initial_window(delta)
         if mfs is not None:
-            for sender in handler._senders.values():
-                sender.apply_settings(max_frame_size=mfs)
-        # RFC 9113 §6.5.2 — the peer's SETTINGS_HEADER_TABLE_SIZE constrains
-        # OUR encoder's table, not our decoder's.  Resizing the decoder here
-        # trips InvalidTableSizeError: the peer's encoder never asked us to.
+            handler.factory.peer_max_frame_size = mfs
+        handler.factory.apply_peer_header_table_size(self.frame.settings)
         await handler.send_frame(handler.factory.settings(ack=True))
 
     FRAME_TYPE = FrameTypes.SETTINGS

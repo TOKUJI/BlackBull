@@ -18,9 +18,10 @@ from ..env import get_settings
 from ..event_aggregator import EventAggregator
 from ..logger import log, debug_gate
 from ..protocol.frame import FrameFactory
+from ..protocol.field_grammar import PROHIBITED_TRAILER_FIELDS
 from ..protocol.framing import method_is
 from ..protocol.frame_types import (
-    ErrorCodes, FrameBase, FrameTypes,
+    ErrorCodes, FrameBase, FrameFormatError, FrameTypes,
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
@@ -590,6 +591,20 @@ class HTTP2Actor(Actor):
                 logger.debug('writer.close raised on connection-error path',
                              exc_info=True)
 
+    async def _undecodable(self, exc: HPACKError | FrameFormatError) -> None:
+        """End the connection over a frame or field block that cannot be read.
+
+        Always a connection error: §4.3 for a field block (COMPRESSION_ERROR),
+        §4.2 and §6.x for a frame whose layout its type refuses (the code the
+        exception names).
+        """
+        if isinstance(exc, FrameFormatError):
+            await self._connection_error(exc.error_code, str(exc))
+        else:
+            await self._connection_error(
+                ErrorCodes.COMPRESSION_ERROR,
+                f'could not decode the field block: {exc}')
+
     def _make_done_cb(
         self, stream_id: int, *, is_ws: bool = False,
     ) -> Callable[[asyncio.Task], None]:
@@ -923,10 +938,8 @@ class HTTP2Actor(Actor):
                 return
             try:
                 frame = self.factory.load(data)
-            except HPACKError as exc:
-                await self._connection_error(
-                    ErrorCodes.COMPRESSION_ERROR,
-                    f'could not decode the field block: {exc}')
+            except (HPACKError, FrameFormatError) as exc:
+                await self._undecodable(exc)
                 continue  # let h2spec read the GOAWAY before we close
             frame_type = frame.FrameType()
 
@@ -1274,13 +1287,17 @@ class HTTP2Actor(Actor):
         """
         if stream.conn is not None:
             # A second field section is trailers: it must end the request,
-            # carry no pseudo-header field, and reach no handler; anything
-            # else earns the head's verdict.
+            # carry no pseudo-header or prohibited field (RFC 9110 §6.5.1),
+            # and reach no handler; anything else earns the head's verdict.
+            prohibited = next((name for name, _ in header_frame.headers
+                               if name in PROHIBITED_TRAILER_FIELDS), None)
             if (not header_frame.end_stream or header_frame.malformed
-                    or header_frame.pseudo_headers):
+                    or header_frame.pseudo_headers or prohibited is not None):
                 reason = (header_frame.malformed_reason
                           or ('pseudo-header in trailer section'
                               if header_frame.pseudo_headers
+                              else f'prohibited trailer field {prohibited!r}'
+                              if prohibited is not None
                               else 'section does not end the request'))
                 if _DEBUG:
                     logger.debug(
@@ -1423,10 +1440,8 @@ class HTTP2Actor(Actor):
 
         try:
             header_frame.parse_payload()
-        except HPACKError as exc:
-            await self._connection_error(
-                ErrorCodes.COMPRESSION_ERROR,
-                f'could not decode the field block: {exc}')
+        except (HPACKError, FrameFormatError) as exc:
+            await self._undecodable(exc)
             return True
         return await self._complete_header_block(
             header_frame, stream, send, tg)
@@ -1663,8 +1678,8 @@ class HTTP2Actor(Actor):
             parent_headers, parent_scheme, _parent_client = Headers([]), 'https', None
         # §8.3.1 maps ``:authority`` into ``host``, so a dispatched parent
         # always carries one; the fallback only covers a parent with none.
-        raw_authority = (parent_headers.get(b'host') or b'localhost')
-        authority = raw_authority.decode() if isinstance(raw_authority, bytes) else raw_authority
+        raw_authority = parent_headers.get(b'host') or b'localhost'
+        authority = raw_authority.decode()
 
         from ..protocol.frame_types import PseudoHeaders  # noqa: PLC0415
         pseudo = {
@@ -1673,12 +1688,9 @@ class HTTP2Actor(Actor):
             PseudoHeaders.SCHEME:    parent_scheme,
             PseudoHeaders.AUTHORITY: authority,
         }
-        regular = [
-            (k.decode() if isinstance(k, bytes) else k,
-             v.decode() if isinstance(v, bytes) else v)
-            for k, v in (event._header or [])
-            if not (k.decode() if isinstance(k, bytes) else k).startswith(':')
-        ]
+        # NativeResponse holds lowercase tchar names, trimmed values and no
+        # host; the promised request takes its host from the authority above.
+        regular = list(event._header or ())
 
         pp = self.factory.push_promise(parent_stream_id, push_stream_id, pseudo, regular)
         # The peer may reset a promised id as soon as the frame reaches its
@@ -1718,9 +1730,7 @@ class HTTP2Actor(Actor):
             method='GET',
             path=_pushed_path,
             raw_path=_pushed_raw_path,
-            headers=Headers([(k.encode() if isinstance(k, str) else k,
-                              v.encode() if isinstance(v, str) else v)
-                             for k, v in regular]),
+            headers=Headers.from_lowered([(b'host', raw_authority), *regular]),
             query_string=_pushed_query,
             http_version='2',
             scheme=parent_scheme,

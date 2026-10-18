@@ -13,6 +13,7 @@ from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.connection import Connection
+from blackbull.headers import Headers
 
 
 def _mock_aggregator() -> AsyncMock:
@@ -558,3 +559,143 @@ async def test_h2_request_completed_listener_forces_access_log_record():
     await actor.run()
 
     assert 'access_log' in seen['state_keys']
+
+
+# -- no aggregator: foreign ASGI apps ---------------------------------------
+
+def _h2_actor(app):
+    """An HTTP2Actor with **no aggregator** and a mocked frame sink."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from blackbull.server.http2_actor import HTTP2Actor
+    from blackbull.server.sender import AsyncioWriter
+
+    writer = MagicMock()
+    writer.drain = AsyncMock()
+    writer.close = MagicMock()
+    actor = HTTP2Actor(None, AsyncioWriter(writer), app, aggregator=None)
+    actor.send_frame = AsyncMock()
+    return actor
+
+
+def _h2_headers_frame(stream_id: int = 1) -> bytes:
+    from hpack import Encoder
+
+    from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
+
+    block = Encoder().encode([
+        (b':method', b'GET'), (b':path', b'/'),
+        (b':scheme', b'http'), (b':authority', b'localhost'),
+    ])
+    flags = HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM
+    return (len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
+            + bytes([flags]) + stream_id.to_bytes(4, 'big') + block)
+
+
+async def _drive_h2(app):
+    from unittest.mock import AsyncMock
+
+    actor = _h2_actor(app)
+    actor.receive = AsyncMock(side_effect=[_h2_headers_frame(), None])
+    await actor.run()
+    return actor
+
+
+@pytest.mark.asyncio
+async def test_h2_serves_a_foreign_app_without_an_aggregator():
+    served = []
+
+    async def foreign_app(scope, receive, send):
+        served.append(True)
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-length', b'0')]})
+        await send({'type': 'http.response.body', 'body': b''})
+
+    await _drive_h2(foreign_app)
+    assert served == [True]
+
+
+@pytest.mark.asyncio
+async def test_h2_resets_the_stream_when_a_foreign_app_raises():
+    """The intended change: the peer is told, instead of being left with a
+    stream that stopped for no stated reason."""
+    from blackbull.protocol.frame_types import ErrorCodes
+
+    async def raising_app(scope, receive, send):
+        raise RuntimeError('stream handler blew up')
+
+    actor = await _drive_h2(raising_app)
+
+    reset = [c for c in actor.send_frame.await_args_list
+             if getattr(c.args[0], 'error_code', None) == ErrorCodes.INTERNAL_ERROR]
+    assert reset, 'a raising stream must be reset with INTERNAL_ERROR'
+
+
+@pytest.mark.asyncio
+async def test_h2_builds_no_log_record_when_nothing_consumes_it():
+    import logging
+
+    seen: list = []
+
+    async def foreign_app(scope, receive, send):
+        state = scope['state'] if isinstance(scope, dict) else scope.state
+        seen.append('access_log' in state)
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-length', b'0')]})
+        await send({'type': 'http.response.body', 'body': b''})
+
+    access = logging.getLogger('blackbull.access')
+    previous = access.level
+    access.setLevel(logging.WARNING)
+    try:
+        await _drive_h2(foreign_app)
+    finally:
+        access.setLevel(previous)
+    assert seen == [False]
+
+
+@pytest.mark.asyncio
+async def test_http2_access_log_emitted_per_stream(caplog):
+    import logging
+    from unittest.mock import AsyncMock, MagicMock
+
+    from blackbull.server.access_log import AccessLogRecord
+    from blackbull.server.http2_actor import HTTP2Actor, StreamActor
+    from blackbull.server.sender import AsyncioWriter
+
+    async def app(conn, receive, send):
+        pass
+
+    async def noop_send(event, *a, **kw):
+        pass
+
+    async def fake_receive():
+        return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+    record = AccessLogRecord(
+        client_ip='10.0.0.1', method='GET', path='/h2', http_version='2',
+    )
+    # The shared boundary derives the app argument from the native
+    # Connection; StreamActor always receives the native Connection.
+    conn = Connection(
+        method='GET', path='/h2', raw_path=b'/h2',
+        headers=Headers([]), http_version='2',
+    )
+
+    # A real HTTP2Actor, not a mock: StreamActor's annotation is the
+    # concrete class and beartype enforces it on this path.
+    sw = MagicMock()
+    sw.drain = AsyncMock()
+    h2 = HTTP2Actor(None, AsyncioWriter(sw), app, aggregator=None)
+    h2.send_frame = AsyncMock()
+
+    with caplog.at_level(logging.INFO):
+        await StreamActor(
+            stream_id=1, conn=conn, receive=fake_receive, send=noop_send,
+            app=app, aggregator=None, http2_actor=h2, log_record=record,
+            force_asgi=False,
+        ).run()
+
+    access_records = [r for r in caplog.records if r.name == 'blackbull.access']
+    assert access_records, 'Expected one access log entry for HTTP/2 stream'
+    assert '/h2' in access_records[0].message

@@ -19,12 +19,12 @@ import pytest
 from blackbull.grpc import GrpcServiceRegistry, encode_message, decode_messages
 from blackbull.grpc.asgi import serve_grpc
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 def _grpc_scope(path):
     return {'type': 'http', 'path': path,
-            'headers': [(b'content-type', b'application/grpc'),
-                        (b':method', b'POST')]}
+            'headers': [(b'content-type', b'application/grpc')]}
 
 
 def _receive_with(body: bytes):
@@ -67,7 +67,7 @@ async def test_message_delivered_while_producer_blocks():
             events.append(event)
 
     call = asyncio.create_task(serve_grpc(
-        reg, _grpc_scope('/watch.W/Watch'),
+        reg, Connection.from_scope(_grpc_scope('/watch.W/Watch')),
         _receive_with(encode_message(b'')), send))
 
     # The first message must arrive without touching `release` — poll for the
@@ -111,7 +111,7 @@ async def test_synchronous_burst_still_batches():
         else:
             events.append(event)
 
-    await serve_grpc(reg, _grpc_scope('/bulk.B/Burst'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/bulk.B/Burst')),
                      _receive_with(encode_message(b'')), send)
     bodies = _bodies(events)
     total = sum(len(decode_messages(b)) for b in bodies)
@@ -143,8 +143,139 @@ async def test_slow_producer_flushes_each_message():
         else:
             events.append(event)
 
-    await serve_grpc(reg, _grpc_scope('/slow.S/Tick'),
+    await serve_grpc(reg, Connection.from_scope(_grpc_scope('/slow.S/Tick')),
                      _receive_with(encode_message(b'')), send)
     messages = [m for b in _bodies(events) for _, m in decode_messages(b)]
     assert messages == [b'tick0', b'tick1', b'tick2']
     assert len(_bodies(events)) == 3      # one flush per awaited message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('batch_bytes', [14, 16384])
+@pytest.mark.parametrize('client_streaming', [False, True])
+@pytest.mark.parametrize('timed', [False, True])
+async def test_batches_rearm_after_backpressure(monkeypatch, batch_bytes, client_streaming, timed):
+    import blackbull.grpc.asgi as grpc_asgi
+
+    monkeypatch.setattr(grpc_asgi, '_STREAM_BATCH_BYTES', batch_bytes)
+    registry = GrpcServiceRegistry()
+    delivered = [asyncio.Event() for _ in range(3)]
+    write_started = asyncio.Event()
+    release_write = asyncio.Event()
+    expected = [bytes([i, j]) for i in range(3) for j in range(32)]
+    received = []
+    statuses = []
+
+    async def stream(request, context):
+        if client_streaming:
+            async for _ in request:
+                pass
+        message = bytearray(2)
+        for batch in range(3):
+            for index in range(32):
+                message[:] = bytes([batch, index])
+                yield message
+            message[:] = b'xx'
+            await delivered[batch].wait()
+
+    registry.add_method('/svc/M', stream, client_streaming=client_streaming)
+
+    async def send(event):
+        for item in event.to_asgi():
+            if item.get('body'):
+                if not write_started.is_set():
+                    write_started.set()
+                    await release_write.wait()
+                received.extend(payload for _, payload in decode_messages(item['body']))
+                for batch in range(3):
+                    if len(received) >= (batch + 1) * 32:
+                        delivered[batch].set()
+            statuses.extend(value for key, value in item.get('headers', []) if key == b'grpc-status')
+
+    scope = _grpc_scope('/svc/M')
+    if timed:
+        scope['headers'].append((b'grpc-timeout', b'5S'))
+    async with asyncio.TaskGroup() as group:
+        task = group.create_task(serve_grpc(
+            registry, Connection.from_scope(scope), _receive_with(encode_message(b'')), send))
+        await asyncio.wait_for(write_started.wait(), 1)
+        release_write.set()
+        await asyncio.wait_for(task, 1)
+    assert received == expected
+    assert statuses == [b'0']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('timed', [False, True])
+async def test_synchronous_stream_closes_before_final_delivery(timed):
+    registry = GrpcServiceRegistry()
+    events = []
+
+    class Stream:
+        def __init__(self, context):
+            self.context = context
+            self.sent = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.sent:
+                raise StopAsyncIteration
+            self.sent = True
+            return b'last'
+
+        async def aclose(self):
+            assert not events
+            await self.context.send_initial_metadata([(b'x-close', b'initial')])
+            self.context.set_trailing_metadata([(b'x-close', b'trailing')])
+
+    registry.add_method('/svc/M', lambda request, context: Stream(context), streaming=True)
+
+    async def send(event):
+        events.extend(event.to_asgi())
+
+    scope = _grpc_scope('/svc/M')
+    if timed:
+        scope['headers'].append((b'grpc-timeout', b'1S'))
+    await serve_grpc(registry, Connection.from_scope(scope), _receive_with(encode_message(b'')), send)
+    assert (b'x-close', b'initial') in events[0]['headers']
+    assert (b'x-close', b'trailing') in events[-1]['headers']
+    assert (b'grpc-status', b'0') in events[-1]['headers']
+    assert [payload for body in _bodies(events) for _, payload in decode_messages(body)] == [b'last']
+    completed = list(events)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert events == completed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('timed', [False, True])
+async def test_cooperative_producer_delivers_before_parking(timed):
+    registry = GrpcServiceRegistry()
+    delivered = asyncio.Event()
+    received = []
+    statuses = []
+
+    @registry.method('/svc/M')
+    async def stream(request, context):
+        for _ in range(3):
+            yield b'item'
+            await asyncio.sleep(0)
+        await delivered.wait()
+
+    async def send(event):
+        for item in event.to_asgi():
+            if item.get('body'):
+                received.extend(payload for _, payload in decode_messages(item['body']))
+                if len(received) == 3:
+                    delivered.set()
+            statuses.extend(value for key, value in item.get('headers', []) if key == b'grpc-status')
+
+    scope = _grpc_scope('/svc/M')
+    if timed:
+        scope['headers'].append((b'grpc-timeout', b'1S'))
+    await asyncio.wait_for(serve_grpc(
+        registry, Connection.from_scope(scope), _receive_with(encode_message(b'')), send), 0.5)
+    assert received == [b'item'] * 3
+    assert statuses == [b'0']

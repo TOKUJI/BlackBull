@@ -42,7 +42,8 @@ VOL_PGSEED="httparena-pgseed"
 HELPER="httparena-vol-pop"
 
 # --- detect broken bind mounts (file mounted as a directory) ---------------
-PROBE="/tmp/bb-mount-probe-$$"
+mkdir -p "$REPO_ROOT/bench/.state"
+PROBE="$REPO_ROOT/bench/.state/mount-probe-$$"
 echo x > "$PROBE"
 if docker run --rm -v "$PROBE:/f:ro" postgres:18 cat /f 2>/dev/null | grep -qx x; then
     rm -f "$PROBE"

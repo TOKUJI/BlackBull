@@ -83,6 +83,45 @@ class TestConnectionClose:
 
 
 @pytest.mark.integration
+class TestListFields:
+    """RFC 9110 §5.3 / §7.6.1 / §10.1.1 — Connection and Expect are lists:
+    a member counts wherever it appears, on any line."""
+
+    @pytest.mark.parametrize('fields', [
+        b'Connection: keep-alive, close\r\n',
+        b'Connection: TE\r\nConnection: Close\r\n',
+    ])
+    def test_close_anywhere_in_the_connection_list_closes(self, h1_app, fields):
+        s = open_socket('127.0.0.1', h1_app.port)
+        try:
+            s.sendall(b'GET / HTTP/1.1\r\nHost: localhost\r\n' + fields + b'\r\n')
+            data = b''
+            try:
+                while chunk := s.recv(4096):
+                    data += chunk
+            except TimeoutError:
+                pytest.fail('connection stayed open after a listed close')
+            assert parse_response(data).status == 200
+        finally:
+            s.close()
+
+    @pytest.mark.parametrize('fields', [
+        b'Expect: 100-Continue\r\n',
+        b'Expect: x-other\r\nExpect: 100-continue\r\n',
+    ])
+    def test_100_continue_anywhere_in_the_expect_list_gets_100(self, h1_app, fields):
+        s = open_socket('127.0.0.1', h1_app.port, timeout=5)
+        try:
+            s.sendall(b'POST /echo HTTP/1.1\r\nHost: localhost\r\n'
+                      b'Content-Length: 4\r\nConnection: close\r\n' + fields + b'\r\n')
+            assert s.recv(4096).startswith(b'HTTP/1.1 100 Continue\r\n')
+            s.sendall(b'ping')
+            assert parse_response(read_until_eof(s), closed=True).body == b'ping'
+        finally:
+            s.close()
+
+
+@pytest.mark.integration
 class TestPipelining:
     """RFC 9112 §9.3 — pipelined requests MUST be served in order.
 
@@ -331,13 +370,14 @@ class TestUpgradeRequestBody:
     separately.
     """
 
-    def _ws_handshake(self, port, extra_headers=b'', body=b''):
+    def _ws_handshake(self, port, extra_headers=b'', body=b'',
+                      upgrade=b'Upgrade: websocket\r\n'):
         key = base64.b64encode(os.urandom(16))
         s = open_socket('127.0.0.1', port, timeout=5)
         try:
             s.sendall(
                 b'GET /ws HTTP/1.1\r\nHost: localhost\r\n'
-                b'Upgrade: websocket\r\nConnection: Upgrade\r\n'
+                + upgrade + b'Connection: Upgrade\r\n'
                 b'Sec-WebSocket-Key: ' + key + b'\r\n'
                 b'Sec-WebSocket-Version: 13\r\n'
                 + extra_headers + b'\r\n' + body
@@ -405,6 +445,15 @@ class TestUpgradeRequestBody:
             h1_app.port, extra_headers=b'Content-Length: 0\r\n')
         assert buf.split(b'\r\n')[0] == b'HTTP/1.1 101 Switching Protocols', (
             f'zero-length handshake was refused; got {buf[:120]!r}')
+
+    @pytest.mark.parametrize('upgrade', [
+        b'Upgrade: h2c, WebSocket\r\n',
+        b'Upgrade: h2c\r\nUpgrade: websocket\r\n',
+    ])
+    def test_websocket_anywhere_in_the_upgrade_list_upgrades(self, h1_app, upgrade):
+        buf = self._ws_handshake(h1_app.port, upgrade=upgrade)
+        assert buf.split(b'\r\n')[0] == b'HTTP/1.1 101 Switching Protocols', (
+            f'listed websocket was not honoured; got {buf[:120]!r}')
 
     def test_ws_upgrade_without_body_still_upgrades(self, h1_app):
         # The plain handshake is the control: the check must not cost the

@@ -10,8 +10,8 @@ import errno
 import logging
 import socket
 import ssl
-import sys
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 import time
 
@@ -24,12 +24,14 @@ from ..protocol.rsock import (
 from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
 from .conn_id import new_connection_id
 from .connection_actor import ConnectionActor
+from .connection_protocol import ConnectionProtocol
 from .sender import AbstractWriter, AsyncioWriter
 from .recipient import (AbstractReader, AsyncioReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .cap_log import CapHitCounter, log_cap_hit
 from ..asgi import ASGIEvent
 from ..env import FD_RESERVE, DerivedCap, get_settings
+from ..utils import _EAGER_TASKS, create_eager_task
 logger = logging.getLogger(__name__)
 
 
@@ -48,8 +50,6 @@ def _address_of(sock) -> Tcp | Unix:
         return Unix(sockname)
     return Tcp(sockname[1])
 
-# ``eager_start`` landed in 3.12; the supported floor is 3.11.
-_EAGER_TASKS = sys.version_info >= (3, 12)
 _CLEANUP_TIMEOUT = 8.0
 
 
@@ -396,9 +396,9 @@ class _AcceptGate:
             raise
         loop = self._loop or asyncio.get_running_loop()
         if _EAGER_TASKS:
-            task = asyncio.Task(
+            task = create_eager_task(
                 self._connected(loop, conn, protocol, ssl_context, admission),
-                loop=loop, eager_start=True)
+                loop=loop)
         else:
             started: list = []
             task = loop.create_task(self._connected(
@@ -635,6 +635,30 @@ def _fit_to_open_descriptors(cap: int) -> int:
     return max(1, min(cap, soft - open_now - _REFUSAL_RESERVE - _ACCEPTS_PER_TICK))
 
 
+class _ServedConnection(ConnectionProtocol):
+    """The protocol a ``Server`` accepts with; ``served`` is (server, binding, write timeout)."""
+
+    async def serve(self):
+        server, bound_binding, write_timeout = self.served
+        try:
+            await server._serve_connection(
+                self.reader,
+                AsyncioWriter(self, write_timeout=write_timeout),
+                bound_binding=bound_binding,
+                transport=self.transport,
+            )
+        finally:
+            # A bare close would RST away the response a peer that is
+            # still sending has not read yet.
+            await self.linger_close()
+
+    def connection_lost(self, exc):
+        try:
+            super().connection_lost(exc)
+        finally:
+            self.admission.release()
+
+
 class Server:
     """An asyncio socket server that dispatches each connection through the
     app's [`ProtocolRegistry`][blackbull.server.protocol_registry.ProtocolRegistry].
@@ -788,33 +812,8 @@ class Server:
 
     def connection_protocol_factory(self, bound_binding=None):
         """One buffered protocol per accept; ``_AcceptGate`` serves it."""
-        from .connection_protocol import ConnectionProtocol  # noqa: PLC0415
-        from .sender import AsyncioWriter  # noqa: PLC0415
-
-        server = self
-        write_timeout = get_settings().write_timeout
-
-        class _ServedConnection(ConnectionProtocol):
-            async def serve(self):
-                try:
-                    await server._serve_connection(
-                        self.reader,
-                        AsyncioWriter(self, write_timeout=write_timeout),
-                        bound_binding=bound_binding,
-                        transport=self.transport,
-                    )
-                finally:
-                    # A bare close would RST away the response a peer that is
-                    # still sending has not read yet.
-                    await self.linger_close()
-
-            def connection_lost(self, exc):
-                try:
-                    super().connection_lost(exc)
-                finally:
-                    self.admission.release()
-
-        return _ServedConnection
+        return partial(_ServedConnection,
+                       (self, bound_binding, get_settings().write_timeout))
 
     def _raw_tls_context(self):
         """TLS context for ``tls=True`` raw bindings.

@@ -585,6 +585,72 @@ class TestG4CompressionErrors:
         assert _sent_goaway_codes(handler) == []
 
 
+class TestG4FrameFormatErrors:
+    """RFC 9113 §4.2, §6.1-§6.7 — a frame whose length or padding breaks its
+    type's layout is a connection error: GOAWAY with the code its section
+    names, and the frame loop ends rather than raising out of run()."""
+
+    _PADDED = int(HeaderFrameFlags.PADDED)
+
+    @pytest.mark.parametrize(('frame', 'code'), [
+        # §6.4 — RST_STREAM is exactly 4 octets.
+        (_make_h2_frame(FrameTypes.RST_STREAM, 0, 1, b'\x00\x00\x00'),
+         ErrorCodes.FRAME_SIZE_ERROR),
+        # §6.7 — PING is exactly 8 octets.
+        (_make_h2_frame(FrameTypes.PING, 0, 0, b'\x00' * 5),
+         ErrorCodes.FRAME_SIZE_ERROR),
+        # §6.1 — padding at least as long as the payload.
+        (_make_h2_frame(FrameTypes.DATA, int(DataFrameFlags.PADDED), 1,
+                        b'\x05abcd'),
+         ErrorCodes.PROTOCOL_ERROR),
+        # §6.6 borrows §6.2's rule.
+        (_make_h2_frame(FrameTypes.PUSH_PROMISE,
+                        int(HeaderFrameFlags.END_HEADERS) | _PADDED, 1,
+                        bytes([200]) + (2).to_bytes(4, 'big') + b'\x82' * 12),
+         ErrorCodes.PROTOCOL_ERROR),
+        # §6.2 — the same rule for HEADERS, which used to reset the stream.
+        (_make_h2_frame(FrameTypes.HEADERS,
+                        int(HeaderFrameFlags.END_HEADERS) | _PADDED, 1,
+                        bytes([10]) + b'\x82\x84'),
+         ErrorCodes.PROTOCOL_ERROR),
+        # Controls: their responders already answered this way.
+        (_make_h2_frame(FrameTypes.WINDOW_UPDATE, 0, 0, b'\x00\x00\x01'),
+         ErrorCodes.FRAME_SIZE_ERROR),
+        (_make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'\x00' * 5),
+         ErrorCodes.FRAME_SIZE_ERROR),
+    ], ids=['rst_stream', 'ping', 'data_padding', 'push_promise_padding',
+            'headers_padding', 'window_update', 'settings'])
+    @pytest.mark.asyncio
+    async def test_a_misshapen_frame_goes_away_with_its_code(self, frame, code):
+        handler, app = _make_h2_actor()
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(side_effect=[settings, frame, None])
+        await handler.run()
+
+        assert _sent_goaway_codes(handler) == [code]
+        assert _sent_rst_streams(handler, 1) == []
+        assert app.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_headers_padding_checked_when_the_last_continuation_lands(self):
+        """A block split across CONTINUATION is parsed only when it is
+        complete, so that path needs the same answer."""
+        handler, app = _make_h2_actor()
+        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
+        handler.receive = AsyncMock(side_effect=[
+            settings,
+            _make_h2_frame(FrameTypes.HEADERS, self._PADDED, 1,
+                           bytes([10]) + b'\x82'),
+            _make_h2_frame(FrameTypes.CONTINUATION,
+                           int(HeaderFrameFlags.END_HEADERS), 1, b'\x84'),
+            None])
+        await handler.run()
+
+        assert _sent_goaway_codes(handler) == [ErrorCodes.PROTOCOL_ERROR]
+        assert _sent_rst_streams(handler, 1) == []
+        assert app.await_count == 0
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # G7: RST_STREAM on idle stream (§6.4)
 # ═══════════════════════════════════════════════════════════════════════

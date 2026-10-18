@@ -17,6 +17,11 @@ RFC 8441 WebSocket requires explicit enablement.
 Use one `FrameFactory` per connection, including pushes and WebSocket
 streams. A second encoder creates a divergent dynamic table.
 
+Peer `SETTINGS_HEADER_TABLE_SIZE` limits the encoder, not the decoder. Apply
+entries in order before ACK, capped at the local encoder capacity. Emit the
+smallest pending size and final size at the start of the next field block,
+before any static-indexed prefix.
+
 Decode every received field block, including one whose stream will be
 refused or whose promise will be discarded. Complete CONTINUATION handling
 before a concurrency refusal; refusing early must not turn legal continuation
@@ -66,8 +71,10 @@ stops new work while permitting accepted responses to drain. Connection errors
 retire output owners and pending credit work before closing.
 
 Preserve RFC connection-versus-stream error scope when validating fixed-size
-control frames. Unknown frame types are ignored only outside an open field
-block. Read `HTTP2Actor` and control responders in `blackbull/server/response.py`.
+control frames. A frame whose length or padding breaks its type's layout
+raises `FrameFormatError` with the RFC's code, and the frame loop answers it
+with GOAWAY: every such case, HEADERS padding included, is a connection error.
+Unknown frame types are ignored only outside an open field block. Read `HTTP2Actor` and control responders in `blackbull/server/response.py`.
 
 ## Message validation
 

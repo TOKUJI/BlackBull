@@ -8,7 +8,7 @@ from hpack import Decoder, Encoder
 import logging
 from .frame_types import (
     FrameBase, FrameTypes, FrameFlags,
-    HeaderFrameFlags, SettingFrameFlags, ErrorCodes, PushPromise,
+    HeaderFrameFlags, SettingFrameFlags, ErrorCodes, PushPromise, DEFAULT_MAX_FRAME_SIZE,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,23 @@ class FrameFactory:
         if max_header_list_size is not None:
             self.decoder.max_header_list_size = max_header_list_size
         self.encoder = Encoder()
+        self.peer_max_frame_size = DEFAULT_MAX_FRAME_SIZE
+        self._encoder_table_limit = self.encoder.header_table_size
+
+    def apply_peer_header_table_size(self, settings) -> None:
+        """Apply peer encoder limits in order, retaining the local capacity cap."""
+        encoder = self.encoder
+        for identifier, value in settings:
+            if identifier != 1:
+                continue
+            size = min(value, self._encoder_table_limit)
+            if size == encoder.header_table_size:
+                continue
+            encoder.header_table_size = size
+            # hpack queues every resize; RFC 7541 §4.2 needs only minimum/final.
+            changes = encoder.table_size_changes
+            minimum = min(changes)
+            changes[:] = [minimum] if minimum == size else [minimum, size]
 
     def create(self, type_: FrameTypes, flags: FrameFlags | int, stream_id: int, *, data: bytes = b'', **kwds):
         """Build the frame class registered for *type_*, ready to ``save()``.
@@ -192,12 +209,3 @@ class FrameFactory:
             return _UnknownFrame(length, type_, flags, stream_id, payload)
 
         return self.create(frame_type, flags, stream_id, data=payload)
-
-    def __setattr__(self, key, value):
-        if key == 'header_table_size':
-            try:
-                self.decoder.header_table_size = value
-            except Exception as e:
-                logger.error(e)
-        else:
-            super().__setattr__(key, value)

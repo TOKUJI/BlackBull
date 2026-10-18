@@ -41,8 +41,8 @@ bash bench/conformance/h2spec_run.sh hpack
 bash bench/conformance/h2spec_run.sh http2/6.5
 ```
 
-Results are saved as bench/conformance/results/h2spec_<timestamp>.txt and
-.xml. Read the final test/failure counts and process status; XML is JUnit.
+Results are saved as h2spec.txt and h2spec.xml in the run directory,
+bench/results/h2spec/<UTC time>-<revision>/. Read the final test/failure counts and process status; XML is JUnit.
 RFC 8441, response validation and BlackBull resource-policy cases also need
 the in-tree tests.
 
@@ -59,7 +59,7 @@ Use `CASES='1.*'` for a subset. Full limits cases need messages up to 16 MiB;
 if you lower frame/message caps, record that configuration when interpreting
 those refusals.
 
-Reports are under bench/conformance/results/autobahn_<timestamp>.<unique>/.
+Reports are under bench/results/autobahn/<UTC time>-<revision>/.
 Keep index.json/index.html, tester.log, exit-code.txt and container-state.json
 when present. Missing reports, timeout, OOM and protocol failure are distinct
 outcomes. A successful report from a failed process is not a pass; a failed

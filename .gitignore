@@ -131,36 +131,14 @@ CLAUDE.md
 # so a committed symlink would arrive dangling in every clone and in CI.
 .github/skills
 
-# benchmark result files (keep directory + READMEs, ignore data)
+# bench/lib is the bench tools' shared code, not a build artefact (lib/ above).
+!bench/lib/
+# bench run output — see bench/results/README.md
 bench/results/*
-!bench/results/aws/
-!bench/results/baselines/
-bench/results/aws/*
-bench/results/baselines/*
-!bench/results/aws/README.md
-!bench/results/baselines/pre_sprint9d/
-bench/results/baselines/pre_sprint9d/*
-!bench/results/baselines/pre_sprint9d/README.md
+!bench/results/README.md
+# bench runtime state: cloud session, key, known hosts (bench/cloud/config.sh)
+bench/.state/
 
-# Bench output that landed at the repo root instead of under
-# bench/results/<run>/.  The harness itself anchors every artifact to its
-# result dir (`httparena_compare.sh` writes `$LOCAL_DEST/…`, `compare_table.py`
-# joins onto `result_dir`), so this only happens when one of those scripts is
-# invoked by hand with the repo root as its result dir — and then the rsync of
-# the remote HttpArena checkout drops ~480 files here, which is enough to bury
-# a real diff in `git status`.
-#
-# Anchored with a leading slash so it matches only the root: the legitimate
-# copies inside bench/results/ are already covered above, and a future
-# docs/COMPARISON.md or a nested provenance.md stays trackable.
-/httparena-tree/
-/COMPARISON.md
-/provenance.md
-/driver.log
-# bench/aws — runtime state and SSH private keys created by up.sh
-bench/aws/.state
-bench/aws/.known_hosts
-bench/aws/*.pem
 # bench/httparena — local sandbox mounts (dataset + dev certs).  See
 # bench/httparena/README.md for the local smoke-test recipe.
 bench/httparena/_local/
@@ -170,16 +148,11 @@ bench/httparena/blackbull-*.whl
 # peer benchmark harness — work-in-progress automated runner.
 # Kept on disk for future development; not committed until the socket-state
 # contamination is solved cleanly.
-bench/peers/compare.sh
-bench/peers/httparena_calibrate.py
-bench/peers/bench/results/*
+bench/compare/compare.sh
+bench/compare/httparena_calibrate.py
+bench/compare/bench/results/*
 # peer benchmark harness — private development notes
 *.private.md
 
-
-
-# RFC conformance test output (kept directory, ignore data files)
-bench/conformance/results/*
-
-# Http11Probe run output (kept directory, ignore data files)
-bench/http11probe/results/*.json
+# mutation testing workspace (just mutate)
+mutants/

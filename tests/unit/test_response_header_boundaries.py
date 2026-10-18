@@ -1,4 +1,10 @@
-"""Outbound HTTP field boundaries shared by response helpers and senders."""
+"""Outbound HTTP fields are checked once, when a NativeResponse is built.
+
+A response helper builds its NativeResponse when it is sent (``to_native``);
+a NativeResponse checks its fields when constructed, assigned or appended
+to; an ASGI ``http.response.*`` dict is checked when converted.  Nothing that
+breaks a field reaches the wire or the HPACK table.
+"""
 import asyncio
 from http import HTTPStatus
 
@@ -28,7 +34,7 @@ class _Writer(AbstractWriter):
 ])
 def test_response_rejects_non_token_field_names(name):
     with pytest.raises(ValueError, match='header name'):
-        Response(b'', headers=[(name, b'value')])
+        Response(b'', headers=[(name, b'value')]).to_native()
 
 
 @pytest.mark.parametrize('value', [
@@ -41,24 +47,29 @@ def test_response_rejects_non_token_field_names(name):
 ])
 def test_response_rejects_prohibited_field_value_octets(value):
     with pytest.raises(ValueError, match='header value'):
-        Response(b'', headers=[(b'x-origin', value)])
+        Response(b'', headers=[(b'x-origin', value)]).to_native()
 
 
-def test_all_response_helpers_reject_boundary_breaking_values():
+@pytest.mark.asyncio
+async def test_all_response_helpers_reject_boundary_breaking_values():
     async def chunks():
         yield b'ok'
 
+    async def send(event):
+        pass
+
     with pytest.raises(ValueError, match='header value'):
-        JSONResponse({}, headers=[(b'x-origin', b'a\r\nx-added: b')])
+        JSONResponse({}, headers=[(b'x-origin', b'a\r\nx-added: b')]).to_native()
     with pytest.raises(ValueError, match='header value'):
-        RedirectResponse('a\r\nx-added: b')
+        RedirectResponse('a\r\nx-added: b').to_native()
     with pytest.raises(ValueError, match='header value'):
-        StreamingResponse(
-            chunks(), headers=[(b'x-origin', b'a\r\nx-added: b')])
+        await StreamingResponse(
+            chunks(), headers=[(b'x-origin', b'a\r\nx-added: b')])(None, None, send)
     with pytest.raises(ValueError, match='header value'):
-        StreamingResponse(chunks(), media_type='text/plain\r\nx-added: b')
+        await StreamingResponse(
+            chunks(), media_type='text/plain\r\nx-added: b')(None, None, send)
     with pytest.raises(ValueError, match='header value'):
-        cookie_header('session', 'a\r\nx-added: b')
+        NativeResponse(header=[cookie_header('session', 'a\r\nx-added: b')])
 
 
 def test_response_preserves_legal_field_value_controls_and_duplicates():
@@ -73,62 +84,39 @@ def test_response_preserves_legal_field_value_controls_and_duplicates():
     assert response.headers[1:] == headers
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('event', [
-    NativeResponse(status=200, header=[
-        (b'x-origin', b'a\r\nx-added: b')]),
-    {'type': 'http.response.start', 'status': 200,
-     'headers': [(b'x-origin', b'a\r\nx-added: b')]},
+@pytest.mark.parametrize('field, message', [
+    ((b'x-origin', b'a\r\nx-added: b'), 'header value'),
+    ((b'x-origin\r\nx-added', b'value'), 'header name'),
+    ((b'', b'value'), 'header name'),
 ])
-async def test_h1_rejects_invalid_native_or_asgi_head_before_buffering(event):
-    writer = _Writer()
-    sender = HTTP1Sender(writer)
-
-    with pytest.raises(ValueError, match='header value'):
-        await sender(event)
-
-    assert writer.data == b''
+def test_a_native_response_refuses_a_breaking_field_when_built(field, message):
+    with pytest.raises(ValueError, match=message):
+        NativeResponse(status=200, header=[field])
 
 
-@pytest.mark.asyncio
-async def test_h1_rejects_invalid_native_field_name_before_buffering():
-    writer = _Writer()
-    sender = HTTP1Sender(writer)
-
-    with pytest.raises(ValueError, match='header name'):
-        await sender(NativeResponse(
-            status=200, header=[(b'x-origin\r\nx-added', b'value')]))
-
-    assert writer.data == b''
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize('field, message', [
     ((b'', b'value'), 'header name'),
     ((b'x-extra', b'value', b'third'), 'unpack'),
 ], ids=['empty-name', 'three-items'])
-async def test_h1_rejects_a_malformed_native_field_before_buffering(field, message):
-    writer = _Writer()
-    # Through the setter: the constructor's annotation would refuse the
-    # three-item field under beartype, before the sender is reached.
+def test_assigning_a_malformed_field_is_refused(field, message):
     native = NativeResponse(status=200)
-    native.header = [(b'x-ok', b'value'), field]
-
     with pytest.raises(ValueError, match=message):
-        await HTTP1Sender(writer)(native)
+        native.header = [(b'x-ok', b'value'), field]
 
-    assert writer.data == b''
+
+def test_appending_a_breaking_field_is_refused():
+    native = Response(b'').to_native()
+    with pytest.raises(ValueError, match='header value'):
+        native.header.append(b'x-origin', b'a\r\nx-added: b')
 
 
 @pytest.mark.asyncio
-async def test_h1_final_boundary_rechecks_mutated_response_headers():
-    native = Response(b'').to_native()
-    assert native.header is not None
-    native.header.append(b'x-origin', b'a\r\nx-added: b')
+async def test_h1_rejects_an_invalid_asgi_head_before_buffering():
     writer = _Writer()
 
     with pytest.raises(ValueError, match='header value'):
-        await HTTP1Sender(writer)(native)
+        await HTTP1Sender(writer)({'type': 'http.response.start', 'status': 200,
+                                   'headers': [(b'x-origin', b'a\r\nx-added: b')]})
 
     assert writer.data == b''
 
@@ -156,19 +144,14 @@ async def test_h1_validates_entire_trailer_event_before_writing_any_of_it():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('event', [
-    NativeResponse(status=200, header=[
-        (b'x-origin', b'a\r\nx-added: b')]),
-    {'type': 'http.response.start', 'status': 200,
-     'headers': [(b'x-origin', b'a\r\nx-added: b')]},
-])
-async def test_h2_rejects_invalid_native_or_asgi_head_before_hpack(event):
+async def test_h2_rejects_an_invalid_asgi_head_before_hpack():
     writer = _Writer()
     factory = FrameFactory()
     sender = HTTP2Sender(writer, factory, stream_id=1)
 
     with pytest.raises(ValueError, match='header value'):
-        await sender(event)
+        await sender({'type': 'http.response.start', 'status': 200,
+                      'headers': [(b'x-origin', b'a\r\nx-added: b')]})
 
     assert writer.data == b''
     assert len(factory.encoder.header_table.dynamic_entries) == 0
@@ -235,15 +218,13 @@ async def test_h1_legal_controls_reach_one_field_each():
     assert wire.count(b'set-cookie:') == 2
 
 
-@pytest.mark.parametrize('native', [
-    NativeResponse(status=200, header=[
-        (b'x-origin', b'a\r\nx-added: b')], body=b''),
-    NativeResponse(status=200, header=[], body=b'', trailers=[
-        (b'x-origin', b'a\r\nx-added: b')]),
+@pytest.mark.parametrize('sections', [
+    {'header': [(b'x-origin', b'a\r\nx-added: b')]},
+    {'header': [], 'trailers': [(b'x-origin', b'a\r\nx-added: b')]},
 ])
-def test_external_asgi_conversion_validates_all_sections_before_return(native):
+def test_every_section_is_checked_when_built(sections):
     with pytest.raises(ValueError, match='header value'):
-        native.to_asgi()
+        NativeResponse(status=200, body=b'', **sections)
 
 
 @pytest.mark.asyncio
@@ -274,10 +255,10 @@ async def test_buffered_start_owns_its_header_snapshot(protocol, native):
 @pytest.mark.parametrize('attempt', [1, 2])
 def test_an_invalid_content_type_is_refused_every_time(attempt):
     with pytest.raises(ValueError):
-        Response(b'', content_type='text/plain\r\nx-injected: 1')
+        Response(b'', content_type='text/plain\r\nx-injected: 1').to_native()
 
 
-def test_a_content_type_becomes_its_validated_pair():
+def test_a_content_type_becomes_its_pair():
     assert Response(b'', content_type='text/plain').headers == [
         (b'content-type', b'text/plain')]
 

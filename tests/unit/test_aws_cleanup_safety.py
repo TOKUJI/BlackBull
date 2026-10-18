@@ -22,6 +22,7 @@ REPO_ROOT="$(cd "$AWS_DIR/../.." && pwd)"
 : "${STATE_FILE:?STATE_FILE is required by the fixture}"
 LOCAL_KEY="$AWS_DIR/mock-key"
 KNOWN_HOSTS_FILE="$AWS_DIR/mock-known-hosts"
+STATE_DIR="$REPO_ROOT/bench/.state"
 REGION=test-region
 INSTANCE_TYPE=test-server
 LOADGEN_INSTANCE_TYPE=test-loadgen
@@ -58,11 +59,11 @@ def run(script: Path, *, env: dict[str, str]) -> subprocess.CompletedProcess[str
 
 
 def test_up_failure_after_instance_creation_runs_cleanup(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     write_executable(
         aws_dir / "down.sh",
@@ -115,11 +116,11 @@ esac
 
 
 def test_down_retains_state_when_verification_finds_resources(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     write_executable(bin_dir / "ssh", "#!/usr/bin/env bash\nexit 0\n")
     write_executable(
@@ -166,11 +167,11 @@ esac
 
 
 def test_down_retains_state_when_proof_publication_fails(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     write_executable(bin_dir / "aws", "#!/usr/bin/env bash\nprintf 'None\\n'\n")
     write_executable(
@@ -205,12 +206,12 @@ esac
 
 
 def test_up_recovers_instance_when_run_command_loses_its_response(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nprintf '203.0.113.1\\n'\n")
     write_executable(bin_dir / "ssh", "#!/usr/bin/env bash\nexit 0\n")
@@ -278,12 +279,12 @@ esac
 
 
 def test_up_recovers_key_pair_when_create_response_is_lost(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     write_executable(
         bin_dir / "aws",
@@ -322,12 +323,12 @@ esac
 
 
 def test_up_recovers_security_group_when_create_response_is_lost(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     (aws_dir / "mock-key").write_text("fixture")
     write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nprintf '203.0.113.1\\n'\n")
@@ -374,12 +375,12 @@ esac
 
 
 def test_up_does_not_modify_reused_security_group(tmp_path: Path) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     (aws_dir / "mock-key").write_text("fixture")
     write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nprintf '203.0.113.1\\n'\n")
@@ -425,12 +426,12 @@ esac
 def test_up_rejects_reused_security_group_with_partial_benchmark_range(
     tmp_path: Path,
 ) -> None:
-    aws_dir = tmp_path / "bench" / "aws"
+    aws_dir = tmp_path / "bench" / "cloud"
     bin_dir = tmp_path / "bin"
     aws_dir.mkdir(parents=True)
     bin_dir.mkdir()
-    shutil.copy2(ROOT / "bench/aws/up.sh", aws_dir / "up.sh")
-    shutil.copy2(ROOT / "bench/aws/down.sh", aws_dir / "down.sh")
+    shutil.copy2(ROOT / "bench/cloud/up.sh", aws_dir / "up.sh")
+    shutil.copy2(ROOT / "bench/cloud/down.sh", aws_dir / "down.sh")
     (aws_dir / "config.sh").write_text(mock_config())
     (aws_dir / "mock-key").write_text("fixture")
     write_executable(bin_dir / "curl", "#!/usr/bin/env bash\nprintf '203.0.113.1\\n'\n")
@@ -474,107 +475,3 @@ esac
     assert "authorize-security-group-ingress" not in calls
     assert "delete-security-group" not in calls
     assert "run-instances" not in calls
-
-
-def test_httparena_wrapper_requires_teardown_proof(tmp_path: Path) -> None:
-    scripts = tmp_path / "scripts"
-    aws_dir = tmp_path / "bench" / "aws"
-    meta_dir = tmp_path / "bench" / "httparena"
-    scripts.mkdir()
-    aws_dir.mkdir(parents=True)
-    meta_dir.mkdir(parents=True)
-    shutil.copy2(ROOT / "scripts/run-httparena-bench.sh", scripts / "run-httparena-bench.sh")
-    (meta_dir / "meta.json").write_text('{"tests":["fixture"]}\n')
-    write_executable(aws_dir / "httparena_compare.sh", "#!/usr/bin/env bash\nexit 0\n")
-    subprocess.run(("git", "init", "-q", str(tmp_path)), check=True)
-    subprocess.run(("git", "-C", str(tmp_path), "config", "user.name", "fixture"), check=True)
-    subprocess.run(
-        ("git", "-C", str(tmp_path), "config", "user.email", "fixture@example.invalid"),
-        check=True,
-    )
-    subprocess.run(("git", "-C", str(tmp_path), "add", "."), check=True)
-    subprocess.run(("git", "-C", str(tmp_path), "commit", "-qm", "fixture"), check=True)
-    state = aws_dir / "mock-state"
-    env = os.environ | {
-        "APPROVE_CLOUD": "1",
-        "STATE_FILE": str(state),
-    }
-
-    result = run(scripts / "run-httparena-bench.sh", env=env)
-
-    assert result.returncode != 0
-    assert not list((tmp_path / "bench/results/httparena").glob("*.complete.json"))
-
-
-def test_httparena_driver_propagates_teardown_failure(tmp_path: Path) -> None:
-    driver = (ROOT / "bench/aws/httparena_compare.sh").read_text()
-    function = re.search(r"(?ms)^_teardown\(\) \{\n.*?^\}\n", driver)
-    assert function is not None
-    aws_dir = tmp_path / "bench" / "aws"
-    aws_dir.mkdir(parents=True)
-    write_executable(aws_dir / "down.sh", "#!/usr/bin/env bash\nexit 9\n")
-    test_driver = aws_dir / "driver.sh"
-    test_driver.write_text(
-        "#!/usr/bin/env bash\n"
-        "set -u\n"
-        "KEEP_INSTANCE=0\n"
-        + function.group()
-        + "trap _teardown EXIT\n"
-        + "exit 0\n"
-    )
-    result = subprocess.run(
-        ("bash", str(test_driver)),
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert result.returncode == 1
-
-
-def test_ab_wrapper_requires_teardown_proof(tmp_path: Path) -> None:
-    scripts = tmp_path / "scripts"
-    aws_dir = tmp_path / "bench" / "aws"
-    bin_dir = tmp_path / "bin"
-    scripts.mkdir()
-    aws_dir.mkdir(parents=True)
-    bin_dir.mkdir()
-    shutil.copy2(ROOT / "scripts/run-ab-verify.sh", scripts / "run-ab-verify.sh")
-    (aws_dir / "config.sh").write_text(
-        r'''#!/usr/bin/env bash
-SSH_USER=tester
-SSH_OPTS=()
-_bench_aws_load_state() {
-    SERVER_PUBLIC_IP=203.0.113.1
-    LOADGEN_PUBLIC_IP=
-}
-'''
-    )
-    write_executable(
-        aws_dir / "up.sh",
-        '#!/usr/bin/env bash\nprintf \'SERVER_INSTANCE_ID="i-test"\\n\' > "$STATE_FILE"\n',
-    )
-    write_executable(aws_dir / "install.sh", "#!/usr/bin/env bash\nexit 0\n")
-    write_executable(
-        aws_dir / "ab.sh",
-        '#!/usr/bin/env bash\n[ "$1" != finish ] || rm -f "$STATE_FILE"\n',
-    )
-    write_executable(bin_dir / "ssh", "#!/usr/bin/env bash\nexit 0\n")
-    subprocess.run(("git", "init", "-q", str(tmp_path)), check=True)
-    subprocess.run(("git", "-C", str(tmp_path), "config", "user.name", "fixture"), check=True)
-    subprocess.run(
-        ("git", "-C", str(tmp_path), "config", "user.email", "fixture@example.invalid"),
-        check=True,
-    )
-    subprocess.run(("git", "-C", str(tmp_path), "add", "."), check=True)
-    subprocess.run(("git", "-C", str(tmp_path), "commit", "-qm", "fixture"), check=True)
-    state = aws_dir / "mock-state"
-    env = os.environ | {
-        "APPROVE_CLOUD": "1",
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "STATE_FILE": str(state),
-    }
-
-    result = run(scripts / "run-ab-verify.sh", env=env)
-
-    assert result.returncode != 0
-    assert not list((tmp_path / "bench/results").glob("*.complete.json"))

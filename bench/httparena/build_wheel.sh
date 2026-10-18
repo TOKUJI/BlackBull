@@ -2,7 +2,7 @@
 # bench/httparena/build_wheel.sh — build a BlackBull wheel from a git ref for
 # the HttpArena local-validation / EC2 workflow.
 #
-# Same discipline as the EC2 path (bench/aws/httparena_compare.sh): the wheel
+# Same discipline as the EC2 path (bench/cloud/jobs/httparena.sh): the wheel
 # is built from `git archive <ref>` — a clean tree of exactly that commit —
 # never from the working copy.  The wheel's sha256 is written alongside it so
 # the identity discipline holds end-to-end: WSL2 validates wheel W, EC2 uploads
@@ -11,8 +11,8 @@
 # Usage:
 #   bash bench/httparena/build_wheel.sh [REF] [OUTDIR]
 #     REF     git ref to build (default: HEAD)
-#     OUTDIR  destination for dist/ + <wheel>.sha256 (default:
-#             /tmp/bb-wheels/<short-ref>)
+#     OUTDIR  destination for the wheel + <wheel>.sha256 (default: wheel/ in
+#             the run directory, see bench/lib/results.sh)
 #
 # Env:
 #   PYTHON   python interpreter with the `build` package (default: python3)
@@ -26,7 +26,11 @@ PYTHON="${PYTHON:-python3}"
 
 cd "$REPO_ROOT"
 SHORT_REF="$(git rev-parse --short "${REF}")"
-OUTDIR="${2:-/tmp/bb-wheels/${SHORT_REF}}"
+if [ -z "${2:-}" ]; then
+    source bench/lib/results.sh
+    bench_run_dir build_wheel ref="$SHORT_REF" >&2
+fi
+OUTDIR="${2:-$BENCH_RUN_DIR/wheel}"
 
 # git archive only overwrites, never deletes — stale files from a previous
 # build would contaminate the wheel.  rm -rf is the whole point.

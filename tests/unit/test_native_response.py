@@ -199,7 +199,7 @@ class TestToASGI:
         events[-1]['headers'].append((b't2', b'v2'))
         # live object untouched
         assert list(r.header) == [(b'a', b'1')]
-        assert r.trailers == [(b't', b'v')]
+        assert list(r.trailers) == [(b't', b'v')]
         # a second conversion is unaffected by the first's mutation
         again = r.to_asgi()
         assert again[0]['headers'] == [(b'a', b'1')]

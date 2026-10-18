@@ -21,7 +21,7 @@ from urllib.parse import parse_qsl
 import uuid as _uuid
 import warnings
 from .di import Depends, _resolve_depends
-from .connection import stashed_connection
+from .connection import refuse_scope, stashed_connection
 from .response import (
     Response as _Response, JSONResponse as _JSONResponse,
     StreamingResponse as _StreamingResponse,
@@ -39,7 +39,7 @@ def __getattr__(name):
 
 import logging
 
-from .protocol.field_grammar import method_token_is_valid
+from .protocol.field_grammar import FieldError, media_type, method_token_is_valid
 logger = logging.getLogger(__name__)
 
 
@@ -815,6 +815,18 @@ def _conn_of(target, receive):
     return conn
 
 
+def _with_path_params(fn, params: dict):
+    """Wrap route *fn* to record *params* before it runs."""
+    async def _inject(conn, receive, send):
+        try:
+            _set_path_params(conn, receive, params)
+        except FieldError:
+            return await refuse_scope(conn, send)
+        return await fn(conn, receive, send)
+    _copy_route_hooks(_inject, fn)
+    return _inject
+
+
 def _set_path_params(target, receive, params: dict) -> None:
     """Record matched URL path params on the request's [`Connection`][],
     where the handler reads them back as ``conn.path_params``.
@@ -1051,7 +1063,10 @@ def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tup
 
     @wraps(fn)
     async def _extended_wrapper(conn, receive, send):
-        conn = _conn_of(conn, receive)
+        try:
+            conn = _conn_of(conn, receive)
+        except FieldError:
+            return await refuse_scope(conn, send)
         kwargs: dict = {}
         if has_query:
             raw_qs = conn.query_string or b''
@@ -1145,7 +1160,10 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
 
     @wraps(fn)
     async def _wrapper(conn, receive, send):
-        conn = _conn_of(conn, receive)
+        try:
+            conn = _conn_of(conn, receive)
+        except FieldError:
+            return await refuse_scope(conn, send)
         kwargs: dict = {}
         for name in params:
             ann = annotations.get(name, inspect.Parameter.empty)
@@ -1298,10 +1316,7 @@ def request_media_type(conn) -> str:
     """Return the request's media type (``Content-Type`` sans parameters),
     lowercased; ``''`` when no Content-Type is present.
     """
-    ct = conn.headers.get(b'content-type', b'')
-    if not ct:
-        return ''
-    return ct.split(b';', 1)[0].strip().lower().decode('latin-1')
+    return media_type(conn.headers.get(b'content-type', b'')).decode('latin-1')
 
 
 class _LookupCache:
@@ -1488,15 +1503,7 @@ class Router:
 
         h, params, trie_allowed = self._trie.lookup(key_path, key_method, key_scheme)
         if h is not None:
-            if params:
-                _fn, _params = h, params
-                async def _inject(conn, receive, send,
-                                  _fn=_fn, _params=_params):
-                    _set_path_params(conn, receive, _params)
-                    return await _fn(conn, receive, send)
-                _copy_route_hooks(_inject, _fn)
-                return _inject
-            return h
+            return _with_path_params(h, params) if params else h
 
         # With no re.Pattern routes registered — the common case — a trie miss
         # is the whole answer and raises here.
@@ -1516,13 +1523,7 @@ class Router:
             if self._method_matches(key_method, ms):
                 logger.debug("raw-regex hit: pattern=%r fn=%r", pattern, fn)
                 if gdict := m.groupdict():
-                    _fn, _params = fn, gdict
-                    async def _inject(conn, receive, send,
-                                      _fn=_fn, _params=_params):
-                        _set_path_params(conn, receive, _params)
-                        return await _fn(conn, receive, send)
-                    _copy_route_hooks(_inject, _fn)
-                    return _inject
+                    return _with_path_params(fn, gdict)
                 return fn
 
         logger.debug("No match: key=%r allowed=%r", key, allowed_methods)

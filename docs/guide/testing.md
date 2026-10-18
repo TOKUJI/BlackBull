@@ -320,10 +320,15 @@ with TestClient(app, headers={'X-Test-Tag': 'integration'}) as client:
 ### WebSocket sessions
 
 `client.websocket_connect(path)` returns a synchronous
-context-managed session.  The session lives inside its own
-background event loop, so all of `send_text` / `send_bytes` /
-`send_json` and the matching receive methods are blocking
-synchronous calls:
+context-managed session inside an active `TestClient` context. Lifespan,
+HTTP requests and WebSocket sessions share the client’s background event loop.
+All send and receive methods block the calling thread.
+
+Closing a session leaves other sessions and the client usable. Exiting the
+client closes its sessions before lifespan shutdown. Sessions cannot be
+re-entered; create a new session for each connection. A standalone
+`WebSocketTestSession(app, path)` owns and closes its own loop.
+Failed handshakes also reclaim the application task and any owned loop.
 
 ```python
 from blackbull.router import Scheme

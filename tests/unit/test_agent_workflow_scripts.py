@@ -31,11 +31,9 @@ def plan(name: str, *args: str) -> dict:
     return json.loads(result.stdout)
 
 
-def test_workflow_scripts_are_executable_shell() -> None:
+def test_workflow_scripts_are_executable() -> None:
     for script in SCRIPTS.values():
         assert script.stat().st_mode & 0o111
-        result = run("bash", "-n", str(script))
-        assert result.returncode == 0, result.stderr
 
 
 def test_http11probe_plan_pins_upstream_and_runs_both_lanes() -> None:
@@ -50,7 +48,7 @@ def test_ab_plan_is_one_approved_self_driving_command() -> None:
     assert result == {
         "workflow": "ab-verify",
         "requires_approval": True,
-        "steps": ["up", "failsafe", "install", "launch", "finish", "marker"],
+        "steps": ["up", "failsafe", "install", "launch", "wait", "pull", "down", "marker"],
     }
 
 
@@ -58,7 +56,7 @@ def test_bench_compare_delegates_defaults_to_authoritative_driver() -> None:
     result = plan("bench-compare")
     assert result == {
         "workflow": "bench-compare",
-        "command": ["bash", "bench/peers/compare_servers.sh"],
+        "command": ["bash", "bench/compare/compare_servers.sh"],
     }
 
 

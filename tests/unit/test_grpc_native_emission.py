@@ -17,12 +17,12 @@ from blackbull.grpc.codec import decode_messages, encode_message
 from blackbull.grpc.registry import GrpcServiceRegistry
 from blackbull.grpc.status import GrpcError, GrpcStatus
 from blackbull.native import NativeResponse
+from blackbull.connection import Connection
 
 
 def _scope(path):
     return {'type': 'http', 'path': path,
-            'headers': [(b'content-type', b'application/grpc'),
-                        (b':method', b'POST')]}
+            'headers': [(b'content-type', b'application/grpc')]}
 
 
 def _receive_with(body: bytes):
@@ -56,7 +56,7 @@ def _as_wire(seen):
 
 async def _drive(reg, path, body=b''):
     seen, send = _seam_collector()
-    await serve_grpc(reg, _scope(path), _receive_with(body), send)
+    await serve_grpc(reg, Connection.from_scope(_scope(path)), _receive_with(body), send)
     return seen
 
 

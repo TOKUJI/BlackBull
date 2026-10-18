@@ -48,7 +48,11 @@ for command in git dotnet jq curl uv; do
 done
 
 cd "$ROOT"
-work="$(mktemp -d "${TMPDIR:-/tmp}/blackbull-http11probe.XXXXXX")"
+source bench/lib/results.sh
+bench_run_dir http11probe lane="$lane" upstream_commit="$UPSTREAM_COMMIT"
+result_dir="$BENCH_RUN_DIR"
+work="$BENCH_TMP/work"
+mkdir "$work"
 server_pid=""
 cleanup() {
     if [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; then
@@ -72,9 +76,6 @@ resolved="$(git -C "$probe" rev-parse FETCH_HEAD)"
 git -C "$probe" switch --quiet --detach "$UPSTREAM_COMMIT"
 dotnet build "$probe/src/Http11Probe.Cli" --configuration Release --nologo
 
-run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-result_dir="${HTTP11PROBE_RESULT_DIR:-$ROOT/bench/results/http11probe/$run_id}"
-mkdir -p "$result_dir"
 lane_records="$work/lanes.jsonl"
 : > "$lane_records"
 overall=0
@@ -138,11 +139,11 @@ case "$lane" in
         ;;
 esac
 
-manifest_tmp="$(mktemp "$result_dir/.manifest.XXXXXX")"
+complete_tmp="$BENCH_TMP/complete.json"
 jq -s \
     --arg commit "$UPSTREAM_COMMIT" \
     '{workflow:"http11probe",upstream_commit:$commit,lanes:.,complete:all(.[];.exit_code == 0)}' \
-    "$lane_records" > "$manifest_tmp"
-mv "$manifest_tmp" "$result_dir/manifest.json"
-echo "$result_dir/manifest.json"
+    "$lane_records" > "$complete_tmp"
+mv "$complete_tmp" "$result_dir/complete.json"
+echo "$result_dir/complete.json"
 exit "$overall"

@@ -33,6 +33,7 @@ from blackbull.router import HTTPException
 from blackbull.server.recipient import (
     AbstractReader, HTTP1Recipient, HTTP2Recipient,
 )
+from blackbull.server.http1_actor import request_framing
 
 pytestmark = pytest.mark.asyncio
 
@@ -115,7 +116,7 @@ def _conn(body_len: int) -> Connection:
 def _recipient(src, *, rate=240.0, grace=5.0, body=1_000_000) -> HTTP1Recipient:
     return HTTP1Recipient(src, _conn(body), chunk_size=64 * 1024,
                           chunk_max=64 * 1024, max_body=0,
-                          min_rate=rate, min_rate_grace=grace)
+                          min_rate=rate, min_rate_grace=grace, framing=request_framing(_conn(body).headers))
 
 
 class TestHTTP1TheRateIsJudgedOnWaitingTime:
@@ -312,7 +313,7 @@ class TestTheTwoProtocolsAgreeOnTheStatus:
                 return b'x' * n
 
         r = HTTP1Recipient(_Big(), _conn(10_000), chunk_size=64 * 1024,
-                           chunk_max=4096, max_body=1024, min_rate=0.0)
+                           chunk_max=4096, max_body=1024, min_rate=0.0, framing=request_framing(_conn(10_000).headers))
         with pytest.raises(HTTPException) as exc:
             await r.next_chunk()
         assert exc.value.status == HTTPStatus.REQUEST_ENTITY_TOO_LARGE

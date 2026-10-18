@@ -134,6 +134,36 @@ class FrameFormatError(ValueError):
         self.error_code = error_code
 
 
+def peer_max_frame_size(settings) -> int | None:
+    size = None
+    for identifier, value in settings:
+        if identifier == 5:
+            if not DEFAULT_MAX_FRAME_SIZE <= value <= MAX_FRAME_SIZE:
+                raise FrameFormatError(
+                    f'SETTINGS_MAX_FRAME_SIZE out of range: {value}',
+                    ErrorCodes.PROTOCOL_ERROR)
+            size = value
+    return size
+
+
+def serialize_field_block(payload: bytes, frame_type: bytes, flags: int,
+                          stream_id: int, max_frame_size: int) -> bytes:
+    """Serialize one complete field block for an uninterrupted writer handoff."""
+    sid = stream_id.to_bytes(4, 'big')
+    if len(payload) <= max_frame_size:
+        return (len(payload).to_bytes(3, 'big') + frame_type
+                + flags.to_bytes(1, 'big') + sid + payload)
+    parts = []
+    for offset in range(0, len(payload), max_frame_size):
+        chunk = payload[offset:offset + max_frame_size]
+        last = offset + len(chunk) == len(payload)
+        fragment_flags = (flags & ~4) if offset == 0 else (4 if last else 0)
+        parts.append(len(chunk).to_bytes(3, 'big')
+                     + (frame_type if offset == 0 else b'\x09')
+                     + fragment_flags.to_bytes(1, 'big') + sid + chunk)
+    return b''.join(parts)
+
+
 class FrameBase:
     """Common frame header and the subclass registry (RFC 9113 §4.1).
 
@@ -464,10 +494,10 @@ class Headers(FrameBase):
             # payload length (otherwise pad would cover the pad-length octet
             # itself and there'd be no room for the header block).
             pad_length = int.from_bytes(payload.read(1), 'big', signed=False)
-            if pad_length >= self.length:
-                self._mark_malformed(
-                    f'HEADERS pad_length ({pad_length}) >= frame length ({self.length})')
-                return
+            if pad_length >= self.length:  # a connection error, not a stream one
+                raise FrameFormatError(
+                    f'HEADERS pad_length ({pad_length}) >= frame length ({self.length})',
+                    ErrorCodes.PROTOCOL_ERROR)
             remaining -= 1 + pad_length
 
         if self.priority:
@@ -559,30 +589,23 @@ class Headers(FrameBase):
             logger.debug('Headers stream_id=%d malformed: %s', self.stream_id, reason)
 
     @log
-    def save(self):
+    def save(self, *, max_frame_size: int | None = None):
         if self.encoder is None:
             raise no_hpack_context(self, 'encoder')
         encoder = self.encoder
-        # Pseudo-headers MUST come before regular headers (RFC 7540 §8.1.2.1)
-        # Fast-path :status when its value is one of the
-        # static-table entries (RFC 7541 App A indices 8-14).  The encoder
-        # would emit the same single byte, but at the cost of dict lookups
-        # and a generator iteration we can sidestep.  Static-indexed fields
-        # don't touch the dynamic table (RFC 7541 §6.1), so removing :status
-        # from the encoder's input is wire-equivalent.
-        fast_bytes = b''
         pseudo_items = self.pseudo_headers.items()
         status = self.pseudo_headers.get(PseudoHeaders.STATUS)
         if status is not None:
-            wire = hpack_fastpath.status_fast_bytes(status)
-            if wire is not None:
-                fast_bytes = wire
-                pseudo_items = (
-                    (k, v) for k, v in self.pseudo_headers.items()
-                    if k is not PseudoHeaders.STATUS
-                )
-        payload = fast_bytes + encoder.encode(chain(pseudo_items, self.headers))
+            pseudo_items = ((k, v) for k, v in pseudo_items if k is not PseudoHeaders.STATUS)
+            payload = hpack_fastpath.encode_status(
+                encoder, status, chain(pseudo_items, self.headers))
+        else:
+            payload = encoder.encode(chain(pseudo_items, self.headers))
         self.length = len(payload)
+
+        if max_frame_size is not None:
+            return serialize_field_block(payload, b'\x01', self.flags,
+                                         self.stream_id, max_frame_size)
 
         base = super().save()
         # Guarded: fires on every HEADERS write; the unguarded form also
@@ -622,7 +645,7 @@ class PushPromise(FrameBase):
                  *, data: bytes = b'', decoder=None, encoder=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
         self.pseudo_headers: dict[PseudoHeaders, str] = {}
-        self.headers: list[tuple[str, str]] = []
+        self.headers: list[tuple[bytes, bytes]] = []
         self.encoder = encoder
         self.decoder = decoder
         self.end_headers = HeaderFrameFlags.END_HEADERS & self.flags
@@ -663,7 +686,7 @@ class PushPromise(FrameBase):
             block = bytes(block) + bytes(continued)
         self.decoder.decode(block, raw=True)
 
-    def save(self) -> bytes:
+    def save(self, *, max_frame_size: int | None = None) -> bytes:
         if self.encoder is None:
             raise no_hpack_context(self, 'encoder')
         encoder = self.encoder
@@ -679,10 +702,14 @@ class PushPromise(FrameBase):
                 fast_bytes += wire
             else:
                 remaining_pseudo.append((k, v))
-        block = fast_bytes + encoder.encode(remaining_pseudo + self.headers)
+        block = hpack_fastpath.encode_with_prefix(
+            encoder, fast_bytes, remaining_pseudo + self.headers)
         payload = (self.promised_stream_id & 0x7FFFFFFF).to_bytes(4, 'big') + block
         self.length = len(payload)
         self.flags = HeaderFrameFlags.END_HEADERS
+        if max_frame_size is not None:
+            return serialize_field_block(payload, b'\x05', int(self.flags),
+                                         self.stream_id, max_frame_size)
         return super().save() + payload
 
 

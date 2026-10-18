@@ -17,7 +17,8 @@ from .event import Event, EventDispatcher, EventHandler
 from .utils import Scheme, is_client_error, is_server_error
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
 from .request import ClientDisconnected
-from .connection import Connection, disconnected, CONNECTION_STASH_KEY
+from .connection import Connection, disconnected, refuse_scope, CONNECTION_STASH_KEY
+from .protocol.field_grammar import FieldError, media_type
 from .native import NativeResponse
 from .response import wrap_native_send
 from .asgi import ASGIReceiveCallable, ASGISendCallable
@@ -73,9 +74,10 @@ def _inject_response_headers(raw_send, extra_headers):
 
 
 def _wants_html(conn) -> bool:
-    """True when the request's Accept header indicates an HTML preference."""
-    accept = conn.headers.get(b'accept', b'').lower()
-    return b'text/html' in accept or b'application/xhtml' in accept
+    """True when the request's Accept lists an HTML media range."""
+    accept = conn.headers.get_combined(b'accept') or b''
+    return any(media_type(r) in (b'text/html', b'application/xhtml+xml')
+               for r in accept.split(b','))
 
 
 def _render_error_html(status, exc, tb_text: str | None, conn) -> bytes:
@@ -494,15 +496,36 @@ class BlackBull:
             }))
         await self._dispatch_http(conn, receive, send, scheme)
 
+    def _handler_event(self, name, conn, handler, exception=None):
+        detail = {
+            'conn': conn,
+            'client_ip': conn.client[0] if conn.client else '',
+            'method': conn.method,
+            'path': conn.path,
+            'handler': handler.__name__,
+        }
+        if name == 'after_handler':
+            detail['exception'] = exception
+        return Event(name, detail=detail)
+
     async def _dispatch_http(self, conn, receive: ASGIReceiveCallable | None,
                              send: ASGISendCallable, scheme):
         """Route and run one HTTP request (the non-WebSocket half of _dispatch)."""
         # gRPC rides the HTTP/2 path; see enable_grpc.
         if self._grpc_registry is not None and scheme == Scheme.http:
-            content_type = conn.headers.get(b'content-type', b'')
-            if content_type.strip().startswith(b'application/grpc'):
-                from .grpc import serve_grpc  # noqa: PLC0415 — optional subpackage
-                await serve_grpc(self._grpc_registry, conn, receive, send)
+            is_grpc, serve_grpc = self._grpc_dispatch
+            if is_grpc(conn.headers.get(b'content-type', b'')):
+                exc_caught = None
+                try:
+                    if self._dispatcher.has_listeners('before_handler'):
+                        await self._dispatcher.emit(self._handler_event('before_handler', conn, serve_grpc))
+                    await serve_grpc(self._grpc_registry, conn, receive, send)
+                except BaseException as exc:
+                    exc_caught = exc
+                    raise
+                finally:
+                    if self._dispatcher.has_listeners('after_handler'):
+                        await self._dispatcher.emit(self._handler_event('after_handler', conn, serve_grpc, exc_caught))
                 return
 
         # ``raw_send`` is retained so a route with declared response headers can
@@ -570,13 +593,7 @@ class BlackBull:
         exc_caught: Exception | None = None
         try:
             if self._dispatcher.has_listeners('before_handler'):
-                await self._dispatcher.emit(Event('before_handler', detail={
-                    'conn':     conn,
-                    'client_ip': conn.client[0] if conn.client else '',
-                    'method':    conn.method,
-                    'path':      conn.path,
-                    'handler':   function.__name__,
-                }))
+                await self._dispatcher.emit(self._handler_event('before_handler', conn, function))
             await function(conn, receive, send)
         except (ClientDisconnected, ConnectionResetError) as e:
             # Peer disconnect during body reads is an ordinary close, not a handler failure.
@@ -596,14 +613,7 @@ class BlackBull:
             self._logger.error(traceback.format_exc())
         finally:
             if self._dispatcher.has_listeners('after_handler'):
-                await self._dispatcher.emit(Event('after_handler', detail={
-                    'conn':     conn,
-                    'client_ip': conn.client[0] if conn.client else '',
-                    'method':    conn.method,
-                    'path':      conn.path,
-                    'handler':   function.__name__,
-                    'exception': exc_caught,
-                }))
+                await self._dispatcher.emit(self._handler_event('after_handler', conn, function, exc_caught))
 
         if exc_caught is not None and not isinstance(exc_caught, ClientDisconnected):
             err_status = (exc_caught.status if isinstance(exc_caught, HTTPException)
@@ -660,20 +670,19 @@ class BlackBull:
         elif conn.get('type') == 'lifespan':
             await self._handle_lifespan(receive, send)
             return
-        elif conn.get('type') == 'websocket':
-            # The WS extras are derived (``conn.subprotocols`` reads the request
-            # header) or actor-set (``conn._ws``), so none of them needs the
-            # scope dict past this point.
-            request = conn.get(CONNECTION_STASH_KEY)
-            if request is None:
-                request = Connection.from_scope(conn, receive)
         else:
             # Reuse the stashed native Connection on compatibility scopes.
             # Do not rebind _receive to the disconnect wrapper: it captures conn and
-            # would create a per-request reference cycle.
+            # would create a per-request reference cycle.  No WebSocket extra
+            # needs the scope dict past this point: each is derived from a
+            # request header or set by the actor.
             request = conn.get(CONNECTION_STASH_KEY)
             if request is None:
-                request = Connection.from_scope(conn, receive)
+                try:
+                    request = Connection.from_scope(conn, receive)
+                except FieldError:
+                    await refuse_scope(conn, send)
+                    return
 
         if self._chain is None:
             self._build_chain()
@@ -869,6 +878,9 @@ class BlackBull:
         Handlers exchange raw message bytes without a protobuf dependency. Use
         TLS+ALPN or h2c; status is sent in trailers. HTTP routes remain available.
         """
+        # Imported here, once: dispatch must not pay for it per request.
+        from .grpc.asgi import _is_grpc_content_type, serve_grpc  # noqa: PLC0415 — optional subpackage
+        self._grpc_dispatch = (_is_grpc_content_type, serve_grpc)
         self._grpc_registry = registry
 
     def enable_openapi(self, *,

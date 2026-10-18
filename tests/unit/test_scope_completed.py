@@ -176,7 +176,7 @@ async def test_fires_for_grpc_call() -> None:
 
     scope = {
         'type': 'http', 'path': '/echo.Echo/Echo', 'method': 'POST',
-        'headers': [(b'content-type', b'application/grpc'), (b':method', b'POST')],
+        'headers': [(b'content-type', b'application/grpc')],
         'client': ('127.0.0.1', 9),
     }
     sent = [False]

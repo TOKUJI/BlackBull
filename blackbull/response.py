@@ -6,17 +6,18 @@ import logging
 from collections.abc import AsyncIterator, Mapping
 from http import HTTPStatus
 
-from .headers import _validate_response_header_field
+from .headers import _as_response_fields
 from .native import NativeResponse, _native_from_asgi
 
 logger = logging.getLogger(__name__)
 
 
 def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
-    """Normalize a Mapping or pair iterable to validated bytes header pairs.
+    """Return a Mapping or pair iterable as ``(bytes, bytes)`` pairs, in order.
 
-    str names/values must encode as ASCII; non-ASCII raises UnicodeEncodeError.
-    Invalid shapes or value types raise TypeError at construction.
+    str names/values must encode as ASCII (else UnicodeEncodeError); a bad
+    shape raises TypeError.  The field grammar is checked when a
+    NativeResponse is built from the pairs, not here.
     """
     if not headers:
         return []
@@ -42,33 +43,39 @@ def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
             raise TypeError(
                 'header name and value must be str or bytes; got '
                 f'({type(k).__name__}, {type(v).__name__})')
-        normalized = (bytes(k), bytes(v))
-        _validate_response_header_field(*normalized)
-        out.append(normalized)
+        out.append((bytes(k), bytes(v)))
     return out
 
 
-#: Validated ``content-type`` pairs by the ``str`` they came from; bounded,
-#: since a content type is almost always a constant of the application.
-_CONTENT_TYPE_PAIRS: dict[str, tuple[bytes, bytes]] = {}
+#: ``content-type`` pairs by the ``str`` they came from, each with its field
+#: list already checked (``None`` when the value breaks the field grammar, so
+#: the conversion refuses it); bounded, since a content type is almost always
+#: a constant of the application.
+_CONTENT_TYPE_PAIRS: dict[str, tuple] = {}
 _CONTENT_TYPE_PAIRS_MAX = 64
 
 
-def _content_type_pair(content_type) -> tuple[bytes, bytes]:
-    pair = _CONTENT_TYPE_PAIRS.get(content_type) if type(content_type) is str else None
-    if pair is None:
+def _content_type_pair(content_type) -> tuple:
+    """Return ``(pair, checked)``: the ``content-type`` pair for
+    *content_type* and, when it keeps the response-field contract, that pair
+    as a checked field list to copy instead of checking it again."""
+    entry = _CONTENT_TYPE_PAIRS.get(content_type) if type(content_type) is str else None
+    if entry is None:
         [pair] = _normalize_headers([(b'content-type', content_type)])
+        try:
+            checked = _as_response_fields([pair])
+        except (TypeError, ValueError):
+            checked = None
+        entry = (pair, checked)
         if type(content_type) is str and len(_CONTENT_TYPE_PAIRS) < _CONTENT_TYPE_PAIRS_MAX:
-            _CONTENT_TYPE_PAIRS[content_type] = pair
-    return pair
+            _CONTENT_TYPE_PAIRS[content_type] = entry
+    return entry
 
 
 async def _emit_response(send, body: bytes, status, headers) -> None:
-    """Send one complete NativeResponse with normalized integer status.
-
-    Copy headers defensively; callers may supply an iterable of bytes pairs.
-    """
-    await send(NativeResponse.complete(int(status), list(headers), body))
+    """Send one complete NativeResponse with an integer status; *headers* is
+    any iterable of pairs, copied and checked as the NativeResponse is built."""
+    await send(NativeResponse.complete(int(status), headers, body))
 
 
 class Response:
@@ -76,6 +83,9 @@ class Response:
 
     An arbitrary ASGI host's raw send does not accept Response objects.
     """
+
+    #: ``(pair, checked)`` for the leading content-type, from _content_type_pair.
+    _checked = (None, None)
 
     def __init__(self, content: str | bytes,
                  status: HTTPStatus = HTTPStatus.OK,
@@ -91,7 +101,8 @@ class Response:
         # A dict or a list of (name, value) pairs; str or bytes names/values.
         # See _normalize_headers for the accepted shapes and the ASCII /
         # RFC 9110 §5.5 coercion rules.
-        self.headers = [_content_type_pair(content_type)]
+        self._checked = _content_type_pair(content_type)
+        self.headers = [self._checked[0]]
         if headers:
             self.headers.extend(_normalize_headers(headers))
 
@@ -111,8 +122,17 @@ class Response:
         [`NativeResponse.to_asgi`][NativeResponse.to_asgi] (the boundary conversion); streaming
         response types drive themselves and are not converted here.
         """
-        return NativeResponse.complete(int(self.status), list(self.headers),
-                                       self.body)
+        headers = self.headers
+        pair, checked = self._checked
+        # Reuse the checked content-type only while it is still the leading
+        # field; whatever the application added after it is checked here.
+        if checked is not None and headers and headers[0] is pair:
+            fields = checked.copy()
+            if len(headers) > 1:
+                fields.extend(headers[1:])
+        else:
+            fields = headers
+        return NativeResponse.complete(int(self.status), fields, self.body)
 
 
 class JSONResponse(Response):
@@ -140,12 +160,11 @@ class RedirectResponse(Response):
 
 def cookie_header(name: str, value: str, path: str = '/',
                   http_only: bool = True) -> tuple[bytes, bytes]:
-    """Build a ``set-cookie`` header tuple suitable for inclusion in response headers."""
+    """Build a ``set-cookie`` header tuple for response headers; checked, like
+    any field, when the NativeResponse carrying it is built."""
     flags = '; HttpOnly' if http_only else ''
-    field = (b'set-cookie',
-             f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
-    _validate_response_header_field(*field)
-    return field
+    return (b'set-cookie',
+            f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
 
 
 class StreamingResponse:

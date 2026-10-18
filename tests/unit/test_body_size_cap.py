@@ -21,6 +21,7 @@ from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.router import HTTPException
 from blackbull.server.recipient import AbstractReader, HTTP1Recipient
+from blackbull.server.http1_actor import request_framing
 
 pytestmark = pytest.mark.asyncio
 
@@ -53,7 +54,7 @@ def _chunked_recipient(payloads: list[bytes], cap: int) -> HTTP1Recipient:
     return HTTP1Recipient(
         _BufReader(_chunked(payloads)),
         _conn([(b'transfer-encoding', b'chunked')]),
-        chunk_size=64 * 1024, max_body=cap)
+        chunk_size=64 * 1024, max_body=cap, framing=request_framing(_conn([(b'transfer-encoding', b'chunked')]).headers))
 
 
 def _declared_recipient(body: bytes, cap: int, *,
@@ -62,7 +63,7 @@ def _declared_recipient(body: bytes, cap: int, *,
     return HTTP1Recipient(
         _BufReader(body),
         _conn([(b'content-length', str(n).encode())]),
-        chunk_size=64 * 1024, chunk_max=64 * 1024, max_body=cap)
+        chunk_size=64 * 1024, chunk_max=64 * 1024, max_body=cap, framing=request_framing(_conn([(b'content-length', str(n).encode())]).headers))
 
 
 async def _drain(recipient: HTTP1Recipient) -> bytes:
@@ -155,7 +156,7 @@ class TestARefusedBodyEndsTheConnection:
         r = _chunked_recipient([b'a' * 700, b'b' * 700], cap=1024)
         with pytest.raises(HTTPException):
             await _drain(r)
-        r.bind(_conn([(b'content-length', b'4')]))
+        r.bind(_conn([(b'content-length', b'4')]), framing=request_framing(_conn([(b'content-length', b'4')]).headers))
         assert r.must_close is False
         # And the consequence that follows from it: the rebound recipient is
         # willing to read a body again, where the refused one was not.
