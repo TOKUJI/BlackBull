@@ -3048,9 +3048,9 @@ def render_markdown(lanes: Sequence[Lane], *,
                     f'in {sum(r.elapsed_s for r in lane.results):.1f}s'
                     for lane in lanes)
         + (f' (not in this tier: {", ".join(excluded)})' if excluded else ''),
-        '- Verdicts: PASS = mechanical oracle held; FAIL = oracle violated; '
-        'TIMEOUT = no answer within the bound; SKIP = not exercised by this '
-        'client (never counted as a pass).',
+        ('- Verdicts: PASS = mechanical oracle held; FAIL = oracle violated; '
+         + 'TIMEOUT = no answer within the bound; SKIP = not exercised by this '
+         + 'client (never counted as a pass).'),
         '- Canary (G2-2): GET / after every check on its own capped budget; '
         'recorded per row, and a canary failure marks the preceding check '
         'FAIL (High).',
@@ -3058,8 +3058,8 @@ def render_markdown(lanes: Sequence[Lane], *,
         'HWM/thread/CPU samples per check; residual fd/ESTABLISHED/CLOSE_WAIT '
         'after the settle wait marks the row FAIL (High); memory and CPU are '
         'recorded, never thresholds.',
-        '- Severity is the rank a failure of that check carries '
-        '(docs/security/severity.md). Recording of findings: docs/security/probe.md.',
+        ('- Severity is the rank a failure of that check carries '
+         + '(docs/security/severity.md). Recording of findings: docs/security/probe.md.'),
         '',
     ]
     for lane in lanes:
