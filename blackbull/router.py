@@ -1124,7 +1124,7 @@ def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tup
         if not depends_plan:
             result = (await fn(**kwargs)) if is_async else fn(**kwargs)
             await _finish_result(result, conn, receive, send, converters, fn_name)
-            return
+            return None
 
         async with AsyncExitStack() as stack:
             cache: dict = {}
@@ -1134,6 +1134,7 @@ def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tup
             # Send inside the stack's scope so provider teardown runs after
             # the client has the response (LIFO on the stack).
             await _finish_result(result, conn, receive, send, converters, fn_name)
+        return None
 
     return _extended_wrapper
 
@@ -1198,10 +1199,10 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
         result = (await fn(**kwargs)) if is_async else fn(**kwargs)
 
         if await _send_native(result, conn, receive, send):
-            return
+            return None
         if converters and (conv := _lookup_mro(converters, type(result))) is not None:
             await _send_converted(conv(result), conn, receive, send)
-            return
+            return None
         raise TypeError(
             f"Simplified handler {fn.__name__!r} returned unsupported type "
             f"{type(result).__name__!r}.  Return a Response, str, bytes, "
