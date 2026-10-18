@@ -12,6 +12,50 @@ from hpack import Encoder
 
 from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
 from blackbull.server.recipient import AbstractReader, IncompleteReadError
+from tests.harness import read_h2_frame
+
+
+def h2_section(block, *, sid=1, split=False, end_stream=True, self_dependent=False):
+    flags = int(end_stream) | (0x20 if self_dependent else 0)
+    prefix = sid.to_bytes(4, 'big') + b'\x00' if self_dependent else b''
+    if not split:
+        return _make_h2_frame(FrameTypes.HEADERS, flags | 4, sid, prefix + block)
+    cut = len(block) // 2
+    return (_make_h2_frame(FrameTypes.HEADERS, flags, sid, prefix + block[:cut])
+            + _make_h2_frame(FrameTypes.CONTINUATION, 4, sid, block[cut:]))
+
+
+async def h2_connect(server):
+    wire = await server.wire()
+    await wire.send(b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
+                    + _make_h2_frame(FrameTypes.SETTINGS))
+    while True:
+        kind, flags, _, _ = await read_h2_frame(wire.reader)
+        if kind == 4:
+            if flags & 1:
+                return wire
+            await wire.send(_make_h2_frame(FrameTypes.SETTINGS, 1))
+
+
+async def h2_terminal(wire, sid, decoder):
+    body = bytearray()
+    fields = []
+    while True:
+        kind, flags, stream, payload = await read_h2_frame(wire.reader)
+        if kind == 7:
+            return kind, int.from_bytes(payload[4:8], 'big')
+        if kind == 1:
+            decoded = decoder.decode(payload, raw=True)
+            if stream == sid:
+                fields.extend(decoded)
+        if stream != sid:
+            continue
+        if kind == 3:
+            return kind, int.from_bytes(payload, 'big')
+        if kind == 0:
+            body.extend(payload)
+        if kind in (0, 1) and flags & 1:
+            return fields, bytes(body)
 
 
 def _make_h2_frame(type_byte: FrameTypes, flags: int = 0,

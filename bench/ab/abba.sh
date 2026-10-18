@@ -129,8 +129,8 @@ _ab_cleanup() {
     _ab_swap "$SHA_TREAT" 2>/dev/null || true
 }
 
-_ab_arm() {  # $1 phase, $2 arm, $3 round
-    local ref="$SHA_BASE" extra="$BASE_EXTRA_ENV" tag="$1_r$3_$2" proof value
+_ab_arm() {  # $1 phase, $2 arm, $3 round, $4 sample
+    local ref="$SHA_BASE" extra="$BASE_EXTRA_ENV" tag="$1_r$3_$2_$4" proof value
     if [ "$2" = treat ] || [ "$1" = null ]; then ref="$SHA_TREAT"; fi
     if [ "$2" = treat ]; then extra="$TREAT_EXTRA_ENV"; fi
     ARM_ENV="BB_UVLOOP=$BB_UVLOOP BB_FORCE_ASGI_SCOPE=$BB_FORCE_ASGI_SCOPE"
@@ -199,13 +199,14 @@ abba_main() {
     echo "$AB_TOOL: ${SHA_BASE:0:8} (base) vs ${SHA_TREAT:0:8} (treat) -> $AB_RUN"
     echo "  lane : $AB_LANE"
     echo "  files: ${AB_FILES[*]:-<none: $BASE_EXTRA_ENV vs $TREAT_EXTRA_ENV>}"
-    local r arm order
+    local r arm order sample=0
     for phase in $PHASES; do
         for r in $(seq 1 "$ROUNDS"); do
             if [ $((r % 2)) -eq 1 ]; then order=(base treat treat base)
             else order=(treat base base treat); fi
             for arm in "${order[@]}"; do
-                _ab_arm "$phase" "$arm" "$r" || exit 1
+                sample=$((sample + 1))
+                _ab_arm "$phase" "$arm" "$r" "$sample" || exit 1
             done
         done
     done

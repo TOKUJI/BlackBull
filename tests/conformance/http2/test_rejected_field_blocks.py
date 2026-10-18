@@ -5,8 +5,11 @@ import pytest
 
 from blackbull import BlackBull
 from blackbull.protocol.frame_types import ErrorCodes, FrameTypes
-from tests.conformance.http2._harness import _make_h2_frame as frame
-from tests.harness import read_h2_frame, served
+from tests.conformance.http2._harness import (
+    _make_h2_frame as frame, h2_section as section,
+    h2_connect as connect, h2_terminal as terminal,
+)
+from tests.harness import served
 
 
 FIELDS = [(b':method', b'GET'), (b':scheme', b'http'),
@@ -18,49 +21,6 @@ def serve(handler):
     app = BlackBull()
     app.route(path='/')(handler)
     return served(app)
-
-
-def section(block, *, sid=1, split=False, end_stream=True, self_dependent=False):
-    flags = int(end_stream) | (0x20 if self_dependent else 0)
-    prefix = sid.to_bytes(4, 'big') + b'\x00' if self_dependent else b''
-    if not split:
-        return frame(FrameTypes.HEADERS, flags | 4, sid, prefix + block)
-    cut = len(block) // 2
-    return (frame(FrameTypes.HEADERS, flags, sid, prefix + block[:cut])
-            + frame(FrameTypes.CONTINUATION, 4, sid, block[cut:]))
-
-
-async def connect(server):
-    wire = await server.wire()
-    await wire.send(b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
-                    + frame(FrameTypes.SETTINGS))
-    while True:
-        kind, flags, _, _ = await read_h2_frame(wire.reader)
-        if kind == 4:
-            if flags & 1:
-                return wire
-            await wire.send(frame(FrameTypes.SETTINGS, 1))
-
-
-async def terminal(wire, sid, decoder):
-    body = bytearray()
-    fields = []
-    while True:
-        kind, flags, stream, payload = await read_h2_frame(wire.reader)
-        if kind == 7:
-            return kind, int.from_bytes(payload[4:8], 'big')
-        if kind == 1:
-            decoded = decoder.decode(payload, raw=True)
-            if stream == sid:
-                fields.extend(decoded)
-        if stream != sid:
-            continue
-        if kind == 3:
-            return kind, int.from_bytes(payload, 'big')
-        if kind == 0:
-            body.extend(payload)
-        if kind in (0, 1) and flags & 1:
-            return fields, bytes(body)
 
 
 async def echo(conn, receive, send):

@@ -541,6 +541,9 @@ class HTTP2Actor(Actor):
         """
         state = stream.state
 
+        if state == StreamState.OPEN:
+            return None
+
         if state == StreamState.IDLE:
             if frame_type in (FrameTypes.HEADERS, FrameTypes.PRIORITY,
                               FrameTypes.CONTINUATION, FrameTypes.PUSH_PROMISE):
@@ -1310,7 +1313,6 @@ class HTTP2Actor(Actor):
                     logger.debug(
                         'Stream %d refused trailing field section — %s',
                         stream.stream_id, reason)
-                self._retire_stream(stream.stream_id, via_rst=True)
                 await self.send_frame(self.factory.rst_stream(
                     stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
                 return True

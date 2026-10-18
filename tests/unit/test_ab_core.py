@@ -24,6 +24,7 @@ AB_TOOL=fake_ab
 AB_LANE='fake lane'
 ab_start_server() { ab_spawn sleep "${FAKE_SERVER_SLEEP:-30}"; printf '%s\n' "$ARM_ENV" > "$BENCH_TMP/arm_env"; }
 ab_measure() {
+    printf '%s\n' "$1" > "$AB_RUN/sample_$1.txt"
     sleep "${FAKE_MEASURE_SLEEP:-0}"
     if grep -q 'X=' "$BENCH_TMP/arm_env"; then
         sed -n 's/.*X=\([0-9]*\).*/\1/p' "$BENCH_TMP/arm_env"
@@ -87,6 +88,7 @@ def test_arms_run_their_own_bytes_in_abba_order_and_null_runs_the_treatment(repo
                     ('1', 'base', '97'), ('2', 'treat', '95'), ('2', 'base', '97'),
                     ('2', 'base', '97'), ('2', 'treat', '95')]
     assert {r[3] for r in rows if r[0] == 'null'} == {'95'}
+    assert len(list(_only_run(repo).glob('sample_*.txt'))) == len(rows)
     assert _git(repo, 'status', '--porcelain', '--untracked-files=no') == ''
 
 

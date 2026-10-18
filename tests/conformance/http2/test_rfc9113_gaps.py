@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from hpack import Encoder
+from hpack import Decoder, Encoder
 
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.recipient import AbstractReader, IncompleteReadError
@@ -29,7 +29,9 @@ from blackbull.protocol.frame_types import (
 )
 from tests.conformance.http2._harness import (
     _make_h2_frame, _make_headers_frame, _BufferReader,
+    h2_connect, h2_terminal,
 )
+from tests.harness import served
 
 
 def _make_h2_actor(app=None):
@@ -866,20 +868,30 @@ class TestG13FieldCharacterValidation:
     ])
     @pytest.mark.asyncio
     async def test_a_malformed_trailer_field_is_malformed(self, bad_field):
-        handler, app = _make_h2_actor()
-        head = _make_headers_frame(1, end_stream=False)
-        trailers = _make_headers_frame(1, end_stream=True, fields=[bad_field])
-        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
-        handler.receive = AsyncMock(
-            side_effect=[settings, head, trailers, None])
-        await handler.run()
+        entered = asyncio.Event()
+        completed = []
 
-        assert [f.error_code for f in _sent_rst_streams(handler, 1)] \
-            == [ErrorCodes.PROTOCOL_ERROR], \
-            f'Trailer violation ({bad_field!r}) was not answered with ' \
-            f'RST_STREAM(PROTOCOL_ERROR)'
-        assert app.await_count == 0, \
-            f'Trailer violation ({bad_field!r}) reached the application'
+        async def app(conn, receive, send):
+            entered.set()
+            while (event := await receive()).get('more_body', False):
+                pass
+            if event['type'] == 'http.disconnect':
+                return
+            completed.append(True)
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b'ok'})
+
+        async with served(app) as server:
+            wire = await h2_connect(server)
+            decoder = Decoder()
+            await wire.send(_make_headers_frame(1, end_stream=False))
+            await asyncio.wait_for(entered.wait(), 2)
+            await wire.send(_make_headers_frame(1, end_stream=True, fields=[bad_field]))
+            assert await h2_terminal(wire, 1, decoder) == (3, ErrorCodes.PROTOCOL_ERROR)
+            assert completed == []
+            await wire.send(_make_headers_frame(3, end_stream=True))
+            fields, body = await h2_terminal(wire, 3, decoder)
+            assert (b':status', b'200') in fields and body == b'ok'
 
     @pytest.mark.asyncio
     async def test_a_valid_trailer_field_section_is_accepted(self):
