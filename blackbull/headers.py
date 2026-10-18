@@ -38,6 +38,19 @@ class _MinimalResponseHeaders(list):
 
     __slots__ = ('content_length', 'transfer_encoding', 'date')
 
+    def __eq__(self, other: object) -> bool:
+        """Field and framing-fact equality: the class stores both, so both
+        decide.  Anything that is not a ``_MinimalResponseHeaders`` keeps
+        plain ``list`` equality."""
+        if isinstance(other, _MinimalResponseHeaders):
+            return (list.__eq__(self, other)
+                    and self.content_length == other.content_length
+                    and self.transfer_encoding == other.transfer_encoding
+                    and self.date == other.date)
+        return list.__eq__(self, other)
+
+    __hash__ = None  # unhashable like list; equality spans mutable state
+
     def add(self, name: bytes, value: bytes) -> None:
         """Append one field, validated, with its name lowercased and its value
         trimmed of edge SP/HTAB."""
