@@ -540,6 +540,9 @@ class HTTP2Actor(Actor):
         """
         state = stream.state
 
+        if state == StreamState.OPEN:
+            return None
+
         if state == StreamState.IDLE:
             if frame_type in (FrameTypes.HEADERS, FrameTypes.PRIORITY,
                               FrameTypes.CONTINUATION, FrameTypes.PUSH_PROMISE):
@@ -548,7 +551,9 @@ class HTTP2Actor(Actor):
 
         if state == StreamState.HALF_CLOSED_REMOTE:
             if frame_type in (FrameTypes.PRIORITY, FrameTypes.WINDOW_UPDATE,
-                              FrameTypes.RST_STREAM):
+                              FrameTypes.RST_STREAM,
+                              FrameTypes.HEADERS, FrameTypes.CONTINUATION):
+                # Field sections are refused only after their HPACK updates.
                 return None
             return (ErrorCodes.STREAM_CLOSED, 'stream')
 
@@ -1280,6 +1285,11 @@ class HTTP2Actor(Actor):
         bit owns the request-body transition even when END_HEADERS arrives on
         a later CONTINUATION frame.
         """
+        if stream.state == StreamState.HALF_CLOSED_REMOTE:
+            await self.send_frame(self.factory.rst_stream(
+                stream.stream_id, ErrorCodes.STREAM_CLOSED))
+            return True
+
         if stream.conn is not None:
             # A second field section is trailers: it must end the request,
             # carry no pseudo-header or prohibited field (RFC 9110 §6.5.1),
@@ -1298,7 +1308,6 @@ class HTTP2Actor(Actor):
                     logger.debug(
                         'Stream %d refused trailing field section — %s',
                         stream.stream_id, reason)
-                self._retire_stream(stream.stream_id, via_rst=True)
                 await self.send_frame(self.factory.rst_stream(
                     stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
                 return True

@@ -13,6 +13,7 @@ from blackbull.response import Response
 from blackbull.utils import Scheme
 from tests.conformance.http2._harness import _make_h2_frame
 from tests.integration.test_grpc import _serve
+from tests.harness import read_h2_frame as _read
 
 
 pytestmark = pytest.mark.integration
@@ -44,13 +45,6 @@ async def test_response_fields_match_across_transports(monkeypatch, force_asgi, 
 def _settings(limits):
     return _make_h2_frame(FrameTypes.SETTINGS, payload=b''.join(
         b'\x00\x01' + size.to_bytes(4, 'big') for size in limits))
-
-
-async def _read(reader):
-    async with asyncio.timeout(2):
-        head = await reader.readexactly(9)
-        payload = await reader.readexactly(int.from_bytes(head[:3], 'big'))
-    return head[3], head[4], int.from_bytes(head[5:], 'big') & 0x7fffffff, payload
 
 
 @pytest.mark.asyncio

@@ -24,13 +24,22 @@ before any static-indexed prefix.
 
 Decode every received field block, including one whose stream will be
 refused or whose promise will be discarded. Complete CONTINUATION handling
-before a concurrency refusal; refusing early must not turn legal continuation
-traffic into an unexpected-frame error.
+before a stream refusal (including concurrency, priority self-dependency and
+input already ended); refusing early must not lose HPACK updates or the
+CONTINUATION requirement.
 
 Encoded field accumulation needs byte and time bounds before decoding.
-A refused or corrupt block affects connection-wide decoder state; it cannot
+An undecoded or corrupt block affects connection-wide decoder state; it cannot
 be handled by resetting only its stream. Keep other frame types off the
 connection while a field block is open.
+
+`HTTP2Actor` bounds accumulated CONTINUATION bytes with `BB_HEADER_MAX_TOTAL`
+and an unfinished block with `BB_HEADER_TIMEOUT`; both send GOAWAY
+`ENHANCE_YOUR_CALM`. Only one block can be open per connection. The shared
+decoder separately bounds decompressed fields; decode failures, including
+that limit, end the connection with `COMPRESSION_ERROR`. Otherwise valid
+client pushes are connection errors (`PROTOCOL_ERROR`), never stream-only
+refusals.
 
 Encode output headers only when their write will happen, after checking
 stream ownership. Mutating the encoder for a block never sent makes later

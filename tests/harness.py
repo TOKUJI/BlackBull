@@ -40,6 +40,13 @@ def _fields(block: bytes) -> list[tuple[bytes, bytes]]:
     return out
 
 
+async def read_h2_frame(reader: asyncio.StreamReader) -> tuple[int, int, int, bytes]:
+    async with asyncio.timeout(TIMEOUT):
+        head = await reader.readexactly(9)
+        payload = await reader.readexactly(int.from_bytes(head[:3], 'big'))
+    return head[3], head[4], int.from_bytes(head[5:], 'big') & 0x7fffffff, payload
+
+
 class Wire:
     """One client connection: send anything, read what comes back."""
 

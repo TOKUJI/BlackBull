@@ -512,7 +512,7 @@ class Headers(FrameBase):
             if self.stream_dependency == self.stream_id:
                 self._mark_malformed(
                     f'HEADERS priority self-dependency on stream {self.stream_id}')
-                return
+                # Even rejected streams must update the shared HPACK table.
             remaining -= 5
 
         # raw=True preserves bytes header values.
