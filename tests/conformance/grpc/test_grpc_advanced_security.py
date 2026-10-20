@@ -763,16 +763,11 @@ class TestAdditionalFramingEdgeCases:
         with pytest.raises(GrpcDecodeError):
             decode_messages(b'\x00\x00\x00\x00')
 
-    def test_compressed_flag_every_value_2_to_254(self):
-        """All non-zero compressed-flag bytes (2–254) must be reported as
-        ``compressed=True``.  The gRPC spec only defines 0 and 1, but
-        other values could appear from buggy or malicious clients."""
-        for flag in range(2, 255):
-            # Manually construct: flag byte + 4-byte length 0
+    def test_compressed_flag_every_value_2_to_255(self):
+        for flag in range(2, 256):
             framed = bytes([flag]) + b'\x00\x00\x00\x00'
-            result = decode_messages(framed)
-            assert result == [(True, b'')], (
-                f'flag={flag} (0x{flag:02X}) should be True')
+            with pytest.raises(GrpcDecodeError, match='compressed flag'):
+                decode_messages(framed)
 
     def test_message_length_exactly_2_pow_24_minus_1(self):
         """$2^{24}-1$ (16 MiB - 1) — near the practical limit."""

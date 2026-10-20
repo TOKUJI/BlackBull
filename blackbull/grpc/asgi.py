@@ -17,7 +17,9 @@ from ..native import NativeResponse
 from ..request import stream_body, ClientDisconnected
 from ..utils import create_eager_task
 from . import compression
-from .codec import encode_message, MAX_MESSAGE_LENGTH, _PREFIX, _PREFIX_LEN
+from .codec import (
+    encode_message, GrpcDecodeError, MAX_MESSAGE_LENGTH, _decode_prefix, _PREFIX_LEN,
+)
 from .registry import GrpcServiceRegistry
 from .status import GrpcError, GrpcStatus
 
@@ -453,7 +455,7 @@ async def _iter_request_messages(receive, encoding: bytes, *, single: bool = Fal
             while offset < len(chunk):
                 if len(buf) < _PREFIX_LEN:
                     if not buf and len(chunk) - offset >= _PREFIX_LEN:
-                        flag, length = _PREFIX.unpack_from(chunk, offset)
+                        flag, length = _decode_prefix(chunk, offset)
                         prefix_end = offset + _PREFIX_LEN
                     else:
                         end = min(len(chunk), offset + _PREFIX_LEN - len(buf))
@@ -461,7 +463,7 @@ async def _iter_request_messages(receive, encoding: bytes, *, single: bool = Fal
                         offset = end
                         if len(buf) < _PREFIX_LEN:
                             break
-                        flag, length = _PREFIX.unpack_from(buf)
+                        flag, length = _decode_prefix(buf)
                         prefix_end = offset
                     if single and seen:
                         raise GrpcError(
@@ -491,6 +493,8 @@ async def _iter_request_messages(receive, encoding: bytes, *, single: bool = Fal
                     buf.clear()
                 seen = True
                 yield _decompress_message(message, encoding) if flag else message
+    except GrpcDecodeError as exc:
+        raise GrpcError(GrpcStatus.INTERNAL, f'malformed request: {exc}') from exc
     except ClientDisconnected as exc:
         raise GrpcError(GrpcStatus.CANCELLED, 'client disconnected mid-stream') from exc
     if buf:
