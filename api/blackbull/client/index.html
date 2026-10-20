@@ -1855,6 +1855,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.ClientConnection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientConnection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.ClientError" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2181,6 +2192,17 @@
     <span class="md-ellipsis">
       
         frame_factory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP2Client.attach_stream_reader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        attach_stream_reader
       
     </span>
   </a>
@@ -6281,6 +6303,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.ClientConnection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ClientConnection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.ClientError" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6607,6 +6640,17 @@
     <span class="md-ellipsis">
       
         frame_factory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.client.HTTP2Client.attach_stream_reader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        attach_stream_reader
       
     </span>
   </a>
@@ -7195,6 +7239,54 @@ always HTTP/1.1.  WebSocket is never dispatched to; name its client.</p>
 <pre><code>async with Client('localhost', 8000) as c:
     res = await c.request(HTTPMethod.GET, '/')
 </code></pre>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.client.ClientConnection" class="doc doc-heading">
+            <code>ClientConnection</code>
+
+
+<a href="#blackbull.client.ClientConnection" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="ConnectionProtocol (blackbull.server.connection_protocol.ConnectionProtocol)" href="../server/connection_protocol/#blackbull.server.connection_protocol.ConnectionProtocol">ConnectionProtocol</a></code></p>
+
+
+
+        <p>The server's buffered protocol, plus a close a client can await.</p>
 
 
 
@@ -8101,6 +8193,29 @@ odd, monotonically-increasing client-initiated stream ID
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.client.HTTP2Client.attach_stream_reader" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">attach_stream_reader</span><span class="p">(</span><span class="n">stream_id</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.client.HTTP2Client.attach_stream_reader" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Deliver <em>stream_id</em>'s DATA to a reader from now on, crediting as it
+is consumed; frames already queued for the raw stream go first.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
@@ -9064,7 +9179,7 @@ or <code>TimeoutError</code> if no response arrives within
         <p>Frame-level WebSocket session over one HTTP/2 stream.</p>
 <p>Outgoing frames are masked (RFC 6455 §5.1) and wrapped in H2 DATA
 frames.  Incoming DATA payloads feed the shared
-<code>WebSocketRecipient</code> stack through <code>_H2QueueReader</code> —
+<code>WebSocketRecipient</code> stack through <code>HTTP2StreamReader</code> —
 fragmentation reassembly, FIN/RSV/mask
 validation, UTF-8 checks, and auto-PONG all come from the same
 codec the server and the H1 client use.</p>

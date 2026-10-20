@@ -5619,12 +5619,20 @@ smallest pending size and final size at the start of the next field block,
 before any static-indexed prefix.</p>
 <p>Decode every received field block, including one whose stream will be
 refused or whose promise will be discarded. Complete CONTINUATION handling
-before a concurrency refusal; refusing early must not turn legal continuation
-traffic into an unexpected-frame error.</p>
+before a stream refusal (including concurrency, priority self-dependency and
+input already ended); refusing early must not lose HPACK updates or the
+CONTINUATION requirement.</p>
 <p>Encoded field accumulation needs byte and time bounds before decoding.
-A refused or corrupt block affects connection-wide decoder state; it cannot
+An undecoded or corrupt block affects connection-wide decoder state; it cannot
 be handled by resetting only its stream. Keep other frame types off the
 connection while a field block is open.</p>
+<p><code>HTTP2Actor</code> bounds accumulated CONTINUATION bytes with <code>BB_HEADER_MAX_TOTAL</code>
+and an unfinished block with <code>BB_HEADER_TIMEOUT</code>; both send GOAWAY
+<code>ENHANCE_YOUR_CALM</code>. Only one block can be open per connection. The shared
+decoder separately bounds decompressed fields; decode failures, including
+that limit, end the connection with <code>COMPRESSION_ERROR</code>. Otherwise valid
+client pushes are connection errors (<code>PROTOCOL_ERROR</code>), never stream-only
+refusals.</p>
 <p>Encode output headers only when their write will happen, after checking
 stream ownership. Mutating the encoder for a block never sent makes later
 sibling blocks undecodable.</p>
@@ -5639,7 +5647,10 @@ awaiting its write to avoid duplicate automatic flushes.</p>
 survive cancellation of the stream consumer; stream credit must not be
 emitted after retirement. Reset, refused DATA and late DATA must return
 the connection credit they consumed, including padding, without resurrecting
-stream ownership. Frame-count limits are still needed for empty DATA.</p>
+stream ownership. Frame-count limits are still needed for empty DATA.
+WebSocket streams, in both roles, read through <code>HTTP2StreamReader</code>: octets a
+pending read has committed to count as consumed, or a WebSocket frame longer
+than the window never completes.</p>
 <p>Use the existing server/client write-timeout owner for credit waits, not
 another timer. Read <code>HTTP2Sender</code>, <code>ConnectionWindow</code> and <code>HTTP2Recipient</code>.</p>
 <h2 id="stream-lifetime-and-error-scope">Stream lifetime and error scope<a class="headerlink" href="#stream-lifetime-and-error-scope" title="Permanent link">&para;</a></h2>

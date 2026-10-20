@@ -6289,9 +6289,7 @@ bindings out of the top-level public exports.</p>
 connection (<code>detect_prefix_len</code>) and whether it <code>claims</code> a given
 peeked prefix; the winner's single <code>serve</code> then performs <em>its own</em>
 protocol reads from a reader still positioned at the first byte, because
-detection peeks without consuming.  Only a reader that cannot peek hands
-back what it took, and there a
-<a class="autorefs autorefs-internal" href="../recipient/#blackbull.server.recipient.PrefixReader"><code>PrefixReader</code></a> restores the stream.</p>
+detection peeks without consuming.</p>
 <p>Every protocol-specific read is the binding's, never the dispatcher's —
 the <code>24</code>-byte HTTP/2 preface and the HTTP/1.1 <code>\r\n</code> request line
 alike — which is what keeps <code>ConnectionActor</code> protocol-agnostic.</p>

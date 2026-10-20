@@ -5852,7 +5852,7 @@ or <code>TimeoutError</code> if no response arrives within
         <p>Frame-level WebSocket session over one HTTP/2 stream.</p>
 <p>Outgoing frames are masked (RFC 6455 §5.1) and wrapped in H2 DATA
 frames.  Incoming DATA payloads feed the shared
-<code>WebSocketRecipient</code> stack through <code>_H2QueueReader</code> —
+<code>WebSocketRecipient</code> stack through <code>HTTP2StreamReader</code> —
 fragmentation reassembly, FIN/RSV/mask
 validation, UTF-8 checks, and auto-PONG all come from the same
 codec the server and the H1 client use.</p>

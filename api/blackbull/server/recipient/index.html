@@ -4753,30 +4753,8 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.AbstractReader.take_ahead" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        take_ahead
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.AsyncioReader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AsyncioReader
-      
-    </span>
-  </a>
   
 </li>
         
@@ -4926,17 +4904,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.credits_on_consume" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        credits_on_consume
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5032,17 +4999,6 @@
         
       </ul>
     </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.PrefixReader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PrefixReader
-      
-    </span>
-  </a>
   
 </li>
         
@@ -6125,30 +6081,8 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.AbstractReader.take_ahead" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        take_ahead
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.AsyncioReader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AsyncioReader
-      
-    </span>
-  </a>
   
 </li>
         
@@ -6298,17 +6232,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.HTTP2Recipient.credits_on_consume" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        credits_on_consume
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6404,17 +6327,6 @@
         
       </ul>
     </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.PrefixReader" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PrefixReader
-      
-    </span>
-  </a>
   
 </li>
         
@@ -6748,9 +6660,7 @@ raw-protocol read loop — should use a reader that overrides this).</p>
 
     <div class="doc doc-contents ">
 
-        <p>Buffer n bytes for peeking; return False on early EOF.</p>
-<p>The default consumes into _ahead. Call take_ahead and wrap with PrefixReader
-to restore inspected input; buffer-owning readers may peek without consuming.</p>
+        <p>Buffer <em>n</em> bytes for <a class="autorefs autorefs-internal" title="peek(n)" href="#blackbull.server.recipient.AbstractReader.peek"><code>peek</code></a>; return False on early EOF.</p>
 
 
     </div>
@@ -6792,13 +6702,6 @@ correctness (control frames are still serviced at the next read).</p>
     <div class="doc doc-contents ">
 
         <p>Up to <em>n</em> buffered bytes without consuming them.</p>
-<p>Returns whatever the default <a class="autorefs autorefs-internal" title="fill(n)
-
-  
-      async
-  " href="#blackbull.server.recipient.AbstractReader.fill"><code>fill</code></a> parked, so detection can
-inspect it; a reader that owns its buffer overrides this to read
-straight out of it.</p>
 
 
     </div>
@@ -6876,90 +6779,12 @@ Concrete transport readers override this.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Read until <em>sep</em> is seen, choosing one limit policy at entry.</p>
+        <p>Read through <em>sep</em>; <em>limit</em> &gt; 0 bounds it (<a class="autorefs autorefs-internal" href="#blackbull.server.recipient.ReadLimitExceeded"><code>ReadLimitExceeded</code></a>).</p>
 
 
     </div>
 
 </div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.recipient.AbstractReader.take_ahead" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">take_ahead</span><span class="p">()</span></code>
-
-<a href="#blackbull.server.recipient.AbstractReader.take_ahead" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Bytes this reader consumed while filling, cleared.</p>
-<p>Empty for a reader whose <a class="autorefs autorefs-internal" title="fill(n)
-
-  
-      async
-  " href="#blackbull.server.recipient.AbstractReader.fill"><code>fill</code></a> truly peeks — which is the whole
-point: the caller wraps only when there is something to replay.</p>
-
-
-    </div>
-
-</div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.recipient.AsyncioReader" class="doc doc-heading">
-            <code>AsyncioReader</code>
-
-
-<a href="#blackbull.server.recipient.AsyncioReader" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="AbstractReader (blackbull.server.recipient.AbstractReader)" href="#blackbull.server.recipient.AbstractReader">AbstractReader</a></code></p>
-
-
-
-        <p>Adapts an asyncio-compatible stream to <code>AbstractReader</code>.</p>
-<p>Accepts any object exposing <code>read()</code>, <code>readuntil()</code>, and
-<code>readexactly()</code> — the asyncio StreamReader API — so that test doubles
-such as <code>MagicMock</code> can be injected without ceremony.</p>
-<p>Pass-through by design: every method delegates to the stream's own native,
-buffered implementation with nothing layered on top.  It cannot peek, so
-detection's pushback goes through <a class="autorefs autorefs-internal" href="#blackbull.server.recipient.PrefixReader"><code>PrefixReader</code></a>.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
 
 
 
@@ -7369,30 +7194,6 @@ mark_end_of_stream_on_headers so the first read delivers an empty final body.</p
 
 
 
-<div class="doc doc-object doc-attribute">
-
-
-
-<h4 id="blackbull.server.recipient.HTTP2Recipient.credits_on_consume" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">credits_on_consume</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-property"><code>property</code></small>
-  </span>
-
-<a href="#blackbull.server.recipient.HTTP2Recipient.credits_on_consume" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>True when WINDOW_UPDATE credit is replayed at consume-time.</p>
-<p>The actor must then NOT credit at enqueue — the recipient's
-<code>credit_callback</code> owns the replay.</p>
-
-    </div>
-
-</div>
-
 
 
 
@@ -7614,55 +7415,6 @@ debugging aid.</p>
 
 
 
-<h3 id="blackbull.server.recipient.PrefixReader" class="doc doc-heading">
-            <code>PrefixReader</code>
-
-
-<a href="#blackbull.server.recipient.PrefixReader" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="AbstractReader (blackbull.server.recipient.AbstractReader)" href="#blackbull.server.recipient.AbstractReader">AbstractReader</a></code></p>
-
-
-
-        <p>Replay inspected prefix bytes before the underlying stream.</p>
-<p>Separators may straddle that seam; detection must not consume protocol input.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
 <h3 id="blackbull.server.recipient.ProtocolError" class="doc doc-heading">
             <code>ProtocolError</code>
 
@@ -7777,8 +7529,6 @@ what it <code>saw</code> and the protocol decides which status that becomes.
 
 
         <p>Creates the appropriate <code>BaseRecipient</code> for the given protocol.</p>
-<p>All methods that need a reader accept a raw asyncio-compatible stream reader
-and wrap it in <code>AsyncioReader</code> internally.</p>
 
 
 

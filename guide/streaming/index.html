@@ -5765,7 +5765,7 @@ per chunk.  Both HTTP/1.1 and HTTP/2 paths apply transport-level
 backpressure inside that <code>await</code>, so a slow client never causes
 unbounded buffer growth in BlackBull.</p>
 <h3 id="http11">HTTP/1.1<a class="headerlink" href="#http11" title="Permanent link">&para;</a></h3>
-<p><code>AsyncioWriter.write()</code> calls <code>asyncio.StreamWriter.drain()</code> on
+<p><code>AsyncioWriter.write()</code> waits for the connection to drain on
 every chunk
 (<a href="https://github.com/TOKUJI/BlackBull/blob/master/blackbull/server/sender.py"><code>blackbull/server/sender.py</code></a>).
 <code>drain()</code> blocks while the kernel send buffer is full of bytes the

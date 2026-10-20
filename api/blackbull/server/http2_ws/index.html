@@ -4430,19 +4430,19 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.http2_ws.HTTP2WSReader" class="md-nav__link">
+  <a href="#blackbull.server.http2_ws.HTTP2StreamReader" class="md-nav__link">
     <span class="md-ellipsis">
       
-        HTTP2WSReader
+        HTTP2StreamReader
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="HTTP2WSReader">
+    <nav class="md-nav" aria-label="HTTP2StreamReader">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.http2_ws.HTTP2WSReader.put_DATAFrame" class="md-nav__link">
+  <a href="#blackbull.server.http2_ws.HTTP2StreamReader.put_DATAFrame" class="md-nav__link">
     <span class="md-ellipsis">
       
         put_DATAFrame
@@ -4453,18 +4453,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.http2_ws.HTTP2WSReader.put_disconnect" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        put_disconnect
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.http2_ws.HTTP2WSReader.take_uncredited" class="md-nav__link">
+  <a href="#blackbull.server.http2_ws.HTTP2StreamReader.take_uncredited" class="md-nav__link">
     <span class="md-ellipsis">
       
         take_uncredited
@@ -5523,19 +5512,19 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.http2_ws.HTTP2WSReader" class="md-nav__link">
+  <a href="#blackbull.server.http2_ws.HTTP2StreamReader" class="md-nav__link">
     <span class="md-ellipsis">
       
-        HTTP2WSReader
+        HTTP2StreamReader
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="HTTP2WSReader">
+    <nav class="md-nav" aria-label="HTTP2StreamReader">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.http2_ws.HTTP2WSReader.put_DATAFrame" class="md-nav__link">
+  <a href="#blackbull.server.http2_ws.HTTP2StreamReader.put_DATAFrame" class="md-nav__link">
     <span class="md-ellipsis">
       
         put_DATAFrame
@@ -5546,18 +5535,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.http2_ws.HTTP2WSReader.put_disconnect" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        put_disconnect
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.http2_ws.HTTP2WSReader.take_uncredited" class="md-nav__link">
+  <a href="#blackbull.server.http2_ws.HTTP2StreamReader.take_uncredited" class="md-nav__link">
     <span class="md-ellipsis">
       
         take_uncredited
@@ -5649,11 +5627,11 @@ factory and flow control; do not create another HPACK context.</p>
 
 
 
-<h3 id="blackbull.server.http2_ws.HTTP2WSReader" class="doc doc-heading">
-            <code>HTTP2WSReader</code>
+<h3 id="blackbull.server.http2_ws.HTTP2StreamReader" class="doc doc-heading">
+            <code>HTTP2StreamReader</code>
 
 
-<a href="#blackbull.server.http2_ws.HTTP2WSReader" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.server.http2_ws.HTTP2StreamReader" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
@@ -5662,18 +5640,11 @@ factory and flow control; do not create another HPACK context.</p>
 
 
 
-        <p>Byte-buffer AbstractReader fed by HTTP/2 DATA frames.</p>
-<p>ws_codec.read_frame_header / read_payload call readexactly(n); this
-class buffers raw DATA frame payloads and serves exact-length reads,
-blocking until enough bytes arrive or EOF is signalled.</p>
-<p><strong>Backpressure</strong>: when the buffered byte count crosses
-<code>max_buffer</code>, <code>put_DATAFrame</code> returns <code>False</code> to signal the
-HTTP/2 actor to skip the per-frame <code>WINDOW_UPDATE</code> emission.  The
-bytes are <em>still</em> buffered (the peer's window debited on the wire
-the moment the frame arrived; dropping them would be silent data
-loss).  As soon as <code>readexactly</code> drains the buffer back under
-<code>max_buffer</code>, the reader replays the withheld credit through
-<code>credit_callback</code>, opening the peer's window again.</p>
+        <p>One stream's DATA as the WebSocket codec's byte stream, in either role.</p>
+<p>Credit returns as octets are consumed, padding included, so at most
+<em>budget</em> octets are ever unconsumed and DATA past that is refused.
+Buffered octets a pending read has committed to count as consumed before
+it waits: otherwise a read longer than the window waits forever.</p>
 
 
 
@@ -5699,21 +5670,15 @@ loss).  As soon as <code>readexactly</code> drains the buffer back under
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.http2_ws.HTTP2WSReader.put_DATAFrame" class="doc doc-heading">
+<h4 id="blackbull.server.http2_ws.HTTP2StreamReader.put_DATAFrame" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">put_DATAFrame</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span></code>
 
-<a href="#blackbull.server.http2_ws.HTTP2WSReader.put_DATAFrame" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.http2_ws.HTTP2StreamReader.put_DATAFrame" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Buffer payload bytes from an incoming DATA frame.</p>
-<p>Always buffers (no silent drop — the peer's window already
-debited <code>frame.length</code> when the frame hit the wire).  Returns
-<code>True</code> when the buffer remained under <code>max_buffer</code> after the
-append; <code>False</code> when the cap was exceeded.  In the <code>False</code>
-case the actor must skip the per-frame <code>WINDOW_UPDATE</code> — the
-bytes are queued for credit replay via <code>readexactly</code>.</p>
+        <p>Buffer <em>frame</em>; False when it overruns the window (the caller resets).</p>
 
 
     </div>
@@ -5723,33 +5688,15 @@ bytes are queued for credit replay via <code>readexactly</code>.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.http2_ws.HTTP2WSReader.put_disconnect" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">put_disconnect</span><span class="p">()</span></code>
-
-<a href="#blackbull.server.http2_ws.HTTP2WSReader.put_disconnect" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Signal EOF (connection closed or GOAWAY received).</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.server.http2_ws.HTTP2WSReader.take_uncredited" class="doc doc-heading">
+<h4 id="blackbull.server.http2_ws.HTTP2StreamReader.take_uncredited" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">take_uncredited</span><span class="p">()</span></code>
 
-<a href="#blackbull.server.http2_ws.HTTP2WSReader.take_uncredited" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.http2_ws.HTTP2StreamReader.take_uncredited" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Return and clear flow-control credit withheld for buffered bytes.</p>
+        <p>Return and clear the credit never returned; the stream is being released.</p>
 
 
     </div>

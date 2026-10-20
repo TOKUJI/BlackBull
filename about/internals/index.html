@@ -5804,25 +5804,22 @@ trims edge SP/HTAB from its value, so middleware and senders read fields
 exactly and check nothing again. Its header and trailer
 lists are <code>_MinimalResponseHeaders</code>; change them only through <code>add</code>, <code>extend</code>
 and <code>discard</code>, which keep the located framing fields true.</p>
-<p>A connection owns one read buffer. <code>BufferReader</code> owns receive policy,
+<p>A connection owns one read buffer, server or client. <code>BufferReader</code> owns receive policy,
 <code>ConnectionProtocol</code> performs transport callbacks and pauses, and
 <code>ReadBuffer</code> owns bytes and cursors. Detection must not consume the prefix;
 an upgrade must retain bytes already received.</p>
 <p>Treat transport size hints as advisory. Release grown allocations only
 through reader policy, which knows whether the connection is between
-messages. Read <code>blackbull/server/connection_protocol.py</code>, <code>read_buffer.py</code>
-and <code>blackbull/protocol/rsock.py</code> before adding a reader adapter.</p>
+messages.</p>
 <h3 id="bounded-reads">Bounded reads<a class="headerlink" href="#bounded-reads" title="Permanent link">&para;</a></h3>
-<p>All readers owe the same <code>read_head</code> and bounded <code>readuntil</code> contract.
-Positive limits include separators and constrain accumulation, not only
+<p><code>BufferReader</code> is the only line reader; other readers refuse <code>read_head</code>
+and <code>readuntil</code> with <code>NotImplementedError</code>. Positive limits include separators and constrain accumulation, not only
 completed results. Every keep-alive request gets the same budget. Empty EOF
 returns an empty head; partial EOF raises <code>IncompleteReadError</code>; overruns
-carry bounded evidence in <code>ReadLimitExceeded</code>. Unsupported line readers
-must refuse consistently.</p>
+carry bounded evidence in <code>ReadLimitExceeded</code>.</p>
 <p>The protocol owns the verdict: a request-line terminator within the budget
 permits a 431 header-overrun response; an unterminated or oversized request
-line receives 400. Preserve evidence across reader adapters.
-See <code>tests/unit/test_read_head_contract.py</code>.</p>
+line receives 400. See <code>tests/unit/test_read_head_contract.py</code>.</p>
 <h3 id="backpressure">Backpressure<a class="headerlink" href="#backpressure" title="Permanent link">&para;</a></h3>
 <p>Pause when a consumer falls behind, but release the pause before waiting for
 more bytes. A reader waiting for a peer-selected large frame must not
