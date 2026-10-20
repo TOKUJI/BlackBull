@@ -9,8 +9,9 @@ The BLA-345 historical samples, settings, reports, and verification logs are in
 
 Run from the repository root on Linux with the same dependency environment for
 both arms. The baseline source is executed locally; use a trusted commit.
-Only `grpc/asgi.py` varies, so verify that its shared dependencies have compatible
-semantics. This measures the bridge with a no-op response collector, not sockets.
+The baseline bridge uses current shared dependencies; verify that the symbols
+it uses have compatible semantics. This measures the bridge with a no-op
+response collector, not sockets.
 
 ```sh
 source bench/lib/results.sh && bench_run_dir grpc_bridge   # sets BENCH_RUN_DIR, BENCH_TMP
@@ -97,6 +98,8 @@ for synchronous streaming bursts; add `--yield-every 100` for a suspending
 producer. Each arm validates all response frames before timing. Repeat with
 `--null` to measure label drift with identical bridge sources. For BLA-344,
 compare against `dd073c9c` (before the fix) and `8a40ae41` (initial fix).
+`--messages` controls response messages. Use `--request-messages 64 --shapes
+Collect Bidi` for input bursts; `--chunk-bytes 1` splits prefixes and bodies.
 For wire comparison, add `-H 'grpc-timeout: 1S'` to both warmup and measured runs.
 The BLA-344 follow-up uses Python 3.11/3.14, all four methods, both scope lanes,
 50 warmup requests and 500 measured requests per sample. Streaming methods emit

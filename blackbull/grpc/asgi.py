@@ -469,9 +469,10 @@ async def _iter_request_messages(receive, encoding: bytes, *, single: bool = Fal
                         raise GrpcError(
                             GrpcStatus.UNIMPLEMENTED,
                             'method expects exactly 1 request message, got more')
-                    limit = (MAX_MESSAGE_LENGTH if flag
-                             else min(MAX_MESSAGE_SIZE, MAX_MESSAGE_LENGTH))
-                    if length > limit:
+                    if (length > MAX_MESSAGE_LENGTH
+                            or (not flag and length > MAX_MESSAGE_SIZE)):
+                        limit = (MAX_MESSAGE_LENGTH if flag
+                                 else min(MAX_MESSAGE_SIZE, MAX_MESSAGE_LENGTH))
                         raise GrpcError(
                             GrpcStatus.RESOURCE_EXHAUSTED,
                             f'request message ({length} bytes) larger than the '

@@ -13,6 +13,7 @@ import time
 import types
 
 import blackbull.grpc.asgi as head
+from blackbull.connection import Connection
 from blackbull.grpc import GrpcServiceRegistry, encode_message
 
 
@@ -30,27 +31,35 @@ async def send(event):
     pass
 
 
-async def measure(module, registry, shape, native, size, count, send=send, timeout=None):
-    frame = encode_message(b'x' * size)
-    conn = {'type': 'http', 'path': '/svc/' + shape,
-            'headers': [(b'content-type', b'application/grpc')]}
+async def measure(module, registry, shape, native, size, count, send=send, timeout=None,
+                  *, request_messages=1, chunk_bytes=0):
+    frame = encode_message(b'x' * size) * request_messages
+    chunks = ([frame[i:i + chunk_bytes] for i in range(0, len(frame), chunk_bytes)]
+              if chunk_bytes else [frame])
+    scope = {'type': 'http', 'path': '/svc/' + shape,
+             'headers': [(b'content-type', b'application/grpc')]}
     if timeout is not None:
-        conn['headers'].append((b'grpc-timeout', timeout.encode('ascii')))
+        scope['headers'].append((b'grpc-timeout', timeout.encode('ascii')))
+    conn = Connection.from_scope(scope)
 
     async def receive():
-        return {'type': 'http.request', 'body': frame, 'more_body': False}
+        nonlocal position
+        chunk = chunks[position]
+        position += 1
+        return {'type': 'http.request', 'body': chunk, 'more_body': position < len(chunks)}
 
     if native:
         async def next_chunk():
-            nonlocal eof
-            if eof:
+            nonlocal position
+            if position == len(chunks):
                 return None
-            eof = True
-            return frame
+            chunk = chunks[position]
+            position += 1
+            return chunk
         receive.next_chunk = next_chunk
     start = time.perf_counter_ns()
     for _ in range(count):
-        eof = False
+        position = 0
         await module.serve_grpc(registry, conn, receive, send)
     return (time.perf_counter_ns() - start) / count
 
@@ -82,6 +91,7 @@ async def main(args):
                       'settings': vars(args), 'python': sys.version}), file=sys.stderr)
     writer = csv.writer(sys.stdout, delimiter='\t', lineterminator='\n')
     writer.writerow(['shape', 'native', 'size', 'round', 'arm', 'ns'])
+    measure_options = dict(request_messages=args.request_messages, chunk_bytes=args.chunk_bytes)
     gc.disable()
     for shape in args.shapes:
         for native in (False, True):
@@ -98,19 +108,20 @@ async def main(args):
                                 if key == b'grpc-status':
                                     status = value
 
-                    await measure(module, registry, shape, native, size, 1, validate, args.timeout)
+                    await measure(module, registry, shape, native, size, 1, validate, args.timeout,
+                                  **measure_options)
                     if status != b'0':
                         raise RuntimeError(f'{shape}/{native}/{size}: grpc-status={status!r}')
                     expected = args.messages if shape in ('Server', 'Bidi') else 1
                     if body != encode_message(b'ok') * expected:
                         raise RuntimeError(f'{shape}/{native}/{size}: response messages differ')
                     await measure(module, registry, shape, native, size, args.warmup,
-                                  timeout=args.timeout)
+                                  timeout=args.timeout, **measure_options)
                 for round_ in range(args.rounds):
                     for arm in ('ABBA' if round_ % 2 == 0 else 'BAAB'):
                         ns = await measure(baseline if arm == 'A' else head,
                                            registry, shape, native, size, args.calls,
-                                           timeout=args.timeout)
+                                           timeout=args.timeout, **measure_options)
                         writer.writerow([shape, native, size, round_, arm, ns])
 
 
@@ -122,6 +133,10 @@ if __name__ == '__main__':
     parser.add_argument('--shapes', nargs='+', choices=('Unary', 'Collect', 'Server', 'Bidi'),
                         default=['Unary', 'Collect'])
     parser.add_argument('--messages', type=int, default=1, help='response messages per streaming RPC')
+    parser.add_argument('--request-messages', type=int, default=1,
+                        help='input messages per client-streaming RPC')
+    parser.add_argument('--chunk-bytes', type=int, default=0,
+                        help='input chunk size; 0 delivers the full input together')
     parser.add_argument('--yield-every', type=int, default=0,
                         help='suspend the streaming producer every N messages; 0 is a synchronous burst')
     parser.add_argument('--rounds', type=int, default=6)
@@ -129,8 +144,11 @@ if __name__ == '__main__':
     parser.add_argument('--warmup', type=int, default=1000)
     parser.add_argument('--sizes', type=int, nargs='+', default=[16, 65536])
     args = parser.parse_args()
-    if min(args.rounds, args.calls, args.warmup, args.messages) <= 0 or min(args.sizes) < 0 or args.yield_every < 0:
-        parser.error('rounds, calls, warmup and messages must be positive; sizes and yield-every nonnegative')
+    if (min(args.rounds, args.calls, args.warmup, args.messages, args.request_messages) <= 0
+            or min(args.sizes) < 0 or min(args.yield_every, args.chunk_bytes) < 0):
+        parser.error('counts must be positive; sizes, chunk-bytes and yield-every nonnegative')
+    if args.request_messages > 1 and any(s in ('Unary', 'Server') for s in args.shapes):
+        parser.error('multiple input messages require Collect or Bidi')
     if max(args.sizes) > min(head.MAX_MESSAGE_SIZE, head.MAX_MESSAGE_LENGTH):
         parser.error('requested payload exceeds the current message cap')
     asyncio.run(main(args))

@@ -56,6 +56,6 @@ def decode_messages(data: bytes) -> list[tuple[bool, bytes]]:
         if end > n:
             raise GrpcDecodeError(
                 f'message body truncated: need {length} bytes, have {n - offset}')
-        messages.append((bool(flag), data[offset:end]))
+        messages.append((flag == 1, data[offset:end]))
         offset = end
     return messages
