@@ -17,6 +17,10 @@ __all__ = ('NO_CONTENT_GENERATED_STATUSES', 'NO_CONTENT_STATUSES',
            'split_transfer_codings')
 
 
+#: End of an HTTP message head (empty line); the H/1.1 actor and the
+#: recipient share this framing constant.
+_HEAD_END = b'\r\n\r\n'
+
 def parse_content_length(fields: Iterable[tuple[bytes, bytes]]
                          ) -> int | None:
     """The length every ``Content-Length`` occurrence agrees on, or ``None``.

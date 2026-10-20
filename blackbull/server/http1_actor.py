@@ -20,14 +20,13 @@ from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
-from ..protocol.framing import (method_is, parse_content_length,
+from ..protocol.framing import (_HEAD_END, method_is, parse_content_length,
                                 split_transfer_codings)
 from .deadline import ConnectionDeadline
 from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
                         AbstractReader, HTTP1Recipient, IncompleteReadError,
-                        ReadLimitExceeded, RecipientFactory, _HEAD_END,
-                        _WS_READ_INLINE)
+                        ReadLimitExceeded, RecipientFactory, _WS_READ_INLINE)
 from .sender import AbstractWriter, SenderFactory
 from .access_log import (AccessLogRecord as _AccessLogRecord,
                          _make_disconnect_detecting_receive,
