@@ -115,8 +115,7 @@ async def test_the_index_sibling_takes_the_same_walk(env):
 @pytest.mark.parametrize('cache', [False, True])
 async def test_a_sibling_swapped_between_requests_is_caught(env, cache):
     www, outside = env
-    # Compress once: gzip.compress embeds the current second as mtime, so
-    # comparing separate evaluations flakes whenever the second ticks over.
+    # One blob: gzip.compress stamps the current second into the header.
     good = gzip.compress(b'GOOD')
     (www / 'item.gz').write_bytes(good)
     app = StaticFiles(directory=str(www), cache=cache)

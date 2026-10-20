@@ -11,6 +11,7 @@ import os
 import ssl
 import time
 
+from ..protocol.framing import _HEAD_END
 from ._transport import half_close
 from .scenario_h1_server import (
     Abort,
@@ -35,9 +36,6 @@ from .scenario_h1_server import (
 )
 
 logger = logging.getLogger(__name__)
-
-#: End of an HTTP/1.1 message head (RFC 9112 §2.1).
-_HEAD_END = b'\r\n\r\n'
 
 
 

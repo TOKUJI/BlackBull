@@ -15,8 +15,8 @@ from typing import NoReturn
 
 from ..protocol import hpack_fastpath
 from ..env import get_settings
-from ..protocol.framing import (NO_CONTENT_GENERATED_STATUSES, is_informational,
-                                parse_content_length)
+from ..protocol.framing import (_CRLF, NO_CONTENT_GENERATED_STATUSES,
+                                is_informational, parse_content_length)
 from ..protocol.frame_types import (HeaderFrameFlags, DataFrameFlags,
                                     FrameBase, Headers, PushPromise, serialize_field_block,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
@@ -41,7 +41,6 @@ logger = logging.getLogger(__name__)
 _DEBUG = debug_gate(logger)
 
 
-_CRLF = b'\r\n'
 _CHUNKED_LINE = b'transfer-encoding: chunked\r\n'
 
 # Fallback chunk size when ``sendfile`` isn't supported by the transport

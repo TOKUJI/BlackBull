@@ -2204,8 +2204,7 @@ def _ws_handshake(path: str, *, key: bytes, version: bytes,
 
 
 _WS_KEY = base64.b64encode(b'0123456789abcdef')
-#: The unmasked TEXT frame carrying "X" that the probe sends as its
-#: masking violation (RFC 6455 §5.3: client frames must be masked).
+#: Unmasked client TEXT frame "X" — the probe's masking violation (RFC 6455 §5.3).
 _WS_UNMASKED_X = b'\x81\x01X'
 
 
