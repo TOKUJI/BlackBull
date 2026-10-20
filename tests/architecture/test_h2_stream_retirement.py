@@ -25,7 +25,7 @@ from blackbull.protocol.frame_types import (
 from blackbull.protocol.stream import StreamState
 import blackbull.server.http2_actor as http2_actor
 from blackbull.server.http2_actor import HTTP2Actor, _CLOSED_STREAMS_CAP
-from blackbull.server.http2_ws import HTTP2WSReader
+from blackbull.server.http2_ws import HTTP2StreamReader
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.response import PriorityUpdateResponder, RstStreamResponder
 from blackbull.server.sender import AbstractWriter
@@ -711,11 +711,9 @@ async def test_consumed_credit_survives_reset_during_stream_window_write(
         async def consume() -> None:
             await recipient()
     else:
-        recipient = HTTP2WSReader(
-            max_buffer=1,
-            credit_callback=actor._make_consume_credit_callback(1),
-        )
-        assert not recipient.put_DATAFrame(frame)
+        recipient = HTTP2StreamReader(
+            2, actor._make_consume_credit_callback(1))
+        assert recipient.put_DATAFrame(frame)
 
         async def consume() -> None:
             await recipient.readexactly(2)
@@ -1066,19 +1064,6 @@ async def test_websocket_spawn_failure_preserves_existing_live_count():
     assert 1 not in actor._stream_tasks
     assert 1 not in actor._senders
     assert 1 not in actor._recipients
-
-
-def test_websocket_reader_hands_withheld_padded_credit_to_retirement_once():
-    reader = HTTP2WSReader(max_buffer=1)
-    actor = _actor()
-    payload = bytes([4]) + b"abc" + b"xxxx"
-    frame = actor.factory.load(
-        _wire(FrameTypes.DATA, int(DataFrameFlags.PADDED), 1, payload)
-    )
-
-    assert not reader.put_DATAFrame(frame)
-    assert reader.take_uncredited() == frame.length
-    assert reader.take_uncredited() == 0
 
 
 def test_closed_history_is_bounded_with_independent_peer_and_push_watermarks():

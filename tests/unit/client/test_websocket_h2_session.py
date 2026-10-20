@@ -3,12 +3,12 @@
 The session previously rolled a third, private WebSocket frame parser that
 ignored FIN, RSV, and MASK bits entirely — no fragmentation reassembly, no
 control-frame handling.  It now reuses the same ``WebSocketRecipient`` /
-``FragmentAssembler`` stack as the server and the H1 client, fed by a small
-``AbstractReader`` adapter over the raw-stream DATA-frame queue.
+``FragmentAssembler`` stack as the server and the H1 client, fed by the
+stream reader both roles share.
 
 Tests drive a real ``HTTP2Client`` (never connected: ``_writer`` stubbed
 with a byte-capturing writer, ``send_raw_frame`` recorded) and hand-feed
-``FrameFactory``-loaded DATA frames into the raw-stream queue.
+``FrameFactory``-loaded DATA frames to the stream's reader.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class _CaptureWriter(AbstractWriter):
         self.data += data
 
 
-def _make_session(stream_id: int = 1):
+async def _make_session(stream_id: int = 1):
     client = HTTP2Client('localhost', 1)
     writer = _CaptureWriter()
     client._writer = writer
@@ -43,12 +43,13 @@ def _make_session(stream_id: int = 1):
         sent_raw.append(frame)
 
     client.send_raw_frame = _record_raw  # type: ignore[method-assign]
-    queue = client.register_raw_stream(stream_id)
+    client.register_raw_stream(stream_id)
+    reader = await client.attach_stream_reader(stream_id)
     # The peer's factory — this is what hand-feeds inbound DATA frames.
     # The session takes its own from the connection.
     factory = FrameFactory()
-    session = WebSocketH2Session(client, stream_id, queue)
-    return session, queue, factory, writer, sent_raw
+    session = WebSocketH2Session(client, stream_id, reader)
+    return session, reader, factory, writer, sent_raw
 
 
 def _data_frame(factory, ws_bytes: bytes, stream_id: int = 1,
@@ -90,10 +91,10 @@ class TestSharedCodecReceive:
         """RFC 6455 §5.4 — TEXT(FIN=0) + CONTINUATION(FIN=1) is one message.
         The old private parser ignored FIN and returned the first fragment
         as a complete message."""
-        session, queue, factory, writer, _ = _make_session()
-        queue.put_nowait(_data_frame(
+        session, reader, factory, writer, _ = await _make_session()
+        reader.put_DATAFrame(_data_frame(
             factory, _fragment(b'Hel', WSOpcode.TEXT, fin=False)))
-        queue.put_nowait(_data_frame(
+        reader.put_DATAFrame(_data_frame(
             factory, _fragment(b'lo', WSOpcode.CONTINUATION, fin=True)))
         opcode, payload = await session.receive(timeout=2.0)
         assert (opcode, payload) == (WSOpcode.TEXT, b'Hello')
@@ -101,10 +102,10 @@ class TestSharedCodecReceive:
     @pytest.mark.asyncio
     async def test_ws_frame_split_across_data_frames(self):
         """One WS frame's bytes may span several H2 DATA frames."""
-        session, queue, factory, writer, _ = _make_session()
+        session, reader, factory, writer, _ = await _make_session()
         ws = encode_frame(b'spanning', opcode=WSOpcode.BINARY)
-        queue.put_nowait(_data_frame(factory, ws[:3]))
-        queue.put_nowait(_data_frame(factory, ws[3:]))
+        reader.put_DATAFrame(_data_frame(factory, ws[:3]))
+        reader.put_DATAFrame(_data_frame(factory, ws[3:]))
         opcode, payload = await session.receive(timeout=2.0)
         assert (opcode, payload) == (WSOpcode.BINARY, b'spanning')
 
@@ -112,10 +113,10 @@ class TestSharedCodecReceive:
     async def test_ping_is_auto_ponged_masked(self):
         """RFC 6455 §5.5.2/§5.5.3 — PING answered with a PONG carrying the
         same payload; §5.1 — client frames MUST be masked."""
-        session, queue, factory, writer, _ = _make_session()
-        queue.put_nowait(_data_frame(
+        session, reader, factory, writer, _ = await _make_session()
+        reader.put_DATAFrame(_data_frame(
             factory, encode_frame(b'probe', opcode=WSOpcode.PING)))
-        queue.put_nowait(_data_frame(
+        reader.put_DATAFrame(_data_frame(
             factory, encode_frame(b'after', opcode=WSOpcode.TEXT)))
         opcode, payload = await session.receive(timeout=2.0)
         assert (opcode, payload) == (WSOpcode.TEXT, b'after')
@@ -126,8 +127,8 @@ class TestSharedCodecReceive:
 
     @pytest.mark.asyncio
     async def test_server_close_yields_close_tuple(self):
-        session, queue, factory, writer, _ = _make_session()
-        queue.put_nowait(_data_frame(
+        session, reader, factory, writer, _ = await _make_session()
+        reader.put_DATAFrame(_data_frame(
             factory,
             encode_frame((1000).to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)))
         opcode, payload = await session.receive(timeout=2.0)
@@ -137,15 +138,15 @@ class TestSharedCodecReceive:
     @pytest.mark.asyncio
     async def test_end_stream_without_close_disconnects(self):
         """END_STREAM with no CLOSE frame = abnormal closure (1006)."""
-        session, queue, factory, writer, _ = _make_session()
-        queue.put_nowait(_data_frame(factory, b'', end_stream=True))
+        session, reader, factory, writer, _ = await _make_session()
+        reader.put_DATAFrame(_data_frame(factory, b'', end_stream=True))
         opcode, payload = await session.receive(timeout=2.0)
         assert opcode == WSOpcode.CLOSE
         assert payload == struct.pack('>H', 1006)
 
     @pytest.mark.asyncio
     async def test_receive_timeout_message_shape(self):
-        session, queue, factory, writer, _ = _make_session()
+        session, reader, factory, writer, _ = await _make_session()
         with pytest.raises(TimeoutError, match='no WebSocket frame within'):
             await session.receive(timeout=0.05)
         await session.close(drain_timeout=0.05)
@@ -155,11 +156,15 @@ class TestSharedCodecReceive:
 # 1.20c — close() drains the peer CLOSE and stops the recipient
 # ═══════════════════════════════════════════════════════════════════════
 
+def _nothing_left_running() -> bool:
+    return asyncio.all_tasks() == {asyncio.current_task()}
+
+
 class TestCloseDiscipline:
     @pytest.mark.asyncio
     async def test_close_completes_when_peer_echoes_close(self):
-        session, queue, factory, writer, _ = _make_session()
-        queue.put_nowait(_data_frame(
+        session, reader, factory, writer, _ = await _make_session()
+        reader.put_DATAFrame(_data_frame(
             factory,
             encode_frame((1000).to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)))
         await asyncio.wait_for(session.close(), 2)
@@ -168,19 +173,17 @@ class TestCloseDiscipline:
         frame = factory.load(outgoing)
         assert frame.FrameType() == FrameTypes.DATA and frame.end_stream
         assert _sent_ws_bytes(writer)[0] & 0x0F == WSOpcode.CLOSE
-        task = session._recipient._reader_task
-        assert task is None or task.done()
+        assert _nothing_left_running()
 
     @pytest.mark.asyncio
     async def test_close_times_out_on_silent_peer(self):
-        session, queue, factory, writer, _ = _make_session()
+        session, reader, factory, writer, _ = await _make_session()
         await asyncio.wait_for(session.close(drain_timeout=0.1), 2)
-        task = session._recipient._reader_task
-        assert task is None or task.done()
+        assert _nothing_left_running()
 
     @pytest.mark.asyncio
     async def test_close_is_idempotent(self):
-        session, queue, factory, writer, _ = _make_session()
+        session, reader, factory, writer, _ = await _make_session()
         await asyncio.wait_for(session.close(drain_timeout=0.1), 2)
         first_close = bytes(writer.data)
         await asyncio.wait_for(session.close(drain_timeout=0.1), 2)
@@ -190,8 +193,8 @@ class TestCloseDiscipline:
     async def test_close_skips_drain_after_disconnect_seen(self):
         """If receive() already surfaced the peer CLOSE, close() must not
         sit in the drain loop waiting for a second one."""
-        session, queue, factory, writer, _ = _make_session()
-        queue.put_nowait(_data_frame(
+        session, reader, factory, writer, _ = await _make_session()
+        reader.put_DATAFrame(_data_frame(
             factory,
             encode_frame((1000).to_bytes(2, 'big'), opcode=WSOpcode.CLOSE)))
         opcode, _payload = await session.receive(timeout=2.0)
@@ -200,3 +203,30 @@ class TestCloseDiscipline:
         # the drain must be skipped entirely, so even a long drain_timeout
         # returns immediately.
         await asyncio.wait_for(session.close(drain_timeout=30.0), 2)
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_read_still_returns_its_connection_credit():
+    """The connection window is every stream's: a read cancelled while its
+    stream WINDOW_UPDATE waits on the transport must not take the connection
+    credit with it."""
+    client = HTTP2Client('localhost', 1)
+    connection_credit: list[int] = []
+
+    async def control(frame) -> None:
+        if frame.FrameType() == FrameTypes.WINDOW_UPDATE:
+            if frame.stream_id:
+                await asyncio.Event().wait()        # a write that never drains
+            connection_credit.append(frame.window_size)
+
+    client._control_sender = control
+    client.register_raw_stream(1)
+    reader = await client.attach_stream_reader(1)
+    reader.put_DATAFrame(_data_frame(FrameFactory(), b'x' * 40000))
+    read = asyncio.create_task(reader.readexactly(50000))
+    for _ in range(3):
+        await asyncio.sleep(0)
+    read.cancel()
+    for _ in range(3):
+        await asyncio.sleep(0)
+    assert connection_credit == [40000]

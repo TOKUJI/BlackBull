@@ -16,50 +16,27 @@ import pytest
 from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.router import HTTPException
-from blackbull.server.recipient import AsyncioReader, HTTP1Recipient
+from blackbull.server.connection_protocol import BufferReader
+from blackbull.server.recipient import HTTP1Recipient
 from blackbull.server.http1_actor import request_framing
+
+from tests.harness import fed
 
 SLICE = 4096
 
 
-class _RecordingSource:
-    """Byte source that records the size of every exact-read it is asked for."""
+@pytest.fixture
+def reads(monkeypatch):
+    """Every size the recipient asks the production reader for."""
+    seen: list[int] = []
+    for name in ('read', 'readexactly'):
+        original = getattr(BufferReader, name)
 
-    def __init__(self, data: bytes = b''):
-        self._d = bytearray(data)
-        self.exact_reads: list[int] = []
-
-    def feed(self, data: bytes) -> None:
-        self._d += data
-
-    async def read(self, n: int = -1) -> bytes:
-        if n < 0:
-            out, self._d = bytes(self._d), bytearray()
-            return out
-        out = bytes(self._d[:n])
-        del self._d[:n]
-        return out
-
-    async def readuntil(self, sep: bytes = b'\n') -> bytes:
-        idx = self._d.find(sep)
-        if idx == -1:
-            from blackbull.server.recipient import IncompleteReadError
-            out, self._d = bytes(self._d), bytearray()
-            raise IncompleteReadError(out)
-        end = idx + len(sep)
-        out = bytes(self._d[:end])
-        del self._d[:end]
-        return out
-
-    async def readexactly(self, n: int) -> bytes:
-        self.exact_reads.append(n)
-        if len(self._d) < n:
-            from blackbull.server.recipient import IncompleteReadError
-            out, self._d = bytes(self._d), bytearray()
-            raise IncompleteReadError(out)
-        out = bytes(self._d[:n])
-        del self._d[:n]
-        return out
+        async def recording(self, n, _original=original):
+            seen.append(n)
+            return await _original(self, n)
+        monkeypatch.setattr(BufferReader, name, recording)
+    return seen
 
 
 def _chunked_conn() -> Connection:
@@ -71,8 +48,8 @@ def _chunked_conn() -> Connection:
     )
 
 
-def _recipient(src: _RecordingSource) -> HTTP1Recipient:
-    return HTTP1Recipient(AsyncioReader(src), _chunked_conn(), chunk_size=SLICE, framing=request_framing(_chunked_conn().headers))
+def _recipient(src) -> HTTP1Recipient:
+    return HTTP1Recipient(src, _chunked_conn(), chunk_size=SLICE, framing=request_framing(_chunked_conn().headers))
 
 
 async def _drain_body(r: HTTP1Recipient) -> bytes:
@@ -88,8 +65,7 @@ async def _drain_body(r: HTTP1Recipient) -> bytes:
 async def test_a_chunk_larger_than_the_slice_arrives_in_slices():
     """One big chunk, several events — and the body is byte-identical."""
     payload = bytes(range(256)) * 40          # 10240 B, 2.5 slices
-    src = _RecordingSource(
-        f'{len(payload):x}\r\n'.encode() + payload + b'\r\n0\r\n\r\n')
+    src = fed(f'{len(payload):x}\r\n'.encode() + payload + b'\r\n0\r\n\r\n').reader
     r = _recipient(src)
 
     slices = []
@@ -105,7 +81,7 @@ async def test_a_chunk_larger_than_the_slice_arrives_in_slices():
 
 
 @pytest.mark.asyncio
-async def test_no_read_is_larger_than_the_slice_however_large_the_chunk():
+async def test_no_read_is_larger_than_the_slice_however_large_the_chunk(reads):
     """The security property, stated as the reader sees it.
 
     A peer declaring 1 GiB must not make the server ask for 1 GiB.  Asking
@@ -114,8 +90,7 @@ async def test_no_read_is_larger_than_the_slice_however_large_the_chunk():
     the pause it triggered is still in effect.
     """
     payload = b'x' * (SLICE * 2)
-    src = _RecordingSource(
-        b'40000000\r\n' + payload)            # declares 1 GiB, sends 8 KiB
+    src = fed(b'40000000\r\n' + payload).reader            # declares 1 GiB, sends 8 KiB
     r = _recipient(src)
 
     # Two full slices are available and must be delivered before the
@@ -123,9 +98,9 @@ async def test_no_read_is_larger_than_the_slice_however_large_the_chunk():
     assert await r.next_chunk() == payload[:SLICE]
     assert await r.next_chunk() == payload[SLICE:]
 
-    assert src.exact_reads, 'no exact-read was recorded'
-    assert max(src.exact_reads) <= SLICE, (
-        f'asked the reader for {max(src.exact_reads)} bytes on a peer-declared '
+    assert reads, 'no read was recorded'
+    assert max(reads) <= SLICE, (
+        f'asked the reader for {max(reads)} bytes on a peer-declared '
         f'chunk size; the slice is {SLICE}'
     )
 
@@ -134,8 +109,7 @@ async def test_no_read_is_larger_than_the_slice_however_large_the_chunk():
 async def test_the_chunk_terminator_is_still_verified_across_slices():
     """Slicing must not lose the CRLF check — that check is anti-smuggling."""
     payload = b'y' * (SLICE + 10)
-    src = _RecordingSource(
-        f'{len(payload):x}\r\n'.encode() + payload + b'XX')  # not CRLF
+    src = fed(f'{len(payload):x}\r\n'.encode() + payload + b'XX').reader  # not CRLF
     r = _recipient(src)
 
     with pytest.raises(HTTPException):
@@ -150,9 +124,8 @@ async def test_the_chunk_terminator_is_still_verified_across_slices():
 async def test_framing_continues_after_a_sliced_chunk():
     """The next chunk parses: slicing left the stream positioned correctly."""
     first = b'a' * (SLICE + 1)
-    src = _RecordingSource(
-        f'{len(first):x}\r\n'.encode() + first + b'\r\n'
-        + b'3\r\nend\r\n0\r\n\r\n')
+    src = fed(f'{len(first):x}\r\n'.encode() + first + b'\r\n'
+        + b'3\r\nend\r\n0\r\n\r\n').reader
     r = _recipient(src)
 
     assert await _drain_body(r) == first + b'end'
@@ -160,7 +133,7 @@ async def test_framing_continues_after_a_sliced_chunk():
 
 
 @pytest.mark.asyncio
-async def test_drain_enforces_its_cap_within_one_oversized_chunk():
+async def test_drain_enforces_its_cap_within_one_oversized_chunk(reads):
     """``drain`` bounds what an ignored body may buffer.
 
     Its ``max_bytes`` is checked per chunk returned, so a single chunk larger
@@ -168,11 +141,10 @@ async def test_drain_enforces_its_cap_within_one_oversized_chunk():
     the cap bounded the report, not the allocation.
     """
     payload = b'z' * (SLICE * 4)
-    src = _RecordingSource(
-        f'{len(payload):x}\r\n'.encode() + payload + b'\r\n0\r\n\r\n')
+    src = fed(f'{len(payload):x}\r\n'.encode() + payload + b'\r\n0\r\n\r\n').reader
     r = _recipient(src)
 
     assert await r.drain(max_bytes=SLICE) is False, (
         'a body over the cap must report False so the actor closes'
     )
-    assert max(src.exact_reads) <= SLICE
+    assert max(reads) <= SLICE

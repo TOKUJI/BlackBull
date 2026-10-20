@@ -41,20 +41,20 @@ class Client:
         # ``None`` the dispatcher falls back to HTTP/1.1; when a context is
         # provided, the caller must configure ALPN with the protocols they
         # want negotiated (typically ``['h2', 'http/1.1']``).
-        r, w = await _open_connection(self._host, self._port, ctx,
+        conn = await _open_connection(self._host, self._port, ctx,
                                       self._connect_timeout)
 
         proto: str | None = None
         if ctx is not None:
-            ssl_obj = w.get_extra_info('ssl_object')
+            ssl_obj = conn.get_extra_info('ssl_object')
             if ssl_obj is not None:
                 proto = ssl_obj.selected_alpn_protocol()
 
         inner: NegotiatedClient
         if proto == 'h2':
-            inner = HTTP2Client._adopt(self._host, self._port, r, w, ssl=ctx)
+            inner = HTTP2Client._adopt(self._host, self._port, conn, ssl=ctx)
         else:
-            inner = HTTP1Client._adopt(self._host, self._port, r, w, ssl=ctx)
+            inner = HTTP1Client._adopt(self._host, self._port, conn, ssl=ctx)
         await inner._start()
 
         self._inner = inner

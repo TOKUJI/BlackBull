@@ -11,7 +11,7 @@ from .cap_log import _LazyCapHitCounter
 from .deadline import ConnectionDeadline
 from .protocol_registry import (ConnectionView, ProtocolBinding,
                                 ProtocolRegistry)
-from .recipient import (AbstractReader, PrefixReader,
+from .recipient import (AbstractReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .sender import AbstractWriter
 
@@ -86,6 +86,7 @@ class ConnectionActor(Actor):
             except Exception as exc:
                 # One error path for every protocol: a handler or actor that
                 # raises is isolated here.
+                logger.exception('connection from %r failed', self._peername)
                 if self._aggregator is not None:
                     await self._aggregator.on_error({}, exc)
             finally:
@@ -204,13 +205,7 @@ class ConnectionActor(Actor):
             # no http1 fallback (it always does for HTTP listeners).  Close.
             return
         self._served_protocol = binding.name
-        # Empty for a buffer-owning reader, which peeked without consuming, so
-        # the binding gets that reader itself.  A reader that could only read
-        # ahead hands back what it took and the replay wrapper restores the
-        # stream — the indirection exists only where it is still needed.
-        ahead = self._reader.take_ahead()
-        reader = PrefixReader(ahead, self._reader) if ahead else self._reader
-        await binding.serve(self._make_conn(reader, dl))
+        await binding.serve(self._make_conn(self._reader, dl))
 
     @staticmethod
     async def _guarded(dl: ConnectionDeadline, deadline: 'float | None', coro):

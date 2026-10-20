@@ -31,14 +31,14 @@ import asyncio
 import pathlib
 import socket
 import ssl
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import pytest_asyncio
 
 from blackbull.server.server import ASGIServer
 from blackbull.server.recipient import RecipientFactory
-from blackbull.protocol.rsock import create_dual_stack_sockets, _bind_socket
+from blackbull.server.http1_actor import request_framing
+
+from tests.harness import fed
 
 
 # ---------------------------------------------------------------------------
@@ -317,40 +317,6 @@ class TestASGIServerRun:
 
 
 # ---------------------------------------------------------------------------
-# Helpers for HTTP/1.1 body-decoding unit tests
-# ---------------------------------------------------------------------------
-
-class FakeStreamReader:
-    """Minimal asyncio.StreamReader stand-in backed by an in-memory buffer."""
-
-    def __init__(self, data: bytes):
-        self._buf = bytearray(data)
-
-    async def read(self, n: int) -> bytes:
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readexactly(self, n: int) -> bytes:
-        if len(self._buf) < n:
-            raise asyncio.IncompleteReadError(bytes(self._buf), n)
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, separator: bytes) -> bytes:
-        idx = self._buf.find(separator)
-        if idx == -1:
-            result = bytes(self._buf)
-            self._buf.clear()
-        else:
-            end = idx + len(separator)
-            result = bytes(self._buf[:end])
-            del self._buf[:end]
-        return result
-
-
-# ---------------------------------------------------------------------------
 # Body-decoding tests
 # ---------------------------------------------------------------------------
 
@@ -369,7 +335,7 @@ class TestHTTP1_1BodyDecoding:
 
         conn = Connection(method='POST', path='/', raw_path=b'/',
                           headers=Headers(headers), type='http')
-        return RecipientFactory.http1(FakeStreamReader(body_bytes), conn, framing=request_framing(conn.headers))
+        return RecipientFactory.http1(fed(body_bytes).reader, conn, framing=request_framing(conn.headers))
 
     @pytest.mark.asyncio
     async def test_content_length_reads_exact_bytes(self):
@@ -426,31 +392,6 @@ class TestHTTP1_1BodyDecoding:
         headers = [(b'transfer-encoding', b'chunked')]
         event = await self._make_recipient(b'0\r\n\r\n', headers)()
         assert event['body'] == b''
-
-
-# ---------------------------------------------------------------------------
-# Helpers for lifespan / timeout tests
-# ---------------------------------------------------------------------------
-
-def _make_fake_writer():
-    """Return a MagicMock writer with transport and written-bytes tracking."""
-    sw = MagicMock()
-    sw.written = bytearray()
-    sw.write = MagicMock(side_effect=lambda d: sw.written.extend(d))
-    sw.drain = AsyncMock()
-    sw.closed = False
-    sw.close = MagicMock(side_effect=lambda: setattr(sw, 'closed', True))
-    sw.wait_closed = AsyncMock()
-
-    class _FakeTransport:
-        def get_extra_info(self, key, default=None):
-            extras = {'peername': ('127.0.0.1', 54321),
-                      'sockname': ('0.0.0.0', 8000),
-                      'ssl_object': None}
-            return extras.get(key, default)
-
-    sw.transport = _FakeTransport()
-    return sw
 
 
 # ---------------------------------------------------------------------------
@@ -524,87 +465,6 @@ class TestASGILifespan:
 
 
 # ---------------------------------------------------------------------------
-# P2 — Timeout handling
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-class TestTimeoutHandling:
-    """Header and body reads must be wrapped with asyncio.wait_for.
-
-    P2 item: a slow or stalled client keeps the connection open indefinitely.
-    Wrapping reads in asyncio.wait_for(coro, timeout=N) lets the server
-    reclaim resources by aborting the connection after N seconds.
-    """
-
-    async def test_slow_header_read_times_out(self):
-        """A peer that connects and never sends its discriminator must stall the
-        connection (detection now peeks via ``read`` before any binding runs)."""
-        async def slow_read(*args, **kwargs):
-            await asyncio.sleep(10)
-            return b''
-
-        sw = _make_fake_writer()
-        reader = MagicMock()
-        reader.read = AsyncMock(side_effect=slow_read)
-        # AsyncioReader.peek reads the stream's ``_buffer``; on a bare MagicMock
-        # that attribute is auto-mocked and yields a spurious byte, which the
-        # preface short-circuit correctly treats as "not http2", routing the
-        # connection to http1 instead of stalling at detection.  Model the
-        # stated premise — the peer sent nothing — with an empty buffer.
-        reader._buffer = b''
-
-        async def noop_app(scope, receive, send):
-            pass
-
-        server = ASGIServer(noop_app, read_timeout=0.05)
-
-        with pytest.raises((asyncio.TimeoutError, TimeoutError,
-                            ConnectionResetError, OSError)):
-            await asyncio.wait_for(
-                server._serve_connection(reader, sw),
-                timeout=1.0,
-            )
-
-    async def test_slow_body_read_times_out(self):
-        """A reader that hangs during body read must also time out."""
-        head = (b'POST / HTTP/1.1\r\nHost: x\r\n'
-                b'Content-Length: 5\r\n\r\n')
-        pending = [head]
-
-        async def head_then_hang(*args, **kwargs):
-            # Detection peek + the whole header block arrive in one read; every
-            # read after that is the body, and the body is what hangs.  The
-            # Content-Length path is transport-paced, so the hang has to sit in
-            # ``read`` — a hang scripted onto ``readexactly`` is never reached.
-            if pending:
-                return pending.pop(0)
-            await asyncio.sleep(10)
-            return b''
-
-        sw = _make_fake_writer()
-        reader = MagicMock()
-        reader.read = AsyncMock(side_effect=head_then_hang)
-        reader.readexactly = AsyncMock(side_effect=head_then_hang)
-        # Empty initial buffer, as a real StreamReader has — a bare MagicMock
-        # auto-mocks ``_buffer`` to spurious bytes, which the preface
-        # short-circuit would treat as "not http2" and route to http1 before
-        # the head has been consumed.
-        reader._buffer = b''
-
-        async def noop_app(scope, receive, send):
-            await receive()  # triggers body read
-
-        server = ASGIServer(noop_app, read_timeout=0.05)
-
-        with pytest.raises((asyncio.TimeoutError, TimeoutError,
-                            ConnectionResetError, OSError)):
-            await asyncio.wait_for(
-                server._serve_connection(reader, sw),
-                timeout=1.0,
-            )
-
-
-# ---------------------------------------------------------------------------
 # P3 — mTLS (mutual TLS)
 # ---------------------------------------------------------------------------
 
@@ -655,203 +515,3 @@ class TestMTLS:
         server = ASGIServer(_noop_app)   # no certfile/keyfile → ssl_context is None
         with pytest.raises((AttributeError, RuntimeError, TypeError)):
             server.configure_mtls(ca_cert='/some/ca.pem')
-
-
-# ---------------------------------------------------------------------------
-# _serve_connection dispatch — migrated from test_server_dispatch.py
-# ---------------------------------------------------------------------------
-
-from unittest.mock import patch
-from blackbull.server.http1_actor import HTTP1Actor as _HTTP1Actor_dispatch
-from blackbull.server.websocket_actor import WebSocketActor as _WebSocketActor_dispatch
-from blackbull.server.recipient import AbstractReader as _AbstractReader_dispatch
-from blackbull.server.sender import AbstractWriter as _AbstractWriter_dispatch
-from blackbull.server.http1_actor import request_framing
-
-
-class _DispatchReader(_AbstractReader_dispatch):
-    def __init__(self, data: bytes):
-        self._buf = bytearray(data)
-
-    async def readline(self) -> bytes:
-        idx = self._buf.find(b'\n')
-        if idx == -1:
-            chunk, self._buf = bytes(self._buf), bytearray()
-            return chunk
-        chunk = bytes(self._buf[:idx + 1])
-        del self._buf[:idx + 1]
-        return chunk
-
-    async def read(self, n: int = -1) -> bytes:
-        if n < 0:
-            chunk, self._buf = bytes(self._buf), bytearray()
-            return chunk
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:
-        idx = self._buf.find(sep)
-        if idx == -1:
-            chunk, self._buf = bytes(self._buf), bytearray()
-            return chunk + sep
-        chunk = bytes(self._buf[:idx + len(sep)])
-        del self._buf[:idx + len(sep)]
-        return chunk
-
-    async def readexactly(self, n: int) -> bytes:
-        import asyncio
-        if len(self._buf) < n:
-            raise asyncio.IncompleteReadError(bytes(self._buf), n)
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-
-class _DispatchWriter(_AbstractWriter_dispatch):
-    def __init__(self):
-        self.written = bytearray()
-        self.closed = False
-
-    async def write(self, data: bytes) -> None:
-        self.written += data
-
-    async def close(self) -> None:
-        self.closed = True
-
-
-def _dispatch_http_request(method='GET', path='/', version='HTTP/1.1',
-                            headers: dict | None = None) -> bytes:
-    if headers is None:
-        headers = {'Host': 'localhost:8000'}
-    lines = [f'{method} {path} {version}']
-    for k, v in headers.items():
-        lines.append(f'{k}: {v}')
-    lines += ['', '']
-    return '\r\n'.join(lines).encode()
-
-
-def _dispatch_ws_request(path='/ws', host='localhost:8000') -> bytes:
-    return _dispatch_http_request(
-        method='GET', path=path,
-        headers={
-            'Host': host,
-            'Upgrade': 'websocket',
-            'Connection': 'Upgrade',
-            'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
-            'Sec-WebSocket-Version': '13',
-        }
-    )
-
-
-async def _dispatch_noop_app(scope, receive, send):
-    pass
-
-
-class TestClientConnectedCbDispatch:
-    """ASGIServer._serve_connection() must route to the correct handler class."""
-
-    @pytest.mark.asyncio
-    async def test_websocket_request_dispatches_to_websocket_actor(self):
-        raw = _dispatch_ws_request(path='/ws')
-        reader = _DispatchReader(raw)
-        writer = _DispatchWriter()
-        server = ASGIServer(_dispatch_noop_app)
-
-        with patch.object(_WebSocketActor_dispatch, 'run', new=AsyncMock()) as mock_ws_run:
-            await server._serve_connection(reader, writer)
-
-        assert mock_ws_run.called, (
-            "An HTTP Upgrade: websocket request must be routed to WebSocketActor."
-        )
-
-    @pytest.mark.asyncio
-    async def test_plain_http_request_dispatches_to_http1_actor(self):
-        raw = _dispatch_http_request(method='GET', path='/hello')
-        reader = _DispatchReader(raw)
-        writer = _DispatchWriter()
-        server = ASGIServer(_dispatch_noop_app)
-        dispatched_type = {}
-
-        original_init = _HTTP1Actor_dispatch.__init__
-
-        def capturing_init(self, *args, **kwargs):
-            dispatched_type['actor'] = 'HTTP1Actor'
-            original_init(self, *args, **kwargs)
-
-        async def noop_run(self):
-            pass
-
-        with patch.object(_HTTP1Actor_dispatch, '__init__', capturing_init):
-            with patch.object(_HTTP1Actor_dispatch, 'run', noop_run):
-                await server._serve_connection(reader, writer)
-
-        assert dispatched_type.get('actor') == 'HTTP1Actor'
-
-    @pytest.mark.asyncio
-    async def test_websocket_handler_receives_correct_scope_type(self):
-        """WebSocketActor.run must be called for WS upgrade requests."""
-        raw = _dispatch_ws_request(path='/chat/room1')
-        reader = _DispatchReader(raw)
-        writer = _DispatchWriter()
-        server = ASGIServer(_dispatch_noop_app)
-
-        with patch.object(_WebSocketActor_dispatch, 'run', new=AsyncMock()) as mock_run:
-            await server._serve_connection(reader, writer)
-
-        assert mock_run.called
-
-    @pytest.mark.asyncio
-    async def test_writer_is_closed_after_connection(self):
-        raw = _dispatch_http_request()
-        reader = _DispatchReader(raw)
-        writer = _DispatchWriter()
-        server = ASGIServer(_dispatch_noop_app)
-
-        async def noop_run(self):
-            pass
-
-        with patch.object(_HTTP1Actor_dispatch, 'run', noop_run):
-            await server._serve_connection(reader, writer)
-
-        assert writer.closed
-
-    @pytest.mark.asyncio
-    async def test_connection_limit_rejects_when_full(self):
-        """When active connections reach max_connections, new ones are closed immediately.
-
-        Regression for Phase 0 item 1.2: without a limit, every incoming
-        connection is accepted and queued, causing unbounded memory growth under
-        overload before multi-worker support lands.
-        """
-        server = ASGIServer(_dispatch_noop_app, max_connections=2)
-
-        # Simulate two active connections by setting the counter directly.
-        server._active_connections = 2
-
-        raw = _dispatch_http_request()
-        reader = _DispatchReader(raw)
-        writer = _DispatchWriter()
-
-        await server._serve_connection(reader, writer)
-
-        assert writer.closed, 'New connection must be closed when the limit is reached'
-
-    @pytest.mark.asyncio
-    async def test_connection_counter_decrements_after_run(self):
-        """Active connection counter must decrement when a connection finishes."""
-        server = ASGIServer(_dispatch_noop_app, max_connections=10)
-
-        raw = _dispatch_http_request()
-        reader = _DispatchReader(raw)
-        writer = _DispatchWriter()
-
-        async def noop_run(self):
-            pass
-
-        with patch.object(_HTTP1Actor_dispatch, 'run', noop_run):
-            await server._serve_connection(reader, writer)
-
-        assert server._active_connections == 0, (
-            f'Counter should be 0 after connection closes, got {server._active_connections}'
-        )

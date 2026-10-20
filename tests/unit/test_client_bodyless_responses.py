@@ -13,38 +13,12 @@ handshake (101) is the case that reaches this in practice.
 import pytest
 
 from blackbull.client.http1 import HTTP1ResponseRecipient
-from blackbull.server.recipient import AbstractReader
+
+from tests.harness import fed
 
 
-class _BytesReader(AbstractReader):
-    """Minimal reader over a fixed buffer."""
-
-    def __init__(self, data: bytes) -> None:
-        self._buf = bytearray(data)
-
-    async def read(self, n: int) -> bytes:
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readexactly(self, n: int) -> bytes:
-        if len(self._buf) < n:
-            raise AssertionError(
-                f'client asked for {n} bytes with only {len(self._buf)} left')
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:
-        idx = self._buf.find(sep)
-        end = len(self._buf) if idx == -1 else idx + len(sep)
-        chunk = bytes(self._buf[:end])
-        del self._buf[:end]
-        return chunk
-
-    @property
-    def remaining(self) -> bytes:
-        return bytes(self._buf)
+def _BytesReader(payload: bytes = b''):
+    return fed(payload).reader
 
 
 @pytest.mark.asyncio
@@ -94,4 +68,4 @@ async def test_a_bodyless_response_leaves_the_next_one_unread():
     second = await HTTP1ResponseRecipient().receive(reader)
     assert second.status == 200
     assert second.body == b'ok'
-    assert reader.remaining == b''
+    assert reader.peek() == b''

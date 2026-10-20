@@ -1,183 +1,82 @@
-"""``read_head`` is a contract, not a capability — every reader answers alike.
+"""``read_head`` answers each case the H/1.1 actor branches on differently.
 
-The H/1.1 actor asks its reader for one message head and does not ask what kind
-of reader it is.  That only holds if the answers agree, so this file drives the
-*same* wire bytes through every reader the server can end up with and asserts
-one outcome per case:
-
-* :class:`~blackbull.server.connection_protocol.BufferReader` — production,
-  finds the terminator in a single scan of its own buffer;
-* :class:`~blackbull.server.recipient.AsyncioReader` — a real
-  ``asyncio.StreamReader`` underneath, one ``readuntil`` per line;
-* :class:`~blackbull.server.recipient.PrefixReader` — bytes already taken off
-  the stream replayed in front of it, which is how a caller hands the actor a
-  request it has partly read.
-
-The cases are the ones the actor branches on, and each maps to a different
-answer on the wire: a complete head, an idle close (silence), a truncated head
-(400), an over-budget head with well-formed lines (431), and an over-budget
-blob with no line terminator at all (400).  A reader that disagreed on any of
-them would put a hole in exactly one deployment shape.
+A complete head, an idle close (silence), a truncated head (400), an
+over-budget head with well-formed lines (431), and an over-budget blob with no
+line terminator at all (400).
 """
 import asyncio
 
 import pytest
 
-from blackbull.server.connection_protocol import ConnectionProtocol
 from blackbull.server.http1_actor import (BadRequestError, HeaderTooLargeError,
                                           _reject_oversized_head)
 from blackbull.server.read_buffer import ReadBuffer
-from blackbull.server.recipient import (AbstractReader, AsyncioReader,
-                                        IncompleteReadError, PrefixReader,
-                                        ReadLimitExceeded)
+from blackbull.server.recipient import IncompleteReadError, ReadLimitExceeded
+
+from tests.harness import feed, fed
 
 pytestmark = pytest.mark.asyncio
 
 HEAD = b'GET /x HTTP/1.1\r\nHost: localhost\r\n\r\n'
 
 
-# ---------------------------------------------------------------------------
-# One reader per builder, each fed *data* and then closed by the peer.
-# ---------------------------------------------------------------------------
-
-def _buffer_reader(data: bytes):
-    proto = ConnectionProtocol()
-    proto.connection_made(_NullTransport())
-    # The transport writes in window-sized chunks: get_buffer's window is the
-    # buffer's free span (the sizehint is advisory — F5), so a head larger
-    # than the initial 8 KiB fills it in pieces and the buffer grows only as
-    # bytes arrive — exactly what uvloop/asyncio do in their recv loop.
-    pos = 0
-    while pos < len(data):
-        view = proto.get_buffer(len(data) - pos)
-        n = min(len(view), len(data) - pos)
-        view[:n] = data[pos:pos + n]
-        proto.buffer_updated(n)
-        pos += n
-    proto.eof_received()
-    return proto.reader
-
-
-def _asyncio_reader(data: bytes):
-    sr = asyncio.StreamReader()
-    sr.feed_data(data)
-    sr.feed_eof()
-    return AsyncioReader(sr)
-
-
-def _prefix_reader(data: bytes):
-    """Split so the seam falls mid-head — the case a naive replay gets wrong."""
-    cut = min(7, len(data))
-    return PrefixReader(data[:cut], _asyncio_reader(data[cut:]))
-
-
-class _NullTransport:
-    def pause_reading(self): pass
-    def resume_reading(self): pass
-    def write(self, data): pass
-    def close(self): pass
-    def is_closing(self): return False
-    def get_extra_info(self, name, default=None): return default
-
-
-class _BytewiseReader(AbstractReader):
-    """Reader using the AbstractReader byte-wise read_head implementation."""
-
-    def __init__(self, data: bytes) -> None:
-        self._data = bytearray(data)
-
-    async def read(self, n: int) -> bytes:
-        chunk = bytes(self._data[:n])
-        del self._data[:n]
-        return chunk
-
-    async def readexactly(self, n: int) -> bytes:
-        if len(self._data) < n:
-            raise IncompleteReadError(bytes(self._data))
-        return await self.read(n)
-
-    def at_eof(self) -> bool:
-        return not self._data
-
-
-READERS = pytest.mark.parametrize(
-    'make_reader',
-    [_buffer_reader, _asyncio_reader, _prefix_reader],
-    ids=['buffer', 'asyncio', 'prefix'],
-)
+def _reader(data: bytes):
+    return fed(data).reader
 
 
 # ---------------------------------------------------------------------------
+async def test_complete_head_comes_back_whole():
+    assert await _reader(HEAD).read_head(8192) == HEAD
 
 
-@READERS
-async def test_complete_head_comes_back_whole(make_reader):
-    assert await make_reader(HEAD).read_head(8192) == HEAD
-
-
-@READERS
-async def test_body_after_the_head_is_left_alone(make_reader):
+async def test_body_after_the_head_is_left_alone():
     """The head read must stop at the terminator: a byte of body consumed here
     is a byte the recipient never sees, and a desynced keep-alive stream."""
-    reader = make_reader(HEAD + b'BODYBYTES')
+    reader = _reader(HEAD + b'BODYBYTES')
     assert await reader.read_head(8192) == HEAD
     assert await reader.readexactly(9) == b'BODYBYTES'
 
 
-@READERS
-async def test_idle_close_is_an_empty_head(make_reader):
+async def test_idle_close_is_an_empty_head():
     """Nothing sent, peer gone: no request, and so no response either."""
-    assert await make_reader(b'').read_head(8192) == b''
+    assert await _reader(b'').read_head(8192) == b''
 
 
-@READERS
-async def test_truncated_head_carries_what_arrived(make_reader):
+async def test_truncated_head_carries_what_arrived():
     """Distinct from the idle close above — this one is answered 400, and the
     actor decides that by looking at the partial."""
     with pytest.raises(IncompleteReadError) as caught:
-        await make_reader(b'GET /x HTTP/1.1\r\nHost: local').read_head(8192)
+        await _reader(b'GET /x HTTP/1.1\r\nHost: local').read_head(8192)
     assert caught.value.partial.startswith(b'GET /x HTTP/1.1\r\n')
 
 
-@READERS
-async def test_over_budget_head_reports_the_breach(make_reader):
+async def test_over_budget_head_reports_the_breach():
     """Well-formed lines, too many of them → the actor's 431."""
     fat = (b'GET /x HTTP/1.1\r\n'
            + b'X-Pad: ' + b'p' * 200 + b'\r\n' * 1) * 40 + b'\r\n'
     with pytest.raises(ReadLimitExceeded) as caught:
-        await make_reader(fat).read_head(1024)
+        await _reader(fat).read_head(1024)
     assert b'\r\n' in caught.value.seen
 
 
-@READERS
-async def test_over_budget_blob_with_no_terminator_reports_the_breach(make_reader):
+async def test_over_budget_blob_with_no_terminator_reports_the_breach():
     """No CRLF anywhere → the actor's 400.  Same exception, different evidence,
     which is why ``seen`` travels with it rather than being re-derived."""
     with pytest.raises(ReadLimitExceeded) as caught:
-        await make_reader(b'x' * 4000).read_head(1024)
+        await _reader(b'x' * 4000).read_head(1024)
     assert b'\r\n' not in caught.value.seen
     assert caught.value.seen.startswith(b'xxx')
 
 
-@READERS
-async def test_a_zero_budget_disables_the_bound(make_reader):
+async def test_a_zero_budget_disables_the_bound():
     """0 means "no limit" everywhere the setting is read, so it has to mean
     that here too — otherwise the budget check fires on every request."""
     fat = b'GET /x HTTP/1.1\r\nX-Pad: ' + b'p' * 20_000 + b'\r\n\r\n'
-    assert await make_reader(fat).read_head(0) == fat
+    assert await _reader(fat).read_head(0) == fat
 
 
-async def test_bytewise_read_head_enforces_limit_during_line_accumulation():
-    reader = _BytewiseReader(b'x' * 10000 + b'\r\n')
-
-    with pytest.raises(ReadLimitExceeded) as caught:
-        await reader.read_head(8)
-
-    assert len(caught.value.seen) <= 9
-
-
-async def test_asyncio_readuntil_overrun_stays_resident():
-    reader = _asyncio_reader(b'x' * 10_000 + b'\n')
+async def test_readuntil_overrun_stays_resident():
+    reader = _reader(b'x' * 10_000 + b'\n')
 
     with pytest.raises(ReadLimitExceeded) as caught:
         await reader.readuntil(b'\n', limit=8)
@@ -186,8 +85,8 @@ async def test_asyncio_readuntil_overrun_stays_resident():
     assert reader.buffered_len() == 10_001
 
 
-async def test_asyncio_readuntil_limit_wins_over_eof():
-    reader = _asyncio_reader(b'x' * 9_000)
+async def test_readuntil_limit_wins_over_eof():
+    reader = _reader(b'x' * 9_000)
 
     with pytest.raises(ReadLimitExceeded):
         await reader.readuntil(b'\n', limit=8192)
@@ -195,12 +94,11 @@ async def test_asyncio_readuntil_limit_wins_over_eof():
     assert reader.buffered_len() == 9_000
 
 
-@READERS
-async def test_oversized_header_keeps_request_line_for_431_classification(make_reader):
+async def test_oversized_header_keeps_request_line_for_431_classification():
     raw = b'GET / HTTP/1.1\r\nX-Pad: ' + b'x' * 2_000 + b'\r\n\r\n'
 
     with pytest.raises(ReadLimitExceeded) as caught:
-        await make_reader(raw).read_head(128)
+        await _reader(raw).read_head(128)
 
     assert caught.value.seen.startswith(b'GET / HTTP/1.1\r\n')
     with pytest.raises(HeaderTooLargeError):
@@ -208,7 +106,7 @@ async def test_oversized_header_keeps_request_line_for_431_classification(make_r
 
 
 async def test_oversized_request_line_remains_a_400():
-    reader = _asyncio_reader(b'G' * 2_000 + b'\r\n\r\n')
+    reader = _reader(b'G' * 2_000 + b'\r\n\r\n')
 
     with pytest.raises(ReadLimitExceeded) as caught:
         await reader.read_head(128)
@@ -217,38 +115,9 @@ async def test_oversized_request_line_remains_a_400():
         _reject_oversized_head(caught.value.seen, 128)
 
 
-async def test_read_head_passes_exact_limit_without_legacy_retry():
-    class RecordingReader(_BytewiseReader):
-        seen_limits: list[int]
-
-        def __init__(self) -> None:
-            super().__init__(HEAD)
-            self.seen_limits = []
-
-        async def readuntil(self, sep: bytes, limit: int = 0) -> bytes:
-            self.seen_limits.append(limit)
-            return await super().readuntil(sep, limit)
-
-    reader = RecordingReader()
-    assert await reader.read_head(123) == HEAD
-    assert reader.seen_limits == [123, 123, 123]
-
-
-async def test_legacy_readuntil_uses_bounded_bytewise_compatibility():
-    class LegacyReader(_BytewiseReader):
-        async def readuntil(self, sep: bytes) -> bytes:
-            raise AssertionError('legacy unbounded readuntil must not run')
-
-    reader = LegacyReader(b'x' * 10_000 + b'\r\n')
-    with pytest.raises(ReadLimitExceeded) as caught:
-        await reader.read_head(8)
-    assert len(caught.value.seen) <= 9
-
-
-@READERS
-async def test_second_head_reads_cleanly_after_the_first(make_reader):
+async def test_second_head_reads_cleanly_after_the_first():
     """The keep-alive case: two pipelined requests, read one at a time."""
-    reader = make_reader(HEAD + HEAD)
+    reader = _reader(HEAD + HEAD)
     assert await reader.read_head(8192) == HEAD
     assert await reader.read_head(8192) == HEAD
     assert await reader.read_head(8192) == b''
@@ -263,8 +132,7 @@ async def test_read_head_skips_the_empty_scan():
     scan's resumption state is untouched (it would set ``_scanned = _w``,
     which already equals ``_r``), so skipping it is conformance-safe.
     """
-    proto = ConnectionProtocol()
-    proto.connection_made(_NullTransport())
+    proto = fed(eof=False)
     empty_calls: list[int] = []
     orig = ReadBuffer.find_head_end
 
@@ -277,18 +145,10 @@ async def test_read_head_skips_the_empty_scan():
     try:
         task = asyncio.create_task(proto.reader.read_head(8192))
         await asyncio.sleep(0)                 # let it reach the wait
-        view = proto.get_buffer(4096)
-        view[:len(HEAD)] = HEAD
-        proto.buffer_updated(len(HEAD))
+        feed(proto, HEAD)
         assert await asyncio.wait_for(task, 1) == HEAD
     finally:
         ReadBuffer.find_head_end = orig
     assert not empty_calls, \
         f'find_head_end ran on an empty buffer {len(empty_calls)}×'
 
-
-class TestAsyncioReader:
-    async def test_invalid_stream_raises_typeerror(self):
-        from blackbull.server.recipient import AsyncioReader
-        with pytest.raises(TypeError, match='read()'):
-            AsyncioReader(object())

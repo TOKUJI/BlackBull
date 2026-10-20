@@ -146,8 +146,12 @@ class BufferReader(AbstractReader):
         self._consumed()
         return out
 
+    async def readuntil(self, sep: bytes, limit: int = 0) -> bytes:
+        if limit <= 0:
+            return await self._readuntil_unbounded(sep)
+        return await self._readuntil_bounded(sep, limit)
+
     async def _readuntil_unbounded(self, sep: bytes) -> bytes:
-        """Read through *sep* without an application byte budget."""
         scan_from = 0
         while True:
             idx = self._buf.find(sep, scan_from)
@@ -237,10 +241,12 @@ class BufferReader(AbstractReader):
             await self.wait_for_data()
         return True
 
-    # -- the one-scan header read ------------------------------------------
+    async def read_head(self, limit: int) -> bytes:
+        if limit <= 0:
+            return await self._read_head_unbounded()
+        return await self._read_head_bounded(limit)
 
     async def _read_head_unbounded(self) -> bytes:
-        """[`read_head`][] with no byte budget."""
         while True:
             if not self._buf.available:
                 if self._proto.peer_closed:
@@ -260,11 +266,6 @@ class BufferReader(AbstractReader):
             await self.wait_for_data()
 
     async def _read_head_bounded(self, limit: int) -> bytes:
-        """[`read_head`][] under a byte budget, found in one scan.
-
-        Contract as documented on [`AbstractReader.read_head`][AbstractReader.read_head] — an idle
-        close returns ``b''`` and a truncated one raises with the partial.
-        """
         while True:
             if not self._buf.available:
                 # An empty buffer cannot exceed a positive limit; wait before scanning.

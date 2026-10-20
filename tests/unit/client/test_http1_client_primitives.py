@@ -14,8 +14,10 @@ from http import HTTPMethod
 import pytest
 
 from blackbull.client.http1 import HTTP1Client
-from blackbull.server.recipient import AbstractReader, IncompleteReadError
+from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
+
+from tests.harness import fed
 
 
 # ---------------------------------------------------------------------------
@@ -37,56 +39,13 @@ class _CapturingWriter(AbstractWriter):
         self.call_times.append(time.monotonic() - self._t0)
 
 
-class _CannedReader(AbstractReader):
-    """Plays back a fixed byte stream for read_response unit tests."""
-
-    def __init__(self, payload: bytes) -> None:
-        self._buf = payload
-        self._pos = 0
-
-    async def read(self, n: int = -1) -> bytes:
-        if n < 0:
-            out = self._buf[self._pos:]
-            self._pos = len(self._buf)
-            return out
-        out = self._buf[self._pos:self._pos + n]
-        self._pos += len(out)
-        return out
-
-    async def readuntil(self, separator: bytes) -> bytes:
-        idx = self._buf.find(separator, self._pos)
-        if idx == -1:
-            partial = self._buf[self._pos:]
-            self._pos = len(self._buf)
-            raise IncompleteReadError(partial)
-        end = idx + len(separator)
-        out = self._buf[self._pos:end]
-        self._pos = end
-        return out
-
-    async def readexactly(self, n: int) -> bytes:
-        out = self._buf[self._pos:self._pos + n]
-        if len(out) < n:
-            self._pos = len(self._buf)
-            raise IncompleteReadError(out)
-        self._pos += n
-        return out
+def _CannedReader(payload: bytes = b''):
+    return fed(payload).reader
 
 
-class _NeverReader(AbstractReader):
-    """Hangs forever on every read — used to exercise the read-timeout path."""
-
-    async def read(self, n: int = -1) -> bytes:  # pragma: no cover (loops)
-        await asyncio.Event().wait()
-        return b''
-
-    async def readuntil(self, separator: bytes) -> bytes:  # pragma: no cover
-        await asyncio.Event().wait()
-        return b''
-
-    async def readexactly(self, n: int) -> bytes:  # pragma: no cover
-        await asyncio.Event().wait()
-        return b''
+def _NeverReader(payload: bytes = b''):
+    """Delivers *payload*, then stays connected and says nothing."""
+    return fed(payload, eof=False).reader
 
 
 def _client_with_fakes(*, record: bool = False,

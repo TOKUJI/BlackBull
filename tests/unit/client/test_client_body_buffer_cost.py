@@ -38,20 +38,20 @@ change tracked as ``BLA-325``.
 
 **Why the fixture manufactures a distinct object per read, and yields.**
 ``tracemalloc`` counts an object once however many references point at it, so
-a fake reader that hands back the *same* slice every time reads ~1 N and every
+a fixture that hands back the *same* payload every time reads ~1 N and every
 assertion here passes vacuously; ``TestTheInstrumentIsNotBlind`` is the
-control against that.  And a reader that never awaits anything real holds one
+control against that.  HTTP/1.1 reads through the production reader, which
+returns a fresh object per read.  And a reader that never awaits anything real holds one
 cancelled ``asyncio`` timer handle per read to the peak — 16,384 of them for
 an 8 MiB body at 512-byte writes, which reads as 0.42 of body cost that no
 body ever paid, because the loop only purges them when it gets a turn.  Both
-fixtures therefore yield once per read, as a socket does.
+fixtures therefore yield once per arrival, as a socket does.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import tracemalloc
-from collections import deque
 from collections.abc import Awaitable, Iterable
 
 import pytest
@@ -59,8 +59,9 @@ import pytest
 from blackbull.client.http1 import HTTP1ResponseRecipient
 from blackbull.client.http2 import HTTP2Client, _PendingResponse
 from blackbull.protocol.frame_types import FrameTypes, PseudoHeaders
-from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
+
+from tests.harness import paced
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(60)]
 
@@ -100,52 +101,23 @@ _BLIND_CONTROL_FAILED = (
     'instrument is counting something other than the body.')
 
 
-class _ScriptedReader(AbstractReader):
-    """Serves framing octets literally and manufactures body octets on demand.
+def _scripted(script: Iterable[bytes | int], *, write_size: int = _PEER_WRITE):
+    """Serves framing octets literally and manufactures body octets per arrival.
 
     The body is never resident as a whole before the read.  A reader holding
     it would put N octets on the scale that no accumulation strategy can move,
     and the ratio would measure the fixture instead of the code.
-
-    *share_one_slice* hands back the same object every read.  That is the
-    blind-instrument control, not a peer: see the module docstring.
     """
-
-    def __init__(self, script: Iterable[bytes | int], *,
-                 write_size: int = _PEER_WRITE,
-                 share_one_slice: bool = False) -> None:
-        self._script: deque[bytes | int] = deque(script)
-        self._literal = b''
-        self._manufacture = 0
-        self._write = write_size
-        self._shared = bytes(write_size) if share_one_slice else None
-
-    async def read(self, n: int = -1) -> bytes:
-        # A real socket read yields, and that matters to what is measured:
-        # ``_body_read`` opens an ``asyncio.timeout`` per read, and asyncio
-        # purges the cancelled timer handles only when the loop gets a turn.
-        # A reader that never yields holds one per read to the peak — 16,384
-        # of them for an 8 MiB body at 512-byte writes, which reads as 0.42
-        # of body cost that no body ever paid.
-        await asyncio.sleep(0)
-        while not self._literal and not self._manufacture:
-            if not self._script:
-                return b''
-            item = self._script.popleft()
-            if isinstance(item, int):
-                self._manufacture = item
-            else:
-                self._literal = item
-        if self._literal:
-            take = len(self._literal) if n < 0 else min(n, len(self._literal))
-            out, self._literal = self._literal[:take], self._literal[take:]
-            return out
-        take = self._manufacture if n < 0 else min(n, self._manufacture)
-        take = min(take, self._write)
-        self._manufacture -= take
-        if self._shared is not None and take == len(self._shared):
-            return self._shared
-        return bytes(take)
+    def arrivals():
+        for item in script:
+            if isinstance(item, bytes):
+                yield 0, item
+                continue
+            while item:
+                take = min(item, write_size)
+                item -= take
+                yield 0, bytes(take)
+    return paced(arrivals())
 
 
 def _declared_script(total: int, write: int = _PEER_WRITE) -> list[bytes | int]:
@@ -196,7 +168,7 @@ async def _peak_ratio(work: Awaitable[int], denominator: int) -> float:
     return (peak - base) / denominator
 
 
-async def _http1_body_octets(reader: AbstractReader) -> int:
+async def _http1_body_octets(reader) -> int:
     response = await HTTP1ResponseRecipient(request_method='GET').receive(reader)
     return len(response.body)
 
@@ -225,7 +197,7 @@ async def _http2_body_octets(client: HTTP2Client, total: int, *,
     ``_on_response_data`` is the accumulation site and ``_complete`` is the
     join, so this drives both without a socket or a settled connection.  The
     loop turn between frames is the receive loop's own — see
-    :meth:`_ScriptedReader.read` for why leaving it out changes the reading.
+    the module docstring for why leaving it out changes the reading.
     """
     future = asyncio.get_running_loop().create_future()
     client._responses[1] = _PendingResponse(future=future)
@@ -270,7 +242,7 @@ class TestTheBufferedBodyCostsTwiceTheCap:
         same multiplier — which is why the documentation states it once, for
         the cap, rather than once per framing.
         """
-        reader = _ScriptedReader(_SCRIPTS[framing](_CAP))
+        reader = _scripted(_SCRIPTS[framing](_CAP))
         ratio = await _peak_ratio(_http1_body_octets(reader), _CAP)
         assert _BAND[0] <= ratio <= _BAND[1], (
             f'{framing}: a body at the cap peaked at {ratio:.3f} x the cap; '
@@ -306,9 +278,9 @@ class TestTheExcessIsPerSliceNotPerOctet:
     """
 
     async def test_the_constant_is_recoverable_from_two_write_sizes(self):
-        wide = await _peak_ratio(_http1_body_octets(_ScriptedReader(
+        wide = await _peak_ratio(_http1_body_octets(_scripted(
             _declared_script(_CAP))), _CAP)
-        narrow = await _peak_ratio(_http1_body_octets(_ScriptedReader(
+        narrow = await _peak_ratio(_http1_body_octets(_scripted(
             _declared_script(_CAP, _SMALL_PEER_WRITE),
             write_size=_SMALL_PEER_WRITE)), _CAP)
         slices = _CAP // _SMALL_PEER_WRITE - _CAP // _PEER_WRITE
@@ -322,26 +294,21 @@ class TestTheExcessIsPerSliceNotPerOctet:
 
 
 class TestTheInstrumentIsNotBlind:
-    """The control: the same code paths, one shared slice, ~1 N.
+    """The control: the same code path, one shared payload, ~1 N.
 
     ``tracemalloc`` counts an object once however many references point at it.
     A fixture that reuses one slice therefore reads ~1 N through code that
     genuinely doubles, which is how the first measurement of this ratio came
-    out at 1.00.  These two prove the reading above is the accumulation and not
+    out at 1.00.  This proves the reading above is the accumulation and not
     the harness — and they are the reason the assertions above have a *lower*
     edge at all.
 
-    They also happen to be the one thing here that a ``bytearray`` rewrite
+    It also happens to be the one thing here that a ``bytearray`` rewrite
     cannot pass: a strategy that copies costs the same whether the slices are
     distinct or not, so it reads ~2 here too.  That is a side effect and not
     the guarantee — the reason not to make that change is written in
     ``env.py``, where it will be read.
     """
-
-    async def test_a_reused_http1_slice_reads_about_one(self):
-        reader = _ScriptedReader(_declared_script(_CAP), share_one_slice=True)
-        ratio = await _peak_ratio(_http1_body_octets(reader), _CAP)
-        assert ratio < 1.5, _BLIND_CONTROL_FAILED.format(kind='slice', ratio=ratio)
 
     async def test_a_reused_http2_payload_reads_about_one(self):
         client = _h2_client()

@@ -33,52 +33,12 @@ from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (DataFrameFlags, ErrorCodes,
                                             FrameTypes, HeaderFrameFlags,
                                             PseudoHeaders, SettingFrameFlags)
-from blackbull.server.sender import AbstractWriter
 
 # A completeness rule that does not fire presents as a wrong status, not as a
 # hang; one that fires wrongly presents as a hang.  Both are reported.
+from tests import harness
+
 pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(10)]
-
-
-# ----------------------------------------------------------------------
-# Harness — the wire is an in-memory StreamReader, the caller is request()
-# ----------------------------------------------------------------------
-
-class _MemTransport(asyncio.Transport):
-    def __init__(self) -> None:
-        super().__init__()
-        self.written = bytearray()
-        self.closing = False
-
-    def write(self, data: bytes) -> None:
-        self.written += data
-
-    def can_write_eof(self) -> bool:
-        return True
-
-    def is_closing(self) -> bool:
-        return self.closing
-
-    def close(self) -> None:
-        self.closing = True
-
-    def abort(self) -> None:
-        self.closing = True
-
-    def get_extra_info(self, name, default=None):
-        return default
-
-
-class _MemWriter(asyncio.StreamWriter):
-    """A real ``StreamWriter`` (``_adopt`` is typed for one) over no socket."""
-
-    def __init__(self) -> None:
-        self.mem = _MemTransport()
-        super().__init__(self.mem, asyncio.Protocol(), None,
-                         asyncio.get_running_loop())
-
-    async def drain(self) -> None:
-        pass
 
 
 class _Peer:
@@ -125,30 +85,35 @@ class _Peer:
 
 
 async def _call(peer: _Peer, method: str = 'GET'):
-    """Run the peer's bytes through the public request(); return the outcome."""
-    reader = asyncio.StreamReader()
-    client = HTTP2Client._adopt('localhost', 80, reader, _MemWriter())
+    """Serve the peer's bytes to the public request(); return the outcome."""
     rst: list = []
-    orig = client._factory.rst_stream
 
-    def watch(stream_id, code):
-        rst.append(code)
-        return orig(stream_id, code)
+    async def origin(reader, writer):
+        await reader.readexactly(24)                 # the client preface
+        while True:                                  # until stream 1 is opened
+            head = await reader.readexactly(9)
+            await reader.readexactly(int.from_bytes(head[:3], 'big'))
+            if head[3] == FrameTypes.HEADERS[0] and int.from_bytes(head[5:], 'big') == 1:
+                break
+        writer.write(peer.wire)
+        await writer.drain()
+        try:
+            while True:
+                head = await reader.readexactly(9)
+                payload = await reader.readexactly(int.from_bytes(head[:3], 'big'))
+                if head[3] == FrameTypes.RST_STREAM[0]:
+                    rst.append(ErrorCodes(int.from_bytes(payload, 'big')))
+        except (asyncio.IncompleteReadError, ConnectionError):
+            pass
 
-    client._factory.rst_stream = watch          # type: ignore[assignment]
-    try:
-        async with client:
-            task = asyncio.ensure_future(client.request(method, '/'))
-            # The wire must reach the receive loop only once request() has
-            # claimed stream 1: bytes buffered before that are consumed first,
-            # and every frame lands on a stream nobody has opened yet.
-            while not client._responses and not task.done():
-                await asyncio.sleep(0)
-            reader.feed_data(peer.wire)
-            return await asyncio.wait_for(task, 2.0)
-    except Exception as exc:
-        return exc, rst
-    return None, rst
+    outcome = None
+    async with harness.peer(origin) as port:
+        try:
+            async with HTTP2Client('127.0.0.1', port) as client:
+                outcome = await asyncio.wait_for(client.request(method, '/'), 2.0)
+        except Exception as exc:
+            outcome = exc
+    return (outcome, rst) if isinstance(outcome, Exception) else outcome
 
 
 def _refused(outcome) -> Exception:

@@ -451,7 +451,6 @@ class HTTP1Actor(Actor):
         app: Callable[..., Awaitable[None]],
         aggregator: 'EventAggregator | None',
         *,
-        request: bytes = b'',
         peername: tuple[str, int | None] | None = None,
         sockname: tuple[str, int | None] | None = None,
         ssl: bool = False,
@@ -460,12 +459,6 @@ class HTTP1Actor(Actor):
         connection_id: str = '',
     ) -> None:
         super().__init__()
-        # Bytes that already arrived go back in front of the stream, not into a
-        # parsed-head slot: the actor then has exactly one way to obtain a head,
-        # and a partial one still gets the budget check and the framing rules.
-        if request:
-            from .recipient import PrefixReader  # noqa: PLC0415
-            reader = PrefixReader(request, reader)
         self._reader = reader
         self._writer = writer
         self._app = app

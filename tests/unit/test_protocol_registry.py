@@ -10,6 +10,8 @@ from blackbull.server.protocol_registry import (
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 
+from tests.harness import fed
+
 
 async def _noop(reader, writer, ctx):  # pragma: no cover - never invoked here
     pass
@@ -19,35 +21,8 @@ async def _noop_app(scope, receive, send):  # pragma: no cover - never invoked
     pass
 
 
-class _StubReader(AbstractReader):
-    """Concrete AbstractReader so ConnectionActor's beartyped __init__ accepts
-    it.  Buffer-backed (detection peeks via ``read``); records whether the
-    framing reads were called so a port-bound test can assert detection never
-    touched the stream."""
-
-    def __init__(self, first_line: bytes = b''):
-        self._buf = bytearray(first_line)
-        self.readuntil_called = False
-        self.readexactly_called = False
-
-    async def read(self, n: int) -> bytes:
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:
-        self.readuntil_called = True
-        idx = self._buf.find(sep)
-        end = (idx + len(sep)) if idx != -1 else len(self._buf)
-        chunk = bytes(self._buf[:end])
-        del self._buf[:end]
-        return chunk
-
-    async def readexactly(self, n: int) -> bytes:
-        self.readexactly_called = True
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
+def _reader(first_line: bytes = b''):
+    return fed(first_line).reader
 
     def at_eof(self) -> bool:
         return not self._buf
@@ -170,7 +145,7 @@ async def test_bound_binding_calls_serve_skips_detection():
     serve without touching the reader — no byte sniffing, no ALPN check."""
     from blackbull.server.connection_actor import ConnectionActor
 
-    reader = _StubReader()
+    reader = _reader(b'ECHO')
     writer = _StubWriter()
 
     served = []
@@ -186,8 +161,7 @@ async def test_bound_binding_calls_serve_skips_detection():
     await actor._dispatch()
 
     assert len(served) == 1
-    assert reader.readexactly_called is False
-    assert reader.readuntil_called is False
+    assert reader.peek(4) == b'ECHO'
 
 
 @pytest.mark.asyncio
@@ -209,7 +183,7 @@ async def test_protocol_detector_claims_connection_before_http1():
         def protocol_name(self):
             return 'echo'
 
-    reader = _StubReader(first_line=b'ECHO hello\r\n')
+    reader = _reader(first_line=b'ECHO hello\r\n')
     writer = _StubWriter()
 
     served = []
@@ -243,7 +217,7 @@ async def test_non_matching_detector_falls_through_to_http1():
         def protocol_name(self):
             return 'none'
 
-    reader = _StubReader(first_line=b'GET / HTTP/1.1\r\nHost: x\r\n\r\n')
+    reader = _reader(first_line=b'GET / HTTP/1.1\r\nHost: x\r\n\r\n')
     writer = _StubWriter()
 
     http1_served = []
@@ -253,7 +227,7 @@ async def test_non_matching_detector_falls_through_to_http1():
 
     async def _record(conn):
         # The http1 binding now reads its own request line from the replayed
-        # stream — assert it sees the intact line through the PrefixReader.
+        # stream — assert it sees the intact line.
         http1_served.append(await conn.reader.readuntil(b'\r\n'))
 
     with patch(
@@ -280,7 +254,7 @@ def test_select_http1_claims_on_first_byte_without_full_peek():
     """_select() lets the http1 catch-all claim as soon as the bytes in hand
     cannot become the HTTP/2 preface: a 'GET' decides on its
     first byte; a 'P' that could still be the preface keeps blocking."""
-    actor = _actor(_StubReader())
+    actor = _actor(_reader())
     order = ProtocolRegistry().detection_order   # (http2, http1)
     assert order[0].name == 'http2' and order[1].name == 'http1'
 
@@ -292,31 +266,20 @@ def test_select_http1_claims_on_first_byte_without_full_peek():
 
 
 @pytest.mark.asyncio
-async def test_peek_and_select_http1_fills_one_byte_not_sixteen():
-    """The per-connection sniff used to grow the peek 1..16 bytes for every
-    plain HTTP request; with the short-circuit a single 1-byte fill decides."""
-    class _CountingReader(_StubReader):
-        def __init__(self, first_line: bytes = b''):
-            super().__init__(first_line)
-            self.fills = 0
-
-        async def fill(self, n: int) -> bool:
-            self.fills += 1
-            return await super().fill(n)
-
-    reader = _CountingReader(b'GET / HTTP/1.1\r\nHost: x\r\n\r\n')
-    binding = await _actor(reader)._peek_and_select(ProtocolRegistry().detection_order)
+async def test_peek_and_select_http1_decides_on_one_byte():
+    """A plain HTTP request is claimed from its first byte, without waiting for
+    the 16 the HTTP/2 preface needs."""
+    reader = fed(b'G', eof=False).reader
+    binding = await asyncio.wait_for(
+        _actor(reader)._peek_and_select(ProtocolRegistry().detection_order), 1)
     assert binding is not None and binding.name == 'http1'
-    assert reader.fills == 1, f'expected one fill, got {reader.fills}'
-
-
 @pytest.mark.asyncio
 async def test_peek_and_select_still_detects_http2_preface():
     """The short-circuit must not break h2c: a real preface still claims
     http2, growing the peek up to the full 16-byte first line."""
     from blackbull.server.protocol_registry import _HTTP2_PREFACE
 
-    reader = _StubReader(first_line=_HTTP2_PREFACE)
+    reader = _reader(first_line=_HTTP2_PREFACE)
     binding = await _actor(reader)._peek_and_select(ProtocolRegistry().detection_order)
     assert binding is not None and binding.name == 'http2'
 
@@ -326,7 +289,7 @@ async def test_peek_and_select_diverged_preface_falls_to_http1():
     """A client that starts like the preface ('PRI * HTTP/1...') but diverges
     mid-way is http1, decided the moment the divergence is visible — not after
     a full 16-byte peek."""
-    reader = _StubReader(first_line=b'PRI * HTTP/1.0\r\nHost: x\r\n\r\n')
+    reader = _reader(first_line=b'PRI * HTTP/1.0\r\nHost: x\r\n\r\n')
     binding = await _actor(reader)._peek_and_select(ProtocolRegistry().detection_order)
     assert binding is not None and binding.name == 'http1'
 
@@ -355,7 +318,7 @@ def _conn_view(reader: AbstractReader, writer: AbstractWriter):
 
 
 def _bad_preface_conn(exc: BaseException):
-    return _conn_view(_StubReader(b'X' * 24), _FailingWriter(exc))
+    return _conn_view(_reader(b'X' * 24), _FailingWriter(exc))
 
 
 @pytest.mark.asyncio
@@ -372,12 +335,12 @@ async def test_bad_preface_goaway_write_does_not_absorb_cancellation():
 
 @pytest.mark.asyncio
 async def test_detect_timeout_returns_when_the_408_write_fails():
-    conn = _conn_view(_StubReader(), _FailingWriter(OSError('peer gone')))
+    conn = _conn_view(_reader(), _FailingWriter(OSError('peer gone')))
     assert await Http1Binding().on_detect_timeout(conn) is None
 
 
 @pytest.mark.asyncio
 async def test_detect_timeout_408_write_does_not_absorb_cancellation():
-    conn = _conn_view(_StubReader(), _FailingWriter(asyncio.CancelledError()))
+    conn = _conn_view(_reader(), _FailingWriter(asyncio.CancelledError()))
     with pytest.raises(asyncio.CancelledError):
         await Http1Binding().on_detect_timeout(conn)

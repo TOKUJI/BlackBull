@@ -13,9 +13,8 @@ from ..env import get_settings
 from ..native import NativeResponse
 from ..protocol.frame import FrameFactory
 from ..protocol.frame_types import FrameTypes, HeaderFrameFlags, PseudoHeaders
-from ..server.http2_ws import HTTP2WSWriter
-from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
-                                IncompleteReadError, WebSocketRecipient)
+from ..server.http2_ws import HTTP2StreamReader, HTTP2WSWriter
+from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, WebSocketRecipient)
 from ..server.ws_codec import WSOpcode, encode_frame
 from ._connect import DEFAULT_CONNECT_TIMEOUT
 from .client import Client
@@ -27,78 +26,21 @@ logger = logging.getLogger(__name__)
 # RFC 6455 §7.4.1 — normal closure status code.
 _CLOSE_CODE_NORMAL = 1000
 
-# Emit WINDOW_UPDATE when the receiver has buffered this many bytes
-# without acknowledging them — half the RFC 9113 §6.9.2 default
-# initial window so a peer streaming at line rate never stalls waiting
-# for credit.
-_WINDOW_UPDATE_THRESHOLD = 32768
-
-
-class _H2QueueReader(AbstractReader):
-    """Expose queued DATA as a byte stream for the shared WebSocket codec.
-
-    Return credit when frames are consumed. END_STREAM/RST_STREAM becomes EOF
-    and an abnormal WebSocket disconnect (1006).
-    """
-
-    def __init__(self, queue: asyncio.Queue, credit_cb) -> None:
-        self._queue = queue
-        self._credit_cb = credit_cb
-        self._buf = bytearray()
-        self._eof = False
-
-    async def _fill(self, n: int) -> None:
-        while len(self._buf) < n and not self._eof:
-            frame = await self._queue.get()
-            ftype = frame.FrameType()
-            if ftype == FrameTypes.DATA:
-                if frame.payload:
-                    self._buf.extend(frame.payload)
-                    await self._credit_cb(len(frame.payload))
-                if frame.end_stream:
-                    self._eof = True
-            elif ftype == FrameTypes.RST_STREAM:
-                self._eof = True
-            # Other frame types (WINDOW_UPDATE etc.) are connection-level
-            # bookkeeping handled by the client's receive loop; ignore.
-
-    async def readexactly(self, n: int) -> bytes:
-        await self._fill(n)
-        if len(self._buf) < n:
-            raise IncompleteReadError()
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def read(self, n: int) -> bytes:
-        await self._fill(1)
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes, limit: int = 0) -> bytes:
-        # Why the full base signature, and not a narrower one:
-        # docs/about/internals.md, "read_head is a contract, not a capability".
-        raise NotImplementedError('_H2QueueReader does not support readuntil')
-
-
 class WebSocketH2Session:
     """Frame-level WebSocket session over one HTTP/2 stream.
 
     Outgoing frames are masked (RFC 6455 §5.1) and wrapped in H2 DATA
     frames.  Incoming DATA payloads feed the shared
-    ``WebSocketRecipient`` stack through ``_H2QueueReader`` —
+    ``WebSocketRecipient`` stack through ``HTTP2StreamReader`` —
     fragmentation reassembly, FIN/RSV/mask
     validation, UTF-8 checks, and auto-PONG all come from the same
     codec the server and the H1 client use.
     """
 
     def __init__(self, http2_client: HTTP2Client,
-                 stream_id: int, frame_queue: asyncio.Queue) -> None:
+                 stream_id: int, reader: HTTP2StreamReader) -> None:
         self._client = http2_client
-        self._factory = http2_client.frame_factory
         self._stream_id = stream_id
-        self._queue = frame_queue
         self._closed = False
         self._disconnect_seen = False
         # Per-stream HTTP2Sender so outgoing WS payloads larger than
@@ -106,19 +48,14 @@ class WebSocketH2Session:
         # respect the peer's send window — same machinery the server
         # uses for response bodies.
         self._sender = http2_client._make_sender(stream_id)
-        # Unacknowledged received bytes since the last WINDOW_UPDATE.
-        # Tracked at both stream and connection levels per RFC 9113 §5.2.
-        self._unacked_stream: int = 0
-        self._unacked_conn: int = 0
-        # Shared WS decode stack: DATA-frame queue → byte stream →
-        # WebSocketRecipient.  ``require_masked=False`` because server
+        # Shared WS decode stack: DATA → byte stream → WebSocketRecipient.  ``require_masked=False`` because server
         # frames are unmasked — which also makes recipient-generated
         # PONG / echo-CLOSE frames masked, as a client's must be.
         # Recipient writes ride the per-stream sender via HTTP2WSWriter,
         # inheriting H2 flow control.
         # Read-ahead stays on for clients — see the note in client/websocket.py.
         self._recipient = WebSocketRecipient(
-            _H2QueueReader(frame_queue, self._credit_returned),
+            reader,
             HTTP2WSWriter(self._sender),
             require_masked=False,
             ws_queue_depth=_WS_EVENT_QUEUE_DEPTH,
@@ -208,22 +145,6 @@ class WebSocketH2Session:
         # send-side flow control is honoured.  ``more_body=True``
         # leaves END_STREAM unset so the WS session stays open.
         await self._sender(NativeResponse(body=ws_bytes, more_body=True))
-
-    async def _credit_returned(self, n: int) -> None:
-        """Account for *n* bytes consumed off the receive buffer and
-        emit ``WINDOW_UPDATE`` at stream + connection level when the
-        accumulated credit crosses ``_WINDOW_UPDATE_THRESHOLD``.
-        """
-        self._unacked_stream += n
-        self._unacked_conn += n
-        if self._unacked_stream >= _WINDOW_UPDATE_THRESHOLD:
-            await self._client.send_raw_frame(self._factory.window_update(
-                self._stream_id, self._unacked_stream))
-            self._unacked_stream = 0
-        if self._unacked_conn >= _WINDOW_UPDATE_THRESHOLD:
-            await self._client.send_raw_frame(self._factory.window_update(
-                0, self._unacked_conn))
-            self._unacked_conn = 0
 
     async def __aenter__(self) -> 'WebSocketH2Session':
         return self
@@ -347,4 +268,5 @@ class WebSocketH2Client:
                 f'server rejected WebSocket-over-H2 CONNECT: '
                 f':status={self._connect_status}')
 
-        return WebSocketH2Session(client, self._stream_id, queue)
+        reader = await client.attach_stream_reader(self._stream_id)
+        return WebSocketH2Session(client, self._stream_id, reader)

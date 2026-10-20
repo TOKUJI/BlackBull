@@ -61,29 +61,26 @@ exactly and check nothing again. Its header and trailer
 lists are `_MinimalResponseHeaders`; change them only through `add`, `extend`
 and `discard`, which keep the located framing fields true.
 
-A connection owns one read buffer. `BufferReader` owns receive policy,
+A connection owns one read buffer, server or client. `BufferReader` owns receive policy,
 `ConnectionProtocol` performs transport callbacks and pauses, and
 `ReadBuffer` owns bytes and cursors. Detection must not consume the prefix;
 an upgrade must retain bytes already received.
 
 Treat transport size hints as advisory. Release grown allocations only
 through reader policy, which knows whether the connection is between
-messages. Read `blackbull/server/connection_protocol.py`, `read_buffer.py`
-and `blackbull/protocol/rsock.py` before adding a reader adapter.
+messages.
 
 ### Bounded reads
 
-All readers owe the same `read_head` and bounded `readuntil` contract.
-Positive limits include separators and constrain accumulation, not only
+`BufferReader` is the only line reader; other readers refuse `read_head`
+and `readuntil` with `NotImplementedError`. Positive limits include separators and constrain accumulation, not only
 completed results. Every keep-alive request gets the same budget. Empty EOF
 returns an empty head; partial EOF raises `IncompleteReadError`; overruns
-carry bounded evidence in `ReadLimitExceeded`. Unsupported line readers
-must refuse consistently.
+carry bounded evidence in `ReadLimitExceeded`.
 
 The protocol owns the verdict: a request-line terminator within the budget
 permits a 431 header-overrun response; an unterminated or oversized request
-line receives 400. Preserve evidence across reader adapters.
-See `tests/unit/test_read_head_contract.py`.
+line receives 400. See `tests/unit/test_read_head_contract.py`.
 
 ### Backpressure
 

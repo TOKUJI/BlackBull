@@ -14,11 +14,12 @@ from ..asgi import WebSocketDisconnectEvent, WebSocketReceiveEvent
 import logging
 from ..headers import Headers
 from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
-                                AsyncioReader, WebSocketRecipient)
+                                WebSocketRecipient)
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ..env import get_settings
 from ..server.ws_codec import WSOpcode, encode_frame
-from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
+from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
+                       open_connection as _open_connection)
 from .exceptions import HandshakeError
 from .http1 import HTTP1RequestSender, HTTP1ResponseRecipient
 
@@ -48,7 +49,7 @@ class WebSocketSession:
     """
 
     def __init__(self, reader: AbstractReader, writer: AbstractWriter,
-                 raw_writer: asyncio.StreamWriter,
+                 raw_writer: ClientConnection,
                  subprotocol: bytes | None,
                  *, max_frame_payload: int | None = None,
                  max_message_size: int | None = None) -> None:
@@ -189,15 +190,15 @@ class WebSocketClient:
         self._connect_timeout = connect_timeout
         self._reader: AbstractReader | None = None
         self._writer: AbstractWriter | None = None
-        self._raw_writer: asyncio.StreamWriter | None = None
+        self._raw_writer: ClientConnection | None = None
 
     async def __aenter__(self) -> 'WebSocketClient':
-        r, w = await _open_connection(self._host, self._port, self._ssl,
+        conn = await _open_connection(self._host, self._port, self._ssl,
                                       self._connect_timeout)
-        self._raw_writer = w
-        self._reader = AsyncioReader(r)
+        self._raw_writer = conn
+        self._reader = conn.reader
         self._writer = AsyncioWriter(
-            w, get_settings().client_write_timeout,
+            conn, get_settings().client_write_timeout,
             cap_name='client_write_timeout', protocol='ws')
         return self
 

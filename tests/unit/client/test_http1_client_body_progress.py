@@ -17,12 +17,12 @@ body succeeds" also passes against a client carrying no deadline at all.
 """
 from __future__ import annotations
 
-import asyncio
 
 import pytest
 
 from blackbull.client.http1 import HTTP1ResponseRecipient
-from blackbull.server.recipient import AbstractReader
+
+from tests.harness import paced
 
 pytestmark = pytest.mark.asyncio
 
@@ -35,30 +35,19 @@ _SLICE = 100
 _BODY = b'x' * 3000
 
 
-class _Dribbler(AbstractReader):
+def _Dribbler(payload: bytes, stall_at: int | None = None):
     """Delivers *payload* in ``_SLICE``-sized pieces, ``_GAP`` apart.
 
     *stall_at* is a byte offset at which one gap exceeds the deadline — the
     control that keeps these tests from passing against no deadline at all.
-    It is an offset rather than a read count because the head is read line by
-    line, so which read lands in the body is not something the test can count.
     """
-
-    def __init__(self, payload: bytes, stall_at: int | None = None) -> None:
-        self._buf, self._pos = payload, 0
-        self._stall_at = stall_at
-
-    async def read(self, n: int = -1) -> bytes:
-        if self._pos >= len(self._buf):
-            return b''
-        if self._stall_at is not None and self._pos >= self._stall_at:
-            self._stall_at = None
-            await asyncio.sleep(_TIMEOUT * 4)
-        await asyncio.sleep(_GAP)
-        want = _SLICE if n < 0 else min(n, _SLICE)
-        out = self._buf[self._pos:self._pos + want]
-        self._pos += len(out)
-        return out
+    script = []
+    for pos in range(0, len(payload), _SLICE):
+        stall = stall_at is not None and pos >= stall_at
+        if stall:
+            stall_at = None
+        script.append((_GAP + (_TIMEOUT * 4 if stall else 0), payload[pos:pos + _SLICE]))
+    return paced(script)
 
 
 def _fixed(body: bytes) -> bytes:
@@ -123,29 +112,6 @@ class TestOneLongGapIsStillRefused:
 _CHUNKED_HEAD = b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n'
 
 
-class _Scripted(AbstractReader):
-    """Delivers ``(gap, data)`` arrivals exactly as scripted.
-
-    ``_Dribbler`` above slices the wire for the test; this one lets a test
-    place a TCP segment boundary in the middle of a chosen operation, which is
-    what distinguishes an operation's deadline from an arrival's.
-    """
-
-    def __init__(self, script: list[tuple[float, bytes]]) -> None:
-        self._script, self._buf = list(script), b''
-
-    async def read(self, n: int = -1) -> bytes:
-        while not self._buf:
-            if not self._script:
-                return b''
-            gap, data = self._script.pop(0)
-            await asyncio.sleep(gap)
-            self._buf = data
-        want = len(self._buf) if n < 0 else min(n, len(self._buf))
-        out, self._buf = self._buf[:want], self._buf[want:]
-        return out
-
-
 #: Each entry splits exactly one operation across four arrivals, each gap
 #: comfortably inside the deadline while the operation as a whole is not.
 #:
@@ -200,7 +166,7 @@ async def _body_via(path: str, reader) -> bytes:
 async def test_the_deadlines_unit_is_the_operation(operation, path):
     """A payload read is paced by arrival; a framing operation is not."""
     script, expected = _SPLIT_OPERATIONS[operation]
-    read = _body_via(path, _Scripted(script))
+    read = _body_via(path, paced(script))
     if expected is not None:
         assert await read == expected
         return
@@ -217,4 +183,4 @@ async def test_operations_do_not_share_one_budget(path):
     script = [(0.0, _CHUNKED_HEAD)]
     script += [(_TIMEOUT / 3, b'4\r\nabcd\r\n') for _ in range(10)]
     script += [(_TIMEOUT / 3, b'0\r\n\r\n')]
-    assert await _body_via(path, _Scripted(script)) == b'abcd' * 10
+    assert await _body_via(path, paced(script)) == b'abcd' * 10

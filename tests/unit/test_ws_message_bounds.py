@@ -26,10 +26,12 @@ import pytest
 
 from blackbull.server.constants import WSCloseCode
 from blackbull.server.permessage_deflate import InboundDecompressor
-from blackbull.server.recipient import (AsyncioReader, ProtocolError,
+from blackbull.server.recipient import (ProtocolError,
                                         WebSocketRecipient)
 from blackbull.server.sender import AsyncioWriter
 from blackbull.server.ws_codec import MessageTooLarge, WSOpcode
+
+from tests.harness import fed
 
 
 # ---------------------------------------------------------------------------
@@ -126,10 +128,10 @@ def _driver(raw: bytes, *, max_message_size: int,
             compressed: bool = False,
             max_frame_payload: int = 64 * 1024 * 1024):
     """A recipient over *raw*, plus the reader and writer to assert on."""
-    reader = _FakeReader(raw)
+    reader = fed(raw).reader
     writer = _FakeWriter()
     recipient = WebSocketRecipient(
-        AsyncioReader(reader),
+        reader,
         AsyncioWriter(writer),
         max_frame_payload=max_frame_payload,
         max_message_size=max_message_size,
@@ -258,7 +260,7 @@ class TestFragmentTotal:
 
         assert exc.value.close_code == WSCloseCode.MESSAGE_TOO_BIG
         assert _closed_with(writer, WSCloseCode.MESSAGE_TOO_BIG)
-        assert reader.remaining > 0, (
+        assert reader.buffered_len() > 0, (
             'every frame was consumed — the total was checked only after the '
             'whole message had been accumulated, which is the defect'
         )
@@ -298,7 +300,7 @@ class TestFragmentTotal:
             await recipient()
         assert exc.value.close_code == WSCloseCode.MESSAGE_TOO_BIG
         assert _closed_with(writer, WSCloseCode.MESSAGE_TOO_BIG)
-        assert reader.remaining > 0, (
+        assert reader.buffered_len() > 0, (
             'the continuation frame was consumed, so the opener was accepted '
             'and only the second frame was judged'
         )
@@ -407,10 +409,10 @@ class TestShippedDefault:
     async def test_a_16_mib_message_is_delivered_unconfigured(self):
         """End-to-end at the boundary, through the recipient's real path."""
         payload = b'\x00' * (16 * 1024 * 1024)
-        reader = _FakeReader(_frame(payload, opcode=WSOpcode.BINARY))
+        reader = fed(_frame(payload, opcode=WSOpcode.BINARY)).reader
         writer = _FakeWriter()
         recipient = WebSocketRecipient(
-            AsyncioReader(reader), AsyncioWriter(writer), ws_queue_depth=0)
+            reader, AsyncioWriter(writer), ws_queue_depth=0)
 
         assert await recipient() == {'type': 'websocket.connect'}
         event = await recipient()

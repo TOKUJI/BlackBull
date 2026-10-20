@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 from blackbull import BlackBull
 from blackbull.server import Server
+from blackbull.server.connection_protocol import ConnectionProtocol
 from blackbull.server.listener import Listener, Tcp
 
 TIMEOUT = 5.0
@@ -164,3 +165,69 @@ async def exchange(app, *requests: bytes, **server_kwargs) -> list[Response]:
             await w.send(raw)
             out.append(await w.response(head=raw.startswith(b'HEAD ')))
         return out
+
+
+@asynccontextmanager
+async def peer(handler):
+    """A loopback origin whose every connection runs *handler(reader, writer)*.
+
+    Yields the port.  The block ends once each handler has seen its client go.
+    """
+    async def serve(reader, writer):
+        try:
+            await handler(reader, writer)
+        finally:
+            # Server.wait_closed waits for every connection (3.12+).
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except ConnectionError:
+                pass
+
+    server = await asyncio.start_server(serve, '127.0.0.1', 0)
+    try:
+        yield server.sockets[0].getsockname()[1]
+    finally:
+        server.close()
+        await asyncio.wait_for(server.wait_closed(), TIMEOUT)
+
+
+def feed(proto: ConnectionProtocol, data: bytes) -> None:
+    """Deliver *data* the way a transport does."""
+    while data:
+        buf = proto.get_buffer(len(data))
+        n = min(len(buf), len(data))
+        buf[:n] = data[:n]
+        proto.buffer_updated(n)
+        data = data[n:]
+
+
+def fed(*chunks: bytes, eof: bool = True) -> ConnectionProtocol:
+    """A connection with no socket, already holding *chunks*; its ``.reader`` is the production reader."""
+    proto = ConnectionProtocol()
+    for chunk in chunks:
+        feed(proto, chunk)
+    if eof:
+        proto.eof_received()
+    return proto
+
+
+class _OnDemand(ConnectionProtocol):
+    def __init__(self, script, pause) -> None:
+        super().__init__()
+        self.script, self.pause = iter(script), pause
+
+    async def wait_for_arrival(self) -> None:
+        step = next(self.script, None)
+        if step is None:
+            self.eof_received()
+            return
+        await self.pause(step[0])
+        feed(self, step[1])
+
+
+def paced(script, pause=asyncio.sleep):
+    """A production reader whose peer sends the next ``(gap, data)`` of the
+    *script* iterable each time the reader waits, after ``await pause(gap)``;
+    EOF once it is exhausted."""
+    return _OnDemand(script, pause).reader

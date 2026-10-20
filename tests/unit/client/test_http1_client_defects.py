@@ -10,46 +10,19 @@ what its own docstring promises.
 """
 from __future__ import annotations
 
-import asyncio
 
 import pytest
 
 from blackbull.client.exceptions import ProtocolError
 from blackbull.client.http1 import HTTP1ResponseRecipient
-from blackbull.server.recipient import AbstractReader
+
+from tests.harness import fed
 
 pytestmark = pytest.mark.asyncio
 
 
-class _Reader(AbstractReader):
-    """Feeds bytes; raises on an over-read so a wrong length is visible."""
-
-    def __init__(self, data: bytes):
-        self._buf = bytearray(data)
-
-    @property
-    def remaining(self) -> int:
-        return len(self._buf)
-
-    async def readexactly(self, n: int) -> bytes:
-        if len(self._buf) < n:
-            raise asyncio.IncompleteReadError(bytes(self._buf), n)
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def read(self, n: int) -> bytes:
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:
-        idx = self._buf.find(sep)
-        if idx == -1:
-            raise asyncio.IncompleteReadError(bytes(self._buf), None)
-        chunk = bytes(self._buf[:idx + len(sep)])
-        del self._buf[:idx + len(sep)]
-        return chunk
+def _Reader(payload: bytes = b''):
+    return fed(payload).reader
 
 
 def _recipient() -> HTTP1ResponseRecipient:

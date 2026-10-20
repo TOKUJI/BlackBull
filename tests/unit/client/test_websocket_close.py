@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from blackbull.client import ClientConnection
 from blackbull.client.websocket import WebSocketSession
 from blackbull.server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
                                         WebSocketRecipient)
@@ -45,7 +46,7 @@ class _CaptureWriter(AbstractWriter):
 def _session(peer_bytes: bytes = b'') -> WebSocketSession:
     reader = _ScriptedReader(peer_bytes)
     writer = _CaptureWriter()
-    raw_writer = MagicMock(spec=asyncio.StreamWriter)
+    raw_writer = MagicMock(spec=ClientConnection)
     return WebSocketSession(reader, writer, raw_writer=raw_writer,
                             subprotocol=None)
 

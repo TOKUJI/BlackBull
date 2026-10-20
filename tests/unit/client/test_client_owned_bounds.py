@@ -1,23 +1,27 @@
 """Client-owned transport and WebSocket bounds stay distinct from server caps."""
 from __future__ import annotations
 
-import asyncio
 import logging
+import ssl
 
 import pytest
 
+from blackbull.client import Client, ClientConnection
 from blackbull.client.http1 import HTTP1Client
 from blackbull.client.http2 import HTTP2Client
 from blackbull.client.websocket import WebSocketSession
 from blackbull.client.websocket_h2 import WebSocketH2Session
 from blackbull.env import get_settings, reset_settings_cache
 from blackbull.protocol.frame import FrameFactory
+from blackbull.server.http2_ws import HTTP2StreamReader
 from blackbull.server.recipient import (AbstractReader, ProtocolError,
                                         WebSocketRecipient)
 from blackbull.server.sender import (AbstractWriter, AsyncioWriter,
                                      ConnectionWindow, FlowControlStalled,
                                      HTTP2Sender)
 from blackbull.server.ws_codec import MessageTooLarge
+
+from tests.harness import served
 
 
 @pytest.fixture(autouse=True)
@@ -73,14 +77,6 @@ class _Reader(AbstractReader):
 
 class _Writer(AbstractWriter):
     async def write(self, data):
-        pass
-
-
-class _Transport:
-    def is_closing(self):
-        return False
-
-    def close(self):
         pass
 
 
@@ -156,20 +152,32 @@ async def test_client_protocols_inject_client_writer_cap(monkeypatch):
     h1 = HTTP1Client('localhost', 80)
     h2 = HTTP2Client('localhost', 80)
     assert h1._writer is None and h2._writer is None
-    # Construction is deliberately lazy; adoption is the common dispatcher
-    # path and proves both protocol implementations inject the same bound.
-    loop = asyncio.get_running_loop()
-    stream_writer = asyncio.StreamWriter(_Transport(), None, None, loop)
-    adopted = (
-        ('http1', HTTP1Client._adopt(
-            'localhost', 80, asyncio.StreamReader(), stream_writer)),
-        ('http2', HTTP2Client._adopt(
-            'localhost', 80, asyncio.StreamReader(), stream_writer)),
-    )
-    for protocol, client in adopted:
-        assert client._writer._write_timeout == 2.5
-        assert client._writer._cap_name == 'client_write_timeout'
-        assert client._writer._protocol == protocol
+    async with served(_ok) as plain, served(_ok, tls=True) as tls:
+        connectors = (
+            (HTTP1Client('127.0.0.1', plain.server.port), 'http1'),
+            (HTTP2Client('127.0.0.1', plain.server.port), 'http2'),
+            # Client adopts the connection whichever protocol ALPN chose.
+            (Client('127.0.0.1', tls.server.port, ssl=_alpn('h2')), 'http2'),
+            (Client('127.0.0.1', tls.server.port, ssl=_alpn('http/1.1')), 'http1'),
+        )
+        for connector, protocol in connectors:
+            async with connector as client:
+                assert (await client.request('GET', '/')).status == 204
+                assert client._writer._write_timeout == 2.5
+                assert client._writer._cap_name == 'client_write_timeout'
+                assert client._writer._protocol == protocol
+
+
+def _alpn(protocol: str) -> ssl.SSLContext:
+    ctx = ssl.create_default_context()
+    ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
+    ctx.set_alpn_protocols([protocol])
+    return ctx
+
+
+async def _ok(scope, receive, send):
+    await send({'type': 'http.response.start', 'status': 204, 'headers': []})
+    await send({'type': 'http.response.body', 'body': b''})
 
 
 def test_websocket_recipient_accepts_explicit_client_caps():
@@ -184,12 +192,16 @@ def test_websocket_recipient_accepts_explicit_client_caps():
     assert recipient._message_cap_name == 'client_ws_max_message_size'
 
 
+async def _no_credit(n: int) -> None:
+    pass
+
+
 def test_h2_websocket_session_injects_client_caps(monkeypatch):
     monkeypatch.setenv('BB_CLIENT_WS_MAX_FRAME_PAYLOAD', '123')
     monkeypatch.setenv('BB_CLIENT_WS_MAX_MESSAGE_SIZE', '456')
     client = HTTP2Client('localhost', 80)
     client._writer = _Writer()
-    session = WebSocketH2Session(client, 1, asyncio.Queue())
+    session = WebSocketH2Session(client, 1, HTTP2StreamReader(1, _no_credit))
     assert session._recipient._max_frame_payload == 123
     assert session._recipient._max_message_size == 456
     assert session._recipient._frame_cap_name == 'client_ws_max_frame_payload'
@@ -199,14 +211,11 @@ def test_h2_websocket_session_injects_client_caps(monkeypatch):
 def test_direct_websocket_session_none_uses_client_caps(monkeypatch):
     monkeypatch.setenv('BB_CLIENT_WS_MAX_FRAME_PAYLOAD', '123')
     monkeypatch.setenv('BB_CLIENT_WS_MAX_MESSAGE_SIZE', '456')
-    loop = asyncio.new_event_loop()
-    raw_writer = asyncio.StreamWriter(_Transport(), None, None, loop)
-    session = WebSocketSession(_Reader(), _Writer(), raw_writer, None)
+    session = WebSocketSession(_Reader(), _Writer(), ClientConnection(), None)
     assert session._recipient._max_frame_payload == 123
     assert session._recipient._max_message_size == 456
     assert session._recipient._frame_cap_name == 'client_ws_max_frame_payload'
     assert session._recipient._message_cap_name == 'client_ws_max_message_size'
-    loop.close()
 
 
 @pytest.mark.asyncio

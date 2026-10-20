@@ -29,9 +29,11 @@ import asyncio
 import pytest
 
 from blackbull.server.constants import WSCloseCode
-from blackbull.server.recipient import AsyncioReader, WebSocketRecipient
+from blackbull.server.recipient import WebSocketRecipient
 from blackbull.server.sender import AsyncioWriter
 from blackbull.server.ws_codec import WSOpcode
+
+from tests.harness import fed, feed
 
 pytestmark = pytest.mark.asyncio
 
@@ -44,45 +46,6 @@ def _frame(payload: bytes = b'', *, opcode: int = WSOpcode.TEXT) -> bytes:
     header = bytes([first, 0x80 | len(payload)])
     masked = bytes(b ^ _MASK[i % 4] for i, b in enumerate(payload))
     return header + _MASK + masked
-
-
-class _LiveReader:
-    """A reader that blocks instead of reporting EOF.
-
-    A silent peer is not a closed one — the whole point of the probe is
-    that the two are indistinguishable without asking, so a reader that
-    returns EOF when it runs dry would test the wrong thing.
-    """
-
-    def __init__(self, initial: bytes = b''):
-        self._buf = bytearray(initial)
-        self._arrived = asyncio.Event()
-        if initial:
-            self._arrived.set()
-
-    def feed(self, data: bytes) -> None:
-        self._buf += data
-        self._arrived.set()
-
-    async def _want(self, n: int) -> None:
-        while len(self._buf) < n:
-            self._arrived.clear()
-            await self._arrived.wait()
-
-    async def readexactly(self, n: int) -> bytes:
-        await self._want(n)
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def read(self, n: int) -> bytes:
-        await self._want(1)
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:  # pragma: no cover
-        raise NotImplementedError
 
 
 class _FakeWriter:
@@ -126,10 +89,10 @@ def _opcodes_written(writer: _FakeWriter) -> list[int]:
     return out
 
 
-async def _connected(reader: _LiveReader, writer: _FakeWriter, **kw):
+async def _connected(reader, writer: _FakeWriter, **kw):
     """A recipient past the handshake, with its watchdog armed."""
     recipient = WebSocketRecipient(
-        AsyncioReader(reader), AsyncioWriter(writer),
+        reader.reader, AsyncioWriter(writer),
         ws_queue_depth=0, **kw)
     assert await recipient() == {'type': 'websocket.connect'}
     return recipient
@@ -146,7 +109,7 @@ def _go_silent_for(recipient, seconds: float) -> None:
 
 class TestSilentPeerIsProbed:
     async def test_silence_past_the_idle_bound_sends_a_ping(self):
-        reader, writer = _LiveReader(), _FakeWriter()
+        reader, writer = fed(eof=False), _FakeWriter()
         r = await _connected(reader, writer, ws_idle_timeout=10.0,
                              ws_pong_timeout=5.0)
 
@@ -160,7 +123,7 @@ class TestSilentPeerIsProbed:
             'is still there')
 
     async def test_an_unanswered_probe_closes_the_connection(self):
-        reader, writer = _LiveReader(), _FakeWriter()
+        reader, writer = fed(eof=False), _FakeWriter()
         r = await _connected(reader, writer, ws_idle_timeout=10.0,
                              ws_pong_timeout=5.0)
 
@@ -175,7 +138,7 @@ class TestSilentPeerIsProbed:
 
     async def test_only_one_probe_is_sent_while_one_is_outstanding(self):
         """Every tick past the bound must not become a PING flood of our own."""
-        reader, writer = _LiveReader(), _FakeWriter()
+        reader, writer = fed(eof=False), _FakeWriter()
         r = await _connected(reader, writer, ws_idle_timeout=10.0,
                              ws_pong_timeout=5.0)
 
@@ -193,7 +156,7 @@ class TestSilentPeerIsProbed:
 
 class TestAnsweringPeerIsNeverClosed:
     async def test_a_pong_clears_the_probe(self):
-        reader, writer = _LiveReader(), _FakeWriter()
+        reader, writer = fed(eof=False), _FakeWriter()
         r = await _connected(reader, writer, ws_idle_timeout=10.0,
                              ws_pong_timeout=5.0)
 
@@ -202,7 +165,7 @@ class TestAnsweringPeerIsNeverClosed:
         await asyncio.sleep(0)
         assert r._probe_sent_at is not None
 
-        reader.feed(_frame(opcode=WSOpcode.PONG))
+        feed(reader, _frame(opcode=WSOpcode.PONG))
         await r._drive_once()
 
         assert r._probe_sent_at is None, 'the peer answered and is still suspect'
@@ -216,26 +179,26 @@ class TestAnsweringPeerIsNeverClosed:
         Requiring a PONG specifically would close a connection whose peer
         is busy talking to us.
         """
-        reader, writer = _LiveReader(), _FakeWriter()
+        reader, writer = fed(eof=False), _FakeWriter()
         r = await _connected(reader, writer, ws_idle_timeout=10.0,
                              ws_pong_timeout=5.0)
 
         _go_silent_for(r, 11.0)
         r._on_idle_tick()
         await asyncio.sleep(0)
-        reader.feed(_frame(b'hi'))
+        feed(reader, _frame(b'hi'))
         await r._drive_once()
 
         assert r._probe_sent_at is None
         assert WSOpcode.CLOSE not in _opcodes_written(writer)
 
     async def test_a_busy_connection_is_never_probed(self):
-        reader, writer = _LiveReader(), _FakeWriter()
+        reader, writer = fed(eof=False), _FakeWriter()
         r = await _connected(reader, writer, ws_idle_timeout=10.0,
                              ws_pong_timeout=5.0)
 
         for i in range(5):
-            reader.feed(_frame(bytes([i])))
+            feed(reader, _frame(bytes([i])))
             await r._drive_once()
             r._on_idle_tick()
 
@@ -248,7 +211,7 @@ class TestAnsweringPeerIsNeverClosed:
 
 class TestTheBoundIsConfigurable:
     async def test_zero_disables_the_probe(self):
-        reader, writer = _LiveReader(), _FakeWriter()
+        reader, writer = fed(eof=False), _FakeWriter()
         r = await _connected(reader, writer, ws_idle_timeout=0.0,
                              ws_pong_timeout=5.0)
 
@@ -266,13 +229,13 @@ class TestTheBoundIsConfigurable:
         than it defends.  The tick callback — once per idle connection per
         scanner tick — is where the clock is read.
         """
-        reader, writer = _LiveReader(), _FakeWriter()
+        reader, writer = fed(eof=False), _FakeWriter()
         r = await _connected(reader, writer, ws_idle_timeout=10.0,
                              ws_pong_timeout=5.0)
 
         before = r._inbound_seq
         for i in range(3):
-            reader.feed(_frame(bytes([i])))
+            feed(reader, _frame(bytes([i])))
             await r._drive_once()
 
         assert r._inbound_seq == before + 3
@@ -287,7 +250,7 @@ class TestTheBoundIsConfigurable:
 
         loop.time = _counting_time
         try:
-            reader.feed(_frame(b'x'))
+            feed(reader, _frame(b'x'))
             await r._drive_once()
         finally:
             loop.time = real_time
@@ -312,7 +275,7 @@ class TestOnlyTheServerProbes:
     """
 
     async def test_a_bare_recipient_never_probes(self):
-        reader, writer = _LiveReader(), _FakeWriter()
+        reader, writer = fed(eof=False), _FakeWriter()
         r = await _connected(reader, writer)          # no timeouts passed
 
         assert r._ws_idle_timeout == 0.0
@@ -326,8 +289,8 @@ class TestOnlyTheServerProbes:
         from blackbull.env import get_settings
         from blackbull.server.recipient import RecipientFactory
 
-        reader, writer = _LiveReader(), _FakeWriter()
-        r = RecipientFactory.websocket(AsyncioReader(reader),
+        reader, writer = fed(eof=False), _FakeWriter()
+        r = RecipientFactory.websocket(reader.reader,
                                        AsyncioWriter(writer),
                                        ws_queue_depth=0)
         cfg = get_settings()
@@ -354,7 +317,7 @@ class TestOnlyTheServerProbes:
 
 class TestTheScannerDrivesIt:
     async def test_a_silent_peer_is_closed_without_anyone_calling_the_tick(self):
-        reader, writer = _LiveReader(), _FakeWriter()
+        reader, writer = fed(eof=False), _FakeWriter()
         r = await _connected(reader, writer, ws_idle_timeout=0.05,
                              ws_pong_timeout=0.05)
         # Drive the reader so the connection is genuinely live and parked.

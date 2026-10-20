@@ -23,11 +23,13 @@ from ..protocol.framing import (is_informational, parse_content_length,
                                 parse_status, response_has_content)
 from ..server.cap_log import log_cap_hit
 from ..server.rate_window import ByteRateFloor
-from ..server.recipient import AbstractReader, AsyncioReader
+from ..server.http2_ws import HTTP2StreamReader
+from ..server.recipient import AbstractReader
 from ..server.sender import (AbstractWriter, AsyncioWriter, ConnectionWindow,
                              HTTP2Sender)
 from ..utils import HTTP2 as _HTTP2_PREFACE
-from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
+from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
+                       open_connection as _open_connection)
 from .exceptions import (ConnectionError, ProtocolError, ResponseTooLarge,
                          StreamReset)
 # Module-level and at runtime, as ``http1.py`` imports its own scenario
@@ -68,8 +70,8 @@ _FRAME_READ_TIMEOUT: float = 30.0
 _OPENS_A_FIELD_BLOCK = frozenset({FrameTypes.HEADERS, FrameTypes.PUSH_PROMISE})
 
 #: What a raw-stream consumer acts on, and therefore all its queue takes.
-#: ``_H2QueueReader._fill`` reads DATA (payload and END_STREAM) and
-#: RST_STREAM (EOF); the RFC 8441 Extended CONNECT handshake reads HEADERS.
+#: A stream reader takes DATA (payload and END_STREAM) and RST_STREAM (EOF);
+#: the RFC 8441 Extended CONNECT handshake reads HEADERS.
 #: HEADERS is also how trailers arrive, and at this layer the two are the
 #: same frame — so this set bounds the *types* a raw stream admits, not the
 #: count of each.  A whitelist and not a blacklist because a queue slot is
@@ -292,7 +294,7 @@ class HTTP2Client:
 
         self._reader: AbstractReader | None = None
         self._writer: AbstractWriter | None = None
-        self._raw_writer: asyncio.StreamWriter | None = None
+        self._raw_writer: ClientConnection | None = None
 
         # One setting, both effects: the number we advertise is the number
         # the decoder refuses at, because they are read together here.  The
@@ -317,6 +319,8 @@ class HTTP2Client:
         # stream id in this dict, it is pushed into the queue instead of
         # being routed through the request/response state machine.
         self._raw_streams: dict[int, asyncio.Queue] = {}
+        #: WebSocket-over-H2 streams after their handshake.
+        self._stream_readers: dict[int, HTTP2StreamReader] = {}
 
         self._receive_task: asyncio.Task | None = None
 
@@ -374,31 +378,31 @@ class HTTP2Client:
         # client that presents as open.
         self._refuse_if_closed()
         if self._raw_writer is None:
-            r, w = await _open_connection(self._host, self._port, self._ssl,
+            conn = await _open_connection(self._host, self._port, self._ssl,
                                           self._connect_timeout)
-            self._raw_writer = w
-            self._reader = AsyncioReader(r)
+            self._raw_writer = conn
+            self._reader = conn.reader
             self._writer = AsyncioWriter(
-                w, get_settings().client_write_timeout,
+                conn, get_settings().client_write_timeout,
                 cap_name='client_write_timeout', protocol='http2')
         await self._start()
         return self
 
     @classmethod
     def _adopt(cls, host: str, port: int,
-               reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+               conn: ClientConnection,
                *, ssl: _ssl.SSLContext | None = None) -> 'HTTP2Client':
-        """Wrap an already-open ``(reader, writer)`` pair as an HTTP2Client.
+        """Wrap an already-open connection as an HTTP2Client.
 
         Unlike the HTTP/1.1 twin the client is not usable on return: call
         ``await self._start()``, or enter via ``async with``, to send the
         connection preface.
         """
         c = cls(host, port, ssl=ssl)
-        c._raw_writer = writer
-        c._reader = AsyncioReader(reader)
+        c._raw_writer = conn
+        c._reader = conn.reader
         c._writer = AsyncioWriter(
-            writer, get_settings().client_write_timeout,
+            conn, get_settings().client_write_timeout,
             cap_name='client_write_timeout', protocol='http2')
         return c
 
@@ -795,6 +799,7 @@ class HTTP2Client:
         turns an orderly shutdown into an error.
         """
         self._raw_streams.pop(stream_id, None)
+        self._stream_readers.pop(stream_id, None)
         # A WebSocket-over-H2 session writes through its sender until it
         # unregisters — its shutdown sends the CLOSE frame first — so this is
         # that stream's last-send boundary, the same one ``request()`` uses.
@@ -831,6 +836,52 @@ class HTTP2Client:
         for stream_id, queue in self._raw_streams.items():
             self._signal_raw_stream(stream_id, queue, ErrorCodes.CONNECT_ERROR)
         self._raw_streams.clear()
+        for reader in self._stream_readers.values():
+            reader.put_disconnect()
+        self._stream_readers.clear()
+
+    async def attach_stream_reader(self, stream_id: int) -> HTTP2StreamReader:
+        """Deliver *stream_id*'s DATA to a reader from now on, crediting as it
+        is consumed; frames already queued for the raw stream go first."""
+        queue = self._raw_streams.pop(stream_id)
+
+        async def credit_connection(n: int) -> None:
+            try:
+                await self._credit_connection(n)
+            except Exception:
+                logger.debug('could not credit the connection')
+
+        async def credit(n: int) -> None:
+            # Owned before any await: cancelling the read must not revoke
+            # connection credit every stream shares.
+            self._spawn(credit_connection(n))
+            if stream_id not in self._stream_readers:
+                return
+            try:
+                await self._send_raw_frame(
+                    self._factory.window_update(stream_id, n))
+            except Exception:
+                logger.debug('could not credit stream %d', stream_id)
+
+        reader = HTTP2StreamReader(DEFAULT_INITIAL_WINDOW_SIZE, credit)
+        self._stream_readers[stream_id] = reader
+        while not queue.empty():
+            await self._to_reader(reader, queue.get_nowait())
+        return reader
+
+    async def _to_reader(self, reader: HTTP2StreamReader, frame) -> None:
+        ftype = frame.FrameType()
+        if ftype == FrameTypes.DATA:
+            if reader.put_DATAFrame(frame):
+                return
+            await self._reject_stream(frame.stream_id,
+                                      ErrorCodes.FLOW_CONTROL_ERROR,
+                                      'DATA past the stream window')
+            await self._credit_connection(frame.length)
+        elif ftype == FrameTypes.RST_STREAM:
+            self._stream_readers.pop(frame.stream_id, None)
+            reader.put_disconnect()
+            await self._credit_connection(reader.take_uncredited())
 
     async def _refuse_raw_stream(self, frame) -> None:
         """Refuse the raw stream whose queue *frame* overflowed, and only it.
@@ -1025,6 +1076,10 @@ class HTTP2Client:
         if queue is not None:
             displaced = self._signal_raw_stream(stream_id, queue, code)
             self.unregister_raw_stream(stream_id)
+        reader = self._stream_readers.pop(stream_id, None)
+        if reader is not None:
+            reader.put_disconnect()
+            displaced += reader.take_uncredited()
         try:
             await self._send_raw_frame(self._factory.rst_stream(stream_id, code))
             await self._credit_connection(displaced)
@@ -1195,6 +1250,10 @@ class HTTP2Client:
                     continue
                 # Only whitelisted frames enter raw-stream queues. Keep connection bookkeeping
                 # and PUSH_PROMISE validation on the normal dispatcher; fold CONTINUATION first.
+                reader = self._stream_readers.get(frame.stream_id)
+                if reader is not None and frame.FrameType() in _RAW_STREAM_FRAME_TYPES:
+                    await self._to_reader(reader, frame)
+                    continue
                 raw_q = self._raw_streams.get(frame.stream_id)
                 if raw_q is not None and frame.FrameType() in _RAW_STREAM_FRAME_TYPES:
                     try:

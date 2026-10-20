@@ -5,6 +5,7 @@ Clients own one connection for their async context. TimeoutError and raw
 WebSocket read failures do not all derive from ClientError; see
 docs/guide/client.md. Scenario exports alias blackbull.fault_injection.
 """
+from ._connect import ClientConnection
 from .client import Client
 from .http1 import (HTTP1Client, HTTP1RequestSender, HTTP1ResponseRecipient,
                     HTTP1UpgradeSession)
@@ -32,6 +33,7 @@ from .exceptions import (
 __all__ = [
     'Abort',
     'Client',
+    'ClientConnection',
     'ClientResponse',
     'HTTP1Client',
     'HTTP1RequestSender',

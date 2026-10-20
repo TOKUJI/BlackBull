@@ -193,7 +193,6 @@ class TestOneContextPerConnection:
         task, _block = await _until_written(writer, ws.connect(_WS_PATH))
         client._raw_streams[1].put_nowait(_connect_response(peer, 1))
         session = await asyncio.wait_for(task, 2)
-        assert session._factory is client.frame_factory
         strays = [name for name, value in vars(session).items()
                   if isinstance(value, FrameFactory)
                   and value is not client.frame_factory]
@@ -204,9 +203,8 @@ class TestOneContextPerConnection:
         uses, so the constructor takes none — a parameter that can be passed
         wrongly is the same hole with a default."""
         client, _ws, _writer = _wired_pair()
-        queue = client.register_raw_stream(3)
         with pytest.raises(_TYPE_ERRORS):
-            WebSocketH2Session(client, FrameFactory(), 3, queue)  # type: ignore[arg-type]
+            WebSocketH2Session(client, FrameFactory(), 3, None)  # type: ignore[arg-type]
 
     def test_frame_factory_before_aenter_names_the_context_manager(self):
         """There is no context to hand out before the connection exists, and
