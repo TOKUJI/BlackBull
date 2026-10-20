@@ -105,9 +105,7 @@ class ProtocolBinding:
     connection (``detect_prefix_len``) and whether it ``claims`` a given
     peeked prefix; the winner's single ``serve`` then performs *its own*
     protocol reads from a reader still positioned at the first byte, because
-    detection peeks without consuming.  Only a reader that cannot peek hands
-    back what it took, and there a
-    [`PrefixReader`][blackbull.server.recipient.PrefixReader] restores the stream.
+    detection peeks without consuming.
 
     Every protocol-specific read is the binding's, never the dispatcher's —
     the ``24``-byte HTTP/2 preface and the HTTP/1.1 ``\\r\\n`` request line
@@ -219,7 +217,6 @@ class Http1Binding(ProtocolBinding):
         # treat as already-read, skipping the budget check that guards it.
         actor = HTTP1Actor(
             conn.reader, conn.writer, conn.app, conn.aggregator,
-            request=b'',
             peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
             ws_queue_depth=conn.ws_queue_depth,
             deadline=conn.deadline,

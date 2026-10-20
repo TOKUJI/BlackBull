@@ -23,7 +23,6 @@ from blackbull.client.exceptions import ConnectionError as ClientConnectionError
 from blackbull.client.exceptions import HandshakeError
 from blackbull.client.http2 import HTTP2Client
 from blackbull.client.websocket_h2 import WebSocketH2Client, WebSocketH2Session
-from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (ErrorCodes, FrameTypes,
                                             HeaderFrameFlags, PseudoHeaders,
                                             SettingFrameFlags)
@@ -329,15 +328,16 @@ class TestRawStreamTeardown:
     """
 
     @staticmethod
-    def _session(client: HTTP2Client, stream_id: int = 1) -> WebSocketH2Session:
-        queue = client.register_raw_stream(stream_id)
-        return WebSocketH2Session(client, stream_id, queue)
+    async def _session(client: HTTP2Client, stream_id: int = 1) -> WebSocketH2Session:
+        client.register_raw_stream(stream_id)
+        reader = await client.attach_stream_reader(stream_id)
+        return WebSocketH2Session(client, stream_id, reader)
 
     async def test_a_parked_consumer_is_woken_when_the_loop_ends(self):
         """The peer vanishes; the session must surface abnormal closure."""
         reader = _BlockingReader()
         c = _client(reader=reader)
-        session = self._session(c)
+        session = await self._session(c)
 
         loop_task = asyncio.ensure_future(c._receive_loop())
         reader.close()
@@ -354,7 +354,7 @@ class TestRawStreamTeardown:
         disturb the one disconnect the session has already been given."""
         reader = _BlockingReader()
         c = _client(reader=reader)
-        session = self._session(c)
+        session = await self._session(c)
         c._receive_task = asyncio.ensure_future(c._receive_loop())
         await asyncio.sleep(0)          # let the loop reach the reader
 
@@ -368,7 +368,7 @@ class TestRawStreamTeardown:
         before its first turn — has no ``finally`` to run, so ``__aexit__``
         is the only thing left that can end the stream."""
         c = _client()
-        session = self._session(c)
+        session = await self._session(c)
 
         await c.__aexit__(None, None, None)
 
@@ -509,12 +509,13 @@ class TestRawStreamQueueDepth:
         rather than left parked on a queue nothing will fill again.  That the
         *connection* survives is the next test's claim."""
         c, task, _sent, flooded, _quiet = self._flood(monkeypatch, 4, 8)
-        session = WebSocketH2Session(c, 1, flooded)
         await self._wait_until(lambda: 1 not in c._raw_streams)
 
         assert 1 not in c._raw_streams, 'the flooded stream was not refused'
-        opcode, close = await session.receive(timeout=1.0)
-        assert (opcode, close) == (WSOpcode.CLOSE, struct.pack('>H', 1006))
+        last = None
+        while not flooded.empty():
+            last = flooded.get_nowait()
+        assert last.FrameType() is FrameTypes.RST_STREAM
         await self._end(c, task)
 
     async def test_the_peer_is_told_to_slow_down(self, monkeypatch):
@@ -799,8 +800,8 @@ class TestRawStreamFrameFilter:
     every other type on a raw stream bought a queue slot, whether or not
     anything would ever read it.
 
-    Between them the two consumers act on three types: ``_H2QueueReader._fill``
-    reads DATA and RST_STREAM, and the Extended CONNECT handshake reads
+    Between them the two consumers act on three types: a stream reader
+    takes DATA and RST_STREAM, and the Extended CONNECT handshake reads
     HEADERS.  Everything else was held until the depth cap fired, and the
     cap's answer is to reset the stream — so a flood of frames nobody reads
     killed the WebSocket riding on it.
@@ -891,7 +892,7 @@ class TestRawStreamFrameFilter:
     # ---- the whitelist: what must still arrive --------------------------
 
     async def test_data_still_reaches_the_queue(self):
-        """Half of what ``_H2QueueReader`` reads: payload and END_STREAM."""
+        """Half of what a stream reader takes: payload and END_STREAM."""
         c, task, _sent, queue = self._fed(
             self._wire(FrameTypes.DATA.value, b'payload', 1))
         await _wait_until(lambda: queue.qsize() == 1)
@@ -916,7 +917,7 @@ class TestRawStreamFrameFilter:
         await self._end(c, task)
 
     async def test_rst_stream_still_reaches_the_queue(self):
-        """The other half of ``_H2QueueReader``: EOF for a parked consumer."""
+        """The other half of a stream reader's: EOF for a parked consumer."""
         c, task, _sent, queue = self._fed(
             self._wire(FrameTypes.RST_STREAM.value,
                        int(ErrorCodes.CANCEL).to_bytes(4, 'big'), 1))

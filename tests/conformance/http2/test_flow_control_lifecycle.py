@@ -375,7 +375,6 @@ def test_legacy_recipient_without_callback_keeps_bounded_queue():
     """Direct constructions without a credit callback (tests, push streams)
     keep the historical bounded-queue, credit-at-enqueue behaviour."""
     r = HTTP2Recipient(queue_depth=2)
-    assert r.credits_on_consume is False
     assert r.put_DATAFrame(_data(b'a')) is True
     assert r.put_DATAFrame(_data(b'b')) is True
     assert r.put_DATAFrame(_data(b'c')) is False   # QueueFull → refused

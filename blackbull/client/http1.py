@@ -12,15 +12,15 @@ from ..env import get_settings
 from ..headers import Headers, HeaderList
 from ..server.cap_log import log_cap_hit
 from ..server.rate_window import ByteRateFloor
-from ..server.recipient import (AbstractReader, AsyncioReader,
-                                IncompleteReadError, ReadLimitExceeded,
-                                _accepts_read_limit)
+from ..server.recipient import (AbstractReader,
+                                IncompleteReadError, ReadLimitExceeded)
 from ..protocol.field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
 from ..protocol.framing import (is_informational, method_is,
                                 parse_content_length, parse_status,
                                 response_has_content, split_transfer_codings)
 from ..server.sender import AbstractWriter, AsyncioWriter
-from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
+from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
+                       open_connection as _open_connection)
 from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
 from .http2 import ClientResponse  # shared dataclass
 from blackbull.fault_injection._transport import half_close as _sc_half_close
@@ -773,37 +773,15 @@ class HTTP1ResponseRecipient:
 
     async def _read_framing_line(self, reader: AbstractReader,
                                  limit: int) -> bytes:
-        """Read a chunk-size or trailer line under the header-line budget.
-
-        Readers accepting only one readuntil argument still require the bounded
-        fallback; adapting the signature must not disable the limit.
-        """
-        native = reader.__dict__.get('_readuntil_accepts_limit')
-        if native is None:
-            native = _accepts_read_limit(reader.readuntil)
-            try:
-                reader.__dict__['_readuntil_accepts_limit'] = native
-            except (AttributeError, TypeError):
-                pass  # a __slots__ reader answers the question every time.
+        """Read a chunk-size or trailer line under the header-line budget."""
         try:
-            if native:
-                return await self._body_read(reader.readuntil(_CRLF, limit))
-            return await self._body_read(
-                AbstractReader._readuntil_bounded(reader, _CRLF, limit))
+            return await self._body_read(reader.readuntil(_CRLF, limit))
         except ReadLimitExceeded as exc:
             log_cap_hit('client_head_max_line', requested=len(exc.seen),
                         limit=limit, protocol='http1')
             raise ResponseTooLarge(
                 f'chunk framing line exceeds '
                 f'BB_CLIENT_HEAD_MAX_LINE={limit}', exc.seen) from None
-        except asyncio.LimitOverrunError as exc:
-            # With the budget switched off the reader falls back to whatever
-            # limit it has of its own and reports it in its own vocabulary.
-            # Same condition, so the same answer leaves the client — a raw
-            # asyncio error is not part of its exception family.
-            raise ResponseTooLarge(
-                f'chunk framing line exceeds the reader buffer '
-                f'({exc.consumed} bytes)') from None
 
     @staticmethod
     def _parse_chunk_size(size_line: bytes) -> int:
@@ -896,7 +874,7 @@ class HTTP1UpgradeSession:
     """
 
     def __init__(self, reader: AbstractReader, writer: AbstractWriter,
-                 raw_writer: asyncio.StreamWriter) -> None:
+                 raw_writer: ClientConnection) -> None:
         self._reader = reader
         self._writer = writer
         self._raw_writer = raw_writer
@@ -955,7 +933,7 @@ class HTTP1Client:
         self._ssl = ssl
         self._reader: AbstractReader | None = None
         self._writer: AbstractWriter | None = None
-        self._raw_writer: asyncio.StreamWriter | None = None
+        self._raw_writer: ClientConnection | None = None
         # Opt-in wire-bytes capture for the low-level
         # primitives (send_raw, send_request_line, send_header_line, ...).
         # When True, every byte sent through those methods is also appended
@@ -998,29 +976,29 @@ class HTTP1Client:
 
     async def __aenter__(self) -> 'HTTP1Client':
         if self._raw_writer is None:
-            r, w = await _open_connection(self._host, self._port, self._ssl,
+            conn = await _open_connection(self._host, self._port, self._ssl,
                                           self._connect_timeout)
-            self._raw_writer = w
-            self._reader = AsyncioReader(r)
+            self._raw_writer = conn
+            self._reader = conn.reader
             self._writer = AsyncioWriter(
-                w, get_settings().client_write_timeout,
+                conn, get_settings().client_write_timeout,
                 cap_name='client_write_timeout', protocol='http1')
         await self._start()
         return self
 
     @classmethod
     def _adopt(cls, host: str, port: int,
-               reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+               conn: ClientConnection,
                *, ssl: _ssl.SSLContext | None = None) -> 'HTTP1Client':
-        """Wrap an already-open ``(reader, writer)`` pair as an HTTP1Client.
+        """Wrap an already-open connection as an HTTP1Client.
 
         HTTP/1.1 owes nothing on connect, so the client is usable on return.
         """
         c = cls(host, port, ssl=ssl)
-        c._raw_writer = writer
-        c._reader = AsyncioReader(reader)
+        c._raw_writer = conn
+        c._reader = conn.reader
         c._writer = AsyncioWriter(
-            writer, get_settings().client_write_timeout,
+            conn, get_settings().client_write_timeout,
             cap_name='client_write_timeout', protocol='http1')
         return c
 

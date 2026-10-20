@@ -8,13 +8,13 @@ import asyncio
 import struct
 from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
+
+from tests.harness import fed, feed
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from blackbull.server.sender import WebSocketSender, AsyncioWriter, AbstractWriter
-from blackbull.server.recipient import (WebSocketRecipient, AsyncioReader,
-                                        AbstractReader, PrefixReader,
-                                        ProtocolError)
+from blackbull.server.recipient import (WebSocketRecipient, AbstractReader, ProtocolError)
 from blackbull.server.ws_codec import (
     encode_frame, encode_frame_header, read_frame, read_payload,
     FramePayloadTooLarge, InvalidFrameLength, WSOpcode)
@@ -140,7 +140,7 @@ class _RecipientWrapper:
         # ws_queue_depth defaults to 0 (inline reading) to match the server
         # default, so every test in this module exercises the default path.
         self._recipient = WebSocketRecipient(
-            AsyncioReader(_FakeReader(raw_bytes)),
+            fed(raw_bytes).reader,
             AsyncioWriter(self.writer),
             max_frame_payload=max_frame_payload,
             ws_queue_depth=ws_queue_depth,
@@ -967,7 +967,7 @@ class TestFramePayloadSizeGuard:
         wrapper = _RecipientWrapper.__new__(_RecipientWrapper)
         wrapper.writer = _FakeWriter()
         wrapper._recipient = WebSocketRecipient(
-            AsyncioReader(_FakeReader(raw)),
+            fed(raw).reader,
             AsyncioWriter(wrapper.writer),
             max_frame_payload=4 * 1024 * 1024,  # 4 MiB — well above
         )
@@ -1173,7 +1173,7 @@ class TestFrameLengthFormatClose:
         raw = TestFrameLengthFormat._frame(
             126, 5, payload=b'hello', masked=False)
         recipient = WebSocketRecipient(
-            AsyncioReader(_FakeReader(raw)), AsyncioWriter(_FakeWriter()),
+            fed(raw).reader, AsyncioWriter(_FakeWriter()),
             require_masked=False)
         await recipient()  # websocket.connect
 
@@ -1207,7 +1207,7 @@ class TestFrameLengthFormatClose:
             126, 5, payload=b'ping!', opcode=0x9)
         writer = _FakeWriter()
         recipient = WebSocketRecipient(
-            PrefixReader(raw, AsyncioReader(_FakeReader(b''))),
+            fed(raw).reader,
             AsyncioWriter(writer))
         await recipient()  # websocket.connect
 
@@ -1317,7 +1317,7 @@ class TestReadAheadMode:
 
         writer = _FakeWriter()
         recipient = WebSocketRecipient(
-            AsyncioReader(_FakeReader(_make_client_frame(b'unconsumed', opcode=0x1))),
+            fed(_make_client_frame(b'unconsumed', opcode=0x1)).reader,
             AsyncioWriter(writer),
             dispatcher=dispatcher,
             conn=_ws_conn('/ws'),

@@ -25,9 +25,8 @@ from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
 from .conn_id import new_connection_id
 from .connection_actor import ConnectionActor
 from .connection_protocol import ConnectionProtocol
-from .sender import AbstractWriter, AsyncioWriter
-from .recipient import (AbstractReader, AsyncioReader,
-                        _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
+from .sender import AsyncioWriter
+from .recipient import (_HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .cap_log import CapHitCounter, log_cap_hit
 from ..asgi import ASGIEvent
 from ..env import FD_RESERVE, DerivedCap, get_settings
@@ -644,8 +643,8 @@ class _ServedConnection(ConnectionProtocol):
             await server._serve_connection(
                 self.reader,
                 AsyncioWriter(self, write_timeout=write_timeout),
+                self.transport,
                 bound_binding=bound_binding,
-                transport=self.transport,
             )
         finally:
             # A bare close would RST away the response a peer that is
@@ -834,21 +833,15 @@ class Server:
             context.set_session_cache_mode(ssl.SESS_CACHE_SERVER)  # type: ignore[attr-defined]
         return context
 
-    async def _serve_connection(self, reader, writer, *, bound_binding=None,
-                                transport=None):
-        """Wrap the transport and run one ``ConnectionActor``.
+    async def _serve_connection(self, reader, writer, transport, *,
+                                bound_binding=None):
+        """Run one ``ConnectionActor``.
 
         *bound_binding* is set for port-bound non-ASGI protocols: the
         connection skips HTTP detection and goes straight to the raw handler.
-
-        *transport* is passed explicitly by the buffered-protocol path, which
-        has no `StreamWriter` to carry it — and peer/socket names and the TLS
-        object are read from it, so it cannot be inferred.
         """
-        if transport is None:
-            transport = getattr(writer, 'transport', None)
-        peername = transport.get_extra_info('peername') if transport else None
-        sockname = transport.get_extra_info('sockname') if transport else None
+        peername = transport.get_extra_info('peername')
+        sockname = transport.get_extra_info('sockname')
         # ASGI 3.0 §Connection Scope requires ``scope['client']`` and
         # ``scope['server']`` to be ``(host, port)``.  What the transport hands
         # back is not: AF_UNIX gives a bare path string (and an empty peername),
@@ -862,20 +855,13 @@ class Server:
             sockname = sockname[:2]
         if isinstance(peername, tuple) and len(peername) > 2:
             peername = peername[:2]
-        ssl_object = transport.get_extra_info('ssl_object') if transport else None
+        ssl_object = transport.get_extra_info('ssl_object')
         ssl_flag = ssl_object is not None
         alpn = ssl_object.selected_alpn_protocol() if ssl_object else None
 
         # No setsockopt on this path, by design: SO_SNDBUF / SO_RCVBUF /
         # TCP_USER_TIMEOUT are set once on the listening socket and inherited,
         # and idle keep-alive ghosts are HTTP1Actor's timer to evict.
-        wrapped_reader = (reader if isinstance(reader, AbstractReader)
-                          else AsyncioReader(reader))
-        if isinstance(writer, AbstractWriter):
-            wrapped_writer = writer
-        else:
-            wrapped_writer = AsyncioWriter(
-                writer, write_timeout=get_settings().write_timeout)
 
         aggregator = self._cached_aggregator
 
@@ -890,7 +876,7 @@ class Server:
             # h1 is the safe guess: the peer has not spoken.
             if bound_binding is None and alpn != 'h2':
                 try:
-                    await wrapped_writer.write(
+                    await writer.write(
                         b'HTTP/1.1 503 Service Unavailable\r\n'
                         b'retry-after: 1\r\n'
                         b'content-length: 0\r\n'
@@ -902,16 +888,16 @@ class Server:
                         peername)
                 # The close decides; ``docs/about/internals.md`` §Rejecting
                 # requires lingering.
-                await wrapped_writer.close()
+                await writer.close()
             else:
                 # Nothing was written, so there is no response to protect.
-                await wrapped_writer.close()
+                await writer.close()
             return
 
         self._active_connections += 1
         try:
             actor = ConnectionActor(
-                wrapped_reader, wrapped_writer, self.app, aggregator,
+                reader, writer, self.app, aggregator,
                 peername=peername, sockname=sockname, ssl=ssl_flag,
                 alpn=alpn,
                 stream_queue_depth=self._stream_queue_depth,

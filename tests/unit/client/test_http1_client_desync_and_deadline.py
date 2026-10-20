@@ -25,34 +25,21 @@ import pytest
 from blackbull.client.exceptions import (ClientError, ConnectionError,
                                          ResponseTooLarge)
 from blackbull.client.http1 import HTTP1Client, HTTP1ResponseRecipient
-from blackbull.server.recipient import AbstractReader, AbstractWriter
+from blackbull.server.recipient import AbstractWriter
+
+from tests.harness import fed
 
 #: A response body that is itself a complete, attacker-chosen response.
 _INJECTED = b'HTTP/1.1 200 OK\r\nx-evil: yes\r\ncontent-length: 5\r\n\r\nPWNED'
 
 
-class _Canned(AbstractReader):
-    def __init__(self, payload: bytes) -> None:
-        self._buf, self._pos = payload, 0
-
-    async def read(self, n: int = -1) -> bytes:
-        out = self._buf[self._pos:] if n < 0 else self._buf[self._pos:self._pos + n]
-        self._pos += len(out)
-        return out
+def _Canned(payload: bytes = b''):
+    return fed(payload).reader
 
 
-class _Silent(AbstractReader):
-    """Delivers a prefix, then stays connected and says nothing."""
-
-    def __init__(self, payload: bytes) -> None:
-        self._buf, self._pos = payload, 0
-
-    async def read(self, n: int = -1) -> bytes:
-        if self._pos < len(self._buf):
-            out = self._buf[self._pos:] if n < 0 else self._buf[self._pos:self._pos + n]
-            self._pos += len(out)
-            return out
-        await asyncio.Event().wait()
+def _Silent(payload: bytes = b''):
+    """Delivers *payload*, then stays connected and says nothing."""
+    return fed(payload, eof=False).reader
 
 
 class _NullWriter(AbstractWriter):

@@ -114,7 +114,7 @@ unbounded buffer growth in BlackBull.
 
 ### HTTP/1.1
 
-`AsyncioWriter.write()` calls `asyncio.StreamWriter.drain()` on
+`AsyncioWriter.write()` waits for the connection to drain on
 every chunk
 ([`blackbull/server/sender.py`](https://github.com/TOKUJI/BlackBull/blob/master/blackbull/server/sender.py)).
 `drain()` blocks while the kernel send buffer is full of bytes the

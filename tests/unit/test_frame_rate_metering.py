@@ -19,13 +19,15 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+
+from tests.harness import fed, feed
 from hpack import Encoder
 
 from blackbull.protocol.frame_types import (
     DataFrameFlags, ErrorCodes, FrameTypes, HeaderFrameFlags, PingFrameFlags,
 )
 from blackbull.server.http2_actor import HTTP2Actor
-from blackbull.server.recipient import (AsyncioReader, ProtocolError,
+from blackbull.server.recipient import (ProtocolError,
                                         WebSocketRecipient)
 from blackbull.server.sender import AsyncioWriter
 from blackbull.server.constants import WSCloseCode
@@ -257,7 +259,7 @@ class _WsReader:
 def _ws_recipient(raw: bytes):
     writer = _Writer()
     recipient = WebSocketRecipient(
-        AsyncioReader(_WsReader(raw)), AsyncioWriter(writer), ws_queue_depth=0)
+        fed(raw).reader, AsyncioWriter(writer), ws_queue_depth=0)
     return recipient, writer
 
 

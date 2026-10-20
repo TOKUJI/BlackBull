@@ -191,6 +191,9 @@ class TestRFC8441DataExchange:
         # 64 KiB exceeds both defaults — exercises outgoing DATA splitting
         # via HTTP2Sender and receive-side WINDOW_UPDATE emission together.
         pytest.param(65536, id='exceeds-h2-limits'),
+        # A message several stream windows long: each role must credit as it
+        # consumes, or the read waits on credit it is withholding.
+        pytest.param(4 * 65536, id='several-windows'),
     ])
     async def test_medium_binary_frame_within_max_frame_size(
         self, rfc8441_server_port, size,

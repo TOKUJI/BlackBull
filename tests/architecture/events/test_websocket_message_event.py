@@ -5,11 +5,13 @@ before the application handler calls receive().
 """
 import asyncio
 import pytest
+
+from tests.harness import fed
 from blackbull import BlackBull, Event
 from blackbull.utils import Scheme
 from blackbull.connection import Connection
 from blackbull.headers import Headers
-from blackbull.server.recipient import WebSocketRecipient, AsyncioReader
+from blackbull.server.recipient import WebSocketRecipient
 from blackbull.server.sender import AbstractWriter
 
 
@@ -88,7 +90,7 @@ async def _drive_ws_client(app, path, *, send_text=None, send_bytes=None):
     raw = _make_client_frame(payload, opcode=opcode) + _make_client_frame(b'', opcode=0x8)
     conn = _make_conn(path)
     receive = WebSocketRecipient(
-        AsyncioReader(_FakeReader(raw)),
+        fed(raw).reader,
         _FakeWriter(),
         dispatcher=app._dispatcher,
         conn=conn,
@@ -107,7 +109,7 @@ async def _drive_ws_client_fragments(app, path, *, fragments):
     raw += _make_client_frame(b'', opcode=0x8)
     conn = _make_conn(path)
     receive = WebSocketRecipient(
-        AsyncioReader(_FakeReader(raw)),
+        fed(raw).reader,
         _FakeWriter(),
         dispatcher=app._dispatcher,
         conn=conn,
@@ -123,7 +125,7 @@ async def _drive_ws_client_multi(app, path, *, messages):
     raw += _make_client_frame(b'', opcode=0x8)
     conn = _make_conn(path)
     receive = WebSocketRecipient(
-        AsyncioReader(_FakeReader(raw)),
+        fed(raw).reader,
         _FakeWriter(),
         dispatcher=app._dispatcher,
         conn=conn,

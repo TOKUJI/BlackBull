@@ -21,6 +21,29 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Added
+
+- `blackbull.client.ClientConnection`, the buffered connection every client
+  owns (the type of `WebSocketSession`'s `raw_writer`).
+
+### Changed
+
+- WebSocket over HTTP/2 returns flow-control credit as the WebSocket codec
+  consumes data, in the server and the client alike, so at most one stream
+  window is buffered. DATA past the window resets the stream
+  (`ENHANCE_YOUR_CALM` from the server, `FLOW_CONTROL_ERROR` from the client).
+- Clients read and write through the server's buffered connection instead of
+  asyncio streams.
+- `WebSocketH2Session(client, stream_id, reader)` takes the stream's
+  `HTTP2StreamReader` (from `HTTP2Client.attach_stream_reader`) instead of a
+  frame queue.
+
+### Removed
+
+- `AsyncioReader`, `PrefixReader` and `HTTP2WSReader`. `AbstractReader` no
+  longer reads lines byte by byte: `readuntil` and `read_head` raise
+  `NotImplementedError` except on `BufferReader`.
+
 ## [0.81.0] — 2026-10-05
 
 ### Changed

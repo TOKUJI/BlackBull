@@ -278,16 +278,8 @@ class AsyncioWriter(AbstractWriter):
         logger.warning(
             'write timeout (%.1fs) exceeded — closing connection',
             self._write_timeout)
-        if self._cap_name == 'write_timeout':
-            log_cap_hit('write_timeout',
-                        requested=self._write_timeout,
-                        limit=self._write_timeout,
-                        protocol=self._protocol)
-        else:
-            log_cap_hit(self._cap_name,
-                        requested=self._write_timeout,
-                        limit=self._write_timeout,
-                        protocol=self._protocol)
+        log_cap_hit(self._cap_name, requested=self._write_timeout,
+                    limit=self._write_timeout, protocol=self._protocol)
         try:
             self._sw.close()
         except Exception as close_exc:

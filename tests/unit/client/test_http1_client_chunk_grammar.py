@@ -22,20 +22,15 @@ import pytest
 
 from blackbull.client.exceptions import ProtocolError
 from blackbull.client.http1 import HTTP1ResponseRecipient
-from blackbull.server.recipient import AbstractReader
 from blackbull.server.recipient import _parse_chunk_size as _server_parse
+
+from tests.harness import fed
 
 _HEAD = b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n'
 
 
-class _Canned(AbstractReader):
-    def __init__(self, payload: bytes) -> None:
-        self._buf, self._pos = payload, 0
-
-    async def read(self, n: int = -1) -> bytes:
-        out = self._buf[self._pos:] if n < 0 else self._buf[self._pos:self._pos + n]
-        self._pos += len(out)
-        return out
+def _Canned(payload: bytes = b''):
+    return fed(payload).reader
 
 
 async def _body(size_line: bytes) -> bytes:

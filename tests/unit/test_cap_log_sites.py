@@ -36,6 +36,8 @@ from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 from blackbull.server.http1_actor import request_framing
 
+from tests.harness import fed, paced
+
 
 def _conn(headers, path: str = '/'):
     """The native ``Connection`` the actor binds a recipient to.
@@ -462,23 +464,12 @@ async def test_h2_ws_max_streams_per_connection_logs(caps_caplog, monkeypatch):
 # client_min_body_rate — the async client's response-body rate floor
 # ----------------------------------------------------------------------
 
-class _DrippingPeer(AbstractReader):
+def _DrippingPeer(script, clock):
     """A response body arriving at 10 B/s, on a clock the test moves."""
-
-    def __init__(self, script, clock) -> None:
-        self._script, self._clock, self._buf = list(script), clock, b''
-
-    async def read(self, n: int = -1) -> bytes:
+    async def pause(gap):
+        clock.now += gap
         await asyncio.sleep(0)
-        while not self._buf:
-            if not self._script:
-                return b''
-            gap, data = self._script.pop(0)
-            self._clock.now += gap
-            self._buf = data
-        want = len(self._buf) if n < 0 else min(n, len(self._buf))
-        out, self._buf = self._buf[:want], self._buf[want:]
-        return out
+    return paced(script, pause)
 
 
 @pytest.mark.asyncio
@@ -631,23 +622,12 @@ async def test_client_max_interim_responses_logs(caps_caplog, monkeypatch):
     Only the count is anomalous."""
     from blackbull.client.exceptions import ResponseTooLarge
     from blackbull.client.http1 import HTTP1ResponseRecipient
-    from blackbull.server.recipient import AbstractReader
 
     monkeypatch.setenv('BB_CLIENT_MAX_INTERIM_RESPONSES', '3')
 
-    class _Interims(AbstractReader):
-        def __init__(self) -> None:
-            self._buf = b'HTTP/1.1 100 Continue\r\n\r\n' * 40
-            self._pos = 0
-
-        async def read(self, n: int = -1) -> bytes:
-            out = (self._buf[self._pos:] if n < 0
-                   else self._buf[self._pos:self._pos + n])
-            self._pos += len(out)
-            return out
-
     with pytest.raises(ResponseTooLarge):
-        await HTTP1ResponseRecipient().receive(_Interims())
+        await HTTP1ResponseRecipient().receive(
+            fed(b'HTTP/1.1 100 Continue\r\n\r\n' * 40).reader)
 
     records = _records_for(caps_caplog, 'client_max_interim_responses')
     assert records and records[0].protocol == 'http1'
@@ -740,52 +720,26 @@ async def test_client_h2_max_frame_size_logs_on_http2(caps_caplog, monkeypatch):
 # connection to reach.
 # ----------------------------------------------------------------------
 
-class _ClientCanned(AbstractReader):
+def _ClientCanned(payload: bytes):
     """A peer that says its piece and then reports EOF."""
-
-    def __init__(self, payload: bytes) -> None:
-        self._buf, self._pos = payload, 0
-
-    async def read(self, n: int = -1) -> bytes:
-        out = (self._buf[self._pos:] if n < 0
-               else self._buf[self._pos:self._pos + n])
-        self._pos += len(out)
-        return out
+    return fed(payload).reader
 
 
-class _ClientStalling(AbstractReader):
+def _ClientStalling(prefix: bytes):
     """A peer that sends *prefix* and then never sends anything again."""
-
-    def __init__(self, prefix: bytes) -> None:
-        self._prefix, self._pos = prefix, 0
-
-    async def read(self, n: int = -1) -> bytes:
-        if self._pos < len(self._prefix):
-            end = len(self._prefix) if n < 0 else self._pos + n
-            out = self._prefix[self._pos:end]
-            self._pos += len(out)
-            return out
-        await asyncio.Event().wait()
-        raise AssertionError('unreachable')
+    return fed(prefix, eof=False).reader
 
 
-class _ClientRaisesTimeout(AbstractReader):
+def _ClientRaisesTimeout(prefix: bytes = b''):
     """A reader whose own read raises ``TimeoutError`` promptly.
 
     Not the deadline expiring — something under the transport answering in
     the same exception type.  The negative control for both time bounds.
     """
-
-    def __init__(self, prefix: bytes = b'') -> None:
-        self._buf, self._pos = prefix, 0
-
-    async def read(self, n: int = -1) -> bytes:
-        if self._pos < len(self._buf):
-            end = len(self._buf) if n < 0 else self._pos + n
-            out = self._buf[self._pos:end]
-            self._pos += len(out)
-            return out
-        raise TimeoutError('the transport said so, not the cap')
+    async def pause(gap):
+        if gap:
+            raise TimeoutError('the transport said so, not the cap')
+    return paced([(0, prefix), (1, b'')], pause)
 
 
 def _h1_response(*fields: bytes) -> bytes:

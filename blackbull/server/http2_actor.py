@@ -5,7 +5,6 @@ StreamActor owns the lifetime of a single HTTP/2 stream.
 """
 import asyncio
 import contextlib
-import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
@@ -54,7 +53,7 @@ _DEBUG = debug_gate(logger)
 
 @runtime_checkable
 class _StreamRecipient(Protocol):
-    """Duck-type interface shared by HTTP2Recipient and HTTP2WSReader."""
+    """Duck-type interface shared by HTTP2Recipient and HTTP2StreamReader."""
     def put_disconnect(self) -> None: pass
     def put_DATAFrame(self, frame) -> bool: pass
 
@@ -897,11 +896,7 @@ class HTTP2Actor(Actor):
             await self.send_frame(self.factory.goaway(
                 self._last_peer_stream_id, error_code))
         with contextlib.suppress(Exception):
-            result = self._writer.close()
-            # Async on the asyncio adapter, sync on the raw transports; accept
-            # both rather than make every caller know which it holds.
-            if inspect.isawaitable(result):
-                await result
+            await self._writer.close()
 
     async def _frame_loop(self, tg: asyncio.TaskGroup) -> None:
         """Read frames and dispatch stream tasks until EOF or GOAWAY."""
@@ -1470,10 +1465,9 @@ class HTTP2Actor(Actor):
     async def _on_data_frame(self, frame, stream: 'Stream') -> None:
         """Handle a DATA frame: state, content-length accounting, delivery.
 
-        Regular request streams credit on *consumption* and do it from the
-        recipient's own callback, so nothing is credited here; the enqueue-time
-        branch below is only for recipients without one.  Both mechanics are
-        RFC 9113 §6.9.1 (``docs/about/rfc9113-implementation.md``).
+        Every recipient that can receive DATA credits on *consumption* from its
+        own callback, so nothing is credited here (RFC 9113 §6.9.1,
+        ``docs/about/rfc9113-implementation.md``).
         """
         if stream.state in (StreamState.HALF_CLOSED_REMOTE, StreamState.CLOSED):
             self._retire_stream(
@@ -1502,30 +1496,7 @@ class HTTP2Actor(Actor):
         stream.on_data_received(end_stream=bool(frame.end_stream))
         if stream.stream_id in self._recipients:
             recipient = self._recipients[stream.stream_id]
-            delivered = recipient.put_DATAFrame(frame)
-            if (delivered and frame.length
-                    and not getattr(recipient, 'credits_on_consume', False)):
-                # Enqueue-time credit, for recipients without a consume-time
-                # callback: HTTP2WSReader under its buffer cap, push streams,
-                # direct test constructions.  Both windows, per §6.9.1.
-                #
-                # The ``frame.length`` guard is load-bearing: a zero-length
-                # DATA frame consumes no window, and a WINDOW_UPDATE of 0 is a
-                # protocol error that a strict client drops the connection on.
-                # grpcio sends exactly that frame to close a client-streaming
-                # request.
-                await self.send_frame(
-                    self.factory.window_update(stream.stream_id, frame.length))
-                await self.send_frame(
-                    self.factory.window_update(0, frame.length))
-            elif delivered:
-                pass  # zero-length carrier, or the recipient credits on consume
-            elif getattr(recipient, 'backpressures_via_credit', False):
-                # Buffered, but withholding credit as back-pressure; the
-                # recipient replays it once its buffer drains.  No RST_STREAM —
-                # the bytes are safe.
-                pass
-            else:
+            if not recipient.put_DATAFrame(frame):
                 # Refused: an overrun of the advertised window, a degenerate
                 # tiny-frame flood, or a body limit.  Tell the recipient as
                 # well, so a handler parked in ``receive()`` for a body that
@@ -1558,7 +1529,7 @@ class HTTP2Actor(Actor):
         """
         from .conn_id import new_connection_id  # noqa: PLC0415
         from .websocket_actor import WebSocketActor  # noqa: PLC0415
-        from .http2_ws import HTTP2WSReader, HTTP2WSWriter  # noqa: PLC0415
+        from .http2_ws import HTTP2StreamReader, HTTP2WSWriter  # noqa: PLC0415
 
         # Without this per-connection cap a peer may hold
         # ``max_concurrent_streams`` idle WS streams.  ``0`` disables it.
@@ -1604,8 +1575,9 @@ class HTTP2Actor(Actor):
 
         conn._ws = {'send_101': _ws_send_200, 'deflate': deflate_params}
 
-        ws_reader = HTTP2WSReader(
-            credit_callback=self._make_consume_credit_callback(stream.stream_id))
+        ws_reader = HTTP2StreamReader(
+            self._inbound_stream_window,
+            self._make_consume_credit_callback(stream.stream_id))
         ws_writer = HTTP2WSWriter(stream_send)
         self._recipients[stream.stream_id] = ws_reader
 

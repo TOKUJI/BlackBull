@@ -40,7 +40,8 @@ import asyncio
 import pytest
 
 from blackbull.client.http1 import HTTP1ResponseRecipient
-from blackbull.server.recipient import AbstractReader
+
+from tests.harness import paced
 
 pytestmark = pytest.mark.asyncio
 
@@ -58,40 +59,16 @@ class _Clock:
         return self.now
 
 
-class _Paced(AbstractReader):
-    """Serves ``(gap, data)`` pieces, charging *gap* to the read that takes it.
+def _paced(clock: _Clock, script: list[tuple[float, bytes]]):
+    """A peer whose gaps are charged to *clock* inside the read that waits on them.
 
-    A gap is spent inside a read, which is how the floor sees transport wait
-    and how it never sees a caller's own time between ``stream()`` yields.
+    That is how the floor sees transport wait, and how it never sees a
+    caller's own time between ``stream()`` yields.
     """
-
-    def __init__(self, clock: _Clock, script: list[tuple[float, bytes]]) -> None:
-        self._clock = clock
-        self._script = list(script)
-        self._buf = b''
-
-    async def read(self, n: int = -1) -> bytes:
+    async def pause(gap: float) -> None:
+        clock.now += gap
         await asyncio.sleep(0)  # a real suspension, so cancellation still works
-        while not self._buf:
-            if not self._script:
-                return b''
-            gap, data = self._script.pop(0)
-            self._clock.now += gap
-            self._buf = data
-        want = len(self._buf) if n < 0 else min(n, len(self._buf))
-        out, self._buf = self._buf[:want], self._buf[want:]
-        return out
-
-
-class _AfterHeadPaced(_Paced):
-    """The head is already parsed before scripted body wait begins."""
-
-    def __init__(self, clock: _Clock, script: list[tuple[float, bytes]]) -> None:
-        super().__init__(clock, script)
-        self._head = b'HTTP/1.1 200 OK\r\n\r\n'
-
-    async def read_head(self, limit: int) -> bytes:
-        return self._head
+    return paced(script, pause)
 
 
 def _fixed(pieces: list[tuple[float, bytes]]) -> list[tuple[float, bytes]]:
@@ -191,7 +168,7 @@ async def test_off_by_default_every_shape_completes(
         shape, path, clock, monkeypatch):
     """The shipped default refuses none of them, including the drip."""
     script, _ = _SHAPES[shape]
-    assert await _body_via(path, _Paced(clock, script))
+    assert await _body_via(path, _paced(clock, script))
 
 
 @_PATHS
@@ -201,7 +178,7 @@ async def test_enabled_refuses_exactly_the_documented_shapes(
     """And when it is on, it fires on the rate — not on the size or the wait."""
     _enable(monkeypatch)
     script, refused = _SHAPES[shape]
-    read = _body_via(path, _Paced(clock, script))
+    read = _body_via(path, _paced(clock, script))
     if not refused:
         assert await read
         return
@@ -219,7 +196,7 @@ class TestTheFloorIsTheOneThatFires:
         monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '0')  # nothing else can fire
         script, _ = _SHAPES['drip']
         with pytest.raises(TimeoutError, match='BB_CLIENT_MIN_BODY_RATE'):
-            await HTTP1ResponseRecipient().receive(_Paced(clock, script))
+            await HTTP1ResponseRecipient().receive(_paced(clock, script))
 
     async def test_a_refused_response_abandons_the_connection(
             self, clock, monkeypatch):
@@ -228,7 +205,7 @@ class TestTheFloorIsTheOneThatFires:
         script, _ = _SHAPES['drip']
         recipient = HTTP1ResponseRecipient()
         with pytest.raises(TimeoutError):
-            await recipient.receive(_Paced(clock, script))
+            await recipient.receive(_paced(clock, script))
         assert recipient.framing_broken
 
 
@@ -241,7 +218,7 @@ class TestCallerTimeIsNotPeerTime:
         _enable(monkeypatch)
         script = _fixed(_steady(6, 2000, 0.0))
         body = b''
-        async for chunk in HTTP1ResponseRecipient().stream(_Paced(clock, script)):
+        async for chunk in HTTP1ResponseRecipient().stream(_paced(clock, script)):
             clock.now += 60.0  # the caller thinks for a minute per chunk
             body += chunk
         assert len(body) == 12000
@@ -256,14 +233,14 @@ class TestCloseDelimitedCompletion:
         _enable(monkeypatch)
         script = _close_delimited([(0.0, b'x'), (2.0, b'')])
         with pytest.raises(TimeoutError, match='BB_CLIENT_MIN_BODY_RATE'):
-            await _body_via(path, _Paced(clock, script))
+            await _body_via(path, _paced(clock, script))
 
     @_PATHS
     async def test_terminal_eof_completes_when_floor_disabled(
             self, path, clock, monkeypatch):
         monkeypatch.setenv('BB_CLIENT_MIN_BODY_RATE', '0')
         script = _close_delimited([(0.0, b'x'), (2.0, b'')])
-        assert await _body_via(path, _Paced(clock, script)) == b'x'
+        assert await _body_via(path, _paced(clock, script)) == b'x'
 
     @_PATHS
     async def test_first_byte_think_time_remains_exempt(
@@ -272,4 +249,4 @@ class TestCloseDelimitedCompletion:
         # read_head() returns first; the ten-second wait is in the first body
         # read, where the exemption must apply.
         script = [(10.0, b'x'), (0.0, b'')]
-        assert await _body_via(path, _AfterHeadPaced(clock, script)) == b'x'
+        assert await _body_via(path, _paced(clock, [(0.0, b'HTTP/1.1 200 OK\r\n\r\n'), *script])) == b'x'

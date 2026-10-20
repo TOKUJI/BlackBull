@@ -14,8 +14,8 @@ from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.sender import AsyncioWriter
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
-    FrameTypes, FrameFlags, HeaderFrameFlags, DataFrameFlags,
-    SettingFrameFlags, PseudoHeaders,
+    FrameTypes, HeaderFrameFlags, DataFrameFlags,
+    SettingFrameFlags,
 )
 from blackbull.server.ws_codec import encode_frame, WSOpcode
 
@@ -339,7 +339,6 @@ class TestExtendedConnectHandshake:
 
     async def test_accept_sends_200_response(self):
         """websocket.accept must trigger a :status 200 HEADERS frame (not 101)."""
-        from hpack import Decoder
 
         writes = []
 
@@ -361,7 +360,6 @@ class TestExtendedConnectHandshake:
     async def test_subprotocol_included_in_200_headers(self):
         """websocket.accept(subprotocol='chat') must include sec-websocket-protocol
         in the 200 response headers."""
-        from hpack import Decoder
 
         writes = []
 
@@ -556,7 +554,6 @@ class TestDataExchange:
     async def test_app_send_text_produces_data_frame(self):
         """websocket.send(text='hi') must result in DATA frame bytes on the wire
         containing a valid RFC 6455 TEXT frame payload."""
-        from blackbull.server.ws_codec import read_frame_header, read_payload
 
         writes = []
 
@@ -847,223 +844,39 @@ class TestWebSocketStreamCap:
 
 
 # ---------------------------------------------------------------------------
-# §7 — HTTP2WSReader buffer backpressure
+# §5 — a WebSocket stream holds at most one window unconsumed
 # ---------------------------------------------------------------------------
-#
-# Without a buffer cap, an overloaded or misbehaving peer could grow
-# HTTP2WSReader._buffer without bound — the reader credited every
-# incoming DATA frame's window even when the actor wasn't draining.
-# Improvement A caps the buffer at ``max_buffer`` (default 1 MiB) and
-# switches credit emission to a credit-on-drain model when the cap is
-# exceeded: bytes are still buffered (no silent data loss), but
-# WINDOW_UPDATE is withheld until ``readexactly`` drains back below
-# the cap.
 
-from blackbull.protocol.frame_types import Data as _DataFrame  # noqa: E402
-from blackbull.server.http2_ws import HTTP2WSReader  # noqa: E402
-
-
-def _fake_data(payload: bytes, end_stream: bool = False) -> _DataFrame:
-    """Real Data frame for HTTP2WSReader unit tests.  Beartype enforces
-    the ``frame: Data`` annotation on ``put_DATAFrame`` at runtime, so
-    a duck-typed stand-in (e.g. ``SimpleNamespace``) is rejected."""
-    flags = int(DataFrameFlags.END_STREAM) if end_stream else 0
-    return _DataFrame(
-        len(payload), FrameTypes.DATA, flags, stream_id=1, data=payload)
+from blackbull.server.http2_ws import HTTP2StreamReader  # noqa: E402
+from blackbull.server.recipient import IncompleteReadError  # noqa: E402
 
 
 @pytest.mark.asyncio
-class TestHTTP2WSReaderBackpressure:
-    """The reader buffers bytes always (so the peer's
-    already-on-the-wire payload never disappears) and signals
-    backpressure by withholding WINDOW_UPDATE.  Withheld credit is
-    replayed when ``readexactly`` drains the buffer below ``max_buffer``.
-    """
+async def test_data_past_a_websocket_streams_window_is_reset():
+    """RST_STREAM(ENHANCE_YOUR_CALM), and the codec parked on the stream wakes."""
+    from blackbull.protocol.stream import Stream, StreamState  # noqa: PLC0415
 
-    async def test_returns_true_while_under_cap(self):
-        r = HTTP2WSReader(max_buffer=100)
-        assert r.put_DATAFrame(_fake_data(b'a' * 50)) is True
-        assert r.put_DATAFrame(_fake_data(b'b' * 40)) is True
-        assert r._pending_credit == 0
+    handler, _, _ = _make_h2_actor()
+    handler.receive = AsyncMock(return_value=None)
+    await handler.run()
+    handler.send_frame.reset_mock()
+    stream = Stream(stream_id=1, parent=handler.root_stream)
+    stream.state = StreamState.OPEN
+    handler.root_stream.add_child(1)
 
-    async def test_returns_false_when_cap_exceeded_and_keeps_bytes(self):
-        """Past the cap, ``put_DATAFrame`` returns ``False`` to signal
-        the actor to skip WINDOW_UPDATE — but the bytes are still in
-        the buffer (the peer already delivered them; dropping would
-        violate WebSocket's reliable-delivery contract)."""
-        r = HTTP2WSReader(max_buffer=100)
-        assert r.put_DATAFrame(_fake_data(b'a' * 80)) is True
-        # This one overflows: 80 + 30 = 110 > 100
-        assert r.put_DATAFrame(_fake_data(b'b' * 30)) is False
-        # Bytes still buffered
-        assert len(r._buffer) == 110
-        assert r._pending_credit == 30, (
-            f'withheld credit must equal the overflowing frame size; '
-            f'got {r._pending_credit}')
+    async def credit(n):
+        pass
 
-    async def test_pending_credit_accumulates_across_multiple_overflows(self):
-        r = HTTP2WSReader(max_buffer=100)
-        r.put_DATAFrame(_fake_data(b'x' * 80))   # under, no withhold
-        r.put_DATAFrame(_fake_data(b'x' * 30))   # 110, withhold 30
-        r.put_DATAFrame(_fake_data(b'x' * 20))   # 130, withhold 20 more
-        assert r._pending_credit == 50
+    reader = HTTP2StreamReader(4, credit)
+    handler._recipients[1] = reader
+    await handler._on_data_frame(
+        handler.factory.load(_make_ws_data_frame(b'payload-bytes')), stream)
 
-    async def test_credit_replay_fires_after_drain_below_cap(self):
-        """Once the actor drains the buffer back under ``max_buffer``,
-        the reader must invoke ``credit_callback`` with the accumulated
-        withheld credit so the peer's WINDOW reopens."""
-        credits: list[int] = []
-
-        async def credit_cb(n: int) -> None:
-            credits.append(n)
-
-        r = HTTP2WSReader(max_buffer=100, credit_callback=credit_cb)
-        # Fill to 110, withholding 30
-        r.put_DATAFrame(_fake_data(b'a' * 80))
-        r.put_DATAFrame(_fake_data(b'b' * 30))
-        assert credits == [], 'no credit while over cap'
-
-        # Drain 20 bytes — still 90 in buffer, under cap → replay
-        drained = await r.readexactly(20)
-        assert len(drained) == 20
-        assert credits == [30], (
-            f'credit_callback must replay withheld credit on drain; '
-            f'got {credits}')
-        assert r._pending_credit == 0
-
-    async def test_no_replay_when_still_over_cap_after_drain(self):
-        """A partial drain that leaves the buffer still over the cap
-        must NOT replay credit — the peer should remain throttled
-        until enough bytes are consumed."""
-        credits: list[int] = []
-
-        async def credit_cb(n: int) -> None:
-            credits.append(n)
-
-        r = HTTP2WSReader(max_buffer=100, credit_callback=credit_cb)
-        r.put_DATAFrame(_fake_data(b'a' * 80))
-        r.put_DATAFrame(_fake_data(b'b' * 80))    # 160, withhold 80
-        assert r._pending_credit == 80
-
-        # Drain only 10 — still 150 in buffer, still over cap
-        await r.readexactly(10)
-        assert credits == [], (
-            f'credit must stay withheld while buffer remains over cap; '
-            f'got {credits}')
-        assert r._pending_credit == 80
-
-        # Drain enough to go under cap (150 → 50)
-        await r.readexactly(100)
-        assert credits == [80]
-        assert r._pending_credit == 0
-
-    async def test_pending_credit_observable_without_callback(self):
-        """When constructed without a callback (unit-test mode), the
-        reader still tracks ``_pending_credit`` — useful for asserting
-        the withhold behaviour.  The reset is gated on the callback
-        firing successfully, so without a callback the count stays
-        accumulated; production always wires a callback so this only
-        matters for direct unit tests."""
-        r = HTTP2WSReader(max_buffer=50)
-        r.put_DATAFrame(_fake_data(b'x' * 80))
-        assert r._pending_credit == 80
-        await r.readexactly(80)
-        assert r._pending_credit == 80, (
-            'without a callback the reader has no peer to credit; '
-            'pending_credit stays observable')
-
-    async def test_default_max_buffer_is_1_mib(self):
-        """The class-level default cap is 1 MiB — covers a single
-        maximum-size WebSocket frame plus headroom."""
-        r = HTTP2WSReader()
-        assert r._max_buffer == 1024 * 1024
-
-
-@pytest.mark.asyncio
-class TestActorBackpressureBranch:
-    """``_on_data_frame`` must recognise the
-    ``backpressures_via_credit`` marker: when a recipient returns
-    ``False`` *and* carries the marker, the bytes are safely buffered
-    so the actor skips both ``WINDOW_UPDATE`` *and* ``RST_STREAM``.
-    Recipients without the marker (regular HTTP, queue-full) still get
-    ``RST_STREAM(ENHANCE_YOUR_CALM)``."""
-
-    def _stub_stream(self, handler):
-        """Minimal real Stream for ``_on_data_frame`` — beartype enforces
-        the actor's annotations, so a SimpleNamespace stand-in is rejected."""
-        from blackbull.protocol.stream import Stream, StreamState  # noqa: PLC0415
-        stream = Stream(stream_id=1, parent=handler.root_stream)
-        stream.state = StreamState.OPEN
-        handler.root_stream.add_child(1)
-        return stream
-
-    async def _drive_data_frame(self, handler, stream, payload):
-        """Invoke ``_on_data_frame`` directly with a synthetic DATA frame."""
-        frame = handler.factory.load(_make_ws_data_frame(
-            payload, stream_id=1))
-        await handler._on_data_frame(frame, stream)
-
-    async def test_backpressure_recipient_skips_window_update_and_rst(self):
-        """Marker + False return → no WINDOW_UPDATE, no RST_STREAM."""
-        class _BackpressureStub:
-            backpressures_via_credit = True
-            def put_DATAFrame(self, frame):
-                return False  # full — withhold credit
-
-        handler, _, _ = _make_h2_actor()
-        # Drive the initial SETTINGS so the actor is in a steady state.
-        handler.receive = AsyncMock(return_value=None)
-        # Spin up just the SETTINGS path without dispatching frames.
-        await handler.run()
-        handler.send_frame.reset_mock()
-
-        stream = self._stub_stream(handler)
-        handler._recipients[1] = _BackpressureStub()
-        await self._drive_data_frame(handler, stream, b'payload-bytes')
-
-        kinds = [type(c.args[0]).__name__
-                 for c in handler.send_frame.call_args_list]
-        assert kinds == [], (
-            f'backpressure path must not emit WINDOW_UPDATE or RST_STREAM; '
-            f'got frames={kinds}')
-
-    async def test_unmarked_recipient_returning_false_still_rsts(self):
-        """A recipient without the marker keeps the legacy queue-full
-        semantics — ``RST_STREAM(ENHANCE_YOUR_CALM)``."""
-        class _DropStub:
-            # No backpressures_via_credit attribute
-            def __init__(self):
-                self.disconnected = False
-
-            def put_DATAFrame(self, frame):
-                return False  # queue full → drop
-
-            def put_disconnect(self):
-                # Part of the ``_StreamRecipient`` protocol: a refused frame
-                # ends the body, so the actor tells the recipient — otherwise a
-                # handler parked in ``receive()`` waits for a continuation that
-                # was just reset away.
-                self.disconnected = True
-
-        handler, _, _ = _make_h2_actor()
-        handler.receive = AsyncMock(return_value=None)
-        await handler.run()
-        handler.send_frame.reset_mock()
-
-        stream = self._stub_stream(handler)
-        recipient = _DropStub()
-        handler._recipients[1] = recipient
-        await self._drive_data_frame(handler, stream, b'payload-bytes')
-
-        rsts = [c.args[0] for c in handler.send_frame.call_args_list
-                if hasattr(c.args[0], 'FrameType')
-                and c.args[0].FrameType() == FrameTypes.RST_STREAM]
-        assert len(rsts) == 1, (
-            f'unmarked-recipient drop must RST_STREAM; got {rsts}')
-        assert rsts[0].error_code == ErrorCodes.ENHANCE_YOUR_CALM
-        assert recipient.disconnected, (
-            'the reset stream left a handler waiting on a body that will '
-            'never continue')
+    rsts = [c.args[0] for c in handler.send_frame.call_args_list
+            if c.args[0].FrameType() == FrameTypes.RST_STREAM]
+    assert [r.error_code for r in rsts] == [ErrorCodes.ENHANCE_YOUR_CALM]
+    with pytest.raises(IncompleteReadError):
+        await asyncio.wait_for(reader.readexactly(1), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1072,7 +885,6 @@ class TestActorBackpressureBranch:
 
 class TestAcceptHeadersOnThe200:
     def _headers_200(self, app, request_frame=None):
-        from hpack import Decoder
 
         writes = []
 

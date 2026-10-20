@@ -27,35 +27,18 @@ import pytest
 from blackbull.client.exceptions import (ConnectionError, ProtocolError,
                                          ResponseTooLarge)
 from blackbull.client.http1 import HTTP1Client, HTTP1ResponseRecipient
-from blackbull.server.recipient import AbstractReader, AbstractWriter
+from blackbull.server.recipient import AbstractWriter
+
+from tests.harness import fed, paced
 
 
-class _Canned(AbstractReader):
-    """A reader whose bytes end at EOF, like a peer that closes."""
-
-    def __init__(self, payload: bytes) -> None:
-        self._buf, self._pos = payload, 0
-
-    async def read(self, n: int = -1) -> bytes:
-        out = self._buf[self._pos:] if n < 0 else self._buf[self._pos:self._pos + n]
-        self._pos += len(out)
-        return out
+def _Canned(payload: bytes = b''):
+    return fed(payload).reader
 
 
-class _Held(_Canned):
-    """Delivers its bytes, then stays connected and says nothing.
-
-    The peer a body-length mistake actually hangs on: a ``HEAD`` response
-    declaring ``content-length: 1234`` with no body behind it, on a connection
-    the peer intends to keep.  A reader that answers EOF would end the read for
-    the wrong reason and prove nothing.
-    """
-
-    async def read(self, n: int = -1) -> bytes:
-        out = await super().read(n)
-        if not out:
-            await asyncio.Event().wait()
-        return out
+def _Held(payload: bytes = b''):
+    """Delivers *payload*, then stays connected and says nothing."""
+    return fed(payload, eof=False).reader
 
 
 class _NullWriter(AbstractWriter):
@@ -490,28 +473,20 @@ class TestTheInterimAggregate:
         monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.3')
         monkeypatch.setenv('BB_CLIENT_MAX_INTERIM_RESPONSES', '3')
 
-        class _Dripping(AbstractReader):
+        heads = 0
+
+        def dripping():
             """One interim per 0.1 s — inside every head deadline, forever."""
+            nonlocal heads
+            while True:
+                heads += 1
+                yield 0.1, b'HTTP/1.1 100 Continue\r\n\r\n'
 
-            def __init__(self) -> None:
-                self.heads = 0
-                self._buf, self._pos = b'', 0
-
-            async def read(self, n: int = -1) -> bytes:
-                if self._pos >= len(self._buf):
-                    await asyncio.sleep(0.1)
-                    self.heads += 1
-                    self._buf += b'HTTP/1.1 100 Continue\r\n\r\n'
-                out = (self._buf[self._pos:] if n < 0
-                       else self._buf[self._pos:self._pos + n])
-                self._pos += len(out)
-                return out
-
-        reader = _Dripping()
+        reader = paced(dripping())
         with pytest.raises(ResponseTooLarge):
             await _within(HTTP1ResponseRecipient().receive(reader), seconds=3.0)
-        assert reader.heads <= 4, (
-            f'a limit of 3 spent {reader.heads} head deadlines; the aggregate '
+        assert heads <= 4, (
+            f'a limit of 3 spent {heads} head deadlines; the aggregate '
             f'is bounded by the count or by nothing')
 
 

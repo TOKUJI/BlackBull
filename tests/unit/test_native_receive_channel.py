@@ -24,12 +24,14 @@ import asyncio
 
 import pytest
 
+from tests.harness import fed, feed
+
 from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.protocol.frame_types import Data, DataFrameFlags, FrameTypes
 from blackbull.request import ClientDisconnected, stream_body
 from blackbull.server.recipient import (
-    AbstractReader, AsyncioReader, HTTP1Recipient, HTTP2Recipient,
+    AbstractReader, HTTP1Recipient, HTTP2Recipient,
     IncompleteReadError,
 )
 from blackbull.server.http1_actor import request_framing
@@ -73,7 +75,7 @@ def _conn(headers, path: str = '/p') -> Connection:
 
 
 def _h1(wire: bytes, headers, **kw) -> HTTP1Recipient:
-    return HTTP1Recipient(AsyncioReader(_Source(wire)), _conn(headers), **kw, framing=request_framing(_conn(headers).headers))
+    return HTTP1Recipient(fed(wire).reader, _conn(headers), **kw, framing=request_framing(_conn(headers).headers))
 
 
 async def _drain_native(recipient) -> list[bytes]:
@@ -354,21 +356,21 @@ class TestConnectionUsesTheNativeChannel:
     async def test_body_reads_the_whole_payload(self):
         conn = _conn([(b'content-length', b'10')])
         conn._receive = HTTP1Recipient(
-            AsyncioReader(_Source(b'0123456789')), conn, chunk_size=4, framing=request_framing(conn.headers))
+            fed(b'0123456789').reader, conn, chunk_size=4, framing=request_framing(conn.headers))
         assert await conn.body() == b'0123456789'
 
     @pytest.mark.asyncio
     async def test_stream_yields_chunks(self):
         conn = _conn([(b'content-length', b'10')])
         conn._receive = HTTP1Recipient(
-            AsyncioReader(_Source(b'0123456789')), conn, chunk_max=4, framing=request_framing(conn.headers))
+            fed(b'0123456789').reader, conn, chunk_max=4, framing=request_framing(conn.headers))
         assert [c async for c in conn.stream()] == [b'0123', b'4567', b'89']
 
     @pytest.mark.asyncio
     async def test_truncated_upload_raises_with_the_partial(self):
         conn = _conn([(b'content-length', b'10')])
         conn._receive = HTTP1Recipient(
-            AsyncioReader(_Source(b'0123')), conn, chunk_size=4, framing=request_framing(conn.headers))
+            fed(b'0123').reader, conn, chunk_size=4, framing=request_framing(conn.headers))
         with pytest.raises(ClientDisconnected) as exc:
             await conn.body()
         assert exc.value.partial == b'0123'
@@ -397,7 +399,7 @@ class TestConnectionUsesTheNativeChannel:
         """
         conn = _conn([(b'content-length', b'10')])
         recipient = HTTP1Recipient(
-            AsyncioReader(_Source(b'0123456789')), conn, chunk_size=2, framing=request_framing(conn.headers))
+            fed(b'0123456789').reader, conn, chunk_size=2, framing=request_framing(conn.headers))
 
         built = 0
         original = type(recipient).__call__

@@ -31,8 +31,9 @@ import pytest
 from blackbull.client.exceptions import ConnectionError, ProtocolError
 from blackbull.client.http1 import HTTP1Client, HTTP1RequestSender
 from blackbull.headers import Headers
-from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
+
+from tests.harness import fed
 
 
 class _Writer(AbstractWriter):
@@ -51,19 +52,8 @@ class _Writer(AbstractWriter):
         return bytes(self.data).split(b'\r\n\r\n', 1)[1]
 
 
-class _Reader(AbstractReader):
-    """A canned response, consumed from the top."""
-
-    def __init__(self, data: bytes) -> None:
-        self.data, self.pos = data, 0
-
-    async def read(self, n: int = -1) -> bytes:
-        if n < 0:
-            n = len(self.data) - self.pos
-        end = min(self.pos + n, len(self.data))
-        out = self.data[self.pos:end]
-        self.pos = end
-        return out
+def _Reader(payload: bytes = b''):
+    return fed(payload).reader
 
 
 class _RawWriter:

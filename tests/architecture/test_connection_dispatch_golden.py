@@ -20,8 +20,10 @@ from blackbull.server.connection_actor import ConnectionActor
 from blackbull.server.protocol_registry import (
     ProtocolDetector, ProtocolRegistry, RawBinding,
 )
-from blackbull.server.recipient import AbstractReader, IncompleteReadError
+from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
+
+from tests.harness import fed
 
 pytestmark = pytest.mark.asyncio
 
@@ -33,44 +35,20 @@ _HTTP1_REQUEST = b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n'
 # Fakes
 # ---------------------------------------------------------------------------
 
-class _BufReader(AbstractReader):
-    """Buffer-backed reader; raises IncompleteReadError when short."""
-
-    def __init__(self, data: bytes = b'') -> None:
-        self.buf = bytearray(data)
-
-    async def read(self, n: int) -> bytes:
-        chunk = bytes(self.buf[:n])
-        del self.buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:
-        idx = self.buf.find(sep)
-        if idx == -1:
-            raise IncompleteReadError()
-        end = idx + len(sep)
-        chunk = bytes(self.buf[:end])
-        del self.buf[:end]
-        return chunk
-
-    async def readexactly(self, n: int) -> bytes:
-        if len(self.buf) < n:
-            raise IncompleteReadError()
-        chunk = bytes(self.buf[:n])
-        del self.buf[:n]
-        return chunk
+def _reader(data: bytes = b''):
+    return fed(data).reader
 
 
 class _TimeoutReader(AbstractReader):
-    """Every detection read raises TimeoutError — simulates a fired deadline."""
+    """Every detection wait raises TimeoutError — simulates a fired deadline."""
 
     async def read(self, n: int) -> bytes:
         raise TimeoutError
 
-    async def readuntil(self, sep: bytes) -> bytes:
-        raise TimeoutError
+    def peek(self, n: int) -> bytes:
+        return b''
 
-    async def readexactly(self, n: int) -> bytes:
+    async def fill(self, n: int) -> bool:
         raise TimeoutError
 
 
@@ -132,14 +110,14 @@ def _actor(reader, writer, *, registry=None, bound=None, alpn=None, aggregator=N
 async def test_http1_cleartext_selects_http1(reader_input, expected) -> None:
     reg, calls = ProtocolRegistry(), []
     _spy_serves(reg, calls)
-    await _actor(_BufReader(reader_input), _Writer(), registry=reg).run()
+    await _actor(_reader(reader_input), _Writer(), registry=reg).run()
     assert calls == expected
 
 
 async def test_http2_alpn_selects_http2() -> None:
     reg, calls = ProtocolRegistry(), []
     _spy_serves(reg, calls)
-    await _actor(_BufReader(_HTTP2_PREFACE), _Writer(), registry=reg, alpn='h2').run()
+    await _actor(_reader(_HTTP2_PREFACE), _Writer(), registry=reg, alpn='h2').run()
     assert calls == ['http2']
 
 
@@ -150,7 +128,7 @@ async def test_shared_port_detector_claims_before_http1() -> None:
     reg, calls = ProtocolRegistry(), []
     reg.register('fake', AsyncMock(), detector=_FirstByteDetector(0x10))
     _spy_serves(reg, calls)
-    await _actor(_BufReader(b'\x10\x00'), _Writer(), registry=reg).run()
+    await _actor(_reader(b'\x10\x00'), _Writer(), registry=reg).run()
     assert calls == ['fake']
 
 
@@ -180,7 +158,7 @@ async def test_shared_port_prefix_is_replayed_to_serve() -> None:
 
     reg.raw_bindings['fake'].serve = _serve   # type: ignore[method-assign]
     # A short MQTT-shaped CONNECT, no CRLF anywhere.
-    await _actor(_BufReader(b'\x10\x0d\x00\x04MQTT\x05\x02\x00\x00\x00'),
+    await _actor(_reader(b'\x10\x0d\x00\x04MQTT\x05\x02\x00\x00\x00'),
                  _Writer(), registry=reg).run()
     assert seen == [b'\x10\x0d\x00\x04MQTT\x05\x02\x00\x00\x00']
 
@@ -192,10 +170,10 @@ async def test_port_bound_skips_detection() -> None:
     async def _serve(conn):
         calls.append('raw')
     bound.serve = _serve             # type: ignore[method-assign]
-    reader = _BufReader(b'anything-unread')
+    reader = _reader(b'anything-unread')
     await _actor(reader, _Writer(), bound=bound).run()
     assert calls == ['raw']
-    assert reader.buf == b'anything-unread'   # detection never consumed bytes
+    assert reader.peek(64) == b'anything-unread'   # detection never consumed bytes
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +208,7 @@ async def test_http_connection_emits_connection_closed() -> None:
     agg = AsyncMock(spec_set=EventAggregator)
     reg, calls = ProtocolRegistry(), []
     _spy_serves(reg, calls)
-    await _actor(_BufReader(_HTTP1_REQUEST), _Writer(), registry=reg, aggregator=agg).run()
+    await _actor(_reader(_HTTP1_REQUEST), _Writer(), registry=reg, aggregator=agg).run()
     agg.on_connection_accepted.assert_called_once()
     agg.on_connection_closed.assert_called_once()
     # peername, protocol, duration_ms — the protocol is the served binding.
@@ -247,6 +225,6 @@ async def test_raw_connection_emits_connection_closed() -> None:
         return
 
     bound = RawBinding('echo', handler)
-    await _actor(_BufReader(), _Writer(), bound=bound, aggregator=agg).run()
+    await _actor(_reader(), _Writer(), bound=bound, aggregator=agg).run()
     agg.on_connection_closed.assert_called_once()
     assert agg.on_connection_closed.call_args[0][1] == 'echo'

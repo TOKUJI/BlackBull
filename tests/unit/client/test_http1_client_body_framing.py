@@ -22,22 +22,11 @@ import pytest
 
 from blackbull.client.exceptions import ProtocolError, ResponseTooLarge
 from blackbull.client.http1 import HTTP1ResponseRecipient
-from blackbull.server.recipient import AbstractReader
+from tests.harness import fed
 
 
-class _CannedReader(AbstractReader):
-    def __init__(self, payload: bytes) -> None:
-        self._buf = payload
-        self._pos = 0
-
-    async def read(self, n: int = -1) -> bytes:
-        if n < 0:
-            out = self._buf[self._pos:]
-            self._pos = len(self._buf)
-            return out
-        out = self._buf[self._pos:self._pos + n]
-        self._pos += len(out)
-        return out
+def _reader(wire: bytes):
+    return fed(wire).reader
 
 
 def _chunked(*chunks: bytes, trailers: bytes = b'') -> bytes:
@@ -62,7 +51,7 @@ class TestChunkSizeGrammar:
         wire = (b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n'
                 + numeral + b'\r\nhello\r\n0\r\n\r\n')
         with pytest.raises(ProtocolError):
-            await HTTP1ResponseRecipient().receive(_CannedReader(wire))
+            await HTTP1ResponseRecipient().receive(_reader(wire))
 
     @pytest.mark.asyncio
     async def test_a_long_but_legal_numeral_is_accepted(self):
@@ -70,14 +59,14 @@ class TestChunkSizeGrammar:
         them, and ``last-chunk = 1*("0")`` puts no ceiling on the zeros."""
         wire = (b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n'
                 + b'0' * 17 + b'\r\n\r\n')
-        res = await HTTP1ResponseRecipient().receive(_CannedReader(wire))
+        res = await HTTP1ResponseRecipient().receive(_reader(wire))
         assert res.status == 200 and res.body == b''
 
     @pytest.mark.asyncio
     async def test_a_chunk_extension_is_still_accepted(self):
         wire = (b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n'
                 b'5;name=value\r\nhello\r\n0\r\n\r\n')
-        res = await HTTP1ResponseRecipient().receive(_CannedReader(wire))
+        res = await HTTP1ResponseRecipient().receive(_reader(wire))
         assert res.body == b'hello'
 
 
@@ -89,7 +78,7 @@ class TestBodylessStatuses:
         but RFC 9112 §6.3 still frames one. Calling it bodyless would leave
         those octets in the buffer for the next response to be misparsed
         as — the desync this reader exists to avoid."""
-        reader = _CannedReader(
+        reader = _reader(
             b'HTTP/1.1 205 Reset Content\r\ncontent-length: 3\r\n\r\nabc'
             b'HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nhi')
         first = await HTTP1ResponseRecipient().receive(reader)
@@ -106,7 +95,7 @@ class TestTrailerSection:
         line."""
         first = _chunked(b'hi', trailers=b'x-a: 1\r\nx-b: 2\r\n')
         second = b'HTTP/1.1 204 No Content\r\n\r\n'
-        reader = _CannedReader(first + second)
+        reader = _reader(first + second)
         recipient = HTTP1ResponseRecipient()
 
         one = await recipient.receive(reader)
@@ -116,7 +105,7 @@ class TestTrailerSection:
 
     @pytest.mark.asyncio
     async def test_an_empty_trailer_section_still_works(self):
-        res = await HTTP1ResponseRecipient().receive(_CannedReader(_chunked(b'hi')))
+        res = await HTTP1ResponseRecipient().receive(_reader(_chunked(b'hi')))
         assert res.body == b'hi'
 
 
@@ -126,14 +115,14 @@ class TestBodyBounds:
         monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '32')
         wire = _chunked(b'a' * 20, b'b' * 20)
         with pytest.raises(ResponseTooLarge):
-            await HTTP1ResponseRecipient().receive(_CannedReader(wire))
+            await HTTP1ResponseRecipient().receive(_reader(wire))
 
     @pytest.mark.asyncio
     async def test_a_declared_body_over_the_total_is_refused(self, monkeypatch):
         monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '4')
         wire = b'HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n' + b'x' * 10
         with pytest.raises(ResponseTooLarge):
-            await HTTP1ResponseRecipient().receive(_CannedReader(wire))
+            await HTTP1ResponseRecipient().receive(_reader(wire))
 
     @pytest.mark.asyncio
     async def test_streaming_is_not_capped_by_the_buffering_total(self, monkeypatch):
@@ -141,7 +130,7 @@ class TestBodyBounds:
         monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '32')
         wire = _chunked(b'a' * 20, b'b' * 20)
         out = b''.join([c async for c in
-                        HTTP1ResponseRecipient().stream(_CannedReader(wire))])
+                        HTTP1ResponseRecipient().stream(_reader(wire))])
         assert out == b'a' * 20 + b'b' * 20
 
     @pytest.mark.asyncio
@@ -150,7 +139,7 @@ class TestBodyBounds:
         wire = (b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n'
                 b'5;ext=' + b'a' * 200 + b'\r\nhello\r\n0\r\n\r\n')
         with pytest.raises(ResponseTooLarge):
-            await HTTP1ResponseRecipient().receive(_CannedReader(wire))
+            await HTTP1ResponseRecipient().receive(_reader(wire))
 
     @pytest.mark.asyncio
     async def test_a_large_chunk_is_delivered_in_slices(self):
@@ -158,7 +147,7 @@ class TestBodyBounds:
         not become one allocation."""
         big = b'z' * (200 * 1024)
         pieces = [c async for c in
-                  HTTP1ResponseRecipient().stream(_CannedReader(_chunked(big)))]
+                  HTTP1ResponseRecipient().stream(_reader(_chunked(big)))]
         assert b''.join(pieces) == big
         assert len(pieces) > 1, 'the whole chunk materialised in one read'
 
@@ -171,70 +160,5 @@ class TestChunkTermination:
         wire = (b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n'
                 b'5\r\nhelloXX\r\n0\r\n\r\n')
         with pytest.raises(ProtocolError):
-            await HTTP1ResponseRecipient().receive(_CannedReader(wire))
+            await HTTP1ResponseRecipient().receive(_reader(wire))
 
-
-class TestReaderCompatibility:
-    """A reader whose ``readuntil`` takes no budget still works.
-
-    ``AbstractReader`` ships ``_accepts_read_limit`` because implementations
-    with a one-argument ``readuntil`` exist — ``read_head`` consults it, and
-    ``PrefixReader`` is built on it.  The framing read passed the budget
-    positionally and unconditionally, so those readers raised ``TypeError`` on
-    the chunked path only.  Worse than a crash: ``receive()`` catches
-    ``BaseException`` to mark the framing broken, so the ``TypeError`` also
-    abandoned the connection.
-    """
-
-    @pytest.mark.asyncio
-    async def test_a_one_argument_readuntil_still_reads_a_chunked_body(self):
-        from blackbull.server.recipient import _accepts_read_limit
-
-        class _Legacy(AbstractReader):
-            def __init__(self, payload: bytes) -> None:
-                self._buf, self._pos = payload, 0
-
-            async def read(self, n: int = -1) -> bytes:
-                out = (self._buf[self._pos:] if n < 0
-                       else self._buf[self._pos:self._pos + n])
-                self._pos += len(out)
-                return out
-
-            async def readuntil(self, sep: bytes) -> bytes:      # no limit
-                idx = self._buf.find(sep, self._pos)
-                end = len(self._buf) if idx < 0 else idx + len(sep)
-                out = self._buf[self._pos:end]
-                self._pos = end
-                return out
-
-        reader = _Legacy(_chunked(b'hi'))
-        assert not _accepts_read_limit(reader.readuntil), 'the double is wrong'
-        res = await HTTP1ResponseRecipient().receive(reader)
-        assert res.body == b'hi'
-
-    @pytest.mark.asyncio
-    async def test_such_a_reader_is_still_bounded(self, monkeypatch):
-        """Falling back must not mean falling open."""
-        monkeypatch.setenv('BB_CLIENT_HEAD_MAX_LINE', '32')
-
-        class _Legacy(AbstractReader):
-            def __init__(self, payload: bytes) -> None:
-                self._buf, self._pos = payload, 0
-
-            async def read(self, n: int = -1) -> bytes:
-                out = (self._buf[self._pos:] if n < 0
-                       else self._buf[self._pos:self._pos + n])
-                self._pos += len(out)
-                return out
-
-            async def readuntil(self, sep: bytes) -> bytes:
-                idx = self._buf.find(sep, self._pos)
-                end = len(self._buf) if idx < 0 else idx + len(sep)
-                out = self._buf[self._pos:end]
-                self._pos = end
-                return out
-
-        wire = (b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n'
-                b'5;ext=' + b'a' * 200 + b'\r\nhello\r\n0\r\n\r\n')
-        with pytest.raises(ResponseTooLarge):
-            await HTTP1ResponseRecipient().receive(_Legacy(wire))

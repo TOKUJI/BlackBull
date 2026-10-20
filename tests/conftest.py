@@ -5,6 +5,14 @@ import subprocess
 import sys
 import pytest
 import pytest_asyncio
+from hypothesis import HealthCheck, settings
+
+# mutmut runs the selected tests twice in one process, so a @given method
+# meets a second instance of its class; that is the runner, not the test.
+if os.environ.get("BB_MUTATE_TESTS"):
+    settings.register_profile(
+        "mutmut", suppress_health_check=[HealthCheck.differing_executors])
+    settings.load_profile("mutmut")
 
 
 # The live-server fixtures bind the listening socket in the parent and then

@@ -22,40 +22,17 @@ import pytest
 
 from blackbull.client.exceptions import ResponseTooLarge
 from blackbull.client.http1 import HTTP1ResponseRecipient
-from blackbull.server.recipient import AbstractReader
+
+from tests.harness import fed
 
 
-class _CannedReader(AbstractReader):
-    """Plays back a fixed byte stream, then EOF."""
-
-    def __init__(self, payload: bytes) -> None:
-        self._buf = payload
-        self._pos = 0
-
-    async def read(self, n: int = -1) -> bytes:
-        if n < 0:
-            out = self._buf[self._pos:]
-            self._pos = len(self._buf)
-            return out
-        out = self._buf[self._pos:self._pos + n]
-        self._pos += len(out)
-        return out
+def _CannedReader(payload: bytes = b''):
+    return fed(payload).reader
 
 
-class _StallingReader(AbstractReader):
-    """Delivers a partial head and then never speaks again."""
-
-    def __init__(self, prefix: bytes) -> None:
-        self._prefix = prefix
-        self._pos = 0
-
-    async def read(self, n: int = -1) -> bytes:
-        if self._pos < len(self._prefix):
-            out = self._prefix[self._pos:self._pos + (len(self._prefix) if n < 0 else n)]
-            self._pos += len(out)
-            return out
-        await asyncio.Event().wait()          # a peer that stopped mid-head
-        raise AssertionError('unreachable')
+def _StallingReader(payload: bytes = b''):
+    """Delivers *payload*, then stays connected and says nothing."""
+    return fed(payload, eof=False).reader
 
 
 def _head(*fields: bytes) -> bytes:

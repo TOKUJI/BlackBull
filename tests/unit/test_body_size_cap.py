@@ -20,24 +20,16 @@ import pytest
 from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.router import HTTPException
-from blackbull.server.recipient import AbstractReader, HTTP1Recipient
+from blackbull.server.recipient import HTTP1Recipient
 from blackbull.server.http1_actor import request_framing
+
+from tests.harness import fed
 
 pytestmark = pytest.mark.asyncio
 
 
-class _BufReader(AbstractReader):
-    """Serves a fixed wire buffer; EOF (empty bytes) once drained."""
-
-    def __init__(self, data: bytes = b'') -> None:
-        self._buf = bytearray(data)
-
-    async def read(self, n: int) -> bytes:
-        if not self._buf:
-            return b''
-        out = bytes(self._buf[:n])
-        del self._buf[:n]
-        return out
+def _BufReader(payload: bytes = b''):
+    return fed(payload).reader
 
 
 def _conn(headers) -> Connection:

@@ -20,9 +20,11 @@ from blackbull.protocol.frame_types import ErrorCodes, FrameTypes, HeaderFrameFl
 from blackbull.router import HTTPException
 from blackbull.server.http1_actor import BadRequestError, HTTP1Actor
 from blackbull.server.http2_actor import HTTP2Actor
-from blackbull.server.recipient import AbstractReader, HTTP1Recipient
+from blackbull.server.recipient import HTTP1Recipient
 from blackbull.server.sender import AsyncioWriter
 from blackbull.server.http1_actor import request_framing
+
+from tests.harness import fed
 
 #: Field lines the header section refuses.
 _BAD_LINES = [
@@ -35,14 +37,8 @@ _BAD_LINES = [
 ]
 
 
-class _Wire(AbstractReader):
-    def __init__(self, data: bytes) -> None:
-        self._buf = bytearray(data)
-
-    async def read(self, n: int) -> bytes:
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
+def _Wire(payload: bytes = b''):
+    return fed(payload).reader
 
 
 def _header_refused(line: bytes) -> bool:

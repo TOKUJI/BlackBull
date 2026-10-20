@@ -11,6 +11,7 @@ from blackbull.native import NativeResponse
 from blackbull.client.exceptions import StreamReset
 from blackbull.client.http2 import HTTP2Client
 from blackbull.client.websocket_h2 import WebSocketH2Session
+from blackbull.server.http2_ws import HTTP2StreamReader
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import ErrorCodes
 from blackbull.server.http2_ws import HTTP2WSWriter
@@ -309,6 +310,10 @@ async def test_client_stream_reset_during_upload_does_not_return_send_credit():
         await client.__aexit__(None, None, None)
 
 
+async def _no_credit(n: int) -> None:
+    pass
+
+
 async def test_websocket_close_waits_for_credit_and_ends_stream():
     writer = _Writer()
     writer.release.set()
@@ -316,7 +321,7 @@ async def test_websocket_close_waits_for_credit_and_ends_stream():
     client._writer = writer
     client._control_sender = HTTP2Sender(writer, client.frame_factory, 0)
     client._conn_window.size = 0
-    session = WebSocketH2Session(client, 1, client.register_raw_stream(1))
+    session = WebSocketH2Session(client, 1, HTTP2StreamReader(1, _no_credit))
     session._disconnect_seen = True
     task = asyncio.create_task(session.close())
     try:
@@ -383,7 +388,7 @@ async def test_websocket_close_cleans_up_when_flow_control_wait_ends(outcome):
     client = HTTP2Client('localhost', 1)
     client._writer = writer
     client._conn_window.size = 0
-    session = WebSocketH2Session(client, 1, client.register_raw_stream(1))
+    session = WebSocketH2Session(client, 1, HTTP2StreamReader(1, _no_credit))
     session._disconnect_seen = True
     session._sender._flow_control_timeout = 0.01 if outcome == 'timeout' else 0.0
     task = asyncio.create_task(session.close())

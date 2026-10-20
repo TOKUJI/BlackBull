@@ -4,9 +4,11 @@ import pytest
 from unittest.mock import AsyncMock
 
 from blackbull.event_aggregator import EventAggregator
-from blackbull.server.recipient import AbstractReader, IncompleteReadError
+from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
 from blackbull.server.connection_actor import ConnectionActor
+
+from tests.harness import feed, fed
 
 
 def _mock_aggregator() -> AsyncMock:
@@ -29,80 +31,20 @@ def _mock_aggregator() -> AsyncMock:
 # In-process fakes
 # ---------------------------------------------------------------------------
 
-class _FakeReader(AbstractReader):
-    """Reader backed by a bytes buffer; raises IncompleteReadError on EOF."""
-
-    def __init__(self, data: bytes):
-        self._buf = bytearray(data)
-
-    async def read(self, n: int) -> bytes:
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:
-        idx = self._buf.find(sep)
-        if idx == -1:
-            raise IncompleteReadError()
-        chunk = bytes(self._buf[:idx + len(sep)])
-        del self._buf[:idx + len(sep)]
-        return chunk
-
-    async def readexactly(self, n: int) -> bytes:
-        if len(self._buf) < n:
-            raise IncompleteReadError()
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-
-class _ByteByByteReader(AbstractReader):
-    """Returns at most 1 byte from read(); readexactly(n) reads all n bytes.
-
-    Simulates TCP fragmentation: read(n) short-reads (returns 1 byte), while
-    readexactly(n) correctly accumulates n bytes.  A production path that used
-    read(8) for the preface remainder would receive only 1 byte and mismatch the
-    expected 8-byte sequence, raising ValueError.
-    """
-
-    def __init__(self, data: bytes):
-        self._buf = bytearray(data)
-
-    async def read(self, n: int) -> bytes:
-        if not self._buf:
-            return b''
-        chunk = bytes(self._buf[:1])
-        del self._buf[:1]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:
-        result = bytearray()
-        while True:
-            if not self._buf:
-                raise IncompleteReadError()
-            result.append(self._buf[0])
-            del self._buf[:1]
-            if bytes(result).endswith(sep):
-                return bytes(result)
-
-    async def readexactly(self, n: int) -> bytes:
-        if len(self._buf) < n:
-            raise IncompleteReadError()
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
+def _reader(data: bytes):
+    return fed(data).reader
 
 
 class _FakeBadReader(AbstractReader):
-    """Reader that immediately raises ValueError on any read."""
+    """Reader that raises ValueError on any read."""
 
     async def read(self, n: int) -> bytes:
         raise ValueError('simulated read error')
 
-    async def readuntil(self, sep: bytes) -> bytes:
-        raise ValueError('simulated read error')
+    def peek(self, n: int) -> bytes:
+        return b''
 
-    async def readexactly(self, n: int) -> bytes:
+    async def fill(self, n: int) -> bool:
         raise ValueError('simulated read error')
 
 
@@ -128,7 +70,7 @@ _HTTP1_REQUEST = b'GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n'
 
 @pytest.fixture
 def fake_http1_reader():
-    return _FakeReader(_HTTP1_REQUEST)
+    return _reader(_HTTP1_REQUEST)
 
 
 def _http2_exchange() -> bytes:
@@ -143,7 +85,7 @@ def _http2_exchange() -> bytes:
 
 @pytest.fixture
 def fake_http2_preface_reader():
-    return _FakeReader(_http2_exchange())
+    return _reader(_http2_exchange())
 
 
 @pytest.fixture
@@ -208,17 +150,18 @@ async def test_connection_isolates_protocol_error(
 @pytest.mark.asyncio
 async def test_connection_dispatches_http2_fragmented_preface(
         fake_writer, mock_app) -> None:
-    """ConnectionActor must choose HTTP2Actor even when the preface arrives byte-by-byte.
+    """A preface arriving one byte per segment still selects HTTP/2."""
+    proto = fed(eof=False)
 
-    Regression: the old _dispatch() used read(8) for the 8-byte preface remainder
-    (b'\\r\\nSM\\r\\n\\r\\n').  read(8) on a byte-by-byte reader returns only 1 byte,
-    causing the preface validation to fail with ValueError('Invalid HTTP/2 preface
-    continuation').  readexactly(8) reads all 8 bytes and the dispatch succeeds.
-    """
-    reader = _ByteByByteReader(_http2_exchange())
+    async def trickle(data: bytes) -> None:
+        for i in range(len(data)):
+            feed(proto, data[i:i + 1])
+            await asyncio.sleep(0)
+        proto.eof_received()
+
     aggregator = _mock_aggregator()
-    actor = ConnectionActor(reader, fake_writer, mock_app, aggregator)
-    await actor.run()  # must not raise ValueError
+    actor = ConnectionActor(proto.reader, fake_writer, mock_app, aggregator)
+    await asyncio.gather(actor.run(), trickle(_http2_exchange()))
 
     aggregator.on_connection_accepted.assert_called_once()
     # A byte-by-byte preface still dispatches: the request runs end to end
@@ -251,7 +194,7 @@ async def test_cap_counter_inherits_actor_connection_id(fake_writer) -> None:
             captured.append(holder.ensure().connection_id)
 
     actor = ConnectionActor(
-        _FakeReader(b''), fake_writer, AsyncMock(), None,
+        _reader(b''), fake_writer, AsyncMock(), None,
         bound_binding=_CaptureBinding(), connection_id='cid-42',
     )
     await actor.run()
@@ -276,7 +219,7 @@ async def test_cap_counter_generates_id_when_actor_has_none(fake_writer) -> None
             captured.append(holder.ensure().connection_id)
 
     actor = ConnectionActor(
-        _FakeReader(b''), fake_writer, AsyncMock(), None,
+        _reader(b''), fake_writer, AsyncMock(), None,
         bound_binding=_CaptureBinding(),
     )
     await actor.run()

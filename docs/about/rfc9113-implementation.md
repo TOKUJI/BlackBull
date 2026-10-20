@@ -51,6 +51,9 @@ survive cancellation of the stream consumer; stream credit must not be
 emitted after retirement. Reset, refused DATA and late DATA must return
 the connection credit they consumed, including padding, without resurrecting
 stream ownership. Frame-count limits are still needed for empty DATA.
+WebSocket streams, in both roles, read through `HTTP2StreamReader`: octets a
+pending read has committed to count as consumed, or a WebSocket frame longer
+than the window never completes.
 
 Use the existing server/client write-timeout owner for credit waits, not
 another timer. Read `HTTP2Sender`, `ConnectionWindow` and `HTTP2Recipient`.
