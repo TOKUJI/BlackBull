@@ -173,6 +173,7 @@
  "unit/test_router_trie.py": 22,
  "unit/test_rsock.py": 2,
  "unit/test_scope_completed.py": 1,
+ "unit/test_security_probe.py": 5,
  "unit/test_sender_client_gone.py": 1,
  "unit/test_sender_write_after_loss.py": 7,
  "unit/test_sendfile_chunking.py": 1,

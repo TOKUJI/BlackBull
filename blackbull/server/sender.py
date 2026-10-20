@@ -98,18 +98,17 @@ def _content_length_bytes(n: int) -> bytes:
     return str(n).encode()
 
 
-# Date has whole-second resolution; cache only within the same second.
-_HTTP_DATE_TS: int = 0
-_HTTP_DATE: bytes = b''
-
-
 def _http_date() -> bytes:
-    global _HTTP_DATE_TS, _HTTP_DATE
     now = int(time.time())
-    if now != _HTTP_DATE_TS:
-        _HTTP_DATE = formatdate(timeval=now, localtime=False, usegmt=True).encode('ascii')
-        _HTTP_DATE_TS = now
-    return _HTTP_DATE
+    if now != _http_date.cache_ts:
+        _http_date.value = formatdate(timeval=now, localtime=False, usegmt=True).encode('ascii')
+        _http_date.cache_ts = now
+    return _http_date.value
+
+
+# Date has whole-second resolution; cache only within the same second.
+_http_date.cache_ts: int = 0
+_http_date.value: bytes = b''
 
 
 def build_response_headers(encoder, stream_id: int, status,

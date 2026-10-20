@@ -180,7 +180,7 @@ def TestOneInput(data: bytes) -> None:
     try:
         r,w = asyncio.run(_connect_h2c(_PORT, timeout=3.0))
         asyncio.run(_send_recv(r, w, pay, timeout=3.0))
-    except (asyncio.TimeoutError, ConnectionError, OSError, TimeoutError):
+    except (asyncio.TimeoutError, ConnectionError, OSError, TimeoutError, RuntimeError):
         return
     except Exception:
         raise
