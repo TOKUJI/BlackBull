@@ -1,0 +1,7176 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Async ASGI web framework for HTTP/1.1, HTTP/2, and WebSocket">
+      
+      
+      
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/security/probe/">
+      
+      
+        <link rel="prev" href="../fixture-app/">
+      
+      
+        <link rel="next" href="../sufficiency/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Local robustness probe - BlackBull</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#local-robustness-probe-just-vuln-check" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="BlackBull" class="md-header__button md-logo" aria-label="BlackBull" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            BlackBull
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Local robustness probe
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/TOKUJI/BlackBull" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    TOKUJI/BlackBull
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="BlackBull" class="md-nav__button md-logo" aria-label="BlackBull" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    BlackBull
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/TOKUJI/BlackBull" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    TOKUJI/BlackBull
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/why-blackbull/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Why BlackBull?
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/hello-world/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hello World
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your First App
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/error-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Error handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/requests-and-responses/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Requests and responses
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/dependency-injection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dependency injection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/websockets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSockets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/http2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP/2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/structured-fields/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Structured Fields
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/listeners/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Listeners
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/raw-protocols/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Non-ASGI protocols
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/mqtt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MQTT broker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/grpc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    gRPC
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/translation-hub/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Protocol translation hub
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/edge-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Edge inference serving
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/logging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/static-files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Static files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/extensions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extensions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/openapi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenAPI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/fault_injection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fault injection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deployment
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/running/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running BlackBull
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/workers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/tls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TLS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/behind-reverse-proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Behind a reverse proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/unix-and-fd/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unix and fd inheritance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/hot-reload/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hot reload
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/env-vars/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2_1" id="__nav_5_2_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_2_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    blackbull
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/asgi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    asgi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cli
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2_1_6" id="__nav_5_2_1_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    client
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    client
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/exceptions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    exceptions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/http1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/http2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/scenario/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/scenario_oracle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_oracle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/client/websocket_h2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket_h2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    config
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/di/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    di
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    env
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/event/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    event
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/event_aggregator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    event_aggregator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/extension/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    extension
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2_1_14" id="__nav_5_2_1_14_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    fault_injection
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_14">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    fault_injection
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.fault_injection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_14_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2_1_14_2" id="__nav_5_2_1_14_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    catalogue
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="5" aria-labelledby="__nav_5_2_1_14_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_14_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    catalogue
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.fault_injection.catalogue
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h1_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h2_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h2_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/h1_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h1_server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/h2_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h2_server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/oracle_h1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    oracle_h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/scenario_h1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/scenario_h1_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h1_server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/scenario_h2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/scenario_h2_client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scenario_h2_client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2_1_15" id="__nav_5_2_1_15_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    grpc
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_15">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    grpc
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/grpc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.grpc
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/grpc/asgi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    asgi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/grpc/codec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    codec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/grpc/compression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    compression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/grpc/registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/grpc/status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    status
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/headers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    headers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/logger/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    logger
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_18" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2_1_18" id="__nav_5_2_1_18_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    middleware
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_18_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_18">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    middleware
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/middleware/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.middleware
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/middleware/cache/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cache
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/middleware/compression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    compression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/middleware/cors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/middleware/proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/middleware/static/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    static
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/middleware/utils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    utils
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/middleware/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_19" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2_1_19" id="__nav_5_2_1_19_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mqtt
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_19_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_19">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    mqtt
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.mqtt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/asyncapi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    asyncapi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/broker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    broker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/extension/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    extension
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/mailbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mailbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/messages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    messages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/mqtt/tap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/native/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    native
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/openapi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    openapi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_22" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2_1_22" id="__nav_5_2_1_22_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    protocol
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_22_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_22">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    protocol
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/field_grammar/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    field_grammar
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/frame/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    frame
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/frame_types/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    frame_types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/framing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    framing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/hpack_fastpath/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hpack_fastpath
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/rsock/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rsock
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/stream/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    stream
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/structured_fields/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    structured_fields
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/request/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    request
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/router/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    router
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_26" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2_1_26" id="__nav_5_2_1_26_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    server
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_26_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_26">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    server
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/access_log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    access_log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/affinity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    affinity
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/cap_log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cap_log
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/conn_id/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    conn_id
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/connection_actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/connection_protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    connection_protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/constants/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    constants
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/deadline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    deadline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/http1_actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http1_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/http2_actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_ws
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/listener/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    listener
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/multiworker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    multiworker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/parser/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    parser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/permessage_deflate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    permessage_deflate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/protocol_registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    protocol_registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/rate_window/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    rate_window
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/read_buffer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    read_buffer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/recipient/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    recipient
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/reload/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    reload
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/request_target/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    request_target
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/response/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    response
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/sender/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    sender
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/warmup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    warmup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/websocket_actor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket_actor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/worker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    worker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/ws_codec/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ws_codec
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2_1_27" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2_1_27" id="__nav_5_2_1_27_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    testing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_2_1_27_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2_1_27">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    testing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    blackbull.testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/testing/grpc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    grpc
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/testing/mqtt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mqtt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/testing/native/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    native
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/utils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    utils
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    websocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Security
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../severity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Severity criteria
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fixture-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Minimal fixture app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Local robustness probe
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Local robustness probe
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#lanes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#safety-gates-enforced-in-code-not-just-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safety gates (enforced in code, not just here)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tiers-g2-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tiers (G2-5)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lanes-g4-1g4-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanes (G4-1/G4-2)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#catalogue-run-g1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalogue run (G1)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detection-power-by-mutation-g3-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detection power by mutation (G3-4)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregated-results-junit-xml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Aggregated results (JUnit XML)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#defense-site-reachability-g3-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Defense-site reachability (G3-3)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fuzzing-g6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fuzzing (G6)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#process-observation-g2-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Process observation (G2-3)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#container-tier-g2-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container tier (G2-4)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-matrix-g7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration matrix (G7)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verdicts-and-severity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verdicts and severity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checks-and-oracles-h1-lane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checks and oracles — h1 lane
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checks-and-oracles-h2-lane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checks and oracles — h2 lane
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation note
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#referenced-vulnerability-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Referenced vulnerability sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage-mapping-m4-research-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage mapping (M4 research → checks)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions-documented-not-checked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions (documented, not checked)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recording-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recording findings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sufficiency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sufficiency population tables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    About
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    About
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../about/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../about/conformance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Conformance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../about/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../about/internals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../about/mqtt-actor-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MQTT broker design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../about/rfc9113-implementation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RFC 9113, implemented
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../about/grpc-assessment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    gRPC assessment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#lanes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#safety-gates-enforced-in-code-not-just-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safety gates (enforced in code, not just here)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tiers-g2-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tiers (G2-5)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lanes-g4-1g4-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lanes (G4-1/G4-2)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#catalogue-run-g1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalogue run (G1)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detection-power-by-mutation-g3-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detection power by mutation (G3-4)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#aggregated-results-junit-xml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Aggregated results (JUnit XML)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#defense-site-reachability-g3-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Defense-site reachability (G3-3)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fuzzing-g6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fuzzing (G6)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#process-observation-g2-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Process observation (G2-3)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#container-tier-g2-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container tier (G2-4)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-matrix-g7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration matrix (G7)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verdicts-and-severity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verdicts and severity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checks-and-oracles-h1-lane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checks and oracles — h1 lane
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checks-and-oracles-h2-lane" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checks and oracles — h2 lane
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation note
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#referenced-vulnerability-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Referenced vulnerability sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage-mapping-m4-research-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage mapping (M4 research → checks)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions-documented-not-checked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions (documented, not checked)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recording-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recording findings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="local-robustness-probe-just-vuln-check">Local robustness probe (<code>just vuln-check</code>)<a class="headerlink" href="#local-robustness-probe-just-vuln-check" title="Permanent link">&para;</a></h1>
+<p><code>just vuln-check [base_url="http://127.0.0.1:8000"] [h2_url="https://127.0.0.1:8443"] [lane="all"]</code>
+(recipe arguments are positional, so <code>just vuln-check http://127.0.0.1:8000
+https://127.0.0.1:8443 h2</code> runs one lane; <code>tools/security/probe.py --lane h2</code>
+does the same) runs <code>tools/security/probe.py</code> against <strong>already-running</strong> local servers —
+normally the <a href="../fixture-app/">minimal fixture app</a> started with
+<code>just vuln-target-up</code> — and prints one results table per lane (check id,
+severity, verdict, detail). The same run writes a markdown report with both
+tables to <code>bench/results/security/&lt;UTC-timestamp&gt;.md</code> (created on demand).
+Exit code: <code>0</code> all PASS, <code>1</code> any FAIL/TIMEOUT, <code>2</code> the safety gate refused a
+target. This harness is deliberately <strong>not</strong> part of the normal <code>pytest</code> run
+(<code>pytest.ini</code> keeps <code>tools/</code> out of collection); the checks need live servers.</p>
+<h2 id="lanes">Lanes<a class="headerlink" href="#lanes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Lane</th>
+<th>Default target</th>
+<th>Transport</th>
+<th>Checks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>h1</code></td>
+<td><code>http://127.0.0.1:8000</code></td>
+<td>HTTP/1.1 over cleartext</td>
+<td>BASELINE-*, H1-ROBUST-*, SMUGGLE-*, CHUNK-*, TRAILER-*, RANGE-*, EXPECT-*, HOST-*, STATE-*, STATIC-*, SYMLINK-*, WS-*, HDR-*</td>
+</tr>
+<tr>
+<td><code>h2</code></td>
+<td><code>https://127.0.0.1:8443</code></td>
+<td>HTTP/2 over TLS (ALPN <code>h2</code>)</td>
+<td>H2-BASE-*, H2-ROBUST-*, TLS-*</td>
+</tr>
+</tbody>
+</table>
+<p><code>--lane h1|h2|all</code> selects the lane(s); <code>--run-timeout</code> bounds the whole run
+across all lanes.</p>
+<h2 id="safety-gates-enforced-in-code-not-just-here">Safety gates (enforced in code, not just here)<a class="headerlink" href="#safety-gates-enforced-in-code-not-just-here" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Loopback allow-list.</strong> <code>parse_target()</code> refuses any host that is not
+  exactly <code>127.0.0.1</code>, <code>::1</code>, or <code>localhost</code> (case-insensitive), and refuses
+  schemes other than <code>http</code>/<code>https</code> and URLs with userinfo — before any
+  socket is opened. A host name is then resolved exactly once; every
+  resolved address must itself be loopback, and the probes dial the literal
+  resolved address (the name stays only in request authorities and TLS SNI).
+  The gate covers <strong>both</strong> lane URLs on every run, even when <code>--lane</code>
+  selects one. A refusal exits with code 2.</li>
+<li><strong>TLS verification is never disabled.</strong> The h2 lane verifies the server
+  certificate against <code>--tls-ca</code> (default: the fixture's published
+  certificate in the per-user private runtime directory that
+  <code>tools/security/paths.py</code> names — created 0700 with an owner check, so no
+  other local user can substitute the trust anchor). An https target without
+  a verifiable CA file is refused (exit 2) rather than probed unverified.</li>
+<li><strong>Timeouts.</strong> Every check is bounded by <code>--check-timeout</code> (default 5 s)
+  and the whole run by <code>--run-timeout</code> (default 120 s). Each check gets one
+  absolute asyncio deadline; every session of that check — multi-variant
+  checks included — spends only the time remaining until it, and every
+  scenario closes with an RST abort so a peer that stops reading cannot trap
+  teardown; a check that hits its deadline records a TIMEOUT verdict and is
+  cancelled. The run cannot hang. The run budget stops later checks from
+  starting; an in-flight check may overshoot it by one connect/teardown
+  slack.</li>
+<li><strong>WebSocket exchanges are raw TCP against the same gated target.</strong>
+  WS-001 writes its upgrade request to the h1 lane's host:port directly (the
+  scenario vocabulary parses HTTP responses, not post-upgrade frames) —
+  <code>Probe.ws_attempt</code> uses the same <code>parse_target</code>-gated <code>Target</code>, one
+  connection budget slot, and the same session deadline. The <code>/ws</code> path is a
+  route on the fixture, not a new URL form; no other host or port is ever
+  contacted.</li>
+<li><strong>Connection caps.</strong> At most 4 concurrent and 96 total connections per run
+  (<code>ConnectionBudget</code>, one instance shared by every lane of the run), TLS
+  handshake attempts included; every connection is closed in a <code>finally</code>
+  block.</li>
+<li><strong>Post-check canary (G2-2).</strong> After every check the runner sends that
+  lane's canary (<code>GET /</code> expecting 200 <code>"ok"</code>, over HTTP/1.1 or h2) and
+  records its outcome and latency on the check's row. A canary failure marks
+  the preceding check <code>FAIL</code> at High — the run cannot claim a pass over a
+  dead server. Canaries spend their own capped budget (2 concurrent /
+  512 per run), never the checks' slots. <code>just vuln-canary-gate</code> proves the
+  mapping: a stub that dies mid-run turns every later row into a canary
+  failure. Canary latency includes the exchange plus at most a 0.5 s drain,
+  so degradation is judged as a multiple of a baseline measured the same
+  way.</li>
+<li><strong>No real DoS.</strong> H1-ROBUST-011 is slow-send <em>lite</em>: 2 connections, one
+  bounded hold (at most 12 s, long tier only), then abort. The flood-shaped h2 checks are
+  <em>lite</em> by construction: H2-ROBUST-006 resets exactly 20 streams one at a
+  time (never more than one open, so the advertised
+  <code>MAX_CONCURRENT_STREAMS</code> is never exceeded), H2-ROBUST-007 sends 30
+  CONTINUATION frames on one stream, and H2-ROBUST-008's HPACK bomb decodes
+  to at most 4 MiB from ~4 KiB of encoded block (the cap is asserted in
+  code and in the unit tests). RANGE-001 sends at most 15 ranges per
+  request. Nothing in the harness floods, loops, or holds more than the
+  per-check deadline.</li>
+</ul>
+<h2 id="tiers-g2-5">Tiers (G2-5)<a class="headerlink" href="#tiers-g2-5" title="Permanent link">&para;</a></h2>
+<p><code>--tier quick</code> (default) is the PR gate: bounded waits only, both lanes in
+about 25 s. <code>--tier long</code> additionally runs the long-only checks, which wait
+out documented default defence timeouts in real time (H1-ROBUST-011 waits
+the 10 s default header timeout plus margin). The report records each tier's
+check list and per-check seconds; checks outside the selected tier are listed
+in the header. Silence is never a verdict's evidence (G2-1): a verdict of
+PASS always names an observed answer or close — <code>just vuln-stub-gate</code> proves
+it by running every check against a do-nothing peer and requiring 0 PASS.</p>
+<h2 id="lanes-g4-1g4-2">Lanes (G4-1/G4-2)<a class="headerlink" href="#lanes-g4-1g4-2" title="Permanent link">&para;</a></h2>
+<p>The harness runs each check family over every transport where its
+semantics are meaningful:</p>
+<table>
+<thead>
+<tr>
+<th>Lane</th>
+<th>Transport</th>
+<th>Checks</th>
+<th>Baseline (negotiation)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>h1</code></td>
+<td>cleartext HTTP/1.1</td>
+<td>the h1 family</td>
+<td>LANE-001: answered as HTTP/1.1</td>
+</tr>
+<tr>
+<td><code>https1</code></td>
+<td>TLS, ALPN <code>http/1.1</code></td>
+<td>the h1 family</td>
+<td>LANE-001: exactly ALPN <code>http/1.1</code></td>
+</tr>
+<tr>
+<td><code>h2</code></td>
+<td>TLS, ALPN <code>h2</code></td>
+<td>the h2 family</td>
+<td>LANE-002: exactly ALPN <code>h2</code></td>
+</tr>
+<tr>
+<td><code>h2c</code></td>
+<td>HTTP/2 prior knowledge, cleartext</td>
+<td>the h2 family</td>
+<td>LANE-002: preface accepted (SETTINGS)</td>
+</tr>
+</tbody>
+</table>
+<p><code>--base-url</code> serves <code>h1</code> and <code>h2c</code>; <code>--h2-url</code> serves <code>https1</code> and <code>h2</code>.
+A lane's baseline must negotiate exactly its protocol — any other
+protocol succeeding is FAIL. A lane whose URL scheme contradicts its
+transport records SKIP (<code>h2c</code> needs a cleartext <code>--base-url</code>; <code>https1</code>
+needs a TLS <code>--h2-url</code>).</p>
+<p>Exclusions with reasons (G4-2):</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Not on</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TLS-001</td>
+<td><code>h2c</code></td>
+<td>endpoint-level TLS check; h2c has no TLS. The <code>https1</code> lane shares the same TLS listener as <code>h2</code>, so the endpoint check stays on <code>h2</code> alone.</td>
+</tr>
+<tr>
+<td>H1-ROBUST-005</td>
+<td><code>https1</code></td>
+<td>the check ends its truncated body with a TCP half-close (FIN); TLS has no half-close for the probe to express, so the server's defence cannot be observed. Covered on <code>h1</code>.</td>
+</tr>
+<tr>
+<td>CHUNK-002</td>
+<td><code>https1</code></td>
+<td>same half-close step as H1-ROBUST-005 (chunk-size overflow). Covered on <code>h1</code>.</td>
+</tr>
+<tr>
+<td>STATE-001</td>
+<td><code>https1</code></td>
+<td>its truncated-body case uses the same half-close step. Covered on <code>h1</code>.</td>
+</tr>
+<tr>
+<td>H1-ROBUST-011</td>
+<td>quick tier</td>
+<td>documented default defence waits; run in the long tier (G2-5).</td>
+</tr>
+</tbody>
+</table>
+<p>gRPC rides on the h2 family's transports (h2 and h2c); its baselines are
+the gRPC lanes of M5-4's fixture work — see the unsupported list until
+those land.</p>
+<h2 id="catalogue-run-g1">Catalogue run (G1)<a class="headerlink" href="#catalogue-run-g1" title="Permanent link">&para;</a></h2>
+<p><code>just vuln-catalogue</code> runs the <strong>existing</strong> <code>blackbull.fault_injection</code>
+catalogue against the fixture unchanged — the 14 <code>h1_client</code> scenarios
+(absent_host, two_content_lengths,
+content_length_and_transfer_encoding, duplicate_transfer_encoding,
+space_before_header_colon, bare_lf_terminators, obs_fold_header,
+negative_content_length, chunk_size_not_hex, nul_in_header_value,
+oversized_method_token, trickled_head, head_never_ends,
+body_shorter_than_declared) and the 11 <code>h2_client</code> scenarios
+(preface_never_arrives, preface_trickled, rapid_reset_burst, ping_flood,
+settings_flood, empty_continuation_flood, header_block_never_finished,
+data_frame_lies_about_length, unknown_frame_type,
+settings_ack_with_payload, abort_mid_header_block).  The G1-2 oracle
+judges every outcome mechanically: <strong>answer-or-close passes, silence
+fails</strong> — a response of any status is an answer, a transport-level error
+is a close, and a wait that expires with neither is a FAIL.  The report
+lands in <code>bench/results/security/catalogue.txt</code>; a unit test pins the
+14/11 inventory to the module callables.</p>
+<h2 id="detection-power-by-mutation-g3-4">Detection power by mutation (G3-4)<a class="headerlink" href="#detection-power-by-mutation-g3-4" title="Permanent link">&para;</a></h2>
+<p><code>just vuln-mutation</code> measures whether the harness <strong>notices</strong> a missing
+defense.  <code>tools/security/mutation_run.py</code> neutralizes one BlackBull
+defense at a time in a throwaway copy of the package (the fixture serves
+from the mutated tree — it must <em>contain</em> the blackbull/ it serves, since
+the fixture's own bootstrap pins its package root), reruns the quick
+tier with the probe unchanged, and reports which clean PASS rows flip to
+FAIL/TIMEOUT.  A mutation with at least one flip is DETECTED.  The
+current mutations: the CL+TE smuggling rejection, the malformed
+Content-Length rejection, and the TE-list rejection (all in
+<code>server/http1_actor.py</code>'s framing), plus the G5-3 <strong>recall</strong> entry
+<code>bla-525-range-revert</code> — it reverts the filed BLA-525 fix in
+<code>middleware/static.py</code> (a satisfiable range ending at or beyond EOF
+clipping to 206 becomes a 416 again) and the harness must catch the
+regression.  A filed fix with no revertable commit and no detecting row
+(BLA-345, gRPC unary message bounds) is a recall gap, recorded on
+BLA-526.  Evidence on BLA-526 lists the
+detecting rows; a flip only by an indirect row is recorded as such, and
+a mutation no row catches is a harness gap — the point of the measure.</p>
+<h2 id="aggregated-results-junit-xml">Aggregated results (JUnit XML)<a class="headerlink" href="#aggregated-results-junit-xml" title="Permanent link">&para;</a></h2>
+<p>Every judgement-producing tool merges its rows into ONE results file,
+<code>bench/results/security/results.xml</code> (JUnit XML): the probe writes one
+suite per lane (<code>probe.h1</code>, <code>probe.https1</code>, <code>probe.h2</code>, <code>probe.h2c</code>),
+the catalogue run writes <code>catalogue</code>, the mutation run writes <code>mutation</code>.
+Merging replaces whole suites by name; suites of other tools are kept.
+Every tool takes <code>--junit PATH</code> (empty disables).</p>
+<table>
+<thead>
+<tr>
+<th>Verdict</th>
+<th>JUnit representation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PASS</code></td>
+<td><code>&lt;testcase&gt;</code></td>
+</tr>
+<tr>
+<td><code>FIXED</code></td>
+<td><code>&lt;testcase&gt;</code> with the fixed issue in <code>&lt;system-out&gt;</code></td>
+</tr>
+<tr>
+<td><code>FAIL</code> / <code>TIMEOUT</code></td>
+<td><code>&lt;failure message=... type=verdict&gt;</code></td>
+</tr>
+<tr>
+<td><code>SKIP</code></td>
+<td><code>&lt;skipped/&gt;</code></td>
+</tr>
+<tr>
+<td><code>KNOWN</code></td>
+<td><code>&lt;skipped message="known: BLA-…"&gt;</code> — visible, but does not fail the consuming CI</td>
+</tr>
+</tbody>
+</table>
+<h2 id="defense-site-reachability-g3-3">Defense-site reachability (G3-3)<a class="headerlink" href="#defense-site-reachability-g3-3" title="Permanent link">&para;</a></h2>
+<p><code>just vuln-reachability tier=quick workers=1</code> measures how much of
+BlackBull's defense surface the probe exercises.  <code>tools/security/
+reachability.py</code> extracts the defense sites from <code>blackbull/</code> via AST
+(the E1 method): every <code>raise</code>, every defense call (<code>log_cap_hit</code>,
+<code>rst_stream</code>, <code>goaway</code>, <code>_connection_error</code>), and every reference to a
+rejection status or an HTTP/2 error code — excluding startup config
+validation (<code>config.py</code>, <code>env.py</code>, <code>_env_vars.py</code>) and non-surface
+packages (<code>client/</code>, <code>fault_injection/</code>, <code>mqtt/</code>, <code>testing/</code>).</p>
+<p><code>BB_WORKERS=1</code> serves in-process so one interpreter holds the request
+path (the report proves it: <code>server/worker.py</code> executes nothing);
+SIGINT reaches the whole process group so each interpreter writes its
+own <code>.coverage.*</code> file before <code>coverage combine</code>.  The report — per-kind
+reachability, a per-module table (unreached first), lines/branches —
+lands in <code>bench/results/security/reachability.txt</code>.</p>
+<p>Current floor (quick tier): 596 sites, 4 reached (0.7%); 3 777/19 950
+lines; 255/6 758 branches.  A floor and a map, not a score: the quick
+tier's oracles accept "400 or close", so the serving modules' rejection
+branches stay untripped.  New scenarios should aim where the
+per-module table points; tightening an "or close" oracle to require the
+refusal is what watches an unreached site.  An unreached site is never
+a defect by itself.</p>
+<h2 id="fuzzing-g6">Fuzzing (G6)<a class="headerlink" href="#fuzzing-g6" title="Permanent link">&para;</a></h2>
+<p>The fuzz surface reuses the <strong>existing</strong> Atheris harnesses unchanged
+(M5-6: new-input harnesses are out of scope):</p>
+<table>
+<thead>
+<tr>
+<th>Recipe</th>
+<th>Asset</th>
+<th>Bound</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>just fuzz-seed</code></td>
+<td><code>tests/conformance/http1/fuzz/make_seeds.py</code>, <code>tests/conformance/http2/fuzz/make_seeds.py</code></td>
+<td>regenerates opcode-tagged seeds under each <code>corpus/</code></td>
+</tr>
+<tr>
+<td><code>just fuzz-http1 t=60</code></td>
+<td><code>tests/conformance/http1/fuzz/fuzz_http1.py</code></td>
+<td><code>$t</code> seconds of fuzzing inside an outer <code>timeout</code>; crash artifacts to <code>/tmp/bla526-fuzz-http1/</code></td>
+</tr>
+<tr>
+<td><code>just fuzz-http2 t=60</code></td>
+<td><code>tests/conformance/http2/fuzz/fuzz_http2.py</code></td>
+<td>same, artifacts to <code>/tmp/bla526-fuzz-http2/</code></td>
+</tr>
+<tr>
+<td><code>just fuzz-all t=60</code></td>
+<td>both</td>
+<td>recipe-level bound</td>
+</tr>
+</tbody>
+</table>
+<p>The harnesses self-host BlackBull per input; the committed <code>corpus/</code>
+directories are the seeds and <code>user-corpus/</code> holds replayable
+differential findings.  Differential mode against nginx is available
+through the harnesses' own <code>BB_FUZZ_NGINX_HOST</code>/<code>_PORT</code> env vars and is
+not part of the recipe.  <code>atheris</code> is an environment dependency
+(<code>uv pip install atheris</code>); the recipes exit 3 with the hint when it is
+missing.</p>
+<p><code>tools/security/fuzz_run.py</code> is the recipes' only adapter: it forces the
+<code>fork</code> multiprocessing start method (Python 3.14 defaults to
+<code>forkserver</code>, under which the harnesses' lambda <code>Process</code> target does not
+pickle), drops into the harness directory, and runs the file as
+<code>__main__</code> — the harnesses themselves are unmodified in structure.  Two
+compatibility repairs were needed on top: <code>fuzz_http1.py</code> now sets
+<code>app.port = server.port</code> after binding (the attribute the single-server
+helpers dial), and both harnesses treat a cleanup-time <code>RuntimeError</code>
+("Event loop is closed") as an expected outcome so a bound-adjacent
+teardown cannot kill a run.  Neither is a product finding — no
+<code>blackbull/</code> frame appears in either traceback.  No harness exists for
+the gRPC LPM decoder or the WebSocket response-side frame parser —
+listed as unsupported on BLA-526.</p>
+<h2 id="process-observation-g2-3">Process observation (G2-3)<a class="headerlink" href="#process-observation-g2-3" title="Permanent link">&para;</a></h2>
+<p>With <code>--server-pid PID</code> the probe samples the server's <code>/proc</code> before and
+after every check — fd count, sockets owned per state (matched by inode
+against <code>/proc/PID/net/tcp{,6}</code>), VmRSS, VmHWM, threads and CPU ticks — and
+waits <code>--observe-settle</code> seconds before the second sample. The judgement is
+the residual: fd, ESTABLISHED and CLOSE_WAIT must return to the pre-check
+level after the settle wait; strictly more of any of them marks the row
+FAIL (High) — a connection the server did not release is a leak. Memory and
+CPU are recorded in the report's Proc column, never as thresholds.
+TIME_WAIT never appears: the kernel holds those, not the process. A server
+process that vanishes mid-check marks the row FAIL (High) as well.</p>
+<p><code>just vuln-proc-gate</code> is the verification: a stub that holds every accepted
+socket must show residuals on every row (4/4 rows marked), while the
+fixture shows zero residual across the quick tier.</p>
+<h2 id="container-tier-g2-4">Container tier (G2-4)<a class="headerlink" href="#container-tier-g2-4" title="Permanent link">&para;</a></h2>
+<p><code>just vuln-container</code> runs the same quick tier against a server confined by
+<code>--memory</code> (default 64m) and <code>--pids-limit</code> (default 256): the fixture runs
+in a container and the probe runs in a <em>sibling</em> container sharing the
+server's network and PID namespaces (<code>--network container:… --pid
+container:…</code>), with no published ports — so /proc observation (G2-3) works
+unchanged. The image is <code>bb-vuln</code>, built from
+<code>tools/security/container.Dockerfile</code> (base <code>bb-multiport</code>): it copies this
+worktree's <code>blackbull/</code> sources over the base's pinned installation, so the
+container tier probes the code under review.</p>
+<p>Recorded per run (<code>bench/results/security/container-*.{json,txt}</code>):
+memory.events <code>oom_kill</code>, pids.events <code>max</code>, <code>memory.peak</code>, <code>pids.peak</code>
+(read from the container's cgroup), and <code>docker inspect</code>'s OOMKilled and
+ExitCode (the fallback when the server was killed). The run is a pass only
+when all of these are zero/absent, the probe reports no FAIL, the container
+verdicts are identical to a fresh native run (38 rows), and no labelled
+container is left behind. Any breach — oom_kill, pids max, OOMKilled, a
+server exit, or verdict drift — makes it exit non-zero.</p>
+<p><code>just vuln-container-oom</code> is the detector verification: with <code>--memory 12m</code>
+the kernel OOM-kills the fixture and the tool must <em>detect</em> it (verified:
+<code>OOMKilled=True</code> recorded via the docker-inspect fallback). Containers are
+self-expiring (<code>timeout 600</code> inside the server command) and carry
+<code>bb-vuln</code>/<code>bb-vuln.run</code> labels; every failure path removes them.</p>
+<h2 id="configuration-matrix-g7">Configuration matrix (G7)<a class="headerlink" href="#configuration-matrix-g7" title="Permanent link">&para;</a></h2>
+<p><code>just vuln-matrix</code> runs the quick tier across the configuration matrix —
+uvloop on/off x 1/2 workers (G7-1) — and requires identical verdicts in
+every configuration; it then runs an operational configuration with
+explicit caps (<code>BB_MAX_CONNECTIONS=8</code>, <code>BB_REQUEST_TIMEOUT=30</code>) and records
+the result (G7-2). Per-config tables and verdict lists land in
+<code>bench/results/security/matrix-*</code>.</p>
+<h2 id="verdicts-and-severity">Verdicts and severity<a class="headerlink" href="#verdicts-and-severity" title="Permanent link">&para;</a></h2>
+<p><code>PASS</code> — the check's mechanical oracle held. <code>FAIL</code> — the oracle was
+violated. <code>TIMEOUT</code> — no answer within the bound (counts as failure for the
+exit code). <code>SKIP</code> — the check could not be exercised by this client (for
+example its TLS stack refuses to offer the version under test); it is
+recorded, never reported as <code>PASS</code>, and does not fail the run.</p>
+<p><code>KNOWN</code> and <code>FIXED</code> (G5) link filed defects.  A <code>known_issue</code> failure
+is <code>KNOWN</code> only when its detail matches the <code>known_signature</code> fragments
+(the filed defect's own failure shape); the issue number rides in the
+row and does not fail the run.  A failure that does not match stays
+<code>FAIL</code>, marked <code>new failure, not the BLA-… shape</code>.  A <code>fixed_issue</code>
+pass is <code>FIXED</code> (the fix holds, the row guards the regression); a
+<code>fixed_issue</code> failure stays <code>FAIL</code>, prefixed <code>REGRESSION, fixed in
+BLA-…</code>.  H1-ROBUST-001 carries <code>known_issue='BLA-527'</code> with signature
+<code>('answered 405', 'answered 501')</code>; its oracle is untouched.</p>
+<p>The severity column is the rank a <em>failure</em> of that check
+carries, per <a href="../severity/">severity criteria</a>; a hang or crash escalates the
+H1-ROBUST/H2-ROBUST/CHUNK checks to High, as that document's defaults table
+prescribes. A canary failure (G2-2) or a residual (G2-3) marks the row FAIL
+at High, whatever the check's own severity: the row would claim something
+about a server that no longer answered, or that held the check's connection
+open.</p>
+<h2 id="checks-and-oracles-h1-lane">Checks and oracles — h1 lane<a class="headerlink" href="#checks-and-oracles-h1-lane" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Oracle (mechanical)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LANE-001</td>
+<td>negotiation baseline: the h1-family lane speaks HTTP/1.1; on <code>https1</code> the handshake must select exactly ALPN <code>http/1.1</code> (another protocol succeeding = FAIL)</td>
+</tr>
+<tr>
+<td>RANGE-002</td>
+<td>a Range whose end is at or beyond EOF answers 206 clipped to the last byte (<code>Content-Range: bytes 0-&lt;size-1&gt;/&lt;size&gt;</code>); the last byte alone is 206; 416 only when the start is at or past EOF (RFC 9110 §14.1.2, BLA-525's clip contract — the G5-3 recall target)</td>
+</tr>
+<tr>
+<td>ROUTES-001</td>
+<td><code>/docs</code> and <code>/openapi.json</code> → 404 exactly (no auto-generated API surface)</td>
+</tr>
+<tr>
+<td>ROUTES-002</td>
+<td><code>GET /stream/1000</code> → 200 and the body is exactly 1000 bytes</td>
+</tr>
+<tr>
+<td>ROUTES-003</td>
+<td><code>POST /items</code> with valid JSON → 200 echoing the parsed dataclass; invalid JSON → 4xx (never 5xx); <code>POST /form</code> with a valid form → 200</td>
+</tr>
+<tr>
+<td>ROUTES-004</td>
+<td><code>GET /raise</code> → 500 and the body carries no traceback or exception text (CWE-209)</td>
+</tr>
+<tr>
+<td>ROUTES-005</td>
+<td>middleware contracts: gzip on <code>/big</code> with exact decoded bytes, CORS preflight carries Access-Control-Allow-Origin, cache headers present, TrustedProxy rewrites the client IP from X-Forwarded-For, <code>/pcstatic/hello.txt</code> serves the <code>.gz</code> sibling with Content-Encoding: gzip</td>
+</tr>
+<tr>
+<td>BASELINE-001/003</td>
+<td><code>GET /</code> → 200 and body exactly <code>ok</code> (003 runs after all abuse)</td>
+</tr>
+<tr>
+<td>BASELINE-002</td>
+<td><code>GET /json</code> → 200 and body is exactly <code>{"ok": true}</code> JSON</td>
+</tr>
+<tr>
+<td>H1-ROBUST-001</td>
+<td>request line <code>FOO / HTTP/1.1</code> → 4xx or 501/505 or connection close; 2xx/3xx and other 5xx = FAIL</td>
+</tr>
+<tr>
+<td>H1-ROBUST-002</td>
+<td>100 KiB header value → 4xx (431/400) or close; 5xx = FAIL</td>
+</tr>
+<tr>
+<td>H1-ROBUST-003</td>
+<td>garbage request-line bytes → 400 or close</td>
+</tr>
+<tr>
+<td>H1-ROBUST-004</td>
+<td>CRLF in a header value (a literal <code>value\r\nX-Injected: 1</code>, and a bare-CR variant) → reject/close, or the value is kept opaque/sanitized with no injected response header and no CR/LF in the echo (RFC 9110 §5.5); a bare CR that splits into a second field line = FAIL</td>
+</tr>
+<tr>
+<td>H1-ROBUST-005</td>
+<td><code>Content-Length: 100</code> with 5 body bytes then FIN → 4xx/408 or close</td>
+</tr>
+<tr>
+<td>H1-ROBUST-006</td>
+<td>field name with whitespace (<code>Foo Bar: x</code>, <code>Foo : x</code>, <code>Foo\tBar: x</code>) → 400 or close (RFC 9112 §5.1)</td>
+</tr>
+<tr>
+<td>H1-ROBUST-007</td>
+<td>obs-fold continuation (<code>Foo: a</code> + <code>b</code>; injection variant <code>+ X-Smuggle: 1</code>) → 400 or close, <strong>or</strong> safe coalescing: exactly one <code>foo</code> field whose value is <code>a b</code>/<code>a\tb</code> with no CR/LF kept and no separate injected field (RFC 9112 §5.2). The fixture refuses obs-fold with 400; the coalescing branch exists for peers that accept it.</td>
+</tr>
+<tr>
+<td>H1-ROBUST-008</td>
+<td>HTTP/1.1 request without <code>Host</code> → 400 or close (RFC 9112 §3.2)</td>
+</tr>
+<tr>
+<td>H1-ROBUST-009</td>
+<td>absolute-form request line (same-authority and foreign-authority variants) → 200 with body <code>ok</code>, or 400, or close; anything else = FAIL. <strong>Documented actual behavior:</strong> the fixture accepts absolute-form and routes by the target <em>path</em> for both variants — a 200 <code>ok</code> — without comparing the absolute authority against <code>Host</code>.</td>
+</tr>
+<tr>
+<td>H1-ROBUST-010</td>
+<td>NUL byte and overlong UTF-8 in the path (raw <code>\x00</code>, NUL-truncation bait <code>/\x00/static/hello.txt</code>, raw <code>\xc0\xaf</code>, <code>/%c0%af</code>) → 400/404 or close. A 200 is always FAIL: the target carried bytes the router must never see, whatever the body.</td>
+</tr>
+<tr>
+<td>SMUGGLE-001</td>
+<td><code>Content-Length</code> and <code>Transfer-Encoding: chunked</code> together → 400 or close (RFC 9112 §6.3); any other status = FAIL</td>
+</tr>
+<tr>
+<td>SMUGGLE-002</td>
+<td><code>Content-Length</code> plus obfuscated/duplicated TE (<code>chunked, identity</code>; <code>xchunked</code>; <code>Transfer-Encoding: chunked</code> + <code>Transfer-Encoding: x</code>; TE listed first) → 400 or close only (RFC 9112 §6.1/§6.3), then the STATE-001 follow-up</td>
+</tr>
+<tr>
+<td>SMUGGLE-003</td>
+<td>duplicate <code>Content-Length</code> with different values → 400 or close (RFC 9112 §6.3; catalogued <code>two_content_lengths</code>), then the STATE-001 follow-up</td>
+</tr>
+<tr>
+<td>CHUNK-001</td>
+<td>chunk extension (<code>1;x=y</code>, <code>4;foo="a b"</code>) + valid chunked body → 200 with the body echoed <strong>exactly</strong>, or 400, or close; then the STATE-001 follow-up</td>
+</tr>
+<tr>
+<td>CHUNK-002</td>
+<td>malformed chunk sizes (<code>-1</code>, <code>0x10</code>, <code>FFFFFFFFFFFFFFFF</code>) then FIN → 400 or close (RFC 9112 §7.1); then the STATE-001 follow-up. The FIN is part of the oracle: a size that swallows the pipelined <code>GET /</code> as chunk data cannot fake a hang-free exchange.</td>
+</tr>
+<tr>
+<td>STATE-001</td>
+<td>standalone battery: after <strong>each</strong> abusive exchange (chunk extension, obs-fold, garbage line, TE obfuscation, truncated body) a <code>GET /</code> pipelined on the same connection must yield exactly one clean <code>200 ok</code>, or the connection must be closed; a garbled/mixed response, a second response, or <code>GET /</code> ignored on a live connection = FAIL. The same oracle runs inside every SMUGGLE-*/CHUNK-* variant.</td>
+</tr>
+<tr>
+<td>H1-ROBUST-011</td>
+<td>slow-send lite (long tier only): 2 connections each send a partial request line (<code>GET / HT</code>) and hold without completing the request, waiting out the documented default header-idle defence (10 s) plus margin in real time. Acceptable outcomes are a refusal (4xx/5xx) or close; <strong>silence is never a pass</strong> (G2-1 — no answer and no close within the wait = FAIL), and a 2xx/3xx answer to a partial line = FAIL. Server survival after the hold is BASELINE-003's row.</td>
+</tr>
+<tr>
+<td>STATIC-001</td>
+<td><code>GET /static/../fixture_app.py</code> and <code>/static/%2e%2e/fixture_app.py</code> → 400/403/404; any 200 = FAIL</td>
+</tr>
+<tr>
+<td>TRAILER-001</td>
+<td>chunked request with trailer fields: forbidden ones (<code>Content-Length</code>, <code>Transfer-Encoding</code>, <code>Host</code>, RFC 9110 §6.5.1) → 400 or close, then the STATE-001 follow-up; a permitted custom trailer (<code>X-Smuggle: 1</code>) is ignored safely — 200 with the body echoed <strong>exactly</strong> or 400, and the pipelined <code>GET /echo-headers</code> echo must not contain the trailer name and must keep no CR/LF (RFC 9112 §7.1.2; CVE-2023-46589 / CVE-2025-53643 / CVE-2026-22815 class)</td>
+</tr>
+<tr>
+<td>RANGE-001</td>
+<td><code>Range</code> abuse on <code>/static/hello.txt</code> (≤ 15 ranges: <code>bytes=0-0,-1,1-99999999999</code>, inverted <code>10-5</code>, suffix <code>-0</code>, junk <code>--3</code>, 15 single-byte ranges) → <strong>200/206/416 only</strong>, nothing else: 200 must carry the whole file (an ignored Range is legal), a single-range 206 must match its <code>Content-Range</code> exactly (start ≤ end &lt; size, body length = end−start+1), <code>multipart/byteranges</code> 206 is accepted as-is, 416 is accepted (its <code>Content-Range</code>, when present, must use <code>bytes */size</code>); a close without a response, a 5xx, or a deadline overrun is FAIL/TIMEOUT (CVE-2011-3192 class)</td>
+</tr>
+<tr>
+<td>EXPECT-001</td>
+<td><code>Expect: 100-continue</code> with the body sent immediately, and a bogus <code>Expect: 100-continue, x</code>, each pipelined with <code>GET /</code>: informational responses must be <code>100</code> at most (or absent — RFC 9112 §10.1.1 lets a server omit it once the body arrived); the request earns 200 with the body echoed <strong>exactly</strong>, 417, or 400; the pipelined <code>GET /</code> must then be exactly one clean <code>200 ok</code> or the connection must close — a leftover body read as the next request is the CVE-2026-103399 / CVE-2024-24791 class and FAILs</td>
+</tr>
+<tr>
+<td>HOST-001</td>
+<td>duplicate <code>Host</code> (identical and conflicting) and empty <code>Host:</code> → 400 or close (RFC 9112 §3.2: "more than one Host header field or … an invalid field value"), then the STATE-001 follow-up (host-confusion class: CVE-2026-71554, CVE-2026-34525)</td>
+</tr>
+<tr>
+<td>SYMLINK-001</td>
+<td><code>GET /static/escape-link.txt</code> — a symlink under the static root whose target is outside it — → 400/403/404 or close; any 200 = FAIL (CWE-59, CVE-2024-23334 / CVE-2024-42367 class). Positive control <code>hello-link.txt</code> → <code>hello.txt</code> (in-root): 200 with that file, or a safe refusal — both designs acceptable</td>
+</tr>
+<tr>
+<td>WS-001</td>
+<td>raw WebSocket upgrade on <code>/ws</code>: a bad <code>Sec-WebSocket-Key</code> and <code>Sec-WebSocket-Version: 12</code> → 400/426 or close (a 101 = FAIL); a flooded handshake (100-entry <code>Sec-WebSocket-Protocol</code> list + 200 extra headers, CVE-2024-37890 class) → 101/4xx or close, never a hang; and after a valid 101 (its <code>Sec-WebSocket-Accept</code> must be present) an <strong>unmasked</strong> TEXT frame → close with code <strong>1002</strong> or a bare connection close (RFC 6455 §5.1/§5.3) — an echo, a masked server frame, any other close code, or a connection left open = FAIL</td>
+</tr>
+<tr>
+<td>HDR-001</td>
+<td>the <code>server:</code> response header of <code>GET /</code>, if present, must not match: a POSIX path under <code>/home</code>, <code>/users</code>, <code>/usr</code>, <code>/var</code>, <code>/etc</code>, <code>/opt</code>, <code>/tmp</code>, <code>/root</code>, <code>/srv</code>, <code>/app</code>, <code>/workspace</code>; a Windows drive path; <code>site-packages</code>/<code>dist-packages</code>; or <code>python</code>, <code>cpython</code>, <code>py/&lt;digit&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="checks-and-oracles-h2-lane">Checks and oracles — h2 lane<a class="headerlink" href="#checks-and-oracles-h2-lane" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Oracle (mechanical)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GRPC-BASE-001</td>
+<td>unary gRPC (<code>/probe.v1.Echo/Echo</code>) over the lane's h2 transport: 200, exactly one length-prefixed echo message, <code>grpc-status: 0</code> in the trailers (G4-3)</td>
+</tr>
+<tr>
+<td>GRPC-BASE-002</td>
+<td>server-streaming gRPC (<code>/probe.v1.Echo/Count</code>): 200, every message delivered (<code>1</code>,<code>2</code>,<code>3</code>), <code>grpc-status: 0</code> in the trailers (G4-3)</td>
+</tr>
+<tr>
+<td>LANE-002</td>
+<td>negotiation baseline: the h2-family lane speaks HTTP/2 — on <code>h2</code> exactly ALPN <code>h2</code>; on <code>h2c</code> the prior-knowledge preface is accepted (SETTINGS received)</td>
+</tr>
+<tr>
+<td>H2-BASE-001</td>
+<td><code>GET /</code> over HTTP/2 (TLS + ALPN <code>h2</code>) → 200 and body exactly <code>ok</code></td>
+</tr>
+<tr>
+<td>H2-ROBUST-001</td>
+<td>HEADERS with a missing pseudo-header, or pseudo-headers after a regular field (RFC 9113 §8.1/§8.3) → <code>RST_STREAM</code>/<code>GOAWAY</code> carrying <code>PROTOCOL_ERROR</code>, or close; a dispatched request or any other error code = FAIL</td>
+</tr>
+<tr>
+<td>H2-ROBUST-002</td>
+<td>DATA on an idle stream, or DATA on stream 0 (RFC 9113 §6.1) → connection error: <code>GOAWAY</code> carrying <code>PROTOCOL_ERROR</code>, or close. A stream error (<code>RST_STREAM</code>) is FAIL — the RFC requires a connection error.</td>
+</tr>
+<tr>
+<td>H2-ROBUST-003</td>
+<td>unknown frame type <code>0xfa</code> with the reserved bit clear (RFC 9113 §4.1) → ignored: a <code>GET /</code> sent afterwards on the same connection must still answer 200 <code>ok</code></td>
+</tr>
+<tr>
+<td>H2-ROBUST-004</td>
+<td>128 KiB header list, fragmented into HEADERS + CONTINUATION frames of ≤16 KiB (so the <em>list</em>, not the frame size, is what overflows) → <code>431</code>, or <code>RST_STREAM REFUSED_STREAM</code>, or <code>GOAWAY ENHANCE_YOUR_CALM</code>/<code>REFUSED_STREAM</code>, or close; no crash</td>
+</tr>
+<tr>
+<td>H2-ROBUST-005</td>
+<td>PRIORITY frame with stream dependency = own stream (RFC 9113 §5.3.1) → <code>PROTOCOL_ERROR</code> (stream or connection error), or close</td>
+</tr>
+<tr>
+<td>H2-ROBUST-006</td>
+<td>bounded Rapid Reset (CVE-2023-44487 class): exactly 20 streams, each <code>HEADERS</code> + an immediate <code>RST_STREAM CANCEL</code>, opened <strong>one at a time</strong> so the advertised <code>MAX_CONCURRENT_STREAMS</code> is never exceeded (it is reported from the server's SETTINGS); the burst is legal traffic, so only <code>NO_ERROR</code>/<code>CANCEL</code> (graceful) or <code>REFUSED_STREAM</code>/<code>ENHANCE_YOUR_CALM</code> (flood defense) error frames are acceptable — <code>PROTOCOL_ERROR</code>/<code>INTERNAL_ERROR</code> over legal frames = FAIL — and a fresh request on the same connection (or, if the burst connection was closed, on a fresh one) must still answer 200 <code>ok</code></td>
+</tr>
+<tr>
+<td>H2-ROBUST-007</td>
+<td>one legal header block cut into 30 CONTINUATION frames then <code>END_HEADERS</code> (CVE-2023-45288 / CVE-2024-27316 / CVE-2024-27983 class): the request <strong>completes</strong> (2xx/4xx) <strong>or</strong> is refused (<code>431</code>, or <code>GOAWAY</code>/<code>RST_STREAM</code> carrying <code>ENHANCE_YOUR_CALM</code>/<code>REFUSED_STREAM</code>/<code>PROTOCOL_ERROR</code>/<code>NO_ERROR</code> — a header-block limit may signal PROTOCOL_ERROR per RFC 9113 §4.3) or the connection closes; a crash, a wrong error code, or a deadline overrun = FAIL/TIMEOUT</td>
+</tr>
+<tr>
+<td>H2-ROBUST-008</td>
+<td>HPACK bomb lite (CVE-2016-6581 / CVE-2022-41723 class): a ~3 KiB seed block fills the dynamic table with one 4 KiB entry, then a ~4 KiB block of 1000 indexed references decodes to ≤ 4 MiB (the cap is asserted in code) on stream 3 of the same connection: bounded <strong>completion</strong> (2xx/4xx) <strong>or</strong> refusal (<code>431</code>, <code>GOAWAY</code>/<code>RST_STREAM</code> with <code>ENHANCE_YOUR_CALM</code>/<code>REFUSED_STREAM</code>/<code>PROTOCOL_ERROR</code>/<code>COMPRESSION_ERROR</code>/<code>NO_ERROR</code> — a decoder expansion cap may trip COMPRESSION_ERROR) or close; a crash or a wrong error code = FAIL (the observed refusal is recorded verbatim in the detail)</td>
+</tr>
+<tr>
+<td>H2-BASE-002</td>
+<td>after all h2 abuse a fresh HTTP/2 request → 200 <code>ok</code> (server survived)</td>
+</tr>
+<tr>
+<td>TLS-001</td>
+<td>TLS 1.0 and 1.1 handshake attempts must fail; TLS 1.2 and 1.3 must succeed negotiating ALPN <code>h2</code> at that version. A client stack that refuses to offer TLS 1.0/1.1 outright (<code>NO_PROTOCOLS_AVAILABLE</code>) is reported as <strong>not exercised</strong> — the check then records <code>SKIP</code>, never <code>PASS</code>, because no ClientHello reached the server (PR #479 review M2). The fixture additionally pins <code>minimum_version = TLSv1_2</code> server-side. A server-side refusal oracle would need a hand-rolled ClientHello (open question, below).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="implementation-note">Implementation note<a class="headerlink" href="#implementation-note" title="Permanent link">&para;</a></h2>
+<p>The wire-level checks are driven by <code>blackbull.fault_injection</code>'s scenario
+machinery against the external running servers — one executor style for both
+lanes, and no in-process coupling:</p>
+<ul>
+<li><strong>h1 lane:</strong> <code>scenario_h1</code> steps (<code>SendRawBytes</code>, <code>HalfClose</code>, <code>Sleep</code>,
+  <code>ReadResponse</code>) executed by <code>HTTP1Client.execute_scenario</code>. That machinery
+  demonstrably drives servers other than BlackBull
+  (<code>tests/unit/test_fault_h1_client_third_party.py</code> runs the same executor
+  against CPython's <code>http.server</code>). <code>SMUGGLE-001</code> reuses the catalogued
+  scenario <code>content_length_and_transfer_encoding</code> and <code>SMUGGLE-003</code> the
+  catalogued <code>two_content_lengths</code> verbatim, with their read steps retimed to
+  <code>--check-timeout</code>. The baseline, static, and header checks use the same
+  executor with plain well-formed raw requests so one <code>asyncio</code> deadline
+  bounds every check identically.</li>
+<li><strong>h2 lane:</strong> <code>scenario_h2_client</code> steps (<code>SendPreface</code>, <code>SendFrame</code>,
+  <code>SendRawBytes</code>, <code>ReadResponse</code>) executed by <code>HTTP2Client.execute_scenario</code>
+  in <code>scenario_mode=True</code>, so the scenario owns the wire from byte zero and
+  no receive loop races its reads. <code>SendFrame</code>'s raw frame type is exactly
+  what H2-ROBUST-003 needs (an unregistered type); <code>encode_headers</code>/
+  <code>encode_frame</code> build HEADERS frames for the ordered-field-block faults
+  (H2-ROBUST-001) and the CONTINUATION fragmentation of H2-ROBUST-004, with
+  <code>hpack</code> — already a runtime dependency — encoding fields <strong>in the given
+  order</strong> so pseudo-header order violations are expressible. The catalogued
+  <code>h2_client</code> cases informed the shapes but several are 30-second floods,
+  deliberately out of scope here; the probe's h2 checks are one-shot frames.</li>
+<li><strong>TLS-001</strong> uses the standard-library <code>ssl</code> module for bounded handshake
+  attempts (the task's sanctioned "openssl s_client or python ssl").</li>
+</ul>
+<h2 id="referenced-vulnerability-sources">Referenced vulnerability sources<a class="headerlink" href="#referenced-vulnerability-sources" title="Permanent link">&para;</a></h2>
+<p>Researched for M4 from the NVD CVE API (keyword and <code>cveId</code> lookups) and
+GitHub's global advisories (<code>gh api /advisories</code>, <code>?ecosystem=pip&amp;affects=…</code>);
+each entry below was fetched and read, and the vector is quoted from what the
+database actually returned. NVD URLs are <code>https://nvd.nist.gov/vuln/detail/&lt;id&gt;</code>,
+advisory URLs <code>https://github.com/advisories/&lt;GHSA-id&gt;</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Vector (one line)</th>
+<th>Mapping</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CVE-2024-23334 (GHSA-5h86-8mv2-jq9f)</td>
+<td>aiohttp <code>follow_symlinks=True</code> static routes resolve symlinks with no root-boundary check → arbitrary file read</td>
+<td>SYMLINK-001, STATIC-001</td>
+</tr>
+<tr>
+<td>CVE-2024-42367 (GHSA-jwhx-xcg6-8xhj)</td>
+<td>aiohttp: compressed files presented as symlinks also escape the static root</td>
+<td>SYMLINK-001</td>
+</tr>
+<tr>
+<td>CVE-2023-37276 (GHSA-45c4-8wx5-qw6w)</td>
+<td>aiohttp/llhttp: crafted request misparses a header value → request smuggling</td>
+<td>SMUGGLE-002</td>
+</tr>
+<tr>
+<td>CVE-2024-52304 (GHSA-8495-4g3g-x7pr)</td>
+<td>aiohttp pure-Python parser reads newlines in chunk extensions wrong → request smuggling</td>
+<td>CHUNK-001</td>
+</tr>
+<tr>
+<td>CVE-2025-53643 (GHSA-9548-qrrj-x5pj)</td>
+<td>aiohttp parses the chunked <strong>trailer section</strong> wrong → request/response smuggling</td>
+<td>TRAILER-001</td>
+</tr>
+<tr>
+<td>CVE-2026-22815 (GHSA-w2fm-2cpv-w7v5)</td>
+<td>aiohttp accepts unlimited trailer headers → unbounded memory use</td>
+<td>TRAILER-001</td>
+</tr>
+<tr>
+<td>CVE-2023-46589</td>
+<td>Tomcat: an oversize trailer field splits one request into two → smuggling behind a reverse proxy</td>
+<td>TRAILER-001</td>
+</tr>
+<tr>
+<td>CVE-2023-45648</td>
+<td>Tomcat: specially crafted invalid trailer header treated as multiple requests → smuggling</td>
+<td>TRAILER-001</td>
+</tr>
+<tr>
+<td>CVE-2025-12642</td>
+<td>lighttpd 1.4.80 merges trailer fields into headers after parsing → header smuggling</td>
+<td>TRAILER-001</td>
+</tr>
+<tr>
+<td>CVE-2025-59822</td>
+<td>http4s: improper trailer-section handling → request smuggling / cache poisoning</td>
+<td>TRAILER-001</td>
+</tr>
+<tr>
+<td>CVE-2023-44487</td>
+<td>HTTP/2 Rapid Reset: streams cancelled faster than work can be shed → server resource exhaustion</td>
+<td>H2-ROBUST-006</td>
+</tr>
+<tr>
+<td>CVE-2023-45288</td>
+<td>HTTP/2 CONTINUATION flood (Nowotarski): excessive CONTINUATION frames keep the endpoint parsing headers</td>
+<td>H2-ROBUST-007</td>
+</tr>
+<tr>
+<td>CVE-2024-27316</td>
+<td>nghttp2 buffers over-limit CONTINUATION headers while building the 413 → memory exhaustion</td>
+<td>H2-ROBUST-007</td>
+</tr>
+<tr>
+<td>CVE-2024-27983</td>
+<td>Node.js HTTP/2: CONTINUATION headers + abrupt close → race/memory crash</td>
+<td>H2-ROBUST-007</td>
+</tr>
+<tr>
+<td>CVE-2016-6581 (GHSA-ffq8-576r-v26g)</td>
+<td>HPACK bomb: a tiny block expands via the dynamic table (Python <code>hpack</code> 1.0.0–2.2.0)</td>
+<td>H2-ROBUST-008</td>
+</tr>
+<tr>
+<td>CVE-2022-41723</td>
+<td>Go: malicious HTTP/2 stream → excessive HPACK-decoder CPU from small requests</td>
+<td>H2-ROBUST-008</td>
+</tr>
+<tr>
+<td>CVE-2011-3192</td>
+<td>Apache: overlapping byte ranges in <code>Range</code> → memory/CPU exhaustion</td>
+<td>RANGE-001</td>
+</tr>
+<tr>
+<td>CVE-2005-2728</td>
+<td>Apache byte-range filter: huge <code>Range</code> field → memory consumption</td>
+<td>RANGE-001</td>
+</tr>
+<tr>
+<td>CVE-2020-10705</td>
+<td>Undertow: <code>Expect: 100-continue</code> requests can exhaust memory → DoS</td>
+<td>EXPECT-001</td>
+</tr>
+<tr>
+<td>CVE-2024-24791</td>
+<td>Go net/http: a final (non-1xx) answer to <code>Expect: 100-continue</code> leaves the connection invalid → desync at the next request</td>
+<td>EXPECT-001</td>
+</tr>
+<tr>
+<td>CVE-2026-103399</td>
+<td>libsoup: early final response before the body is read; leftover body bytes are parsed as the next request</td>
+<td>EXPECT-001</td>
+</tr>
+<tr>
+<td>CVE-2019-20372</td>
+<td>nginx <code>error_page</code> misconfiguration → request smuggling</td>
+<td>SMUGGLE-002</td>
+</tr>
+<tr>
+<td>CVE-2022-41721</td>
+<td>Go <code>MaxBytesHandler</code>: unconsumed body bytes read as HTTP/2 frames → request tunneling</td>
+<td>SMUGGLE-001 (class)</td>
+</tr>
+<tr>
+<td>CVE-2024-1135 (GHSA-w3h3-4rj7-4ph4)</td>
+<td>gunicorn request smuggling → endpoint restriction bypass</td>
+<td>SMUGGLE-001</td>
+</tr>
+<tr>
+<td>CVE-2024-6827 (GHSA-hc5x-x2vx-497g)</td>
+<td>gunicorn HTTP request/response smuggling</td>
+<td>SMUGGLE-002</td>
+</tr>
+<tr>
+<td>CVE-2018-1000164</td>
+<td>gunicorn: CRLF sequences in HTTP headers not neutralized</td>
+<td>H1-ROBUST-004</td>
+</tr>
+<tr>
+<td>CVE-2020-7695</td>
+<td>uvicorn HTTP response splitting</td>
+<td>H1-ROBUST-004</td>
+</tr>
+<tr>
+<td>CVE-2024-37890</td>
+<td>ws (Node.js): a handshake with more headers than <code>maxHeadersCount</code> crashes the server</td>
+<td>WS-001</td>
+</tr>
+<tr>
+<td>CVE-2026-69243 (GHSA-mfx4-hv73-q22v)</td>
+<td>aiohttp: HTTP request smuggling via the WebSocket upgrade</td>
+<td>WS-001</td>
+</tr>
+<tr>
+<td>CVE-2026-54274 (GHSA-xcgm-r5h9-7989)</td>
+<td>aiohttp: incomplete WebSocket frame payloads bypass memory limits</td>
+<td>WS-001 (class)</td>
+</tr>
+<tr>
+<td>CVE-2018-1000518 (GHSA-6g87-ff9q-v847)</td>
+<td>websockets: memory-exhaustion DoS during handshake/parsing</td>
+<td>WS-001 (class)</td>
+</tr>
+<tr>
+<td>CVE-2026-71554 (GHSA-6hr6-w5qg-qmwg)</td>
+<td>Python <code>h2</code>: duplicate <code>Host</code> header can facilitate request smuggling</td>
+<td>HOST-001</td>
+</tr>
+<tr>
+<td>CVE-2026-34525 (GHSA-c427-h43c-vf67)</td>
+<td>aiohttp accepts duplicate <code>Host</code> headers (host confusion)</td>
+<td>HOST-001</td>
+</tr>
+<tr>
+<td>CVE-2025-57804 (GHSA-847f-9342-265h)</td>
+<td>Python <code>h2</code>: illegal characters in headers → request smuggling</td>
+<td>H2-ROBUST-001 (class)</td>
+</tr>
+<tr>
+<td>CVE-2009-3555</td>
+<td>TLS renegotiation: unauthenticated request prefix injection into HTTPS sessions</td>
+<td>TLS-001 (class)</td>
+</tr>
+<tr>
+<td>CVE-2024-24762</td>
+<td>python-multipart (uvicorn's form parser): <code>Content-Type</code> regex → ReDoS stall</td>
+<td>consulted — not judged (timing oracle)</td>
+</tr>
+<tr>
+<td>CVE-2024-7592</td>
+<td>CPython <code>http.cookies</code>: quadratic cookie parsing → CPU exhaustion</td>
+<td>consulted — not judged (timing oracle)</td>
+</tr>
+</tbody>
+</table>
+<p>One requested lookup did <strong>not</strong> match its assumed class: CVE-2024-27351 is
+Django's <code>Truncator.words</code> regex DoS (per NVD), not an aiohttp smuggling
+case; the aiohttp smuggling trail is CVE-2023-37276, CVE-2024-52304 and the
+2025/2026 trailer advisories above. Hypercorn returned zero pip
+advisories (<code>gh api /advisories?ecosystem=pip&amp;affects=hypercorn</code>).</p>
+<h2 id="coverage-mapping-m4-research-checks">Coverage mapping (M4 research → checks)<a class="headerlink" href="#coverage-mapping-m4-research-checks" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Vector class</th>
+<th>Source (CVE/advisory)</th>
+<th>Coverage</th>
+<th>Check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CL.TE / CL-vs-TE smuggling</td>
+<td>CVE-2023-37276, CVE-2024-1135, CVE-2022-41721</td>
+<td>COVERED</td>
+<td>SMUGGLE-001/002, STATE-001</td>
+</tr>
+<tr>
+<td>duplicate/ambiguous Content-Length</td>
+<td>GHSA-xx9p-xxvh-7g8j class</td>
+<td>COVERED</td>
+<td>SMUGGLE-003</td>
+</tr>
+<tr>
+<td>TE obfuscation</td>
+<td>CVE-2019-20372, CVE-2024-6827</td>
+<td>COVERED</td>
+<td>SMUGGLE-002</td>
+</tr>
+<tr>
+<td>chunk extensions and sizes</td>
+<td>CVE-2024-52304</td>
+<td>COVERED</td>
+<td>CHUNK-001/002</td>
+</tr>
+<tr>
+<td>chunked trailer section</td>
+<td>CVE-2023-46589, CVE-2023-45648, CVE-2025-53643, CVE-2025-12642, CVE-2025-59822, CVE-2026-22815</td>
+<td>COVERED (M4)</td>
+<td>TRAILER-001</td>
+</tr>
+<tr>
+<td>CRLF / obs-fold injection</td>
+<td>CVE-2018-1000164, CVE-2020-7695</td>
+<td>COVERED</td>
+<td>H1-ROBUST-004/006/007</td>
+</tr>
+<tr>
+<td>path traversal</td>
+<td>CVE-2024-23334 (traversal form)</td>
+<td>COVERED</td>
+<td>STATIC-001</td>
+</tr>
+<tr>
+<td>symlink escape from static root</td>
+<td>CVE-2024-23334, CVE-2024-42367</td>
+<td>COVERED (M4)</td>
+<td>SYMLINK-001</td>
+</tr>
+<tr>
+<td>Range abuse</td>
+<td>CVE-2011-3192, CVE-2005-2728</td>
+<td>COVERED (M4)</td>
+<td>RANGE-001</td>
+</tr>
+<tr>
+<td>Expect: 100-continue</td>
+<td>CVE-2020-10705, CVE-2024-24791, CVE-2026-103399</td>
+<td>COVERED (M4)</td>
+<td>EXPECT-001</td>
+</tr>
+<tr>
+<td>duplicate/conflicting Host</td>
+<td>CVE-2026-71554, CVE-2026-34525</td>
+<td>COVERED (M4)</td>
+<td>HOST-001</td>
+</tr>
+<tr>
+<td>Rapid Reset</td>
+<td>CVE-2023-44487</td>
+<td>COVERED (M4, bounded)</td>
+<td>H2-ROBUST-006</td>
+</tr>
+<tr>
+<td>CONTINUATION flood</td>
+<td>CVE-2023-45288, CVE-2024-27316, CVE-2024-27983</td>
+<td>COVERED (M4, bounded)</td>
+<td>H2-ROBUST-007</td>
+</tr>
+<tr>
+<td>HPACK bomb</td>
+<td>CVE-2016-6581, CVE-2022-41723</td>
+<td>COVERED (M4, bounded)</td>
+<td>H2-ROBUST-008</td>
+</tr>
+<tr>
+<td>header-list floods</td>
+<td>CVE-2023-36478 class</td>
+<td>COVERED</td>
+<td>H2-ROBUST-004, H1-ROBUST-002</td>
+</tr>
+<tr>
+<td>pseudo-header / frame-order faults</td>
+<td>RFC 9113, CVE-2025-57804 class</td>
+<td>COVERED</td>
+<td>H2-ROBUST-001..005</td>
+</tr>
+<tr>
+<td>WebSocket handshake validation, masking</td>
+<td>CVE-2024-37890, CVE-2026-69243, RFC 6455 §5.1/§5.3</td>
+<td>COVERED (M4)</td>
+<td>WS-001</td>
+</tr>
+<tr>
+<td>TLS version floor / ALPN</td>
+<td>CVE-2009-3555 (class)</td>
+<td>PARTIAL</td>
+<td>TLS-001 (floor only; no renegotiation probe — see open questions)</td>
+</tr>
+<tr>
+<td>slow-send / slowloris</td>
+<td>class</td>
+<td>PARTIAL</td>
+<td>H1-ROBUST-011 (lite; waits the default 10 s header timeout in long tier)</td>
+</tr>
+<tr>
+<td>h1→h2 request tunneling</td>
+<td>CVE-2022-41721</td>
+<td>PARTIAL</td>
+<td>framing checks cover the h1 side; no MaxBytesHandler analog in the fixture surface</td>
+</tr>
+<tr>
+<td>WS frame memory limits / compression</td>
+<td>CVE-2026-54274, GHSA-mq44-7p77-q5h7</td>
+<td>GAP (skipped)</td>
+<td>needs fragment/deflate state juggling and a memory oracle — not one-shot mechanical</td>
+</tr>
+<tr>
+<td>regex DoS (Content-Type, cookies)</td>
+<td>CVE-2024-24762, CVE-2024-7592</td>
+<td>GAP (skipped)</td>
+<td>judged by timing, not a mechanical accept set</td>
+</tr>
+<tr>
+<td>unbounded pipelining / body-size limits</td>
+<td>CVE-2026-54273 class</td>
+<td>GAP (skipped)</td>
+<td>capacity behavior, not attack semantics — a load test</td>
+</tr>
+<tr>
+<td>decompression bombs</td>
+<td>CVE-2025-69223 class</td>
+<td>GAP (skipped)</td>
+<td>the fixture never decompresses request bodies — out of surface</td>
+</tr>
+</tbody>
+</table>
+<h2 id="open-questions-documented-not-checked">Open questions (documented, not checked)<a class="headerlink" href="#open-questions-documented-not-checked" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Server-side TLS 1.0/1.1 refusal.</strong> The python.org/OpenSSL build refuses
+  to <em>offer</em> TLS 1.0/1.1 (<code>NO_PROTOCOLS_AVAILABLE</code>), so TLS-001's
+  sub-1.2 attempts cannot reach the server. A raw ClientHello probe with
+  modern extensions would close this gap; attempts to hand-roll one showed
+  bare closes for even valid hellos, so it is parked as an open question.</li>
+<li><strong>Embedded colon in a field name.</strong> HTTP/1.1 splits the field name at the
+  <em>first</em> colon, so a "colon in the name" is unobservable on the wire —
+  <code>Foo:Bar: x</code> is a legal <code>Foo</code> field with value <code>Bar: x</code>. H1-ROBUST-006
+  therefore tests the crisp cases (whitespace in the name).</li>
+<li><strong>Chunk-size overflow outcome.</strong> <code>FFFFFFFFFFFFFFFF</code> is valid <em>hex</em> per
+  RFC 9112 §7.1's grammar, so "400-or-close" accepts a silent close; the
+  fixture answers <code>-1</code>/<code>0x10</code> with 400 but closes silently on the overflow
+  size. Both outcomes are on the safe side but inconsistent — severity.md's
+  Info rank describes exactly this, and it is recorded in BLA-526's findings
+  rather than as a check failure.</li>
+</ul>
+<h2 id="recording-findings">Recording findings<a class="headerlink" href="#recording-findings" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Run results: comment on YouTrack issue BLA-526 (<code>just yt-comment</code>).</li>
+<li>A confirmed defect: its own issue, with repro steps and the severity rank
+  from <a href="../severity/">severity criteria</a>.</li>
+<li>Fixes: land as PRs plus a fast deterministic regression test added to the
+  normal <code>pytest</code> suite.</li>
+</ul>
+<h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../fixture-app/">Minimal fixture app</a> — the probe target definition.</li>
+<li><a href="../severity/">Severity criteria</a> — how findings are ranked.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

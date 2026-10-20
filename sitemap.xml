@@ -612,4 +612,20 @@
          <loc>https://TOKUJI.github.io/BlackBull/reference/env-vars/</loc>
          <lastmod>2026-10-20</lastmod>
     </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/security/fixture-app/</loc>
+         <lastmod>2026-10-20</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/security/probe/</loc>
+         <lastmod>2026-10-20</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/security/severity/</loc>
+         <lastmod>2026-10-20</lastmod>
+    </url>
+    <url>
+         <loc>https://TOKUJI.github.io/BlackBull/security/sufficiency/</loc>
+         <lastmod>2026-10-20</lastmod>
+    </url>
 </urlset>
