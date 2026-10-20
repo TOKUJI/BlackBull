@@ -2204,9 +2204,8 @@ def _ws_handshake(path: str, *, key: bytes, version: bytes,
 
 
 _WS_KEY = base64.b64encode(b'0123456789abcdef')
-#: A masked TEXT frame carrying "X" (RFC 6455 §5.3): the masking-violation
-#: twin of the unmasked ``0x81 0x01 0x58`` the probe sends.
-_WS_MASKED_X = b'\x81\x81\x37\xfa\x21\x3d\x7f'
+#: The unmasked TEXT frame carrying "X" that the probe sends as its
+#: masking violation (RFC 6455 §5.3: client frames must be masked).
 _WS_UNMASKED_X = b'\x81\x01X'
 
 
@@ -3039,10 +3038,10 @@ def render_markdown(lanes: Sequence[Lane], *,
     lines = [
         f'# BLA-526 robustness probe — {timestamp}',
         '',
-        f'- Bounds: check timeout {check_timeout:g}s, run cap {run_timeout:g}s, '
-        f'connections {MAX_CONCURRENT_CONNECTIONS} concurrent / '
-        f'{MAX_TOTAL_CONNECTIONS * len(lanes)} per run '
-        f'({MAX_TOTAL_CONNECTIONS} x {len(lanes)} lanes, one shared budget)',
+        (f'- Bounds: check timeout {check_timeout:g}s, run cap {run_timeout:g}s, '
+         + f'connections {MAX_CONCURRENT_CONNECTIONS} concurrent / '
+         + f'{MAX_TOTAL_CONNECTIONS * len(lanes)} per run '
+         + f'({MAX_TOTAL_CONNECTIONS} x {len(lanes)} lanes, one shared budget)'),
         f'- Tier: {tier} — '
         + ', '.join(f'{lane.name} {len(lane.results)} checks '
                     f'in {sum(r.elapsed_s for r in lane.results):.1f}s'
@@ -3051,13 +3050,13 @@ def render_markdown(lanes: Sequence[Lane], *,
         ('- Verdicts: PASS = mechanical oracle held; FAIL = oracle violated; '
          + 'TIMEOUT = no answer within the bound; SKIP = not exercised by this '
          + 'client (never counted as a pass).'),
-        '- Canary (G2-2): GET / after every check on its own capped budget; '
-        'recorded per row, and a canary failure marks the preceding check '
-        'FAIL (High).',
-        '- Process observation (G2-3): with --server-pid, /proc fd/socket/RSS/'
-        'HWM/thread/CPU samples per check; residual fd/ESTABLISHED/CLOSE_WAIT '
-        'after the settle wait marks the row FAIL (High); memory and CPU are '
-        'recorded, never thresholds.',
+        ('- Canary (G2-2): GET / after every check on its own capped budget; '
+         + 'recorded per row, and a canary failure marks the preceding check '
+         + 'FAIL (High).'),
+        ('- Process observation (G2-3): with --server-pid, /proc fd/socket/RSS/'
+         + 'HWM/thread/CPU samples per check; residual fd/ESTABLISHED/CLOSE_WAIT '
+         + 'after the settle wait marks the row FAIL (High); memory and CPU are '
+         + 'recorded, never thresholds.'),
         ('- Severity is the rank a failure of that check carries '
          + '(docs/security/severity.md). Recording of findings: docs/security/probe.md.'),
         '',
