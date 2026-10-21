@@ -163,7 +163,8 @@ def _bind_socket(family, host, port,
     can be avoided.
     """
     try:
-        sock = socket.socket(family, socket.SOCK_STREAM)
+        # asyncio enables TCP_NODELAY only for sockets tagged as TCP.
+        sock = socket.socket(family, socket.SOCK_STREAM, socket.IPPROTO_TCP)
     except OSError as msg:
         logger.error('Could not create socket (family=%s): %s', family, msg)
         return None

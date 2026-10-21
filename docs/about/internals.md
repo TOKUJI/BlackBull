@@ -99,6 +99,9 @@ when the peer does not read.
 
 ### Accept admission
 
+New TCP listeners carry `IPPROTO_TCP` so asyncio enables `TCP_NODELAY`
+on accepted connections, as uvloop does.
+
 Count descriptors from `accept()` to close on every supported loop,
 including TLS handshakes and refusals. `connection_made` misses handshakes.
 Pause acceptance at the cap plus refusal reserve; do not consume the

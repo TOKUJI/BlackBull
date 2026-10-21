@@ -125,13 +125,18 @@ class Served:
         self.tls = tls
         self.wires: list[Wire] = []
 
-    async def wire(self, *, alpn: list[str] | None = None) -> Wire:
+    async def wire(self, *, alpn: list[str] | None = None,
+                   host: str = '127.0.0.1') -> Wire:
         ctx = None
         if self.tls:
             ctx = ssl.create_default_context()
             ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
             ctx.set_alpn_protocols(alpn or ['http/1.1'])
-        w = Wire(*await asyncio.open_connection('127.0.0.1', self.server.port, ssl=ctx))
+        if self.server.unix_path:
+            streams = await asyncio.open_unix_connection(self.server.unix_path, ssl=ctx)
+        else:
+            streams = await asyncio.open_connection(host, self.server.port, ssl=ctx)
+        w = Wire(*streams)
         self.wires.append(w)
         return w
 
@@ -149,8 +154,8 @@ async def served(app, *, tls: bool = False, **server_kwargs):
         ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         ctx.set_alpn_protocols(['h2', 'http/1.1'])
         ctx.load_cert_chain(_HERE / 'cert.pem', _HERE / 'key.pem')
-    server = Server(app, listeners=[Listener(Tcp(0, '127.0.0.1'), tls=ctx)],
-                    **server_kwargs)
+    server_kwargs.setdefault('listeners', [Listener(Tcp(0, '127.0.0.1'), tls=ctx)])
+    server = Server(app, **server_kwargs)
     server.open_socket()
     running = asyncio.create_task(server.run())
     s = Served(server, tls)
