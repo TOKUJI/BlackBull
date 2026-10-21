@@ -5998,6 +5998,8 @@ within byte and time bounds. Keep both: one bounds work, the other prevents
 a refused peer from retaining the connection. Delivery stays best-effort
 when the peer does not read.</p>
 <h3 id="accept-admission">Accept admission<a class="headerlink" href="#accept-admission" title="Permanent link">&para;</a></h3>
+<p>New TCP listeners carry <code>IPPROTO_TCP</code> so asyncio enables <code>TCP_NODELAY</code>
+on accepted connections, as uvloop does.</p>
 <p>Count descriptors from <code>accept()</code> to close on every supported loop,
 including TLS handshakes and refusals. <code>connection_made</code> misses handshakes.
 Pause acceptance at the cap plus refusal reserve; do not consume the
