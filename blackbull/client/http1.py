@@ -15,7 +15,7 @@ from ..server.rate_window import ByteRateFloor
 from ..server.recipient import (AbstractReader,
                                 IncompleteReadError, ReadLimitExceeded)
 from ..protocol.field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
-from ..protocol.framing import (is_informational, method_is,
+from ..protocol.framing import (_CRLF, is_informational, method_is,
                                 parse_content_length, parse_status,
                                 response_has_content, split_transfer_codings)
 from ..server.sender import AbstractWriter, AsyncioWriter
@@ -63,7 +63,6 @@ class _PreparedRequest(NamedTuple):
 #: shape to a caller.
 _STREAM_CHUNK_SIZE: int = 64 * 1024
 
-_CRLF = b'\r\n'
 
 #: How a response body ends — the outcome of RFC 9112 §6.3's ordered decision.
 #: Named rather than inlined because one method decides and three read the

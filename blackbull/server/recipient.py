@@ -104,10 +104,6 @@ class ReadLimitExceeded(Exception):
         self.seen = seen
 
 
-#: End of an HTTP message head; the H/1.1 actor imports it rather than copying it.
-_HEAD_END = b'\r\n\r\n'
-
-
 _HEXDIG_SET = frozenset(b'0123456789abcdefABCDEF')
 
 def _bad_request(detail: str):

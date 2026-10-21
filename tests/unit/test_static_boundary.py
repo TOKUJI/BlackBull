@@ -115,17 +115,19 @@ async def test_the_index_sibling_takes_the_same_walk(env):
 @pytest.mark.parametrize('cache', [False, True])
 async def test_a_sibling_swapped_between_requests_is_caught(env, cache):
     www, outside = env
-    (www / 'item.gz').write_bytes(gzip.compress(b'GOOD'))
+    # One blob: gzip.compress stamps the current second into the header.
+    good = gzip.compress(b'GOOD')
+    (www / 'item.gz').write_bytes(good)
     app = StaticFiles(directory=str(www), cache=cache)
     start, body = await _collect(app, _scope(
         path='/item', headers={'accept-encoding': 'gzip'}))
-    assert (start['status'], body) == (200, gzip.compress(b'GOOD'))
+    assert (start['status'], body) == (200, good)
     (www / 'item.gz').unlink()
     (www / 'item.gz').symlink_to(outside / 'sentinel')
     start, body = await _collect(app, _scope(
         path='/item', headers={'accept-encoding': 'gzip'}))
     assert start['status'] == 400
-    assert SENTINEL not in body and gzip.compress(b'GOOD') not in body
+    assert SENTINEL not in body and good not in body
 
 
 async def test_the_streaming_arm_is_bounded_too(env):

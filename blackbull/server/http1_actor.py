@@ -20,14 +20,13 @@ from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
-from ..protocol.framing import (method_is, parse_content_length,
-                                split_transfer_codings)
+from ..protocol.framing import (_CRLF, _HEAD_END, method_is,
+                                parse_content_length, split_transfer_codings)
 from .deadline import ConnectionDeadline
 from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
                         AbstractReader, HTTP1Recipient, IncompleteReadError,
-                        ReadLimitExceeded, RecipientFactory, _HEAD_END,
-                        _WS_READ_INLINE)
+                        ReadLimitExceeded, RecipientFactory, _WS_READ_INLINE)
 from .sender import AbstractWriter, SenderFactory
 from .access_log import (AccessLogRecord as _AccessLogRecord,
                          _make_disconnect_detecting_receive,
@@ -205,7 +204,7 @@ def _reject_oversized_head(head: bytes, max_total: int) -> None:
     "too many header fields"; **431** when the lines are well-formed and merely
     numerous (RFC 6585 §5).
     """
-    first_eol = head.find(b'\r\n')
+    first_eol = head.find(_CRLF)
     if first_eol < 0 or first_eol >= max_total:
         raise BadRequestError(
             f'request line exceeds BB_HEADER_MAX_TOTAL={max_total} '

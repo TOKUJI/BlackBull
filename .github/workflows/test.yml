@@ -127,6 +127,44 @@ jobs:
           python -m pytest tests/unit tests/architecture tests/properties \
             --timeout=60 -q --beartype-packages=blackbull
 
+  fast-315:
+    # Informational 3.15 lane.  3.15.0 is GA (2026-10-09) and the tier
+    # passes on it (verified: 6606 passed with beartype 0.23.1 +
+    # pytest-beartype 0.3.0), but the support claim (matrix = classifiers)
+    # stays at 3.11-3.14 until this lane has stayed green; then add '3.15'
+    # to the fast matrix and the pyproject classifier.
+    name: Fast tier (unit + arch + properties) (3.15, informational)
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        with:
+          python-version: '3.15'
+
+      - name: Install BlackBull (with test-relevant extras)
+        run: pip install -e '.[compression,testing,fault-injection,reload,speed]'
+
+      - name: Generate self-signed TLS material
+        run: |
+          # SAN must cover 127.0.0.1; see the fast job for the why.
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout tests/key.pem -out tests/cert.pem \
+            -days 365 -nodes -subj '/CN=localhost' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+
+      - name: Run fast test tier
+        run: |
+          python -m pytest tests/unit tests/architecture tests/properties \
+            --timeout=60 -q --beartype-packages=blackbull
+
+
   integration:
     name: Integration lane (integration + conformance)
     needs: skip-check

@@ -6,7 +6,12 @@ Not safe for concurrent readers or cross-thread mutation.
 """
 from __future__ import annotations
 
+from ..protocol.framing import _HEAD_END
+
 __all__ = ('ReadBuffer',)
+
+# Derived so the scan cannot drift from the constant.
+_HEAD_END_LEN = len(_HEAD_END)
 
 # Initial allocation in bytes.
 _INITIAL = 8192
@@ -161,7 +166,7 @@ class ReadBuffer:
         """
         start = max(self._r, self._scanned - 3)
         self._examined += self._w - start
-        idx = self._buf.find(b'\r\n\r\n', start, self._w)
+        idx = self._buf.find(_HEAD_END, start, self._w)
         if idx == -1:
             self._scanned = self._w
             if limit > 0 and self._w - self._r > limit:
@@ -171,7 +176,7 @@ class ReadBuffer:
         # would make a repeat call search from beyond the match and report
         # "not found" for a head sitting right there.
         self._scanned = idx
-        end = idx + 4 - self._r
+        end = idx + _HEAD_END_LEN - self._r
         if limit > 0 and end > limit:
             return self.LIMIT_EXCEEDED
         return end

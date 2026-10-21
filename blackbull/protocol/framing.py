@@ -17,6 +17,12 @@ __all__ = ('NO_CONTENT_GENERATED_STATUSES', 'NO_CONTENT_STATUSES',
            'split_transfer_codings')
 
 
+#: End of an HTTP/1 message head (RFC 9112 §2.1).
+_HEAD_END = b'\r\n\r\n'
+
+#: HTTP/1 field-line terminator (RFC 9112 §2.2).
+_CRLF = b'\r\n'
+
 def parse_content_length(fields: Iterable[tuple[bytes, bytes]]
                          ) -> int | None:
     """The length every ``Content-Length`` occurrence agrees on, or ``None``.
