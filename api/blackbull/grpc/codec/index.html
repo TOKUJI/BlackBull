@@ -5773,8 +5773,7 @@ module. Protobuf serialization remains the handler's responsibility.</p>
 
 
 
-        <p>Raised when a DATA buffer is not a valid sequence of
-Length-Prefixed-Messages (truncated prefix or short body).</p>
+        <p>Invalid message framing: compression flag, length, or incomplete input.</p>
 
 
 
@@ -5804,7 +5803,7 @@ Length-Prefixed-Messages (truncated prefix or short body).</p>
 <p>A single DATA buffer may contain zero, one, or many framed messages
 (gRPC permits multiple messages per stream and does not align them to
 DATA-frame boundaries).  Raises <a class="autorefs autorefs-internal" href="#blackbull.grpc.codec.GrpcDecodeError"><code>GrpcDecodeError</code></a> on a truncated
-prefix or a message body shorter than its declared length.</p>
+prefix, an invalid compression flag, or a short message body.</p>
 
 
     </div>
