@@ -315,6 +315,9 @@ users will actually use.
   Declared oversize is rejected at the prefix. Unary and server-streaming
   accept one request message. Streaming caps apply per message; transport body
   and time limits still apply.
+- The message compression flag must be `0` or `1`. Other values fail the RPC
+  with `INTERNAL` without waiting for the message body or decompressing it;
+  `decode_messages` raises `GrpcDecodeError` for them.
 - **gzip message compression** is supported (`grpc-encoding: gzip` /
   `identity`); a compressed request in any other coding is rejected with
   `UNIMPLEMENTED`, and the response advertises

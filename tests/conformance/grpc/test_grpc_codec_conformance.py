@@ -188,12 +188,8 @@ class TestDecodeSecurityBoundaries:
         assert result == [(False, b'')]
 
     def test_compressed_flag_beyond_one(self):
-        """Values > 1 for the compressed flag byte are not valid per spec,
-        but the decoder reports them faithfully (the caller rejects)."""
-        # Custom-prefix: flag=0xFF, length=0
-        framed = b'\xff\x00\x00\x00\x00'
-        result = decode_messages(framed)
-        assert result == [(True, b'')]  # any non-zero → True
+        with pytest.raises(GrpcDecodeError, match='compressed flag'):
+            decode_messages(b'\xff\x00\x00\x00\x00')
 
 
 # ---------------------------------------------------------------------------

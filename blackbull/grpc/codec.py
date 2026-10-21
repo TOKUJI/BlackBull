@@ -16,8 +16,14 @@ MAX_MESSAGE_LENGTH = 16 * 1024 * 1024
 
 
 class GrpcDecodeError(ValueError):
-    """Raised when a DATA buffer is not a valid sequence of
-    Length-Prefixed-Messages (truncated prefix or short body)."""
+    """Invalid message framing: compression flag, length, or incomplete input."""
+
+
+def _decode_prefix(data: bytes | bytearray, offset: int = 0) -> tuple[int, int]:
+    prefix = _PREFIX.unpack_from(data, offset)
+    if prefix[0] > 1:
+        raise GrpcDecodeError(f'invalid compressed flag: {prefix[0]}')
+    return prefix
 
 
 def encode_message(payload: bytes, *, compressed: bool = False) -> bytes:
@@ -31,7 +37,7 @@ def decode_messages(data: bytes) -> list[tuple[bool, bytes]]:
     A single DATA buffer may contain zero, one, or many framed messages
     (gRPC permits multiple messages per stream and does not align them to
     DATA-frame boundaries).  Raises [`GrpcDecodeError`][] on a truncated
-    prefix or a message body shorter than its declared length.
+    prefix, an invalid compression flag, or a short message body.
     """
     messages: list[tuple[bool, bytes]] = []
     offset = 0
@@ -40,7 +46,7 @@ def decode_messages(data: bytes) -> list[tuple[bool, bytes]]:
         if n - offset < _PREFIX_LEN:
             raise GrpcDecodeError(
                 f'truncated message prefix: {n - offset} byte(s) before EOF')
-        flag, length = _PREFIX.unpack_from(data, offset)
+        flag, length = _decode_prefix(data, offset)
         offset += _PREFIX_LEN
         if length > MAX_MESSAGE_LENGTH:
             raise GrpcDecodeError(
@@ -50,6 +56,6 @@ def decode_messages(data: bytes) -> list[tuple[bool, bytes]]:
         if end > n:
             raise GrpcDecodeError(
                 f'message body truncated: need {length} bytes, have {n - offset}')
-        messages.append((bool(flag), data[offset:end]))
+        messages.append((flag == 1, data[offset:end]))
         offset = end
     return messages
