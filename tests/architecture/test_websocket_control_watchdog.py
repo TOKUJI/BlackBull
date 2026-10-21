@@ -39,7 +39,7 @@ async def test_ping_answered_while_handler_send_only(monkeypatch):
     Send-time servicing reads the fully-buffered PING at the next ``send()``,
     so a pusher answers keepalives without ever calling ``receive()``.
     """
-    monkeypatch.setattr(_deadline, '_TICK_S', 0.05)
+    monkeypatch.setattr(_deadline, 'TICK_S', 0.05)
 
     app = BlackBull()
 
@@ -76,7 +76,7 @@ async def test_ping_answered_for_idle_handler(monkeypatch):
     connection quiet for more than one tick — PONG latency bounded to ~one
     tick with no per-connection timers.
     """
-    monkeypatch.setattr(_deadline, '_TICK_S', 0.05)
+    monkeypatch.setattr(_deadline, 'TICK_S', 0.05)
 
     app = BlackBull()
 
@@ -97,7 +97,7 @@ async def test_ping_answered_between_receives(monkeypatch):
     """A handler that does slow work between ``receive()`` calls answers PINGs
     while the handler is busy (send-time servicing on the *send* after the
     work), not only at the next receive."""
-    monkeypatch.setattr(_deadline, '_TICK_S', 0.05)
+    monkeypatch.setattr(_deadline, 'TICK_S', 0.05)
 
     app = BlackBull()
 

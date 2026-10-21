@@ -9,7 +9,6 @@ import asyncio
 import base64
 import binascii
 import logging
-import os
 
 from ..connection import Connection
 from ..protocol.field_grammar import list_members, media_type
@@ -22,6 +21,7 @@ from .codec import (
 )
 from .registry import GrpcServiceRegistry
 from .status import GrpcError, GrpcStatus
+from ..env import read_setting
 
 logger = logging.getLogger(__name__)
 
@@ -39,31 +39,11 @@ _GRPC_SUBTYPE_PREFIX = _GRPC_CONTENT_TYPE + b'+'
 # encodings the server can decode (``identity`` + ``gzip``).
 _GRPC_ACCEPT_ENCODING = compression.ACCEPT_ENCODING
 
-# Per-message size cap at the gRPC layer (RESOURCE_EXHAUSTED above it).  4 MiB
-# matches grpcio's default receive limit; override with BB_GRPC_MAX_MESSAGE_SIZE.
-# Read at import; tests may monkeypatch this module attribute.
-try:
-    MAX_MESSAGE_SIZE = int(os.environ.get('BB_GRPC_MAX_MESSAGE_SIZE', 4 * 1024 * 1024))
-except ValueError:
-    MAX_MESSAGE_SIZE = 4 * 1024 * 1024
-
+# Read at import; tests may monkeypatch these module attributes.
+MAX_MESSAGE_SIZE = read_setting('grpc_max_message_size')
 # Batch length-prefixed messages independently of DATA boundaries.
-# Flush partial batches on producer suspension, at end, and before status.
-try:
-    _STREAM_BATCH_BYTES = int(os.environ.get('BB_GRPC_STREAM_BATCH_BYTES', 16 * 1024))
-except ValueError:
-    _STREAM_BATCH_BYTES = 16 * 1024
-
-# Response messages larger than this are gzip-compressed when the client's
-# grpc-accept-encoding lists gzip (and compression actually shrinks them).
-# Small messages compress poorly — the gzip header/trailer overhead can make
-# them *larger* — so a threshold avoids burning CPU for no bandwidth win.  Set
-# BB_GRPC_COMPRESS_MIN_BYTES very high to effectively disable response
-# compression.  Read at import; tests may monkeypatch this module attribute.
-try:
-    _COMPRESS_MIN_BYTES = int(os.environ.get('BB_GRPC_COMPRESS_MIN_BYTES', 1024))
-except ValueError:
-    _COMPRESS_MIN_BYTES = 1024
+_STREAM_BATCH_BYTES = read_setting('grpc_stream_batch_bytes')
+_COMPRESS_MIN_BYTES = read_setting('grpc_compress_min_bytes')
 
 # grpc-timeout unit → seconds (gRPC HTTP/2 protocol §"Timeout").
 _TIMEOUT_UNITS: dict[bytes, float] = {

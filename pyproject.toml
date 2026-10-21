@@ -241,7 +241,7 @@ blackbull = ["py.typed"]
 
 [tool.mutmut]
 source_paths = ["blackbull"]
-also_copy = ["bench", "scripts", "examples", "templates", "docs", "README.md", "KNOWN_LIMITATIONS.md", "justfile", "mkdocs.yml", ".github", "AGENTS.md"]
+also_copy = ["bench", "scripts", "tools", "examples", "templates", "docs", "README.md", "KNOWN_LIMITATIONS.md", "justfile", "mkdocs.yml", ".github", "AGENTS.md"]
 # Tests that read source or typing output cannot see through mutmut's trampolines.
 pytest_add_cli_args = [
     "-p", "no:cacheprovider",

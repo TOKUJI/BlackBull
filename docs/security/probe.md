@@ -188,7 +188,7 @@ reachability.py` extracts the defense sites from `blackbull/` via AST
 (the E1 method): every `raise`, every defense call (`log_cap_hit`,
 `rst_stream`, `goaway`, `_connection_error`), and every reference to a
 rejection status or an HTTP/2 error code — excluding startup config
-validation (`config.py`, `env.py`, `_env_vars.py`) and non-surface
+validation (`config.py`, `env.py`) and non-surface
 packages (`client/`, `fault_injection/`, `mqtt/`, `testing/`).
 
 `BB_WORKERS=1` serves in-process so one interpreter holds the request

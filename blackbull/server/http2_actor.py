@@ -27,6 +27,7 @@ from ..protocol.stream import Stream, StreamState
 from ..connection import Connection
 from ..headers import Headers
 from .parser import parse_headers
+from .deadline import Deadline
 from .cap_log import log_cap_hit
 from .rate_window import RateWindow
 from .recipient import (AbstractReader, IncompleteReadError,
@@ -320,10 +321,8 @@ class HTTP2Actor(Actor):
         self._peer_enable_push: bool = True
         self._task_group: asyncio.TaskGroup | None = None
 
-        # The time axis.  HTTP/2 cannot borrow HTTP/1.1's ConnectionDeadline:
-        # that cancels the task parked in the read, and this actor's read is a
-        # frame loop the server usually intends to keep.  Hence
-        # ``_liveness_watchdog``, which observes rather than interrupts.
+        # Enforced by ``_check_liveness``, which closes the writer: a Guard
+        # would cancel the frame loop.
         self._h2_idle_timeout: float = _cfg.h2_idle_timeout
         self._h2_ping_timeout: float = _cfg.h2_ping_timeout
         self._header_timeout: float = _cfg.header_timeout
@@ -776,14 +775,13 @@ class HTTP2Actor(Actor):
 
         async with asyncio.TaskGroup() as tg:
             self._task_group = tg
-            watchdog = _schedule_group_task(tg, self._liveness_watchdog())
-            # Cannot be None: the group was just entered.  Guarded anyway, so
-            # a refused watchdog can never look like a healthy connection.
-            if watchdog is not None:
-                try:
-                    await self._frame_loop(tg)
-                finally:
-                    watchdog.cancel()
+            liveness = self._liveness = Deadline(self._check_liveness)
+            if self._h2_idle_timeout > 0 or self._header_timeout > 0:
+                self._check_liveness()
+            try:
+                await self._frame_loop(tg)
+            finally:
+                liveness.disarm()
 
         self._task_group = None
 
@@ -823,46 +821,37 @@ class HTTP2Actor(Actor):
             self._rst_meter.count, self._rst_meter.window)
         await self._close_connection(ErrorCodes.ENHANCE_YOUR_CALM)
 
-    async def _liveness_watchdog(self) -> None:
+    def _check_liveness(self) -> None:
         """Enforce header, idle and PING deadlines by closing the writer.
 
-        Do not cancel a partially read frame; closing wakes the reader for ordered
-        stream teardown. Re-evaluate the applicable deadline after each wakeup.
+        Scanner callback.  Do not cancel a partially read frame; closing wakes
+        the reader for ordered stream teardown.  The applicable deadline is
+        chosen afresh each time, since frames move it while it waits.
         """
-        if self._h2_idle_timeout <= 0 and self._header_timeout <= 0:
+        now = asyncio.get_running_loop().time()
+        if self._probe_sent_at is not None:
+            due, expired = self._probe_sent_at + self._h2_ping_timeout, 'probe'
+        elif self._header_block_since is not None and self._header_timeout > 0:
+            due, expired = self._header_block_since + self._header_timeout, 'header'
+        elif self._h2_idle_timeout > 0:
+            due, expired = self._last_frame_at + self._h2_idle_timeout, 'idle'
+        else:
+            # Nothing to watch until the frame loop opens a header block.
+            self._liveness.arm(self._header_timeout)
             return
-        loop = asyncio.get_running_loop()
-        while True:
-            now = loop.time()
-            if self._probe_sent_at is not None:
-                wake_at = self._probe_sent_at + self._h2_ping_timeout
-                expired = 'probe'
-            elif self._header_block_since is not None and self._header_timeout > 0:
-                wake_at = self._header_block_since + self._header_timeout
-                expired = 'header'
-            elif self._h2_idle_timeout > 0:
-                wake_at = self._last_frame_at + self._h2_idle_timeout
-                expired = 'idle'
-            else:
-                # Nothing to watch until the frame loop opens a header block.
-                await asyncio.sleep(self._header_timeout)
-                continue
-
-            if wake_at > now:
-                await asyncio.sleep(wake_at - now)
-                continue  # state may have changed while we slept
-
-            if expired == 'header':
-                await self._end_for_stalled_header_block()
-                return
-            if expired == 'probe':
-                await self._end_for_unresponsive_peer()
-                return
-            await self._probe_peer()
+        if due > now:
+            self._liveness.arm(due - now)
+        elif expired == 'header':
+            _schedule_group_task(self._task_group, self._end_for_stalled_header_block())
+        elif expired == 'probe':
+            _schedule_group_task(self._task_group, self._end_for_unresponsive_peer())
+        else:
+            self._probe_sent_at = now
+            _schedule_group_task(self._task_group, self._probe_peer())
+            self._check_liveness()
 
     async def _probe_peer(self) -> None:
         """Ask a silent peer whether it is still there (RFC 9113 §6.7)."""
-        self._probe_sent_at = asyncio.get_running_loop().time()
         if _DEBUG:
             logger.debug('HTTP/2 idle %.1fs — probing with PING',
                          self._h2_idle_timeout)
@@ -1149,6 +1138,9 @@ class HTTP2Actor(Actor):
                         header_frame = frame
                         # The peer now owes CONTINUATION; start its clock.
                         self._header_block_since = _loop.time()
+                        # The liveness deadline was chosen before the block
+                        # opened; re-choose it so header_timeout applies now.
+                        self._check_liveness()
                 case FrameTypes.CONTINUATION:
                     send = self.make_sender(stream.stream_id)
                     spawned = await self._on_continuation_frame(

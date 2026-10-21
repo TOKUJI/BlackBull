@@ -22,7 +22,7 @@ from ..connection import (
 from ..headers import Headers
 from ..protocol.framing import (_CRLF, _HEAD_END, method_is,
                                 parse_content_length, split_transfer_codings)
-from .deadline import ConnectionDeadline
+from .deadline import Guard
 from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
                         AbstractReader, HTTP1Recipient, IncompleteReadError,
@@ -454,7 +454,7 @@ class HTTP1Actor(Actor):
         sockname: tuple[str, int | None] | None = None,
         ssl: bool = False,
         ws_queue_depth: int = _WS_READ_INLINE,
-        deadline: ConnectionDeadline | None = None,
+        deadline: Guard | None = None,
         connection_id: str = '',
     ) -> None:
         super().__init__()
@@ -476,7 +476,7 @@ class HTTP1Actor(Actor):
         cfg = get_settings()
         driven_without_connection_actor = self._deadline is None
         if driven_without_connection_actor:
-            self._deadline = ConnectionDeadline()
+            self._deadline = Guard()
         dl = self._deadline
         max_body_size = cfg.max_body_size
         send = SenderFactory.http1(self._writer)
@@ -498,7 +498,7 @@ class HTTP1Actor(Actor):
                                else cfg.header_timeout)
                 try:
                     if idle_window > 0:
-                        with dl.guard(idle_window):
+                        with dl.within(idle_window):
                             await self._read_headers(cfg.header_max_total)
                     else:
                         await self._read_headers(cfg.header_max_total)

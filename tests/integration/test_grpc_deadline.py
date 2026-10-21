@@ -1,5 +1,6 @@
 import asyncio
 from collections import Counter
+import gc
 
 from hpack import Decoder
 import pytest
@@ -15,11 +16,20 @@ pytestmark = pytest.mark.integration
 SHAPES = ('unary', 'server-streaming', 'client-streaming', 'bidi')
 
 
+@pytest.fixture
+def no_gc_pause():
+    """A full collection can stall the loop past the 30 ms call deadline."""
+    gc.collect()
+    gc.disable()
+    yield
+    gc.enable()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('force_asgi', [False, True])
 @pytest.mark.parametrize('shape', SHAPES)
 @pytest.mark.parametrize('stage', ['input', 'handler', 'output'])
-async def test_deadline_and_next_rpc_share_h2_connection(monkeypatch, force_asgi, shape, stage):
+async def test_deadline_and_next_rpc_share_h2_connection(monkeypatch, no_gc_pause, force_asgi, shape, stage):
     monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', '1' if force_asgi else '0')
     app = BlackBull()
     registry = GrpcServiceRegistry()

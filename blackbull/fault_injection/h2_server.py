@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import ssl
 import time
 
@@ -51,17 +50,9 @@ class H2FaultServerError(RuntimeError):
 def _refuse_in_production() -> None:
     """Refuse startup in BLACKBULL_ENV=production or when BB_PRODUCTION is enabled.
     """
-    override = os.environ.get('BB_PRODUCTION', '').strip().lower() in (
-        '1', 'true', 'yes', 'on')
-    in_production = False
-    try:
-        from ..env import get_settings, Environment  # noqa: PLC0415
-        in_production = get_settings().env == Environment.PRODUCTION
-    except Exception:
-        # If Settings can't be resolved for any reason, fall back to the
-        # explicit override alone rather than failing open silently.
-        pass
-    if override or in_production:
+    from ..env import get_settings, Environment  # noqa: PLC0415
+    cfg = get_settings()
+    if cfg.production or cfg.env == Environment.PRODUCTION:
         raise H2FaultServerError(
             "H2FaultServer refuses to run in a production context "
             "(BLACKBULL_ENV=production or BB_PRODUCTION set).  This is a "

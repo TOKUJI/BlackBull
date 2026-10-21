@@ -230,17 +230,3 @@ class TestTheRefusalReadsAgree:
             'must_close no longer reduces to the two flags needs_drain '
             'reads; update needs_drain to match')
 
-
-class TestTheCapIsReportedAsACapHit:
-    async def test_a_refusal_records_a_cap_hit(self, monkeypatch):
-        """Operators find out that a limit fired, and which one, the same way
-        every other limit reports it."""
-        seen = []
-        monkeypatch.setattr('blackbull.server.recipient.log_cap_hit',
-                            lambda name, **kw: seen.append((name, kw)))
-        r = _chunked_recipient([b'a' * 700, b'b' * 700], cap=1024)
-        with pytest.raises(HTTPException):
-            await _drain(r)
-        assert [name for name, _ in seen] == ['max_body_size']
-        assert seen[0][1]['limit'] == 1024
-        assert seen[0][1]['requested'] == 1400

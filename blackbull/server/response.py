@@ -284,7 +284,7 @@ class PriorityUpdateResponder(Responder):
                 log_cap_hit('h2_priority_update_buffer',
                             requested=len(handler.root_stream.children) + 1,
                             limit=handler.max_concurrent_streams,
-                            protocol='http/2')
+                            protocol='http2')
                 return
             handler.root_stream.add_child(self.frame.prioritized_stream_id)
             stream = handler.find_stream(self.frame.prioritized_stream_id)

@@ -22,7 +22,7 @@ from ..protocol.frame_types import (HeaderFrameFlags, DataFrameFlags,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
 from .cap_log import log_cap_hit
 from .constants import WSCloseCode
-from .deadline import WriteDeadline
+from .deadline import SharedGuard
 from .ws_codec import WSOpcode, encode_frame, encode_frame_header
 import logging
 from ..asgi import (
@@ -217,7 +217,7 @@ class AsyncioWriter(AbstractWriter):
     shape of slowloris, where a peer reading at 1 byte/sec blocks the drain on
     a TCP window that never reopens.  On timeout the transport is closed and
     ``ConnectionResetError`` raised, so the sender treats it as a peer-side
-    reset.  The bound rides the shared ``ConnectionDeadline`` scanner,
+    reset.  The bound rides the shared deadline scanner,
     whose ``BB_DEADLINE_TICK_MS`` granularity is the slop on when it fires.
     """
 
@@ -238,7 +238,7 @@ class AsyncioWriter(AbstractWriter):
         self._write_timeout = write_timeout
         self._cap_name = cap_name
         self._protocol = protocol
-        self._deadline = (WriteDeadline(write_timeout)
+        self._deadline = (SharedGuard(write_timeout)
                           if write_timeout > 0 else None)
         # Same mock hazard: checked on the class, which a fabricated instance
         # attribute cannot reach.
@@ -1230,16 +1230,10 @@ class HTTP2Sender(BaseSender):
                     async with asyncio.timeout(self._flow_control_timeout):
                         await self._window_open.wait()
                 except (asyncio.TimeoutError, TimeoutError) as exc:
-                    if self._flow_control_cap == 'write_timeout':
-                        log_cap_hit('write_timeout',
-                                    requested=self._flow_control_timeout,
-                                    limit=self._flow_control_timeout,
-                                    protocol='http2')
-                    else:
-                        log_cap_hit(self._flow_control_cap,
-                                    requested=self._flow_control_timeout,
-                                    limit=self._flow_control_timeout,
-                                    protocol='http2')
+                    log_cap_hit(self._flow_control_cap,
+                                requested=self._flow_control_timeout,
+                                limit=self._flow_control_timeout,
+                                protocol='http2')
                     cap_env = f'BB_{self._flow_control_cap.upper()}'
                     raise FlowControlStalled(
                         f'stream {self._stream_id}: peer sent no WINDOW_UPDATE '

@@ -1,10 +1,9 @@
 """Write the environment-variable tables in the reference page from the code.
 
-``blackbull/_env_vars.py`` holds every configurable variable: its default as
-the value, its description as the attribute docstring.  This renders those
-into ``docs/reference/env-vars.md`` between the markers, leaving the page's
-own prose -- the intros, the client narrative, the recommendations table --
-untouched.
+Each ``Settings`` and ``AppConfig`` field declared with ``blackbull.env.setting``
+holds one variable: its name, default, section and description.  This renders
+them into ``docs/reference/env-vars.md`` between the markers, leaving the
+page's own prose untouched.
 
 Run it with ``--check`` to fail when the committed page is not what the code
 would produce.
@@ -12,57 +11,35 @@ would produce.
 from __future__ import annotations
 
 import argparse
-import ast
+import dataclasses
 import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SOURCE = ROOT / 'blackbull' / '_env_vars.py'
+sys.path.insert(0, str(ROOT))
+
+from blackbull.config import AppConfig  # noqa: E402
+from blackbull.env import Settings  # noqa: E402
+
 PAGE = ROOT / 'docs' / 'reference' / 'env-vars.md'
+SOURCE = 'the Settings and AppConfig declarations'
 
 BEGIN = '<!-- generated: {} -->'
 END = '<!-- /generated -->'
 HEADER = '| Variable | Default | Controls |\n|---|---|---|'
 
 
-def sections() -> list[tuple[str, list[tuple[str, object, str]]]]:
-    """``(section, [(variable, default, description)])`` in source order."""
-    src = SOURCE.read_text(encoding='utf-8')
-    tree = ast.parse(src)
-    lines = src.splitlines()
-    ns: dict[str, object] = {}
-    exec(compile(tree, str(SOURCE), 'exec'), ns)  # noqa: S102 - our own module
-    COMPUTED.update(ns.get('COMPUTED_DEFAULTS', {}))
-
-    out: list[tuple[str, list]] = []
-    current: str | None = None
-    body = tree.body
-    for index, node in enumerate(body):
-        if not isinstance(node, ast.Assign):
-            continue
-        name = node.targets[0].id
-        if not name.startswith(('BB_', 'BLACKBULL_')):
-            continue
-        for above in range(node.lineno - 2, 0, -1):
-            text = lines[above].strip()
-            if text.startswith('# --- '):
-                current = text[6:].rstrip('- ').strip()
-                break
-            if text and not text.startswith('#'):
-                break
-        # The description is the string statement that follows the assignment
-        # -- an attribute docstring, which is what griffe reads too.
-        nxt = body[index + 1] if index + 1 < len(body) else None
-        doc = (nxt.value.value if isinstance(nxt, ast.Expr)
-               and isinstance(nxt.value, ast.Constant)
-               and isinstance(nxt.value.value, str) else '')
-        if not out or out[-1][0] != current:
-            out.append((current or '', []))
-        out[-1][1].append((name, ns[name], doc.strip()))
-    return out
-
-
-COMPUTED: dict[str, str] = {}
+def sections() -> list[tuple[str, list[tuple[str, str, object, str]]]]:
+    """``(section, [(variable, shown, default, description)])`` in declaration order."""
+    out: dict[str, list] = {}
+    for cls in (Settings, AppConfig):
+        for f in dataclasses.fields(cls):
+            meta = f.metadata
+            if 'env' not in meta:
+                continue
+            out.setdefault(meta['section'], []).append(
+                (meta['env'], meta['shown'], f.default, meta['doc']))
+    return list(out.items())
 
 
 def spelling(value: object) -> str:
@@ -93,12 +70,11 @@ def cell(text: str) -> str:
     return text.replace('|', r'\|')
 
 
-def table(entries: list[tuple[str, object, str]]) -> str:
+def table(entries: list[tuple[str, str, object, str]]) -> str:
     rows = [HEADER]
-    for name, value, doc in entries:
-        computed = COMPUTED.get(name)
-        shown = computed if computed is not None else spelling(value)
-        default = f'`{shown}`{gloss(value)}' if shown != '' else '*(unset)*'
+    for name, shown, value, doc in entries:
+        shown = shown if shown is not None else spelling(value)
+        default = f'`{shown}`{gloss(value)}' if shown not in ('', 'None') else '*(unset)*'
         rows.append(f'| `{name}` | {default} | {cell(doc)} |')
     return '\n'.join(rows)
 
@@ -124,9 +100,9 @@ def main() -> int:
     wanted = render(current)
     if args.check:
         if current == wanted:
-            print(f'{PAGE.relative_to(ROOT)} matches {SOURCE.relative_to(ROOT)}')
+            print(f'{PAGE.relative_to(ROOT)} matches {SOURCE}')
             return 0
-        print(f'{PAGE.relative_to(ROOT)} is not what {SOURCE.relative_to(ROOT)} '
+        print(f'{PAGE.relative_to(ROOT)} is not what {SOURCE} '
               f'produces.  Run: uv run python scripts/gen_env_docs.py')
         return 1
     PAGE.write_text(wanted, encoding='utf-8')

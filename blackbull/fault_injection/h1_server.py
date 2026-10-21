@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import ssl
 import time
 
@@ -46,21 +45,12 @@ class H1FaultServerError(RuntimeError):
 def _refuse_in_production() -> None:
     """Hard opt-out: refuse to start in a production context.
 
-    Same rule and same two signals as the HTTP/2 half —
-    ``BLACKBULL_ENV=production`` via ``Settings.env``, plus ``BB_PRODUCTION``
-    as an explicit override so the guard trips even when the Settings
-    machinery is unavailable.
+    Same rule and same two signals as the HTTP/2 half:
+    ``BLACKBULL_ENV=production``, or the ``BB_PRODUCTION`` override.
     """
-    override = os.environ.get('BB_PRODUCTION', '').strip().lower() in (
-        '1', 'true', 'yes', 'on')
-    in_production = False
-    try:
-        from ..env import get_settings, Environment  # noqa: PLC0415
-        in_production = get_settings().env == Environment.PRODUCTION
-    except Exception:
-        # Fall back to the explicit override rather than failing open.
-        pass
-    if override or in_production:
+    from ..env import get_settings, Environment  # noqa: PLC0415
+    cfg = get_settings()
+    if cfg.production or cfg.env == Environment.PRODUCTION:
         raise H1FaultServerError(
             "H1FaultServer refuses to run in a production context "
             "(BLACKBULL_ENV=production or BB_PRODUCTION set).  This is a "

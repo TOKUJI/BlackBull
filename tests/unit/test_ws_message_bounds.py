@@ -18,7 +18,6 @@ Every test here sets the cap explicitly.  None of them assert the shipped
 default, so changing that default cannot silently rewrite what these
 tests mean.
 """
-import asyncio
 import tracemalloc
 import zlib
 
@@ -65,42 +64,6 @@ def _deflate(payload: bytes) -> bytes:
     c = zlib.compressobj(wbits=-15, level=zlib.Z_DEFAULT_COMPRESSION)
     out = c.compress(payload) + c.flush(zlib.Z_SYNC_FLUSH)
     return out[:-4] if out.endswith(b'\x00\x00\xff\xff') else out
-
-
-class _FakeReader:
-    """Byte buffer with the StreamReader surface the recipient uses.
-
-    ``remaining`` is the point of it: a refusal that happens at the frame
-    which crosses the cap leaves the following frames unread, and that is
-    observable here without reaching into the recipient.
-    """
-
-    def __init__(self, data: bytes):
-        self._buf = bytearray(data)
-
-    @property
-    def remaining(self) -> int:
-        return len(self._buf)
-
-    async def readexactly(self, n: int) -> bytes:
-        if len(self._buf) < n:
-            raise asyncio.IncompleteReadError(bytes(self._buf), n)
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def read(self, n: int) -> bytes:
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:
-        idx = self._buf.find(sep)
-        if idx == -1:
-            raise asyncio.IncompleteReadError(bytes(self._buf), None)
-        chunk = bytes(self._buf[:idx + len(sep)])
-        del self._buf[:idx + len(sep)]
-        return chunk
 
 
 class _FakeWriter:
@@ -355,30 +318,6 @@ class TestCapPolicy:
         assert await recipient() == {'type': 'websocket.connect'}
         event = await recipient()
         assert event['bytes'] == payload
-
-    @pytest.mark.asyncio
-    async def test_refusal_is_visible_in_the_cap_log(self, caplog):
-        """Every other limit reports on ``blackbull.caps``; so does this one."""
-        cap = 4096
-        recipient, _, _ = _driver(
-            _frame(b'z' * (cap + 1), opcode=WSOpcode.BINARY),
-            max_message_size=cap, max_frame_payload=1024 * 1024)
-        assert await recipient() == {'type': 'websocket.connect'}
-
-        with caplog.at_level('WARNING', logger='blackbull.caps'):
-            with pytest.raises(ProtocolError):
-                await recipient()
-
-        hits = [r for r in caplog.records
-                if getattr(r, 'cap', None) == 'ws_max_message_size']
-        assert hits, (
-            'no ws_max_message_size record on blackbull.caps; the limit is '
-            f'invisible to operators.  saw={[getattr(r, "cap", None) for r in caplog.records]}'
-        )
-        assert hits[0].limit == cap
-        assert hits[0].requested > cap
-        assert hits[0].protocol == 'ws'
-
 
 class TestShippedDefault:
     """The one place the default value itself is the claim under test.

@@ -308,13 +308,13 @@ class _FailingWriter(AbstractWriter):
 
 
 def _conn_view(reader: AbstractReader, writer: AbstractWriter):
-    from blackbull.server.deadline import ConnectionDeadline
+    from blackbull.server.deadline import Guard
     from blackbull.server.protocol_registry import ConnectionView
 
     return ConnectionView(
         reader=reader, writer=writer, app=_noop_app, aggregator=None,
         peername=None, sockname=None, ssl=False, alpn=None,
-        deadline=ConnectionDeadline(), connection_id='best-effort-write')
+        deadline=Guard(), connection_id='best-effort-write')
 
 
 def _bad_preface_conn(exc: BaseException):

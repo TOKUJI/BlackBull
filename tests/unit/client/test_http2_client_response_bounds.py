@@ -59,6 +59,14 @@ from blackbull.server.sender import AbstractWriter
 pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(10)]
 
 
+@pytest.fixture(autouse=True)
+def _fine_scanner(monkeypatch):
+    """These deadlines are fractions of a second; the default scanner tick
+    would add up to ``BB_DEADLINE_TICK_MS`` to each."""
+    from blackbull.server import deadline
+    monkeypatch.setattr(deadline, 'TICK_S', 0.01)
+
+
 async def _resolved(future, seconds: float = 1.0):
     """The response, or a failure — never an unbounded wait."""
     return await asyncio.wait_for(asyncio.shield(future), seconds)

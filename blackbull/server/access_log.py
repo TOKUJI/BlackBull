@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from dataclasses import dataclass, field
 from typing import ClassVar
@@ -13,11 +12,12 @@ from ..asgi import ASGIEvent
 # module imports anything back from this one, so there is no cycle.
 from ..event_aggregator import EventAggregator  # noqa: TC002
 from ..logger import enqueue_access_log
+from ..env import read_setting
 
 _access_logger = logging.getLogger('blackbull.access')
 
 # Diagnostic checkpoints are opt-in; their clock reads add request work.
-PHASE_TRACE: bool = os.environ.get('BB_PHASE_TRACE', '0') == '1'
+PHASE_TRACE: bool = read_setting('phase_trace')
 
 
 def _escape(value: str) -> str:

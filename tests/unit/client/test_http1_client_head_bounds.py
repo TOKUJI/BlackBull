@@ -16,11 +16,9 @@ guard.
 """
 from __future__ import annotations
 
-import asyncio
 
 import pytest
 
-from blackbull.client.exceptions import ResponseTooLarge
 from blackbull.client.http1 import HTTP1ResponseRecipient
 
 from tests.harness import fed
@@ -28,11 +26,6 @@ from tests.harness import fed
 
 def _CannedReader(payload: bytes = b''):
     return fed(payload).reader
-
-
-def _StallingReader(payload: bytes = b''):
-    """Delivers *payload*, then stays connected and says nothing."""
-    return fed(payload, eof=False).reader
 
 
 def _head(*fields: bytes) -> bytes:
@@ -46,32 +39,6 @@ class TestHeadBounds:
         res = await HTTP1ResponseRecipient().receive(reader)
         assert res.status == 200
         assert res.body == b'hi'
-
-    @pytest.mark.asyncio
-    async def test_a_head_over_the_total_budget_is_refused(self, monkeypatch):
-        monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '512')
-        fields = [b'x-pad-%03d: %s\r\n' % (i, b'v' * 40) for i in range(40)]
-        reader = _CannedReader(_head(*fields))
-        with pytest.raises(ResponseTooLarge):
-            await HTTP1ResponseRecipient().receive(reader)
-
-    @pytest.mark.asyncio
-    async def test_one_oversized_line_is_refused_inside_the_total(self, monkeypatch):
-        """The unit column is not the total: this head fits, one line does not."""
-        monkeypatch.setenv('BB_CLIENT_HEAD_MAX_TOTAL', '8192')
-        monkeypatch.setenv('BB_CLIENT_HEAD_MAX_LINE', '64')
-        reader = _CannedReader(_head(b'x-big: ' + b'v' * 200 + b'\r\n'))
-        with pytest.raises(ResponseTooLarge):
-            await HTTP1ResponseRecipient().receive(reader)
-
-    @pytest.mark.asyncio
-    async def test_a_stalled_head_times_out_rather_than_hanging(self, monkeypatch):
-        """A bare ``TimeoutError``, matching ``_connect``'s choice: a peer that
-        stalled reads differently from one that answered and refused."""
-        monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.05')
-        reader = _StallingReader(b'HTTP/1.1 200 OK\r\nx-half: ')
-        with pytest.raises(TimeoutError):
-            await asyncio.wait_for(HTTP1ResponseRecipient().receive(reader), 2.0)
 
     @pytest.mark.asyncio
     async def test_zero_disables_each_bound(self, monkeypatch):

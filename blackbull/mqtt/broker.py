@@ -339,10 +339,7 @@ class BrokerActor(Actor):
         self._wills = {}            # client_id -> MQTTPublish (Will template)
         # Derive share-group membership from live subscriptions; retain only rotation position.
         self._share_rotation: dict[tuple[str, str], int] = {}
-        # One-shot handle armed at the earliest pending session deadline, in
-        # the spirit of ``ConnectionDeadline``: no periodic tick, and nothing
-        # armed at all while no detached session can expire — an app that
-        # loads the MQTT extension but sees no traffic pays no wakeup.
+        # Armed at the earliest session expiry; unarmed while none can expire.
         self._expiry_timer: asyncio.TimerHandle | None = None
         # CONNECT is allowed once per transport, including failed attempts.
         # Weak references retain that fact while queued messages can name the

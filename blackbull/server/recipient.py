@@ -15,14 +15,15 @@ from ..protocol.field_grammar import (
     FIELD_VALUE_ALLOWED_OCTETS, PROHIBITED_TRAILER_FIELDS, TCHAR_OCTETS,
     FieldError, field_line)
 from .cap_log import log_cap_hit
-from .deadline import ConnectionDeadline, WsIdleWatchdog
+from . import deadline as _deadline
+from .deadline import Deadline, Guard
 from .sender import AbstractWriter, AsyncioWriter
 from .ws_codec import (
     FramePayloadTooLarge, InvalidFrameLength, MessageTooLarge, WSOpcode,
     encode_frame, read_frame_header, read_payload,
 )
 from .constants import WSCloseCode
-from .rate_window import RateWindow
+from .rate_window import ByteRateFloor, RateWindow
 from ..asgi import ASGIEvent
 from ..env import get_settings
 from ..connection import Connection, disconnected, mark_disconnected
@@ -409,7 +410,7 @@ class HTTP1Recipient(BaseRecipient):
 
     def __init__(self, reader: AbstractReader, conn: Connection,
                  *, body_timeout: float = 0.0,
-                 deadline: ConnectionDeadline | None = None,
+                 deadline: Guard | None = None,
                  chunk_size: int | None = None,
                  chunk_max: int | None = None,
                  max_body: int | None = None,
@@ -476,11 +477,8 @@ class HTTP1Recipient(BaseRecipient):
         # Transport-wait seconds only, never the handler's own — the delivery
         # rate's denominator (env-vars.md, ``BB_MIN_BODY_RATE_GRACE``).
         self._body_wait = 0.0
-        # ``_rate_window_wait`` is the accumulated wait when the current window
-        # opened, ``_rate_window_seen`` the octets delivered inside it; the
-        # window's width and purpose are ``BB_MIN_BODY_RATE`` in env-vars.md.
-        self._rate_window_wait = 0.0
-        self._rate_window_seen = 0
+        self._judged_wait = 0.0
+        self._rate_floor = None         # made on the first body chunk
         # Over the size cap or below the rate floor; see [`must_close`][].
         self._body_refused = False
         # A chunked-framing violation; see [`must_close`][].
@@ -649,7 +647,6 @@ class HTTP1Recipient(BaseRecipient):
         abandons a silent one.
         """
         self._body_seen += len(chunk)
-        self._rate_window_seen += len(chunk)
         if self._max_body and self._body_seen > self._max_body:
             self._body_refused = True
             self._done = True
@@ -659,20 +656,17 @@ class HTTP1Recipient(BaseRecipient):
             raise _content_too_large(
                 f'request body exceeds {self._max_body} bytes')
         if self._min_rate:
-            window_wait = self._body_wait - self._rate_window_wait
-            if window_wait > self._min_rate_grace:
-                if self._rate_window_seen < self._min_rate * window_wait:
-                    self._body_refused = True
-                    self._done = True
-                    log_cap_hit(
-                        'min_body_rate',
-                        requested=self._rate_window_seen / window_wait,
-                        limit=self._min_rate,
-                        scope_path=self._req_path, protocol='http1')
-                    raise ClientDisconnected()
-                # Earned its keep: roll the window forward.
-                self._rate_window_wait = self._body_wait
-                self._rate_window_seen = 0
+            floor = self._rate_floor
+            if floor is None:
+                floor = self._rate_floor = ByteRateFloor(self._min_rate, self._min_rate_grace)
+            waited, self._judged_wait = self._body_wait - self._judged_wait, self._body_wait
+            if floor.record(len(chunk), waited):
+                self._body_refused = True
+                self._done = True
+                log_cap_hit('min_body_rate', requested=floor.observed,
+                            limit=self._min_rate,
+                            scope_path=self._req_path, protocol='http1')
+                raise ClientDisconnected()
         return chunk
 
     async def _read_with_timeout(self, coro):
@@ -687,10 +681,10 @@ class HTTP1Recipient(BaseRecipient):
         t0 = _monotonic() if self._min_rate else None
         try:
             if self._body_timeout > 0 and self._deadline is not None:
-                with self._deadline.guard(self._body_timeout):
+                with self._deadline.within(self._body_timeout):
                     return await coro
             if self._body_timeout > 0:
-                # Fallback for a caller with no ConnectionDeadline; same
+                # Fallback for a caller with no Guard; same
                 # per-call semantics, but a fresh Timeout per chunk.
                 return await asyncio.wait_for(coro, timeout=self._body_timeout)
             return await coro
@@ -852,10 +846,9 @@ class HTTP2Recipient(BaseRecipient):
         self._min_rate = min_rate
         self._min_rate_grace = min_rate_grace
         self._body_seen = 0
-        #: Wall clock, unlike HTTP/1.1's transport-wait denominator: DATA arrives
-        #: whether or not the handler reads, so elapsed time is the peer's alone.
-        self._rate_window_start: float | None = None
-        self._rate_window_seen = 0
+        #: Fed wall time between DATA frames, which is the peer's alone.
+        self._rate_floor: ByteRateFloor | None = None     # made on the first DATA
+        self._rate_last: float | None = None
         #: Exempts the peer from the rate judgement: it was blocked by our own
         #: closed inbound window, so its pace is partly our doing.
         self._was_window_stalled = False
@@ -902,32 +895,27 @@ class HTTP2Recipient(BaseRecipient):
         if not self._min_rate:
             return False
         now = _monotonic()
-        if self._rate_window_start is None:
-            self._rate_window_start = now
-            self._rate_window_seen = nbytes
-        else:
-            self._rate_window_seen += nbytes
-            if (self._credit_cb is not None
-                    and self._uncredited + nbytes >= self._credit_budget):
-                # Observed as the window *closes*, not while it is closed: the
-                # peer's next frame can only arrive after a replay has reopened
-                # it, by which point the balance no longer shows the stall.
-                self._was_window_stalled = True
-            elapsed = now - self._rate_window_start
-            if elapsed > self._min_rate_grace:
-                if (not self._was_window_stalled
-                        and self._rate_window_seen < self._min_rate * elapsed):
-                    logger.warning(
-                        'HTTP2Recipient body below BB_MIN_BODY_RATE — '
-                        'refusing DATA frame')
-                    log_cap_hit('min_body_rate',
-                                requested=self._rate_window_seen / elapsed,
-                                limit=self._min_rate, protocol='http2')
-                    return True
-                # Earned its keep: roll the window forward.
-                self._rate_window_start = now
-                self._rate_window_seen = 0
-        return False
+        last, self._rate_last = self._rate_last, now
+        floor = self._rate_floor
+        if floor is None:
+            floor = self._rate_floor = ByteRateFloor(self._min_rate, self._min_rate_grace)
+        if last is None:
+            floor.record(nbytes, 0.0)
+            return False
+        if (self._credit_cb is not None
+                and self._uncredited + nbytes >= self._credit_budget):
+            # Noted as the window closes: by the peer's next frame it has reopened.
+            self._was_window_stalled = True
+        if not floor.record(nbytes, now - last):
+            return False
+        if self._was_window_stalled:
+            floor.reset()       # exempt, but the window still rolls forward
+            return False
+        logger.warning('HTTP2Recipient body below BB_MIN_BODY_RATE — '
+                       'refusing DATA frame')
+        log_cap_hit('min_body_rate', requested=floor.observed,
+                    limit=self._min_rate, protocol='http2')
+        return True
 
     def put_DATAFrame(self, frame: Data) -> bool:
         """Enqueue a DATA frame event.  Returns False when the frame must be
@@ -1067,8 +1055,9 @@ class HTTP2Recipient(BaseRecipient):
                 # window restarts rather than resumes, so the exempted interval
                 # is not averaged into the next judgement.
                 self._was_window_stalled = False
-                self._rate_window_start = None
-                self._rate_window_seen = 0
+                if self._rate_floor is not None:
+                    self._rate_floor.reset()
+                self._rate_last = None
             try:
                 await self._credit_cb(credit)
             except Exception:
@@ -1200,7 +1189,7 @@ class WebSocketRecipient(BaseRecipient):
         self._deferred_pending = False
         # Created lazily on the first touch(), so constructing a recipient never
         # requires a running loop.
-        self._watchdog: WsIdleWatchdog | None = None
+        self._watchdog: Deadline | None = None
         self._closed = False
         # The *time* column for a WebSocket connection (env-vars.md,
         # ``BB_WS_IDLE_TIMEOUT``).  Off unless a caller asks: this class is the
@@ -1720,7 +1709,12 @@ class WebSocketRecipient(BaseRecipient):
 
     def _ensure_watchdog(self) -> None:
         if self._watchdog is None:
-            self._watchdog = WsIdleWatchdog(self._on_idle_tick)
+            self._watchdog = Deadline(self._on_watchdog)
+
+    def _on_watchdog(self) -> None:
+        """Quiet for a tick: service deferred work, and keep watching."""
+        self._watchdog.arm(_deadline.TICK_S)
+        self._on_idle_tick()
 
     def _ensure_watchdog_armed(self) -> None:
         """Create + register the watchdog once (requires a running loop).
@@ -1730,13 +1724,13 @@ class WebSocketRecipient(BaseRecipient):
         serviced.
         """
         if self._watchdog is None:
-            self._watchdog = WsIdleWatchdog(self._on_idle_tick)
-            self._watchdog.touch()      # register with the deadline scanner
+            self._ensure_watchdog()
+            self._watchdog.arm(_deadline.TICK_S)
 
     def touch(self) -> None:
         """Mark connection activity (receive or send) for the idle watchdog."""
         self._ensure_watchdog()
-        self._watchdog.touch()
+        self._watchdog.arm(_deadline.TICK_S)
 
     def disarm_watchdog(self) -> None:
         if self._watchdog is not None:
@@ -1885,7 +1879,7 @@ class RecipientFactory:
     @staticmethod
     def http1(reader: AbstractReader, conn: Connection, *,
               body_timeout: float = 0.0,
-              deadline: ConnectionDeadline | None = None,
+              deadline: Guard | None = None,
               framing: tuple[int | None, bool]) -> HTTP1Recipient:
         return HTTP1Recipient(reader, conn, body_timeout=body_timeout,
                               deadline=deadline, framing=framing)

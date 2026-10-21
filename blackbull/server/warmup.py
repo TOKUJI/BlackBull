@@ -6,38 +6,10 @@ Failures log and fall back to cold startup; the wall-clock budget must bound boo
 import asyncio
 import gc
 import logging
-import os
 import time
+from ..env import get_settings
 
 logger = logging.getLogger(__name__)
-
-# Wall-clock upper bound so a pathological hook can never stall boot.  Hooks
-# self-limit their own volume; this is only a safety cap.
-_DEFAULT_BUDGET_S = 60.0
-# In-memory TLS handshakes to prime the OpenSSL / RSA / ALPN path when a TLS
-# context is present (protocol-agnostic transport warm-up).
-_DEFAULT_TLS_N = 64
-
-
-def _budget_s() -> float:
-    raw = os.environ.get('BB_WARMUP_BUDGET_S')
-    if raw is None:
-        return _DEFAULT_BUDGET_S
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        return _DEFAULT_BUDGET_S
-
-
-def _tls_n() -> int:
-    raw = os.environ.get('BB_WARMUP_TLS_N')
-    if raw is None:
-        return _DEFAULT_TLS_N
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        return _DEFAULT_TLS_N
-
 
 def _name(fn) -> str:
     return getattr(fn, '__name__', repr(fn))
@@ -68,7 +40,7 @@ async def warmup_inline(app, ssl_context=None) -> None:
     hooks = getattr(app, '_warmup_hooks', None)
     if not hooks:
         return
-    budget = _budget_s()
+    budget = get_settings().warmup_budget_s
     if budget <= 0:
         return
     t0 = time.monotonic()
@@ -95,7 +67,7 @@ async def _run_hooks(app, ssl_context, hooks) -> None:
     # only runs when the listener will terminate TLS.
     if ssl_context is not None:
         try:
-            await warm_tls(ssl_context, n=_tls_n())
+            await warm_tls(ssl_context, n=get_settings().warmup_tls_n)
         except Exception:  # pragma: no cover - defensive
             logger.warning('TLS warm-up failed (skipping)', exc_info=True)
 
@@ -108,9 +80,11 @@ def _freeze() -> None:
         pass
 
 
-async def warm_tls(ssl_context, *, n: int = _DEFAULT_TLS_N) -> None:
+async def warm_tls(ssl_context, *, n: int | None = None) -> None:
     """Warm TLS using in-memory SSL BIOs, without binding a listener.
     """
+    if n is None:
+        n = get_settings().warmup_tls_n
     if ssl_context is None or n <= 0:
         return
     import ssl  # noqa: PLC0415

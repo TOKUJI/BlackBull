@@ -96,7 +96,7 @@ async def _served(path: str, timeout: float = 5.0) -> None:
         await asyncio.sleep(0.02)
 
 
-async def _open_during_startup(served, attempts: int) -> int:
+async def open_during_startup(served, attempts: int) -> int:
     """Run the server, make *attempts* connects during startup; returns refusals."""
     server, path, started, release = served
     runner = asyncio.create_task(server.run())
@@ -115,7 +115,7 @@ async def _open_during_startup(served, attempts: int) -> int:
         server.close_socket()
 
 
-def _server(tmp_path, how: str, max_connections: int, monkeypatch):
+def server_under_startup(tmp_path, how: str, max_connections: int, monkeypatch):
     """A server on an AF_UNIX listener of backlog ``BACKLOG``.
 
     ``bound``: BlackBull binds it, from ``BB_SOCKET_BACKLOG``.  ``adopted``:
@@ -160,11 +160,11 @@ def _fresh_settings():
 @pytest.mark.parametrize('accept', ['uncapped', 'capped'])
 async def test_a_full_queue_at_open_warns_once_with_waiting_and_backlog(
         tmp_path, caplog, monkeypatch, how, accept):
-    served = _server(tmp_path, how, 0 if accept == 'uncapped' else 64,
+    served = server_under_startup(tmp_path, how, 0 if accept == 'uncapped' else 64,
                      monkeypatch)
     path = served[1]
     with caplog.at_level(logging.WARNING, logger='blackbull'):
-        refused = await _open_during_startup(served, BACKLOG + 3)
+        refused = await open_during_startup(served, BACKLOG + 3)
     assert refused == 2, 'the kernel admits backlog + 1 on AF_UNIX'
 
     warnings = _backlog_warnings(caplog)
@@ -187,9 +187,9 @@ async def test_a_full_queue_at_open_warns_once_with_waiting_and_backlog(
 async def test_a_queue_that_is_not_full_gives_no_warning(
         tmp_path, caplog, monkeypatch, how):
     """``BACKLOG`` waiting is not full: one more would still be admitted."""
-    served = _server(tmp_path, how, 0, monkeypatch)
+    served = server_under_startup(tmp_path, how, 0, monkeypatch)
     with caplog.at_level(logging.WARNING, logger='blackbull'):
-        refused = await _open_during_startup(served, BACKLOG)
+        refused = await open_during_startup(served, BACKLOG)
     assert refused == 0
     assert _backlog_warnings(caplog) == []
 
@@ -205,9 +205,9 @@ async def test_a_failing_query_gives_no_warning_and_still_serves(
         return None
 
     monkeypatch.setattr(server_mod, 'unix_accept_queue', broken)
-    served = _server(tmp_path, 'bound', 0, monkeypatch)
+    served = server_under_startup(tmp_path, 'bound', 0, monkeypatch)
     with caplog.at_level(logging.WARNING, logger='blackbull'):
-        await _open_during_startup(served, BACKLOG + 3)
+        await open_during_startup(served, BACKLOG + 3)
     assert _backlog_warnings(caplog) == []
 
 

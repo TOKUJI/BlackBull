@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..event_aggregator import EventAggregator
-from .deadline import ConnectionDeadline
+from .deadline import Guard
 from .http1_actor import HTTP1Actor
 from .recipient import AbstractReader, _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE
 from .sender import AbstractWriter
@@ -66,7 +66,7 @@ class ConnectionView:
     sockname: tuple[str, int | None] | None
     ssl: bool
     alpn: str | None
-    deadline: ConnectionDeadline
+    deadline: Guard
     connection_id: str
     stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH
     ws_queue_depth: int = _WS_READ_INLINE
