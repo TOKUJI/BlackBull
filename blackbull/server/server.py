@@ -45,8 +45,8 @@ def _listener_from_args(port, unix_path, inherited_fd, tls=None) -> Listener:
 
 def _address_of(sock) -> Tcp | Unix:
     sockname = sock.getsockname()
-    if isinstance(sockname, str):
-        return Unix(sockname)
+    if isinstance(sockname, (str, bytes)):
+        return Unix(os.fsdecode(sockname))
     return Tcp(sockname[1])
 
 _CLEANUP_TIMEOUT = 8.0
@@ -172,9 +172,8 @@ class _SigtermCapture:
         return False
 
 
-def _unix_address(sock) -> str:
-    """The listener's name as ``ss`` prints it: an abstract one gets ``@``."""
-    name = sock.getsockname()
+def _unix_address(name: str | bytes) -> str:
+    """An AF_UNIX address for applications and logs: abstract names get ``@``."""
     if isinstance(name, bytes):
         if name[:1] == b'\0':
             return '@' + name[1:].decode('utf-8', 'backslashreplace')
@@ -198,7 +197,7 @@ def _report_full_unix_queue(sock) -> None:
     waiting, backlog = queue
     if waiting <= backlog:
         return
-    listener = _unix_address(sock)
+    listener = _unix_address(sock.getsockname())
     cap = somaxconn()
     if cap is not None and backlog >= cap:
         raise_what = (f'net.core.somaxconn caps this backlog at {cap}: raise '
@@ -842,15 +841,11 @@ class Server:
         """
         peername = transport.get_extra_info('peername')
         sockname = transport.get_extra_info('sockname')
-        # ASGI 3.0 §Connection Scope requires ``scope['client']`` and
-        # ``scope['server']`` to be ``(host, port)``.  What the transport hands
-        # back is not: AF_UNIX gives a bare path string (and an empty peername),
-        # AF_INET6 a 4-tuple ``(host, port, flowinfo, scope_id)``.  Normalise
-        # both here so the actor layer never special-cases a family.
-        if isinstance(sockname, str):
-            sockname = (sockname, None)
-        if isinstance(peername, str):
-            peername = (peername or '', None)
+        # Actors and ASGI require (host, port), including UNIX and IPv6.
+        if isinstance(sockname, (str, bytes)):
+            sockname = (_unix_address(sockname), None)
+        if isinstance(peername, (str, bytes)):
+            peername = (_unix_address(peername), None)
         if isinstance(sockname, tuple) and len(sockname) > 2:
             sockname = sockname[:2]
         if isinstance(peername, tuple) and len(peername) > 2:
@@ -997,8 +992,8 @@ class Server:
                        for sock in socks if listener.speaks == HTTP]
         first = raw_sockets[0] if raw_sockets else None
         sockname = first.getsockname() if first is not None else None
-        if isinstance(sockname, str):
-            return raw_sockets, None, sockname
+        if isinstance(sockname, (str, bytes)):
+            return raw_sockets, None, os.fsdecode(sockname)
         elif sockname is not None:
             return raw_sockets, sockname[1], None
         return raw_sockets, None, None

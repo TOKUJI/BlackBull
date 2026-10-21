@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
+import socket
 import ssl
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -126,14 +127,29 @@ class Served:
         self.wires: list[Wire] = []
 
     async def wire(self, *, alpn: list[str] | None = None,
-                   host: str = '127.0.0.1') -> Wire:
+                   host: str = '127.0.0.1',
+                   local_path: str | bytes | None = None) -> Wire:
         ctx = None
         if self.tls:
             ctx = ssl.create_default_context()
             ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
             ctx.set_alpn_protocols(alpn or ['http/1.1'])
-        if self.server.unix_path:
-            streams = await asyncio.open_unix_connection(self.server.unix_path, ssl=ctx)
+        sock = self.server.raw_sockets[0]
+        if sock.family == socket.AF_UNIX:
+            address = sock.getsockname()
+            if isinstance(address, bytes) or local_path is not None:
+                client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                client.setblocking(False)
+                try:
+                    if local_path is not None:
+                        client.bind(local_path)
+                    await asyncio.get_running_loop().sock_connect(client, address)
+                    streams = await asyncio.open_unix_connection(sock=client, ssl=ctx)
+                except BaseException:
+                    client.close()
+                    raise
+            else:
+                streams = await asyncio.open_unix_connection(address, ssl=ctx)
         else:
             streams = await asyncio.open_connection(host, self.server.port, ssl=ctx)
         w = Wire(*streams)
