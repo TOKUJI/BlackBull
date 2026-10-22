@@ -521,6 +521,9 @@ trailer section begins.  To split a trailer section across events, set
 `more_trailers=True` on every event except the last.  HTTP/2 collects those
 parts into one trailing HEADERS block carrying `END_STREAM`.
 
+For an empty body where trailers are permitted, trailer events may follow the
+response start directly; the response headers are sent first.
+
 HEAD responses never carry content or a trailer section.  The response is
 complete after its header section even if the application declared trailers;
 later trailer events are ignored so they cannot become bytes in the next

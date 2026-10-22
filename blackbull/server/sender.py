@@ -626,6 +626,10 @@ class HTTP1Sender(BaseSender):
     async def _handle_trailers(self, headers: _MinimalResponseHeaders,
                                more_trailers: bool = False) -> None:
         """Write one part of the trailer section."""
+        if self._expect_trailers and self._buffered_status is not None:
+            await self._handle_body_content(b'', False)
+            if self._completed:
+                return
         if not (self._expect_trailers or self._chunked):
             return
         if not self._trailers_started:
