@@ -142,6 +142,7 @@ Entry points are in **bold**; everything else is a part of the tool on its row.
 | **`bench/probes/soak/soak.sh`** | one-hour soak; `bench/probes/soak/sample.py` samples, `bench/probes/soak/mixed.lua` loads |
 | **`bench/probes/static/run.sh`**, **`bench/probes/static/latency_probe.sh`**, **`bench/probes/static/drain_time.sh`** | static serving: reproduction, latency from the access log, drain |
 | `bench/probes/static/server_probe.py`, `bench/probes/static/access_log_server.py`, `bench/probes/static/parse_access_log.py`, `bench/probes/static/rotate.lua` | their server wrappers, log parser, wrk script |
+| `bench/probes/static/stats_access_log.py` | phase-trace stats (p50/p99 per phase) for `BB_PHASE_TRACE=1` access logs |
 | **`bench/probes/http11probe/probe_scan.py`** | local stand-in for Http11Probe: fires its vectors at a live server (the pinned probe itself: `just http11probe`) |
 | **`bench/probes/mqtt/tap_throughput.py`** | MQTT tap throughput |
 
