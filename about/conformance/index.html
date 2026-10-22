@@ -5433,6 +5433,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#http11-http11probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/1.1 — Http11Probe
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#http2-h2spec" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5670,6 +5681,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#http11-http11probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP/1.1 — Http11Probe
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#http2-h2spec" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5737,7 +5759,7 @@ conformance or absence of defects.</p>
 <tbody>
 <tr>
 <td>HTTP/1.1</td>
-<td>tests/conformance/http1/</td>
+<td>Http11Probe plus tests/conformance/http1/</td>
 <td>RFC 9110/9112 framing, dispatch and resource refusals</td>
 </tr>
 <tr>
@@ -5774,6 +5796,55 @@ nginx differential test requires Docker/testcontainers and skips when they
 are unavailable. For a changed recorded status, decide whether it is a
 regression before regenerating the corpus under Docker; do not update the
 expectation merely to make a test pass.</p>
+<h2 id="http11-http11probe">HTTP/1.1 — Http11Probe<a class="headerlink" href="#http11-http11probe" title="Permanent link">&para;</a></h2>
+<p>With the .NET SDK available, run:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+just<span class="w"> </span>http11probe<span class="w"> </span>both
+</code></pre></div>
+<p>The runner pins Http11Probe to <code>d4bc93f2843ac77fcaae71f25069ce1534952e1a</code>,
+starts and stops native and compatibility targets, and saves each lane's JSON
+under <code>bench/results/http11probe/&lt;UTC time&gt;-&lt;revision&gt;/</code>.
+This local check is separate from the conformance workflow above.</p>
+<p>On 2026-10-22, revision <code>809c1c0b</code> produced the following JSON counts:</p>
+<table>
+<thead>
+<tr>
+<th>Lane</th>
+<th style="text-align: right;">Scored passed</th>
+<th style="text-align: right;">Failed</th>
+<th style="text-align: right;">Warnings</th>
+<th style="text-align: right;">Errors</th>
+<th style="text-align: right;">Unscored</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Native</td>
+<td style="text-align: right;">153</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">54</td>
+</tr>
+<tr>
+<td>Compatibility</td>
+<td style="text-align: right;">153</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">54</td>
+</tr>
+</tbody>
+</table>
+<p>Each lane ran 213 cases, 159 scored. The CLI's <code>158/159</code> score includes the
+five warnings; the JSON's <code>passed</code> count excludes them.</p>
+<p><code>MAL-CL-OVERFLOW</code> expects 400 or a close without a response for
+<code>Content-Length: 99999999999999999999</code>. BlackBull intentionally returns
+413 and closes before reading the body. The decimal value is syntactically
+valid; refusing content above the configured body limit is consistent with
+<a href="https://www.rfc-editor.org/rfc/rfc9110.html#section-8.6">RFC 9110 §8.6</a>
+and <a href="https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.14">§15.5.14</a>.
+The probe reports this status mismatch as a failure; do not count it as a pass.</p>
 <h2 id="http2-h2spec">HTTP/2 — h2spec<a class="headerlink" href="#http2-h2spec" title="Permanent link">&para;</a></h2>
 <p>Install the version pinned by the workflow and start a BlackBull TLS server
 on port 8443. Then run:</p>
