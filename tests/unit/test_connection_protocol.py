@@ -17,7 +17,7 @@ import pytest
 
 from blackbull.server.connection_protocol import ConnectionProtocol
 from blackbull.server.read_buffer import ReadBuffer
-from blackbull.server.recipient import ReadLimitExceeded
+from blackbull.protocol.http1 import ReadLimitExceeded
 
 
 class _FakeTransport:
@@ -254,7 +254,7 @@ class TestHeadScan:
         431 for one that is merely a long head, and it must reach that verdict
         the same way whichever reader it is sitting on.
         """
-        from blackbull.server.recipient import ReadLimitExceeded
+        from blackbull.protocol.http1 import ReadLimitExceeded
         proto, _ = wired
         _deliver(proto, b'x' * 5000)
         with pytest.raises(ReadLimitExceeded) as caught:

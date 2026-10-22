@@ -20,12 +20,8 @@ exclusion of client-, user- and deployment-specific names, which is checked.
 """
 import pytest
 
-from blackbull.server.http1_actor import (
-    _DEFAULT_LINES,
-    _FRAMING_NAMES,
-    _LINE_CACHE_MAX_LINE,
-    HTTP1Actor,
-)
+from blackbull.protocol.http1 import _DEFAULT_LINES, _FRAMING_NAMES, _LINE_CACHE_MAX_LINE
+from blackbull.server.http1_actor import HTTP1Actor
 
 
 def _actor() -> HTTP1Actor:

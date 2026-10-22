@@ -18,7 +18,7 @@ from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.request import ClientDisconnected
 from blackbull.server.recipient import AbstractReader, HTTP1Recipient
-from blackbull.server.http1_actor import request_framing
+from blackbull.protocol.http1 import request_framing
 
 
 class _Source(AbstractReader):

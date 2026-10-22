@@ -41,7 +41,7 @@ from blackbull.env import get_settings  # noqa: E402
 from blackbull.server.http1_actor import HTTP1Actor  # noqa: E402
 
 try:
-    from blackbull.server.http1_actor import _LINE_CACHE_MAX
+    from blackbull.protocol.http1 import _LINE_CACHE_MAX
 except ImportError:                      # a build without the cache
     _LINE_CACHE_MAX = 0
 

@@ -35,12 +35,33 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- HTTP/1.1 persistence follows RFC 9112 §9.3 on both roles: `close` ends the
+  connection even beside `keep-alive` (an HTTP/1.0 request with both was kept
+  open), a higher HTTP/1 minor version persists by default, and a `Connection`
+  option that is not a token is refused (400 by the server).
+- HTTP/2 reads `content-length` as HTTP/1.1 does: one canonical number,
+  agreed by every field (RFC 9113 §8.1.1). The server resets any other with
+  RST_STREAM PROTOCOL_ERROR; it used the first value and ignored an unparsable
+  one. The client refuses a leading zero or a list.
 - HTTP/2 enforces `BB_HEADER_TIMEOUT` on a field block a peer opens and never
   finishes. With the idle timeout enabled (the default) it was enforced only
   when `BB_H2_IDLE_TIMEOUT` expired.
 
 ### Changed
 
+- The HTTP/1.1 client reads responses by the server's grammar, through the one
+  codec `blackbull.protocol.http1`. It now raises `ProtocolError` for
+  whitespace before a field's colon, obs-fold, a field name outside tchar, a
+  `Content-Length` other than one canonical number (`05`, `5, 5`), two
+  `Content-Type` fields, a malformed chunk extension, and a trailer line the
+  head would refuse or that RFC 9110 §6.5.1 prohibits in a trailer.
+- `HTTP1ResponseRecipient.fate`, a `Fate`, replaces `framing_broken`,
+  `reusable`, `tunnel`, `protocol_switched`, `response_persistent` and
+  `connection_exhausted`.
+- `blackbull.server.http1_actor`'s `BadRequestError`, `HeaderTooLargeError`,
+  `NotImplementedFramingError`, `UnsupportedVersionError` and
+  `request_framing` are `MessageError`, `FieldsTooLarge`, `Unimplemented`,
+  `UnsupportedVersion` and `request_framing` in `blackbull.protocol.http1`.
 - A setting whose value does not parse, or is out of range, falls back to its
   default. Previously the gRPC message limits, `BB_STATIC_STAT_TTL_S` and
   `BB_DEADLINE_TICK_MS` could raise at import, the warm-up values clamped

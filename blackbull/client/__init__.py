@@ -7,7 +7,7 @@ docs/guide/client.md. Scenario exports alias blackbull.fault_injection.
 """
 from ._connect import ClientConnection
 from .client import Client
-from .http1 import (HTTP1Client, HTTP1RequestSender, HTTP1ResponseRecipient,
+from .http1 import (Fate, HTTP1Client, HTTP1RequestSender, HTTP1ResponseRecipient,
                     HTTP1UpgradeSession)
 from .http2 import ClientResponse, HTTP2Client
 from .response import ResponderFactory
@@ -35,6 +35,7 @@ __all__ = [
     'Client',
     'ClientConnection',
     'ClientResponse',
+    'Fate',
     'HTTP1Client',
     'HTTP1RequestSender',
     'HTTP1ResponseRecipient',

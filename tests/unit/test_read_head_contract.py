@@ -8,10 +8,10 @@ import asyncio
 
 import pytest
 
-from blackbull.server.http1_actor import (BadRequestError, HeaderTooLargeError,
+from blackbull.server.http1_actor import (MessageError, FieldsTooLarge,
                                           _reject_oversized_head)
 from blackbull.server.read_buffer import ReadBuffer
-from blackbull.server.recipient import IncompleteReadError, ReadLimitExceeded
+from blackbull.protocol.http1 import IncompleteReadError, ReadLimitExceeded
 
 from tests.harness import feed, fed
 
@@ -101,7 +101,7 @@ async def test_oversized_header_keeps_request_line_for_431_classification():
         await _reader(raw).read_head(128)
 
     assert caught.value.seen.startswith(b'GET / HTTP/1.1\r\n')
-    with pytest.raises(HeaderTooLargeError):
+    with pytest.raises(FieldsTooLarge):
         _reject_oversized_head(caught.value.seen, 128)
 
 
@@ -111,7 +111,7 @@ async def test_oversized_request_line_remains_a_400():
     with pytest.raises(ReadLimitExceeded) as caught:
         await reader.read_head(128)
 
-    with pytest.raises(BadRequestError):
+    with pytest.raises(MessageError):
         _reject_oversized_head(caught.value.seen, 128)
 
 

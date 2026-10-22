@@ -11,9 +11,8 @@ from collections import deque
 from time import monotonic as _monotonic
 from typing import Awaitable, Callable, NoReturn, Optional
 
-from ..protocol.field_grammar import (
-    FIELD_VALUE_ALLOWED_OCTETS, PROHIBITED_TRAILER_FIELDS, TCHAR_OCTETS,
-    FieldError, field_line)
+from ..protocol.http1 import (ChunkedDecoder, FieldsTooLarge, IncompleteReadError,
+                              MessageError)
 from .cap_log import log_cap_hit
 from . import deadline as _deadline
 from .deadline import Deadline, Guard
@@ -70,43 +69,6 @@ _WS_CONTROL_OPS = (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG)
 # Reader abstraction
 # ---------------------------------------------------------------------------
 
-class IncompleteReadError(EOFError):
-    """Raised by AbstractReader when the peer closes the connection mid-read.
-
-    Mirrors asyncio.IncompleteReadError but is not tied to asyncio, so
-    handlers that depend on AbstractReader remain runtime-agnostic.
-    """
-
-    @property
-    def partial(self) -> bytes:
-        """Whatever had been read when the peer went away.
-
-        A truncated head and an idle close are the same exception with
-        different payloads, and the caller answers 400 for one and nothing at
-        all for the other — so the payload is part of the contract, not a
-        debugging aid.
-        """
-        return self.args[0] if self.args else b''
-
-
-class ReadLimitExceeded(Exception):
-    """A bounded reader operation was given a byte budget and passed it.
-
-    Belongs to the reader contract, not to any protocol: the reader hands back
-    what it ``saw`` and the protocol decides which status that becomes.
-    ``docs/about/internals.md`` §One breach, two verdicts is that decision.
-    """
-
-    def __init__(self, message: str, seen: bytes = b'') -> None:
-        super().__init__(message)
-        #: The over-budget bytes, for the caller to classify.  Never consumed
-        #: on the caller's behalf: a reader that owns its buffer leaves them
-        #: resident so the connection can still be lingered closed.
-        self.seen = seen
-
-
-_HEXDIG_SET = frozenset(b'0123456789abcdefABCDEF')
-
 def _bad_request(detail: str):
     from http import HTTPStatus  # noqa: PLC0415
     from ..router import HTTPException  # noqa: PLC0415
@@ -119,67 +81,9 @@ def _content_too_large(detail: str):
     return HTTPException(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail)
 
 
-def _validate_chunk_ext(ext: bytes) -> None:
-    """RFC 9112 §7.1.1::
-
-        chunk-ext      = *( BWS ";" BWS chunk-ext-name [ BWS "=" BWS chunk-ext-val ] )
-        chunk-ext-name = token
-        chunk-ext-val  = token / quoted-string
-
-    *ext* is the chunk line **from the first ``;``** onward.  A bare ``;`` (empty
-    ext-name), a non-token ext-name/val, and control characters are all
-    silent-acceptance smuggling vectors, so each is rejected.  A quoted-string
-    ext-val is accepted leniently (matched quotes, no bare CTLs) since chunk
-    extensions are ignored on receipt.
-    """
-    for element in ext.split(b';')[1:]:
-        element = element.strip(b' \t')          # BWS around the element
-        name, eq, val = element.partition(b'=')
-        name = name.rstrip(b' \t')
-        if not name or name.translate(None, TCHAR_OCTETS):
-            raise _bad_request(f'invalid chunk-ext-name {name!r}')
-        if eq:
-            val = val.strip(b' \t')
-            if val[:1] == b'"':
-                if (len(val) < 2 or not val.endswith(b'"')
-                        or val.translate(None, FIELD_VALUE_ALLOWED_OCTETS)):
-                    raise _bad_request(f'invalid quoted chunk-ext-val {val!r}')
-            elif not val or val.translate(None, TCHAR_OCTETS):
-                raise _bad_request(f'invalid chunk-ext-val {val!r}')
-
-
-# MAL-CHUNK-EXT-64K (CVE-2023-39326 class) — the unit bound on one chunk-framing
-# line (chunk-size + chunk-ext, or one trailer field line).  Mirrors the
-# BB_HEADER_MAX_LINE default: extensions and trailers are ignored on receipt, so
-# nothing legitimate needs more.
+# MAL-CHUNK-EXT-64K (CVE-2023-39326 class) — the bound on one chunk-size or
+# trailer line, the BB_HEADER_MAX_LINE default: nothing legitimate needs more.
 _CHUNK_LINE_MAX = 8192
-
-
-def _parse_chunk_size(line: bytes) -> int:
-    """RFC 9112 §7.1.1 — ``chunk-size = 1*HEXDIG`` optionally followed by
-    ``chunk-ext``.  Validate the size token strictly (no sign, no ``0x``
-    prefix, no ``_``, no stray whitespace) **before** ``int()``, and
-    validate the chunk-ext grammar, so malformed framing is rejected rather
-    than silently accepted or crashed on.
-
-    The line must be CRLF-terminated: a bare-LF terminator (``5\\n``) is a
-    framing violation, so we require the trailing CRLF rather than stripping
-    either.
-    """
-    if not line.endswith(b'\r\n') or line.count(b'\n') != 1:
-        raise _bad_request(f'chunk-size line not CRLF-terminated: {line!r}')
-    line = line[:-2]
-    if b';' in line:
-        size_part, _, _ext = line.partition(b';')
-        # BWS is tolerated between the size and ';' (RFC 9112 §7.1.1 BWS).
-        size_part = size_part.rstrip(b' \t')
-        _validate_chunk_ext(line[len(size_part):])
-    else:
-        # No chunk-ext, and no trailing OWS: a bare ``5 \r\n`` smuggles.
-        size_part = line
-    if not size_part or any(c not in _HEXDIG_SET for c in size_part):
-        raise _bad_request(f'invalid chunk-size {size_part!r}')
-    return int(size_part, 16)
 
 
 class ProtocolError(Exception):
@@ -469,9 +373,9 @@ class HTTP1Recipient(BaseRecipient):
         # Keep only the path for diagnostics to avoid a request reference cycle.
         self._req_path: str | None = conn.path
         self._content_length, self._chunked = framing
-        # Per request, not per connection: a rebound recipient that inherited a
-        # half-read chunk would splice request N's body into request N+1.
-        self._chunk_remaining = 0
+        # Per request: an inherited half-read chunk would splice request N's
+        # body into request N+1.
+        self._decoder = None
         self._done = False
         self._body_seen = 0
         # Transport-wait seconds only, never the handler's own — the delivery
@@ -559,79 +463,28 @@ class HTTP1Recipient(BaseRecipient):
                 return False
         return True
 
-    def _parse_chunk_size_or_400(self, size_line: bytes) -> int:
-        """Parse the chunk-size line, marking the stream unframeable on any
-        violation so the actor closes the connection instead of keep-aliving
-        a desynced byte stream."""
+    async def _next_chunked(self) -> bytes | None:
+        decoder = self._decoder
+        if decoder is None:
+            decoder = self._decoder = ChunkedDecoder(
+                self._reader, self._read_with_timeout, line_max=_CHUNK_LINE_MAX,
+                slice_max=self._chunk_size)
         try:
-            return _parse_chunk_size(size_line)
-        except BaseException:
+            data = await decoder.next()
+        except FieldsTooLarge as exc:
             self.framing_broken = True
-            raise
-
-    async def _read_chunk_slice(self) -> bytes:
-        """Read at most ``_chunk_size`` octets of the chunk in progress.
-
-        The slice, not the whole chunk, because a peer-declared ``chunk-size``
-        must not choose how much the server buffers or reopen the pause the
-        high-water mark just applied — internals.md §Backpressure pauses for a
-        handler that is behind, not one that is waiting.
-
-        ``readexactly`` (not the up-to-n ``read``) still backs every slice, so a
-        chunk split across TCP segments cannot return short and silently corrupt
-        the body.
-        """
-        n = min(self._chunk_remaining, self._chunk_size)
-        data = await self._read_with_timeout(self._reader.readexactly(n))
-        self._chunk_remaining -= n
-        if self._chunk_remaining == 0:
-            # RFC 9112 §7.1 — chunk-data is followed by exactly CRLF.  Reading
-            # *until* CRLF would swallow trailing spill (SMUG-CHUNK-SPILL) and
-            # tolerate a bare CR/LF terminator.
-            term = await self._read_with_timeout(self._reader.readexactly(2))
-            if term != b'\r\n':
-                self.framing_broken = True
-                raise _bad_request(f'chunk-data not CRLF-terminated: {term!r}')
-        return data
-
-    async def _read_chunk_line(self) -> bytes:
-        """Read one line of chunked framing (chunk-size line or trailer
-        line) with a hard length bound.
-
-        Reads to bare LF, not CRLF: a bare-LF-terminated line then returns
-        immediately and fails the caller's CRLF check with a 400 instead of
-        blocking in ``readuntil`` until the peer gives up
-        (SMUG-CHUNK-LF-TERM / SMUG-CHUNK-LF-TRAILER).
-        """
-        try:
-            line = await self._read_with_timeout(self._readuntil_chunk_line())
-        except ReadLimitExceeded as exc:
-            self.framing_broken = True
-            log_cap_hit('h1_chunk_line_length',
-                        requested=len(exc.seen), limit=_CHUNK_LINE_MAX,
-                        scope_path=self._req_path,
+            log_cap_hit('h1_chunk_line_length', requested=exc.length,
+                        limit=_CHUNK_LINE_MAX, scope_path=self._req_path,
                         protocol='http1')
-            raise _bad_request(
-                'chunk framing line exceeds length limit') from None
-        except asyncio.LimitOverrunError as exc:
+            raise _bad_request('chunk framing line exceeds length limit') from None
+        except MessageError as exc:
+            # The stream is desynced: the actor closes rather than keep-alive.
             self.framing_broken = True
-            log_cap_hit('h1_chunk_line_length',
-                        requested=exc.consumed, limit=_CHUNK_LINE_MAX,
-                        scope_path=self._req_path,
-                        protocol='http1')
-            raise _bad_request(
-                'chunk framing line exceeds length limit') from None
-        if len(line) > _CHUNK_LINE_MAX:
-            self.framing_broken = True
-            log_cap_hit('h1_chunk_line_length',
-                        requested=len(line), limit=_CHUNK_LINE_MAX,
-                        scope_path=self._req_path,
-                        protocol='http1')
-            raise _bad_request('chunk framing line exceeds length limit')
-        return line
-
-    async def _readuntil_chunk_line(self) -> bytes:
-        return await self._reader.readuntil(b'\n', limit=_CHUNK_LINE_MAX)
+            raise _bad_request(str(exc)) from None
+        if data is None:
+            self._done = True
+            return None
+        return self._account(data)
 
     def _account(self, chunk: bytes) -> bytes:
         """Weigh *chunk* against the two body limits, giving up if it fails one.
@@ -669,7 +522,7 @@ class HTTP1Recipient(BaseRecipient):
                 raise ClientDisconnected()
         return chunk
 
-    async def _read_with_timeout(self, coro):
+    async def _read_with_timeout(self, coro, _payload: bool = False):
         """Run *coro* under the configured body_timeout, if any.
 
         Also the one place body reads wait, which is why the rate detector's
@@ -706,38 +559,7 @@ class HTTP1Recipient(BaseRecipient):
             return None
         try:
             if self._chunked:
-                if self._chunk_remaining:
-                    return self._account(await self._read_chunk_slice())
-                size_line = await self._read_chunk_line()
-                chunk_size = self._parse_chunk_size_or_400(size_line)
-                if chunk_size == 0:
-                    # RFC 9112 §7.1.2 — last-chunk, an optional trailer-part,
-                    # then a final CRLF.  Each line must be CRLF-terminated (a
-                    # bare LF is the same violation as on the chunk-size line),
-                    # and RFC 9110 §6.5.1-prohibited fields are rejected.
-                    while True:
-                        line = await self._read_chunk_line()
-                        if line == b'\r\n':
-                            break
-                        if not line.endswith(b'\r\n'):
-                            self.framing_broken = True
-                            raise _bad_request(
-                                f'trailer line not CRLF-terminated: '
-                                f'{line[-8:]!r}')
-                        try:
-                            name, _ = field_line(line[:-2])
-                        except FieldError as exc:
-                            self.framing_broken = True
-                            raise _bad_request(f'trailer: {exc}') from None
-                        if name in PROHIBITED_TRAILER_FIELDS:
-                            self.framing_broken = True
-                            raise _bad_request(
-                                f'prohibited trailer field {name!r} '
-                                f'(RFC 9110 §6.5.1)')
-                    self._done = True
-                    return None
-                self._chunk_remaining = chunk_size
-                return self._account(await self._read_chunk_slice())
+                return await self._next_chunked()
             else:
                 # Transport-paced up-to-n slices (env-vars.md,
                 # ``BB_BODY_CHUNK_MAX``).  ``b''`` means the peer is gone — a
@@ -769,7 +591,7 @@ class HTTP1Recipient(BaseRecipient):
                         protocol='http1')
             self._done = True
             raise ClientDisconnected() from None
-        except IncompleteReadError:
+        except EOFError:
             # EOF mid-body — not a cap hit, and no synthetic 408.
             self._done = True
             raise ClientDisconnected() from None

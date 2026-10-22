@@ -1524,7 +1524,7 @@ class HTTP2Client:
         pending.status = status
         pending.final_seen = True
         try:
-            pending.declared = parse_content_length(lengths)
+            pending.declared = parse_content_length(lengths, canonical=True)
         except ValueError as exc:
             await self._reject_response(
                 frame.stream_id, self._response_error(frame.stream_id, str(exc)))

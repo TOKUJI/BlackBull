@@ -153,7 +153,7 @@ tier with the probe unchanged, and reports which clean PASS rows flip to
 FAIL/TIMEOUT.  A mutation with at least one flip is DETECTED.  The
 current mutations: the CL+TE smuggling rejection, the malformed
 Content-Length rejection, and the TE-list rejection (all in
-`server/http1_actor.py`'s framing), plus the G5-3 **recall** entry
+`protocol/http1.py`'s request framing), plus the G5-3 **recall** entry
 `bla-525-range-revert` — it reverts the filed BLA-525 fix in
 `middleware/static.py` (a satisfiable range ending at or beyond EOF
 clipping to 206 becomes a 416 again) and the harness must catch the

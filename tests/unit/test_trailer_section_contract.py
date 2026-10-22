@@ -1,81 +1,17 @@
-"""A trailer section obeys the header section's field-line grammar.
+"""RFC 9110 §6.5.1 fields a trailer may not carry reset an HTTP/2 stream.
 
-RFC 9112 §7.1.2 gives a trailer section the same field lines as a header
-section, and RFC 9110 §6.5.1 lists fields a trailer may not carry.  A line
-refused in a header section is refused in a trailer section, and a prohibited
-trailer field is refused on both transports: HTTP/1.1 with 400, HTTP/2 with
-RST_STREAM PROTOCOL_ERROR.
+HTTP/1.1 trailer sections are rows of tests/conformance/http1/test_framing_both_roles.py.
 """
 from __future__ import annotations
 
-from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock
 
 from hpack import Encoder
 import pytest
 
-from blackbull.connection import Connection
-from blackbull.headers import Headers
 from blackbull.protocol.frame_types import ErrorCodes, FrameTypes, HeaderFrameFlags
-from blackbull.router import HTTPException
-from blackbull.server.http1_actor import BadRequestError, HTTP1Actor
 from blackbull.server.http2_actor import HTTP2Actor
-from blackbull.server.recipient import HTTP1Recipient
 from blackbull.server.sender import AsyncioWriter
-from blackbull.server.http1_actor import request_framing
-
-from tests.harness import fed
-
-#: Field lines the header section refuses.
-_BAD_LINES = [
-    pytest.param(b'Foo : bar', id='space-before-colon'),
-    pytest.param(b' folded', id='obs-fold'),
-    pytest.param(b'X\x01: y', id='name-control'),
-    pytest.param(b'X-A: a\x00b', id='value-nul'),
-    pytest.param(b'X-A: \x0bv', id='value-vt'),
-    pytest.param(b'NoColon', id='no-colon'),
-]
-
-
-def _Wire(payload: bytes = b''):
-    return fed(payload).reader
-
-
-def _header_refused(line: bytes) -> bool:
-    try:
-        object.__new__(HTTP1Actor)._parse(
-            b'POST / HTTP/1.1\r\nHost: a\r\n' + line + b'\r\n\r\n')
-    except BadRequestError:
-        return True
-    return False
-
-
-async def _read_chunked(wire: bytes) -> bytes:
-    conn = Connection(method='POST', path='/', raw_path=b'/', type='http',
-                      headers=Headers([(b'transfer-encoding', b'chunked')]))
-    recipient = HTTP1Recipient(_Wire(wire), conn, chunk_size=64 * 1024, framing=request_framing(conn.headers))
-    body = bytearray()
-    while True:
-        event = await recipient()
-        body += event.get('body', b'')
-        if not event.get('more_body', False):
-            return bytes(body)
-
-
-@pytest.mark.asyncio
-class TestHttp1:
-    @pytest.mark.parametrize('line', _BAD_LINES)
-    async def test_a_line_refused_in_the_header_section_is_refused_as_a_trailer(
-            self, line):
-        assert _header_refused(line)
-        with pytest.raises(HTTPException) as refused:
-            await _read_chunked(b'1\r\nZ\r\n0\r\n' + line + b'\r\n\r\n')
-        assert refused.value.status == HTTPStatus.BAD_REQUEST
-
-    async def test_a_valid_trailer_is_read_and_discarded(self):
-        body = await _read_chunked(b'1\r\nZ\r\n0\r\nX-Checksum:  abc \r\n\r\n')
-
-        assert body == b'Z'
 
 
 def _frame(type_byte, flags, stream_id, payload=b'') -> bytes:

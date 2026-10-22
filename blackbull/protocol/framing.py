@@ -23,16 +23,23 @@ _HEAD_END = b'\r\n\r\n'
 #: HTTP/1 field-line terminator (RFC 9112 §2.2).
 _CRLF = b'\r\n'
 
-def parse_content_length(fields: Iterable[tuple[bytes, bytes]]
-                         ) -> int | None:
+#: One number, no leading zero (RFC 9110 §8.6).
+_CANONICAL_LENGTH = re.compile(rb'\A(?:0|[1-9][0-9]*)\Z')
+
+
+def parse_content_length(fields: Iterable[tuple[bytes, bytes]], *,
+                         canonical: bool = False) -> int | None:
     """The length every ``Content-Length`` occurrence agrees on, or ``None``.
 
     Occurrences are ``#field-value`` lists too, so each member counts.  Raises
     ``ValueError`` when a member is not ``1*DIGIT`` or the members disagree;
-    the message names the values it could not reconcile.
+    the message names the values it could not reconcile.  *canonical* also
+    refuses a list and a leading zero, as HTTP/1.1's field-line check does.
     """
     values: list[int] = []
     for _name, raw in fields:
+        if canonical and not _CANONICAL_LENGTH.match(raw):
+            raise ValueError(f'non-canonical Content-Length value: {raw!r}')
         for member in raw.split(b','):
             value = member.strip(b' \t')
             if not value or not value.isdigit():

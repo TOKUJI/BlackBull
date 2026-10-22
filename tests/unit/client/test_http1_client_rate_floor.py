@@ -39,7 +39,7 @@ import asyncio
 
 import pytest
 
-from blackbull.client.http1 import HTTP1ResponseRecipient
+from blackbull.client.http1 import Fate, HTTP1ResponseRecipient
 
 from tests.harness import paced
 
@@ -206,7 +206,7 @@ class TestTheFloorIsTheOneThatFires:
         recipient = HTTP1ResponseRecipient()
         with pytest.raises(TimeoutError):
             await recipient.receive(_paced(clock, script))
-        assert recipient.framing_broken
+        assert recipient.fate is Fate.BROKEN
 
 
 class TestCallerTimeIsNotPeerTime:

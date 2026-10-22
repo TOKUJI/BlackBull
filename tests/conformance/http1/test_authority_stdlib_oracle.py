@@ -27,7 +27,7 @@ from hypothesis import strategies as st
 
 from blackbull.protocol.field_grammar import HOST_FORBIDDEN_BYTES
 from blackbull.server.http1_actor import (
-    BadRequestError, HTTP1Actor, _parse_host_header,
+    MessageError, HTTP1Actor, _parse_host_header,
 )
 
 _ACTOR = HTTP1Actor.__new__(HTTP1Actor)
@@ -51,7 +51,7 @@ def _accepts(authority: bytes) -> bool:
                b'Host: localhost\r\n\r\n')
     try:
         _ACTOR._parse(request)
-    except BadRequestError:
+    except MessageError:
         return False
     return True
 
@@ -61,7 +61,7 @@ def _accepts_as_host(authority: bytes) -> bool:
     request = b'GET /x HTTP/1.1\r\nHost: ' + authority + b'\r\n\r\n'
     try:
         _ACTOR._parse(request)
-    except BadRequestError:
+    except MessageError:
         return False
     return True
 
@@ -264,5 +264,5 @@ class TestAnInvalidRegNameIsRejected:
     ])
     @pytest.mark.parametrize('authority', _INVALID, ids=bytes.hex)
     def test_the_absolute_form_authority_rejects_it(self, build, authority):
-        with pytest.raises(BadRequestError):
+        with pytest.raises(MessageError):
             _ACTOR._parse(build(authority))

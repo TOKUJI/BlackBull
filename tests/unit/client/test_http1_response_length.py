@@ -26,7 +26,7 @@ import pytest
 
 from blackbull.client.exceptions import (ConnectionError, ProtocolError,
                                          ResponseTooLarge)
-from blackbull.client.http1 import HTTP1Client, HTTP1ResponseRecipient
+from blackbull.client.http1 import Fate, HTTP1Client, HTTP1ResponseRecipient
 from blackbull.server.recipient import AbstractWriter
 
 from tests.harness import fed, paced
@@ -283,19 +283,6 @@ class TestTransferCodingList:
         res = await _within(HTTP1ResponseRecipient().receive(_Canned(wire)))
         assert res.body == b'raw octets to the close'
 
-    @pytest.mark.asyncio
-    async def test_transfer_encoding_with_content_length_is_refused(self):
-        """§6.3 item 3 — the two disagree by construction, and the message
-        'ought to be handled as an error'.  The server refuses the same shape
-        on the request side; this is that rule facing the other way."""
-        wire = (b'HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n'
-                b'content-length: 5\r\n\r\n2\r\nhi\r\n0\r\n\r\n')
-        recipient = HTTP1ResponseRecipient()
-        with pytest.raises(ProtocolError):
-            await _within(recipient.receive(_Canned(wire)))
-        assert recipient.framing_broken
-
-
 # ----------------------------------------------------------------------
 # RFC 9112 §6.3 item 8 — a body delimited by the close (BLA-294)
 # ----------------------------------------------------------------------
@@ -337,8 +324,7 @@ class TestCloseDelimitedBody:
         recipient = HTTP1ResponseRecipient()
         await _within(recipient.receive(
             _Canned(b'HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\nbody')))
-        assert recipient.connection_exhausted
-        assert not recipient.framing_broken, 'the message ended where it said'
+        assert recipient.fate is Fate.EXHAUSTED, 'the message ended where it said'
 
     @pytest.mark.asyncio
     async def test_the_client_refuses_to_reuse_a_closed_connection(self):
@@ -348,7 +334,6 @@ class TestCloseDelimitedBody:
         client._writer = _NullWriter()
         res = await _within(client.request('GET', '/'))
         assert res.body == b'body'
-        assert client._connection_exhausted
         # The type alone proves nothing: a second read of a spent reader hits
         # EOF and raises the same ConnectionError, so this passes just as well
         # with the mechanism deleted.  The message is what names the mechanism.
@@ -362,7 +347,6 @@ class TestCloseDelimitedBody:
             b'HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\nbody')
         client._writer = _NullWriter()
         assert b''.join([c async for c in client.stream('GET', '/')]) == b'body'
-        assert client._connection_exhausted
         with pytest.raises(ConnectionError, match='delimited by the connection'):
             await _within(client.request('GET', '/second'))
 
@@ -373,7 +357,7 @@ class TestCloseDelimitedBody:
         reader = _Canned(b'HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nhi' + _NEXT)
         first = await _within(recipient.receive(reader))
         assert first.body == b'hi'
-        assert not recipient.connection_exhausted
+        assert recipient.fate is Fate.REUSE
         assert (await _within(recipient.receive(reader))).status == 201
 
 

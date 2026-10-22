@@ -415,8 +415,6 @@ class TestConnectionFate:
                 (b'content-length', b'5'), (b'content-length', b'9')])
 
         assert bytes(client._writer.data) == b''  # type: ignore[union-attr]
-        assert client._active_response is None
-        assert client._reusable is True
         assert (await client.request('GET', '/next')).body == b'ok'
 
     @pytest.mark.parametrize('api', ['request', 'stream'])
@@ -432,10 +430,8 @@ class TestConnectionFate:
                         body=_chunks(b'ab', b'cd'))
 
         assert bytes(client._writer.data).endswith(b'\r\n\r\nab')  # type: ignore[union-attr]
-        assert client._reusable is False
-        assert client._framing_broken is True
         assert raw.close_calls == 1
-        with pytest.raises(ConnectionError):
+        with pytest.raises(ConnectionError, match='abandoned'):
             await client.request('GET', '/next')
 
     @pytest.mark.parametrize('api', ['request', 'stream'])
@@ -451,9 +447,8 @@ class TestConnectionFate:
                         body=_chunks(b'ab'))
 
         assert bytes(client._writer.data).endswith(b'\r\n\r\nab')  # type: ignore[union-attr]
-        assert client._reusable is False
         assert raw.close_calls == 1
-        with pytest.raises(ConnectionError):
+        with pytest.raises(ConnectionError, match='abandoned'):
             await client.request('GET', '/next')
 
     @pytest.mark.asyncio
@@ -478,9 +473,8 @@ class TestConnectionFate:
         with pytest.raises(asyncio.CancelledError):
             await task
 
-        assert client._reusable is False
         assert raw.close_calls == 1
-        with pytest.raises(ConnectionError):
+        with pytest.raises(ConnectionError, match='abandoned'):
             await client.request('GET', '/next')
 
     @pytest.mark.asyncio
@@ -501,5 +495,4 @@ class TestConnectionFate:
                 (b'content-length', b'4')], body=boom())
 
         assert bytes(client._writer.data).endswith(b'\r\n\r\nab')  # type: ignore[union-attr]
-        assert client._reusable is False
         assert raw.close_calls == 1

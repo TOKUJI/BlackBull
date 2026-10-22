@@ -18,7 +18,7 @@ from blackbull.headers import Headers
 from blackbull.router import HTTPException
 from blackbull.server.connection_protocol import BufferReader
 from blackbull.server.recipient import HTTP1Recipient
-from blackbull.server.http1_actor import request_framing
+from blackbull.protocol.http1 import request_framing
 
 from tests.harness import fed
 

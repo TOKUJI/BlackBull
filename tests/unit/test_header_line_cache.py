@@ -14,13 +14,10 @@ get a test, because each is what stops this from being a smuggling vector.
 """
 import pytest
 
-from blackbull.server.http1_actor import (
-    _LINE_CACHE_MAX,
-    _LINE_CACHE_MAX_BYTES,
-    _LINE_CACHE_MAX_LINE,
-    BadRequestError,
-    HTTP1Actor,
-)
+from blackbull.protocol.http1 import (_DEFAULT_LINES, _LINE_CACHE_MAX,
+                                     _LINE_CACHE_MAX_BYTES, _LINE_CACHE_MAX_LINE,
+                                     MessageError)
+from blackbull.server.http1_actor import HTTP1Actor
 
 
 def _actor() -> HTTP1Actor:
@@ -122,7 +119,7 @@ def test_key_is_exact_bytes_so_one_changed_byte_misses():
     warm = _actor()
     warm._parse(_req(b'X-Ctl: clean'))
     # Same name, same length, one byte changed into a CTL.
-    with pytest.raises(BadRequestError):
+    with pytest.raises(MessageError):
         warm._parse(_req(b'X-Ctl: clea\x01'))
 
 
@@ -139,7 +136,7 @@ def test_content_length_strictness_is_not_bypassed_by_a_warm_cache():
     """A cached ``Content-Length: 5`` must not admit ``005`` on the next request."""
     warm = _actor()
     warm._parse(_req(b'Content-Length: 5', method=b'POST'))
-    with pytest.raises(BadRequestError):
+    with pytest.raises(MessageError):
         warm._parse(_req(b'Content-Length: 005', method=b'POST'))
 
 
@@ -218,7 +215,7 @@ def test_cache_respects_a_byte_budget():
     # Lines well under the per-line cap, but many of them.
     for i in range(_LINE_CACHE_MAX * 4):
         warm._parse(_req(b'X-Pad-%03d: %s' % (i, b'v' * 200)))
-    assert warm._line_cache_bytes <= _LINE_CACHE_MAX_BYTES
+    assert warm._line_cache.size <= _LINE_CACHE_MAX_BYTES
     assert len(warm._line_cache) <= _LINE_CACHE_MAX
 
 
@@ -265,12 +262,11 @@ def test_real_world_header_set_still_fits_entirely():
         b'Referer: http://localhost:8788/',
     ]
     warm._parse(_req(*captured))
-    assert warm._line_cache_bytes <= _LINE_CACHE_MAX_BYTES
+    assert warm._line_cache.size <= _LINE_CACHE_MAX_BYTES
     # Every captured line is served without re-validation — from the shared
     # spec table where the value set is fixed, from this connection's cache
     # otherwise.  The split between the two is an implementation detail; that
     # nothing falls through both is not.
-    from blackbull.server.http1_actor import _DEFAULT_LINES
     for line in captured:
         assert line in warm._line_cache or line in _DEFAULT_LINES, line
 
@@ -302,4 +298,4 @@ def test_an_empty_cache_is_not_probed():
     """
     warm = _actor()
     warm._parse(_req(b'Accept: */*'))
-    assert warm._line_cache_bytes > 0
+    assert warm._line_cache.size > 0
