@@ -1506,6 +1506,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#runtime-and-processes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5769,6 +5780,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#runtime-and-processes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5965,10 +5987,60 @@
 
 
 <h1 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h1>
-<p>Defaults and enforcement scope are generated from blackbull/<em>env_vars.py.
+<p>Defaults and enforcement scope are generated from the <code>Settings</code> and
+<code>AppConfig</code> declarations in <code>blackbull/env.py</code> and <code>blackbull/config.py</code>.
 See <a href="../../guide/configuration/">Configuration</a> for startup-setting precedence;
-BB</em>* runtime tuning is a separate namespace. Most settings are cached on first
-use, and import-time settings require a restart.</p>
+BB_* runtime tuning is a separate namespace. Most settings are cached on first
+use, and import-time settings require a restart. A value that does not parse,
+or is outside a setting's range, falls back to its default.</p>
+<h2 id="deployment">Deployment<a class="headerlink" href="#deployment" title="Permanent link">&para;</a></h2>
+<p>These resolve with <code>run()</code> precedence: an explicit argument, then the
+variable, then a <code>.env</code> entry, then <code>AppConfig</code>.</p>
+<div class="admonition warning">
+<p class="admonition-title">The <code>BLACKBULL_*</code> names move to <code>BB_*</code> in October 2027</p>
+<p><code>BLACKBULL_ENV</code> and the variables below will be renamed to the <code>BB_</code>
+prefix in a release no earlier than October 2027, so that every setting
+shares one namespace. Until then only the <code>BLACKBULL_</code> names are read.</p>
+</div>
+<!-- generated: Deployment -->
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Controls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>BLACKBULL_CERT</code></td>
+<td><em>(unset)</em></td>
+<td>TLS certificate file.  Enables HTTPS, and therefore HTTP/2 via ALPN, when paired with the key.</td>
+</tr>
+<tr>
+<td><code>BLACKBULL_KEY</code></td>
+<td><em>(unset)</em></td>
+<td>TLS private key file.  Required alongside the certificate for HTTPS and HTTP/2.</td>
+</tr>
+<tr>
+<td><code>BLACKBULL_PORT</code></td>
+<td><code>0</code></td>
+<td>TCP port to bind.  <code>0</code> lets the OS pick a free ephemeral port.</td>
+</tr>
+<tr>
+<td><code>BLACKBULL_UNIX_PATH</code></td>
+<td><em>(unset)</em></td>
+<td>AF_UNIX socket path.  Mutually exclusive with a TCP port bind.</td>
+</tr>
+<tr>
+<td><code>BLACKBULL_RELOAD</code></td>
+<td><code>0</code></td>
+<td>Enable auto-reload (<code>1</code>, <code>true</code>, <code>yes</code> or <code>on</code>; requires the <code>[reload]</code> extra).</td>
+</tr>
+</tbody>
+</table>
+<!-- /generated -->
+
 <h2 id="runtime-and-processes">Runtime and processes<a class="headerlink" href="#runtime-and-processes" title="Permanent link">&para;</a></h2>
 <!-- generated: Runtime and processes -->
 <table>
@@ -6023,7 +6095,7 @@ use, and import-time settings require a restart.</p>
 <tbody>
 <tr>
 <td><code>BB_WARMUP_BUDGET_S</code></td>
-<td><code>60</code></td>
+<td><code>60.0</code></td>
 <td>Hard wall-clock cap (seconds) on total warm-up.  A hook that overruns is cancelled and the master proceeds to bind — warm-up is best-effort and never blocks boot indefinitely.</td>
 </tr>
 <tr>
@@ -6126,7 +6198,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_STREAM_QUEUE_DEPTH</code></td>
 <td><code>64</code></td>
-<td>Frame-count queue depth for HTTP/2 bodies without consume-time credit (direct/push fallback). Native request streams instead use the advertised byte window plus a frame-count abuse cap; this knob does not replace those bounds.</td>
+<td>Frame-count queue depth for HTTP/2 bodies without consume-time credit (direct/push fallback). Native request streams instead use the advertised byte window plus a frame-count abuse cap of 16 times this depth; this knob does not replace those bounds. A stream past either is reset with <code>RST_STREAM ENHANCE_YOUR_CALM</code>.</td>
 </tr>
 <tr>
 <td><code>BB_WS_QUEUE_DEPTH</code></td>
@@ -6194,12 +6266,12 @@ For failure types and buffered/streaming tradeoffs, see <a href="../../guide/cli
 <tr>
 <td><code>BB_CLIENT_WS_MAX_FRAME_PAYLOAD</code></td>
 <td><code>67108864</code> (64 MiB)</td>
-<td>Client WebSocket inbound payload bytes per frame (unit).  <code>BB_CLIENT_WS_MAX_MESSAGE_SIZE</code> owns the aggregate message total.  There is no client-owned WebSocket time bound here: the H1 session has no environment time owner, and H2 per-call receive timeouts are caller arguments, not this setting.  <code>0</code> disables this unit cap.</td>
+<td>Client WebSocket inbound payload bytes per frame (unit).  Excess closes with 1009 and raises <code>ProtocolError</code> from <code>receive()</code>.  <code>BB_CLIENT_WS_MAX_MESSAGE_SIZE</code> owns the aggregate message total.  There is no client-owned WebSocket time bound here: the H1 session has no environment time owner, and H2 per-call receive timeouts are caller arguments, not this setting.  <code>0</code> disables this unit cap.</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_WS_MAX_MESSAGE_SIZE</code></td>
 <td><code>16777216</code> (16 MiB)</td>
-<td>Client WebSocket inbound payload bytes per reassembled/inflated message (total).  <code>BB_CLIENT_WS_MAX_FRAME_PAYLOAD</code> owns the per-frame unit.  There is no client-owned WebSocket time bound here: the H1 session has no environment time owner, and H2 per-call receive timeouts are caller arguments, not this setting.  <code>0</code> disables this total cap.</td>
+<td>Client WebSocket inbound payload bytes per reassembled/inflated message (total).  Excess closes with 1009 and raises <code>ProtocolError</code> from <code>receive()</code>.  <code>BB_CLIENT_WS_MAX_FRAME_PAYLOAD</code> owns the per-frame unit.  There is no client-owned WebSocket time bound here: the H1 session has no environment time owner, and H2 per-call receive timeouts are caller arguments, not this setting.  <code>0</code> disables this total cap.</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_MAX_INTERIM_RESPONSES</code></td>
@@ -6243,8 +6315,8 @@ For failure types and buffered/streaming tradeoffs, see <a href="../../guide/cli
 <tbody>
 <tr>
 <td><code>BB_PRODUCTION</code></td>
-<td><em>(unset)</em></td>
-<td>Set to <code>1</code>, <code>true</code>, <code>yes</code> or <code>on</code> to make the fault-injection servers refuse to start, in addition to the refusal that <code>BLACKBULL_ENV=production</code> already triggers.  An explicit override for a process that reaches production without going through the <code>Settings</code> machinery.</td>
+<td><code>0</code></td>
+<td>Set to <code>1</code> to make the fault-injection servers refuse to start, in addition to the refusal that <code>BLACKBULL_ENV=production</code> already triggers.</td>
 </tr>
 </tbody>
 </table>
@@ -6473,7 +6545,7 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 <tr>
 <td><code>BB_H2_WS_MAX_STREAMS_PER_CONNECTION</code></td>
 <td><code>5</code></td>
-<td>Maximum concurrent WebSocket (RFC 8441 Extended CONNECT) streams per HTTP/2 connection.  Caps the per-connection blast radius of WS-over-H2 stream-exhaustion attacks.  <code>0</code> disables the cap (no upper bound beyond <code>BB_H2_MAX_CONCURRENT_STREAMS</code>).  Only meaningful when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.</td>
+<td>Maximum concurrent WebSocket (RFC 8441 Extended CONNECT) streams per HTTP/2 connection.  Caps the per-connection blast radius of WS-over-H2 stream-exhaustion attacks.  Excess streams receive <code>RST_STREAM REFUSED_STREAM</code>.  <code>0</code> disables the cap (no upper bound beyond <code>BB_H2_MAX_CONCURRENT_STREAMS</code>).  Only meaningful when <code>BB_H2_ENABLE_WEBSOCKET=1</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -6515,7 +6587,7 @@ Maximum relies on peer compliance; it is not an enforced admission gate.</p>
 <tr>
 <td><code>BB_MQTT_CONNECTION_INBOX_MAX_BYTES</code></td>
 <td><code>16777216</code> (16 MiB)</td>
-<td>Positive encoded-byte budget for each MQTT writer inbox. The packet object is retained alongside encoded bytes. One active write is outside this queue budget and uses <code>BB_WRITE_TIMEOUT</code>. Tune with the accepted packet size; an individually larger packet cannot fit even in an empty queue. Invalid values use the default.</td>
+<td>Positive encoded-byte budget for each MQTT writer inbox. The packet object is retained alongside encoded bytes. One active write is outside this queue budget and uses <code>BB_WRITE_TIMEOUT</code>. Tune with the accepted packet size; an individually larger packet cannot fit even in an empty queue.  Like the count cap, a packet that cannot be admitted ends only that connection. Invalid values use the default.</td>
 </tr>
 <tr>
 <td><code>BB_MQTT_RECEIVE_MAXIMUM</code></td>
@@ -6631,7 +6703,7 @@ module attribute rather than the variable.</p>
 </tr>
 <tr>
 <td><code>BB_DEADLINE_TICK_MS</code></td>
-<td><code>300</code></td>
+<td><code>300.0</code></td>
 <td>Milliseconds between shared deadline-scanner ticks. Smaller values tighten enforcement granularity at a CPU cost; larger values allow more deadline slack.</td>
 </tr>
 </tbody>

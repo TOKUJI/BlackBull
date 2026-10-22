@@ -6344,7 +6344,7 @@ reachability.py</code> extracts the defense sites from <code>blackbull/</code> v
 (the E1 method): every <code>raise</code>, every defense call (<code>log_cap_hit</code>,
 <code>rst_stream</code>, <code>goaway</code>, <code>_connection_error</code>), and every reference to a
 rejection status or an HTTP/2 error code — excluding startup config
-validation (<code>config.py</code>, <code>env.py</code>, <code>_env_vars.py</code>) and non-surface
+validation (<code>config.py</code>, <code>env.py</code>) and non-surface
 packages (<code>client/</code>, <code>fault_injection/</code>, <code>mqtt/</code>, <code>testing/</code>).</p>
 <p><code>BB_WORKERS=1</code> serves in-process so one interpreter holds the request
 path (the report proves it: <code>server/worker.py</code> executes nothing);

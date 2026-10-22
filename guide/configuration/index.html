@@ -5997,6 +5997,12 @@ general-purpose settings store — server-tuning knobs stay in the
 <li>the value declared on the bound <code>AppConfig</code>;</li>
 <li><code>serve()</code>'s built-in default.</li>
 </ol>
+<div class="admonition warning">
+<p class="admonition-title">The <code>BLACKBULL_*</code> names move to <code>BB_*</code> in October 2027</p>
+<p>These variables, and <code>BLACKBULL_ENV</code>, will be renamed to the <code>BB_</code> prefix
+in a release no earlier than October 2027. Until then only the
+<code>BLACKBULL_</code> names are read.</p>
+</div>
 <div class="highlight"><pre><span></span><code><span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">AppConfig</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8443</span><span class="p">,</span> <span class="n">certfile</span><span class="o">=</span><span class="s1">'c.pem'</span><span class="p">,</span> <span class="n">keyfile</span><span class="o">=</span><span class="s1">'k.pem'</span><span class="p">))</span>
 <span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>              <span class="c1"># binds 8443 with TLS from the config</span>
 <span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">9000</span><span class="p">)</span>     <span class="c1"># explicit arg overrides the config's 8443</span>

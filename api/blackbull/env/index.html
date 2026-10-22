@@ -2275,6 +2275,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.env.read_setting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        read_setting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.env.reset_settings_cache" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2290,6 +2301,17 @@
     <span class="md-ellipsis">
       
         resolve_max_connections
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.env.setting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        setting
       
     </span>
   </a>
@@ -5792,6 +5814,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.env.read_setting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        read_setting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.env.reset_settings_cache" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5807,6 +5840,17 @@
     <span class="md-ellipsis">
       
         resolve_max_connections
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.env.setting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        setting
       
     </span>
   </a>
@@ -5853,9 +5897,16 @@
 
     <div class="doc doc-contents first">
 
-        <p>Immutable environment settings snapshot.</p>
-<p>After changing the environment in a test, call reset_settings_cache().
-Defaults and generated reference descriptions live in blackbull._env_vars.</p>
+        <p>Immutable environment settings snapshot, declared once per setting.</p>
+<p>Each <code>Settings</code> field is the whole declaration of one environment variable:
+its name, type, default, range, config-file key and description.
+<a class="autorefs autorefs-internal" title="get_settings()
+
+  
+      cached
+  " href="#blackbull.env.get_settings"><code>get_settings</code></a>, <code>blackbull run --config</code> and the reference page all read
+them from here.  After changing the environment in a test, call
+reset_settings_cache().</p>
 
 
 
@@ -5989,7 +6040,8 @@ The fault-injection servers refuse to start there at all.</p>
   
       cached
   " href="#blackbull.env.get_settings"><code>get_settings</code></a> rather than directly so that
-environment variables are read at the right time.</p>
+environment variables are read at the right time.  A directly
+constructed <code>Settings</code> leaves <code>max_connections</code> uncapped.</p>
 
 
 
@@ -6092,6 +6144,30 @@ reset_settings_cache(); tests changing them must reset in teardown.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="blackbull.env.read_setting" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">read_setting</span><span class="p">(</span><span class="n">name</span><span class="p">)</span></code>
+
+<a href="#blackbull.env.read_setting" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>One <code>Settings</code> field read from the environment now, uncached.</p>
+<p>Use it at import and in logging: <a class="autorefs autorefs-internal" title="get_settings()
+
+  
+      cached
+  " href="#blackbull.env.get_settings"><code>get_settings</code></a> at import would cache
+values before <code>blackbull run --config</code> exports them.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="blackbull.env.reset_settings_cache" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">reset_settings_cache</span><span class="p">()</span></code>
 
@@ -6138,6 +6214,29 @@ given, <em>not</em> clamped to that budget: an operator who names a number
 means it.  <code>0</code> disables the cap.</p>
 <p>Why a derived default is safe to ship, and what it does not bound, is
 argued in <code>docs/about/security-model.md</code> (qualification 2).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.env.setting" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">setting</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">default</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">section</span><span class="p">,</span> <span class="n">doc</span><span class="p">,</span> <span class="n">minimum</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">parse</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">shown</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+<a href="#blackbull.env.setting" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Declare one environment variable as a <code>Settings</code> field.</p>
+<p>A value that does not parse, or is below <em>minimum</em>, falls back to
+<em>default</em>.  <em>parse</em> replaces that rule and also receives <code>None</code> when the
+variable is unset.  <em>config</em> is the <code>[section] key</code> that <code>blackbull run
+--config</code> maps onto <em>env</em>; <em>shown</em> is the default as the reference page
+states it, when it is a rule rather than a value.</p>
 
 
     </div>

@@ -6525,7 +6525,7 @@ mechanism is handled transparently and <code>BaseSender</code> stays runtime-agn
 shape of slowloris, where a peer reading at 1 byte/sec blocks the drain on
 a TCP window that never reopens.  On timeout the transport is closed and
 <code>ConnectionResetError</code> raised, so the sender treats it as a peer-side
-reset.  The bound rides the shared <code>ConnectionDeadline</code> scanner,
+reset.  The bound rides the shared deadline scanner,
 whose <code>BB_DEADLINE_TICK_MS</code> granularity is the slop on when it fires.</p>
 
 

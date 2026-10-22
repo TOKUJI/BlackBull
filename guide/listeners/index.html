@@ -5869,6 +5869,9 @@ not rewritten; the answer is read back:</p>
 </code></pre></div>
 <p><code>server.port</code> and <code>server.unix_path</code> describe the first listener, as they
 always did.</p>
+<p>For Linux abstract UNIX sockets, <code>server.unix_path</code> retains the leading NUL
+used to connect. Application addresses derived from the socket and logs
+render it as <code>@name</code>; the port is <code>None</code>.</p>
 <h2 id="startup-is-all-or-nothing">Startup is all-or-nothing<a class="headerlink" href="#startup-is-all-or-nothing" title="Permanent link">&para;</a></h2>
 <p>BlackBull does not publish or serve a partial listener set. It first acquires
 every requested TCP, Unix, inherited-fd, and protocol-specific socket; only
