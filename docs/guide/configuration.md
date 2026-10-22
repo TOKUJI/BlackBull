@@ -170,6 +170,11 @@ Resolution order in `run()` is, highest to lowest:
 4. the value declared on the bound `AppConfig`;
 5. `serve()`'s built-in default.
 
+!!! warning "The `BLACKBULL_*` names move to `BB_*` in October 2027"
+    These variables, and `BLACKBULL_ENV`, will be renamed to the `BB_` prefix
+    in a release no earlier than October 2027. Until then only the
+    `BLACKBULL_` names are read.
+
 ```python
 app = BlackBull(config=AppConfig(port=8443, certfile='c.pem', keyfile='k.pem'))
 app.run()              # binds 8443 with TLS from the config

@@ -1,238 +1,181 @@
-"""Unit tests for :class:`blackbull.server.deadline.ConnectionDeadline`.
+"""The one deadline primitive, enforced by the shared scanner.
 
-The deadline replaces ``asyncio.timeout`` on the per-request hot path
-These tests pin down the behaviours the server stack
-relies on:
-
-* a fired deadline surfaces as ``TimeoutError`` via :meth:`guard`
-* a deadline that does *not* fire returns the body result normally
-* the timer is reusable across phases (arm → fire → arm → no-op)
-* the same-tick race (read completes and timer fires in the same loop
-  iteration) does not leave the task in a cancelled state
-* ``seconds <= 0`` disables the deadline (legacy "timeout off" path)
-* a non-deadline ``CancelledError`` propagates unchanged
+``Deadline`` runs its callback once the deadline passes; ``Guard`` turns that
+into ``TimeoutError`` for the body of a ``with`` block, the way the server
+bounds a read or a drain.  Expiry may lag by one scanner tick.
 """
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 
 import pytest
 
-from blackbull.server.deadline import ConnectionDeadline, _Scanner
+from blackbull.server.deadline import TICK_S, Deadline, Guard, SharedGuard
+
+pytestmark = pytest.mark.asyncio
+
+PAST_A_TICK = TICK_S * 2 + 0.05
 
 
-@pytest.mark.asyncio
-async def test_guard_raises_timeout_when_deadline_fires():
-    dl = ConnectionDeadline()
+def _deadline():
+    fired: list[None] = []
+    return Deadline(lambda: fired.append(None)), fired
+
+
+async def test_expiry_runs_the_callback_once():
+    dl, fired = _deadline()
+    dl.arm(0.01)
+    await asyncio.sleep(PAST_A_TICK)
+    await asyncio.sleep(PAST_A_TICK)
+    assert fired == [None]
+
+
+async def test_rearming_replaces_the_earlier_deadline():
+    dl, fired = _deadline()
+    dl.arm(0.01)
+    dl.arm(PAST_A_TICK * 3)
+    await asyncio.sleep(PAST_A_TICK)
+    assert fired == []
+    dl.disarm()
+
+
+@pytest.mark.parametrize('stop', ['disarm', 'arm-zero'])
+async def test_a_stopped_deadline_never_fires(stop):
+    dl, fired = _deadline()
+    dl.arm(0.01)
+    dl.disarm() if stop == 'disarm' else dl.arm(0.0)
+    await asyncio.sleep(PAST_A_TICK)
+    assert fired == []
+
+
+async def test_deadlines_are_independent():
+    (a, fa), (b, fb) = _deadline(), _deadline()
+    a.arm(0.01)
+    b.arm(0.01)
+    b.disarm()
+    await asyncio.sleep(PAST_A_TICK)
+    assert (fa, fb) == ([None], [])
+
+
+async def test_a_deadline_armed_after_the_scanner_went_quiet_still_fires():
+    dl, fired = _deadline()
+    dl.arm(0.01)
+    await asyncio.sleep(PAST_A_TICK)            # fires; the registry drains
+    await asyncio.sleep(PAST_A_TICK)            # the scanner stops ticking
+    dl.arm(0.01)
+    await asyncio.sleep(PAST_A_TICK)
+    assert fired == [None, None]
+
+
+async def test_guard_raises_timeout_when_its_deadline_passes():
+    guard = Guard()
     with pytest.raises(TimeoutError):
-        with dl.guard(0.01):
-            await asyncio.sleep(1.0)
-    assert dl.fired
+        with guard.within(0.01):
+            await asyncio.sleep(10)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('deadline', [
-    pytest.param(0.5, id='under-deadline-returns'),
-    pytest.param(0.0, id='zero-disables'),
-])
-async def test_guard_zero_disables_deadline(deadline):
-    """Under the deadline the guard returns normally; 0 must NOT arm a timer
-    — the call should pass through.  Use a quick sleep so the test stays
-    fast even if the contract regresses."""
-    dl = ConnectionDeadline()
-    with dl.guard(deadline):
+@pytest.mark.parametrize('seconds', [PAST_A_TICK * 3, 0.0],
+                         ids=['under-deadline', 'zero-disables'])
+async def test_guard_returns_normally_otherwise(seconds):
+    with Guard().within(seconds) as bound:
         await asyncio.sleep(0.01)
-    assert not dl.fired
+    assert isinstance(bound, Guard)
 
 
-@pytest.mark.asyncio
-async def test_deadline_reusable_across_phases():
-    """The same instance is rearmed for headers, then body chunks, then
-    keep-alive idle.  After a phase completes, the next ``arm`` must
-    start a fresh deadline with ``fired`` cleared."""
-    dl = ConnectionDeadline()
-    # Phase 1 — completes well under the deadline.
-    with dl.guard(0.5):
-        await asyncio.sleep(0.01)
-    assert not dl.fired
-    # Phase 2 — also completes; the timer from phase 1 must already be
-    # cancelled so it can't bleed into phase 2.
-    with dl.guard(0.5):
-        await asyncio.sleep(0.01)
-    assert not dl.fired
-
-
-@pytest.mark.asyncio
-async def test_deadline_reusable_after_firing():
-    """Some call sites translate the TimeoutError into a 408 response
-    and continue serving (the connection actor handles header-timeout
-    this way before returning).  The deadline object itself must be
-    safe to rearm after firing."""
-    dl = ConnectionDeadline()
+async def test_a_guard_is_reusable_after_it_fires():
+    guard = Guard()
     with pytest.raises(TimeoutError):
-        with dl.guard(0.01):
-            await asyncio.sleep(1.0)
-    assert dl.fired
-    # Rearm — fired should reset and the next short await should pass.
-    with dl.guard(0.5):
+        with guard.within(0.01):
+            await asyncio.sleep(10)
+    with guard.within(PAST_A_TICK * 3):
         await asyncio.sleep(0.01)
-    assert not dl.fired
 
 
-@pytest.mark.asyncio
-async def test_unrelated_cancel_propagates():
-    """If the task is cancelled by something other than the deadline
-    (e.g. server shutdown), the guard must not swallow it."""
-    dl = ConnectionDeadline()
+async def test_after_a_timeout_the_task_is_not_left_cancelled():
+    with pytest.raises(TimeoutError):
+        with Guard().within(0.01):
+            await asyncio.sleep(10)
+    await asyncio.sleep(0.01)
 
+
+async def test_an_unrelated_cancel_propagates():
     async def inner():
-        with dl.guard(5.0):
-            await asyncio.sleep(10.0)
+        with Guard().within(5.0):
+            await asyncio.sleep(10)
 
     task = asyncio.create_task(inner())
     await asyncio.sleep(0.01)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert not dl.fired  # cancel came from outside the deadline
 
 
-@pytest.mark.asyncio
-async def test_guard_does_not_leak_cancel_after_timeout():
-    """After ``guard`` raises ``TimeoutError`` on a fired deadline, the
-    surrounding task must not be left in a cancelled state — the
-    server's keep-alive loop continues to issue follow-up awaits (to
-    send the 408 response, for example) and they must complete
-    normally."""
-    dl = ConnectionDeadline()
-    with pytest.raises(TimeoutError):
-        with dl.guard(0.01):
-            await asyncio.sleep(1.0)
-    # If ``guard`` didn't call ``task.uncancel()`` this sleep would
-    # immediately raise CancelledError instead of completing.
-    await asyncio.sleep(0.01)
-
-
-@pytest.mark.asyncio
-async def test_guard_propagates_non_cancel_exception():
-    """If the body raises a non-CancelledError exception, ``guard`` must
-    propagate it unchanged and still disarm the pending timer (the
-    Phase A — parity case 2 from the contextmanager-era implementation)."""
-    dl = ConnectionDeadline()
+async def test_an_exception_propagates_and_leaves_no_deadline_behind():
     with pytest.raises(ValueError, match='boom'):
-        with dl.guard(0.5):
+        with Guard().within(0.01):
             raise ValueError('boom')
-    assert not dl.fired
-    # Deadline must be disarmed even on raise — rearm should start clean.
-    assert dl._deadline_at == float('inf')
-    assert not dl._registered
+    await asyncio.sleep(PAST_A_TICK)            # a leftover would cancel this
 
 
-@pytest.mark.asyncio
-async def test_guard_same_tick_race_raises_timeout():
-    """Same-tick race: the body completes normally but ``_fired`` is set
-    in the same loop iteration.
-    This is the convention ``asyncio.timeout`` uses: a deadline that
-    fired wins even if the awaited read also produced a value."""
-    dl = ConnectionDeadline()
+async def test_a_task_riding_another_tasks_guard_is_not_cancelled():
+    """Concurrent drains share one write deadline: only its owner is bound."""
+    guard = SharedGuard(0.01)
+    owner_entered = asyncio.Event()
+
+    async def owner():
+        with guard:
+            owner_entered.set()
+            await asyncio.sleep(10)
+
+    async def rider():
+        await owner_entered.wait()
+        with guard:
+            await asyncio.sleep(PAST_A_TICK)
+        return 'finished'
+
+    owning = asyncio.create_task(owner())
+    riding = asyncio.create_task(rider())
     with pytest.raises(TimeoutError):
-        with dl.guard(0.5):
-            # Simulate the same-tick race by setting _fired without
-            # going through _fire (which would also cancel the task).
-            dl._fired = True
-    # Disarmed and clean.
-    assert dl._deadline_at == float('inf')
-    assert not dl._registered
+        await owning
+    assert await riding == 'finished'
 
 
-@pytest.mark.asyncio
-async def test_guard_returns_self_as_context_manager():
-    """``dl.guard(s)`` returns the deadline itself so ``with ... as x``
-    binds ``x`` to ``dl``.  Locks in the protocol; calling code does not
-    use the ``as`` form today but the parity case from the old
-    @contextmanager form returned ``None``, so this is a deliberate
-    extension."""
-    dl = ConnectionDeadline()
-    with dl.guard(0.5) as bound:
-        assert bound is dl
+async def test_a_raising_callback_does_not_stop_the_scanner(caplog):
+    """One bad callback must not end enforcement for every other deadline."""
+    def explode() -> None:
+        raise RuntimeError('boom')
+
+    bad = Deadline(explode)
+    good, fired = _deadline()
+    bad.arm(0.01)
+    await asyncio.sleep(PAST_A_TICK)
+    good.arm(0.01)
+    await asyncio.sleep(PAST_A_TICK)
+    assert fired == [None]
 
 
-@pytest.mark.asyncio
-async def test_arm_cancels_previous_handle():
-    """Calling ``arm`` again before the previous deadline fires must
-    cancel the pending handle — otherwise the older, shorter deadline
-    would fire mid-phase."""
-    dl = ConnectionDeadline()
-    dl.arm(0.01)   # would fire after 10 ms
-    dl.arm(0.5)    # replaces the above
-    # Wait past the original short deadline; should NOT fire.
-    await asyncio.sleep(0.05)
-    assert not dl.fired
-    dl.disarm()
+async def test_a_guard_cancels_the_task_that_created_it():
+    """A connection's read deadline belongs to the connection's task, whichever
+    await inside it is running when the deadline passes."""
+    async def connection():
+        guard = Guard()
+        with guard.within(0.01):
+            await asyncio.sleep(10)
 
-
-# --- Scanner-architecture-specific tests ---
-
-
-@pytest.mark.asyncio
-async def test_scanner_singleton_resurrects_after_quiesce():
-    """The per-process scanner cancels its tick handle once the registry
-    drains; the next ``arm`` must re-arm the scanner."""
-    dl = ConnectionDeadline()
-    dl.arm(5.0)
-    assert _Scanner._HANDLE is not None
-    assert dl in _Scanner._REGISTRY
-    dl.disarm()
-    assert dl not in _Scanner._REGISTRY
-    # After disarm, registry may still hold the handle until the next
-    # tick — but a fresh arm must observe the scanner running.  We can't
-    # easily wait a full tick here, so the invariant we lock in is just
-    # that re-arming re-registers.
-    dl.arm(5.0)
-    assert dl in _Scanner._REGISTRY
-    assert _Scanner._HANDLE is not None
-    dl.disarm()
-
-
-@pytest.mark.asyncio
-async def test_scanner_handles_multiple_independent_deadlines():
-    """One scanner serves many deadlines.  Firing one must not affect
-    the others; the registry must track each independently."""
-    a, b, c = ConnectionDeadline(), ConnectionDeadline(), ConnectionDeadline()
-    a.arm(5.0)
-    b.arm(5.0)
-    c.arm(5.0)
-    assert {a, b, c} <= _Scanner._REGISTRY
-    b.disarm()
-    assert b not in _Scanner._REGISTRY
-    assert a in _Scanner._REGISTRY
-    assert c in _Scanner._REGISTRY
-    a.disarm()
-    c.disarm()
-
-
-@pytest.mark.asyncio
-async def test_scanner_fires_short_deadline_within_tick_window():
-    """End-to-end: a deadline armed past ``_TICK_S`` must fire through
-    the scanner.  Uses guard() which translates the cancellation into
-    ``TimeoutError`` — the same observable shape as the per-connection timer."""
-    dl = ConnectionDeadline()
     with pytest.raises(TimeoutError):
-        with dl.guard(0.05):
-            # Sleep long enough that the scanner is guaranteed to
-            # observe the expiry (one full _TICK_S past the deadline).
-            await asyncio.sleep(1.0)
-    assert dl.fired
+        await asyncio.wait_for(connection(), 5)
 
 
-@pytest.mark.asyncio
-async def test_arm_zero_disables_deadline_and_unregisters():
-    """``arm(0.0)`` after a positive arm must drop the deadline from
-    the registry — otherwise we leak entries when callers disable a
-    previously-armed timer."""
-    dl = ConnectionDeadline()
-    dl.arm(5.0)
-    assert dl in _Scanner._REGISTRY
-    dl.arm(0.0)
-    assert dl not in _Scanner._REGISTRY
-    assert dl._deadline_at == float('inf')
+def test_a_shared_guard_works_before_any_other_deadline_was_armed():
+    """A client-only process drains through a writer before anything else arms."""
+    code = ('import asyncio\n'
+            'from blackbull.server.deadline import SharedGuard\n'
+            'async def main():\n'
+            '    with SharedGuard(1.0):\n'
+            '        await asyncio.sleep(0)\n'
+            'asyncio.run(main())\n')
+    done = subprocess.run([sys.executable, '-c', code], capture_output=True,
+                          text=True, timeout=30)
+    assert done.returncode == 0, done.stderr

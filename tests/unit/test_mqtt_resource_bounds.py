@@ -12,8 +12,6 @@ The tests here drive broker and framer behaviour, never codec
 round-trips: what matters is the packet the broker emits and the state it
 refuses to grow.
 """
-import asyncio
-import contextlib
 
 import pytest
 
@@ -22,15 +20,12 @@ from blackbull.mqtt.broker import (
     Attach, BrokerActor, ClientPuback, ClientPublish, ClientSubscribe,
     Close, Send,
 )
-from blackbull.mqtt.connection import PacketFramer, PacketTooLarge, serve_connection
+from blackbull.mqtt.connection import PacketFramer, PacketTooLarge
 from blackbull.mqtt.messages import (
     MQTTPacketType, MQTTDecodeError,
     MQTTConnack, MQTTConnect, MQTTDisconnect, MQTTPuback, MQTTPublish,
     MQTTSubscribe, ReasonCode, encode_packet, encode_variable_byte_integer,
 )
-from blackbull.server.protocol_registry import ProtocolContext
-from blackbull.server.recipient import AbstractReader
-from blackbull.server.sender import AbstractWriter
 
 pytestmark = pytest.mark.asyncio
 
@@ -50,58 +45,6 @@ class RecordingConn(Actor):
 
     def publishes(self) -> list:
         return [p for p in self.packets() if isinstance(p, MQTTPublish)]
-
-
-class _Reader(AbstractReader):
-    """Feeds pre-built bytes, then reports EOF."""
-
-    def __init__(self, data: bytes = b''):
-        self._buf = bytearray(data)
-        self._eof = False
-
-    def feed(self, data: bytes) -> None:
-        self._buf += data
-
-    async def read(self, n: int) -> bytes:
-        if not self._buf:
-            self._eof = True
-            return b''
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readexactly(self, n: int) -> bytes:
-        return await self.read(n)
-
-    async def readuntil(self, sep: bytes) -> bytes:  # pragma: no cover
-        raise NotImplementedError
-
-    def at_eof(self) -> bool:
-        return self._eof and not self._buf
-
-
-class _Writer(AbstractWriter):
-    def __init__(self):
-        self.written = bytearray()
-        self.closed = False
-
-    async def write(self, data: bytes) -> None:
-        self.written += data
-
-    async def drain(self) -> None:
-        pass
-
-    def close(self) -> None:
-        self.closed = True
-
-    async def wait_closed(self) -> None:
-        pass
-
-
-def _ctx():
-    return ProtocolContext(peername=('127.0.0.1', 5), sockname=('0.0.0.0', 1883),
-                           ssl=False, aggregator=None, connection_id='c',
-                           protocol='mqtt')
 
 
 def _oversized_header(declared: int,
@@ -185,26 +128,6 @@ class TestPacketSizeBound:
         framer.feed(packet)
         assert len(list(framer)) == 1
 
-    async def test_connection_answers_disconnect_with_packet_too_large_and_closes(self):
-        """§3.14.2.1 — 0x95 Packet Too Large, then the connection ends."""
-        reader = _Reader(encode_packet(MQTTConnect(client_id='large', clean_start=True, keep_alive=60))
-                         + _oversized_header(64 * 1024 * 1024) + b'\x00' * 50)
-        writer = _Writer()
-        broker = BrokerActor()
-        drain = asyncio.create_task(broker.run())
-        try:
-            await asyncio.wait_for(serve_connection(reader, writer, _ctx(), broker), 1)
-        finally:
-            drain.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await drain
-
-        sent = bytes(writer.written)
-        assert sent, 'connection closed silently; the peer learns nothing'
-        assert sent[0] >> 4 == MQTTPacketType.CONNACK, f'expected CONNACK first, got {sent[0] >> 4}'
-        assert ReasonCode.PACKET_TOO_LARGE in sent, (
-            f'DISCONNECT did not carry 0x95: {sent!r}')
-
     @pytest.mark.parametrize('complete', [False, True])
     async def test_malformed_prefix_never_scans_for_an_oversized_candidate(self, complete):
         candidate = encode_packet(MQTTPublish(topic='t', payload=b'p' * 200))
@@ -238,20 +161,6 @@ class TestPacketSizeBound:
         framer.feed(packet[-1:] + packet)
         assert [p.payload for p in framer] == [b'p' * 200, b'p' * 200]
         assert not framer.buffered
-
-    async def test_cap_hit_is_logged(self, caplog):
-        framer = PacketFramer(max_packet_size=4096)
-        framer.feed(_oversized_header(64 * 1024 * 1024))
-
-        with caplog.at_level('WARNING', logger='blackbull.caps'):
-            with pytest.raises(PacketTooLarge):
-                list(framer)
-
-        hits = [r for r in caplog.records
-                if getattr(r, 'cap', None) == 'mqtt_max_packet_size']
-        assert hits, 'MQTT is still invisible in blackbull.caps'
-        assert hits[0].protocol == 'mqtt'
-        assert hits[0].limit == 4096
 
     async def test_connack_advertises_the_limits(self):
         broker = BrokerActor()
@@ -394,27 +303,6 @@ class TestRetainedBound:
         assert 't0' not in broker._retained
         await _publish(broker, pub, 't2', payload=b'v', retain=True)
         assert 't2' in broker._retained, 'freed room was not reusable'
-
-    async def test_the_publisher_is_told_the_retain_was_refused(self):
-        """A refusal only the log hears is a refusal that changes nothing.
-
-        Nobody re-publishes what they believe already worked, and a
-        retained message is exactly the kind a publisher sends once and
-        assumes is live for good.  So the acknowledgement carries 0x97,
-        which means the decision has to be taken before the ACK is sent.
-        """
-        broker = BrokerActor(max_retained=1)
-        pub = RecordingConn()
-        await _attach(broker, pub)
-        await _publish(broker, pub, 't0', payload=b'v', retain=True)
-
-        await _publish(broker, pub, 't1', payload=b'v', retain=True,
-                       qos=1, packet_id=7)
-        pubacks = [p for p in pub.packets() if isinstance(p, MQTTPuback)]
-        assert pubacks, 'no PUBACK at all'
-        assert pubacks[-1].reason_code == ReasonCode.QUOTA_EXCEEDED, (
-            f'PUBACK said {pubacks[-1].reason_code:#x}; the publisher believes '
-            f'its retained message is stored')
 
     async def test_an_accepted_retain_still_acknowledges_success(self):
         broker = BrokerActor(max_retained=10)

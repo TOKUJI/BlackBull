@@ -26,8 +26,33 @@ metadata; reinstall an editable checkout after changing that version.
 - `blackbull.client.ClientConnection`, the buffered connection every client
   owns (the type of `WebSocketSession`'s `raw_writer`).
 
+### Deprecated
+
+- The `BLACKBULL_*` environment variables (`BLACKBULL_ENV`, `BLACKBULL_PORT`,
+  `BLACKBULL_CERT`, `BLACKBULL_KEY`, `BLACKBULL_UNIX_PATH`,
+  `BLACKBULL_RELOAD`) will be renamed to the `BB_` prefix in a release no
+  earlier than October 2027. Until then only the `BLACKBULL_` names are read.
+
+### Fixed
+
+- HTTP/2 enforces `BB_HEADER_TIMEOUT` on a field block a peer opens and never
+  finishes. With the idle timeout enabled (the default) it was enforced only
+  when `BB_H2_IDLE_TIMEOUT` expired.
+
 ### Changed
 
+- A setting whose value does not parse, or is out of range, falls back to its
+  default. Previously the gRPC message limits, `BB_STATIC_STAT_TTL_S` and
+  `BB_DEADLINE_TICK_MS` could raise at import, the warm-up values clamped
+  negatives to `0`, and `BB_PRODUCTION` accepted only `1`, `true`, `yes` or
+  `on`.
+- The HTTP/2 client's per-stream deadlines and the server's HTTP/2 idle, PING
+  and header-block deadlines run on the shared deadline scanner, so they may
+  fire up to `BB_DEADLINE_TICK_MS` late, as the HTTP/1.1 deadlines already do.
+- `blackbull.server.deadline`: `ConnectionDeadline`, `WriteDeadline` and
+  `WsIdleWatchdog` are replaced by `Deadline`, `Guard` and `SharedGuard`.
+- The `h2_priority_update_buffer` cap record names its protocol `http2`, as
+  every other HTTP/2 record does.
 - WebSocket over HTTP/2 returns flow-control credit as the WebSocket codec
   consumes data, in the server and the client alike, so at most one stream
   window is buffered. DATA past the window resets the stream

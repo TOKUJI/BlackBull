@@ -5,7 +5,7 @@ The E1 method extracts defense sites from the ``blackbull/`` tree with
 Python's AST — every ``raise``, every defense call (``log_cap_hit``,
 ``rst_stream``, ``goaway``, ``_connection_error``), and every reference
 to a rejection status or an HTTP/2 error code — and excludes startup
-configuration validation (``config.py``, ``env.py``, ``_env_vars.py``).
+configuration validation (``config.py``, ``env.py``).
 A site counts as reached when measured coverage executed its line.
 
 Usage::
@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 #: Startup configuration validation is not a runtime defense site.
-SKIP_FILES = frozenset({'config.py', 'env.py', '_env_vars.py'})
+SKIP_FILES = frozenset({'config.py', 'env.py'})
 
 #: Not the server's defense surface: probe-side (client/,
 #: fault_injection/), out-of-scope mqtt/, test tooling testing/.

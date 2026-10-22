@@ -5,6 +5,7 @@ CLI arguments use serve() configuration precedence; see docs/guide/configuration
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import importlib
 import os
 import sys
@@ -20,45 +21,11 @@ from .env import Settings
 # TOML config loading
 # ---------------------------------------------------------------------------
 
-# Mapping: (section, key) → BB_* environment variable name.
 # Values in the TOML file set the corresponding env var only when the var
 # is not already present in os.environ (env vars always win over config).
 _TOML_TO_ENV: dict[tuple[str, str], str] = {
-    # [server]
-    ('server', 'workers'):              'BB_WORKERS',
-    ('server', 'stream_queue_depth'):   'BB_STREAM_QUEUE_DEPTH',
-    ('server', 'ws_queue_depth'):       'BB_WS_QUEUE_DEPTH',
-    ('server', 'socket_backlog'):       'BB_SOCKET_BACKLOG',
-    ('server', 'socket_sndbuf'):        'BB_SOCKET_SNDBUF',
-    ('server', 'socket_rcvbuf'):        'BB_SOCKET_RCVBUF',
-    ('server', 'socket_reuseport'):     'BB_SOCKET_REUSEPORT',
-    ('server', 'keep_alive_timeout'):   'BB_KEEP_ALIVE_TIMEOUT',
-    ('server', 'tcp_user_timeout_ms'):  'BB_TCP_USER_TIMEOUT_MS',
-    ('server', 'frame_yield_every'):    'BB_FRAME_YIELD_EVERY',
-    ('server', 'h2_active_streams'):    'BB_H2_ACTIVE_STREAMS',
-    ('server', 'h2_active_streams_1w'): 'BB_H2_ACTIVE_STREAMS_1W',
-    ('server', 'h2_initial_window_size'):    'BB_H2_INITIAL_WINDOW_SIZE',
-    ('server', 'h2_connection_window_size'): 'BB_H2_CONNECTION_WINDOW_SIZE',
-    ('server', 'h2_max_concurrent_streams'): 'BB_H2_MAX_CONCURRENT_STREAMS',
-    ('server', 'h2_enable_websocket'):  'BB_H2_ENABLE_WEBSOCKET',
-    ('server', 'ws_permessage_deflate'): 'BB_WS_PERMESSAGE_DEFLATE',
-    # [limits]
-    ('limits', 'max_connections'):      'BB_MAX_CONNECTIONS',
-    ('limits', 'request_timeout'):      'BB_REQUEST_TIMEOUT',
-    ('limits', 'header_timeout'):       'BB_HEADER_TIMEOUT',
-    ('limits', 'header_max_line'):      'BB_HEADER_MAX_LINE',
-    ('limits', 'header_max_total'):     'BB_HEADER_MAX_TOTAL',
-    ('limits', 'compression_min_size'): 'BB_COMPRESSION_MIN_SIZE',
-    ('limits', 'compression_executor_threshold'): 'BB_COMPRESSION_EXECUTOR_THRESHOLD',
-    # [logging]
-    ('logging', 'access_log'):   'BB_ACCESS_LOG',
-    ('logging', 'async_logging'): 'BB_ASYNC_LOGGING',
-    ('logging', 'log_format'):    'BB_LOG_FORMAT',
-    ('logging', 'syslog_addr'):   'BB_SYSLOG_ADDR',
-    ('logging', 'batch_size'):    'BB_LOG_BATCH_SIZE',
-    ('logging', 'batch_timeout_ms'): 'BB_LOG_BATCH_TIMEOUT_MS',
-    ('logging', 'file'):          'BB_LOG_FILE',
-}
+    f.metadata['config']: f.metadata['env']
+    for f in dataclasses.fields(Settings) if f.metadata['config']}
 
 
 def _load_config(path: str) -> dict[str, str]:

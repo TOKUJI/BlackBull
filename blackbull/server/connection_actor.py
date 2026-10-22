@@ -8,7 +8,7 @@ from ..actor import Actor, Message
 from ..env import get_settings
 from ..event_aggregator import EventAggregator
 from .cap_log import _LazyCapHitCounter
-from .deadline import ConnectionDeadline
+from .deadline import Guard
 from .protocol_registry import (ConnectionView, ProtocolBinding,
                                 ProtocolRegistry)
 from .recipient import (AbstractReader,
@@ -102,7 +102,7 @@ class ConnectionActor(Actor):
                     await self._aggregator.on_connection_closed(
                         self._peername, self._served_protocol, elapsed_ms)
 
-    def _make_conn(self, reader: AbstractReader, dl: ConnectionDeadline) -> ConnectionView:
+    def _make_conn(self, reader: AbstractReader, dl: Guard) -> ConnectionView:
         return ConnectionView(
             reader=reader, writer=self._writer, app=self._app,
             aggregator=self._aggregator,
@@ -167,7 +167,7 @@ class ConnectionActor(Actor):
         # process-wide scanner walks the registry (see ``deadline.py``).  Bound
         # to *this* dispatch task and passed down into HTTP1Actor /
         # HTTP1Recipient, so every phase boundary re-arms the same object.
-        dl = ConnectionDeadline()
+        dl = Guard()
 
         # Port-bound non-ASGI protocol: the listening socket already
         # identifies the protocol, so skip detection and the deadline machinery
@@ -208,10 +208,10 @@ class ConnectionActor(Actor):
         await binding.serve(self._make_conn(self._reader, dl))
 
     @staticmethod
-    async def _guarded(dl: ConnectionDeadline, deadline: 'float | None', coro):
+    async def _guarded(dl: Guard, deadline: 'float | None', coro):
         """Run *coro* under the connection deadline, if one is configured."""
         if deadline is not None:
-            with dl.guard(deadline):
+            with dl.within(deadline):
                 return await coro
         return await coro
 
@@ -224,7 +224,7 @@ class ConnectionActor(Actor):
 
     async def _on_detect_timeout(self, binding: 'ProtocolBinding | None',
                                  deadline: 'float | None',
-                                 dl: ConnectionDeadline) -> None:
+                                 dl: Guard) -> None:
         """Peer connected but never sent its discriminator within the deadline.
 
         Records the (protocol-agnostic) slowloris cap hit, then delegates the

@@ -15,10 +15,10 @@ from urllib.parse import unquote
 from http import HTTPStatus
 
 from blackbull.connection import Connection
-from blackbull.env import get_settings, Environment
 from blackbull.native import NativeResponse
 from ._accept_encoding import acceptable_encodings
 from ..protocol.field_grammar import if_none_match_hit
+from ..env import Environment, get_settings, read_setting
 
 
 # Register standard web-asset MIME types missing from slim host databases.
@@ -141,9 +141,8 @@ class StaticFiles:
     _CACHE_MAX_ENTRIES = 256
     # 64 KiB streaming chunk for files above the cache threshold.
     _CHUNK = 64 * 1024
-    # Seconds between cached-body validations. Requests still stat the target;
-    # 0 compares every request. This can delay visibility of on-disk edits.
-    _STAT_TTL_S = float(os.environ.get('BB_STATIC_STAT_TTL_S', '1.0'))
+    # Seconds between cached-body validations; 0 compares every request.
+    _STAT_TTL_S = read_setting('static_stat_ttl_s')
 
     #: Precompressed sibling suffix and Content-Encoding token per coding.
     _VARIANTS: dict[str, tuple[str, bytes]] = {

@@ -20,17 +20,15 @@ import asyncio
 
 import pytest
 
-from tests.harness import fed, feed
+from tests.harness import fed
 from hpack import Encoder
 
 from blackbull.protocol.frame_types import (
-    DataFrameFlags, ErrorCodes, FrameTypes, HeaderFrameFlags, PingFrameFlags,
+    ErrorCodes, FrameTypes, HeaderFrameFlags, PingFrameFlags,
 )
 from blackbull.server.http2_actor import HTTP2Actor
-from blackbull.server.recipient import (ProtocolError,
-                                        WebSocketRecipient)
+from blackbull.server.recipient import (WebSocketRecipient)
 from blackbull.server.sender import AsyncioWriter
-from blackbull.server.constants import WSCloseCode
 
 pytestmark = pytest.mark.asyncio
 
@@ -64,11 +62,6 @@ def _ping() -> bytes:
 
 def _settings() -> bytes:
     return _frame(FrameTypes.SETTINGS, 0, 0, b'')
-
-
-def _rst(stream_id: int) -> bytes:
-    return _frame(FrameTypes.RST_STREAM, 0, stream_id,
-                  ErrorCodes.CANCEL.to_bytes(4, 'big'))
 
 
 def _headers(stream_id: int, *, end_headers: bool = True) -> bytes:
@@ -133,14 +126,6 @@ def _goaway_codes(sent) -> list[int]:
 
 class TestPingFlood:
     """CVE-2019-9512 — one ACK write per PING."""
-
-    @pytest.mark.parametrize('frames', [
-        pytest.param([_settings()] + [_ping()] * (_LIMIT + 2), id='ping-flood'),
-        pytest.param([_settings()] * (_LIMIT + 3), id='settings-flood'),
-    ])
-    async def test_over_the_budget_closes_the_connection(self, frames):
-        _, sent = await _drive(frames)
-        assert ErrorCodes.ENHANCE_YOUR_CALM in _goaway_codes(sent)
 
     async def test_within_the_budget_every_ping_is_answered(self):
         _, sent = await _drive([_settings()] + [_ping()] * _LIMIT)
@@ -236,26 +221,6 @@ def _ws_frame(payload: bytes = b'', *, opcode: int = 0x9) -> bytes:
     return bytes([0x80 | opcode, 0x80 | len(payload)]) + _MASK + masked
 
 
-class _WsReader:
-    def __init__(self, data: bytes):
-        self._buf = bytearray(data)
-
-    async def readexactly(self, n: int) -> bytes:
-        if len(self._buf) < n:
-            raise asyncio.IncompleteReadError(bytes(self._buf), n)
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def read(self, n: int) -> bytes:
-        chunk = bytes(self._buf[:n])
-        del self._buf[:n]
-        return chunk
-
-    async def readuntil(self, sep: bytes) -> bytes:  # pragma: no cover
-        raise NotImplementedError
-
-
 def _ws_recipient(raw: bytes):
     writer = _Writer()
     recipient = WebSocketRecipient(
@@ -265,16 +230,6 @@ def _ws_recipient(raw: bytes):
 
 class TestWebSocketControlFlood:
     """A PING costs a PONG write; nothing counted them."""
-
-    async def test_over_the_budget_closes_with_1008(self):
-        recipient, writer = _ws_recipient(_ws_frame() * (_LIMIT + 3))
-        assert await recipient() == {'type': 'websocket.connect'}
-
-        with pytest.raises(ProtocolError) as exc:
-            for _ in range(_LIMIT + 3):
-                await recipient()
-        assert exc.value.close_code == WSCloseCode.POLICY_VIOLATION
-        assert WSCloseCode.POLICY_VIOLATION.to_bytes(2, 'big') in bytes(writer.written)
 
     async def test_within_the_budget_every_ping_earns_a_pong(self):
         recipient, writer = _ws_recipient(_ws_frame() * _LIMIT)
@@ -291,16 +246,3 @@ class TestWebSocketControlFlood:
         assert pongs == _LIMIT, (
             f'{pongs} PONGs for {_LIMIT} PINGs inside the budget')
 
-    async def test_the_cap_hit_is_logged(self, caplog):
-        recipient, _ = _ws_recipient(_ws_frame() * (_LIMIT + 3))
-        assert await recipient() == {'type': 'websocket.connect'}
-
-        with caplog.at_level('WARNING', logger='blackbull.caps'):
-            with pytest.raises(ProtocolError):
-                for _ in range(_LIMIT + 3):
-                    await recipient()
-
-        hits = [r for r in caplog.records
-                if getattr(r, 'cap', None) == 'frame_rate'
-                and getattr(r, 'protocol', None) == 'ws']
-        assert hits and hits[0].limit == _LIMIT

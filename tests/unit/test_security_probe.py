@@ -527,7 +527,7 @@ def test_defense_sites_cover_the_documented_kinds():
     kinds = {s.kind for s in sites}
     assert {'raise', 'defense-call', 'rejection-status', 'error-code'} <= kinds
     assert sites, 'the AST pass must find the blackbull defense surface'
-    assert all(s.path not in ('config.py', 'env.py', '_env_vars.py')
+    assert all(s.path not in ('config.py', 'env.py')
                for s in sites), 'startup config validation is not a site'
     assert any(s.kind == 'defense-call' for s in sites)
     assert any(s.kind == 'error-code' and s.context == 'PROTOCOL_ERROR'

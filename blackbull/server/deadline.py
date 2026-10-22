@@ -6,12 +6,15 @@ quiesce when empty and resume on the next arm; each worker owns its scanner.
 from __future__ import annotations
 
 import asyncio
-import os
+import logging
+from collections.abc import Callable
 from typing import ClassVar
+from ..env import read_setting
 
 
-_TICK_S: float = max(0.01,
-                     float(os.environ.get('BB_DEADLINE_TICK_MS', '300')) / 1000.0)
+logger = logging.getLogger(__name__)
+
+TICK_S: float = max(0.01, read_setting('deadline_tick_ms') / 1000.0)
 _INF = float('inf')
 
 
@@ -34,10 +37,14 @@ def _tick() -> None:
     now = loop.time()
     # Snapshot — _fire_from_scanner mutates _REGISTRY.
     for dl in list(_Scanner._REGISTRY):
-        if dl._deadline_at <= now:
-            dl._fire_from_scanner()
+        if dl._at <= now:
+            try:
+                dl._expire()
+            except Exception:
+                # One failing callback must not end enforcement for the rest.
+                logger.exception('deadline callback failed')
     if _Scanner._REGISTRY:
-        _Scanner._HANDLE = loop.call_later(_TICK_S, _tick)
+        _Scanner._HANDLE = loop.call_later(TICK_S, _tick)
     else:
         _Scanner._HANDLE = None
 
@@ -51,155 +58,141 @@ def _ensure_scanner_running(loop: 'asyncio.AbstractEventLoop') -> None:
         _Scanner._HANDLE = None
         _Scanner._REGISTRY = set()
     if _Scanner._HANDLE is None:
-        _Scanner._HANDLE = loop.call_later(_TICK_S, _tick)
+        _Scanner._HANDLE = loop.call_later(TICK_S, _tick)
 
 
-class ConnectionDeadline:
-    """One reusable deadline per connection.
+class _Armed:
+    """``arm`` (re)sets the deadline from now; ``seconds <= 0`` or ``disarm`` drops it."""
 
-    The instance binds to the task that constructed it (in practice, the
-    connection actor's task).  When the per-process scanner observes
-    that the deadline's monotonic ``_deadline_at`` has passed, the bound
-    task is cancelled — the cancellation propagates into whichever
-    ``reader.readuntil`` / ``read`` / ``readexactly`` is currently
-    awaiting.  Call sites translate the cancellation into
-    ``TimeoutError`` via [`guard`][] (the common case) or manually
-    by checking ``fired``.
-    """
-
-    __slots__ = ('_loop', '_task', '_deadline_at', '_fired',
-                 '_pending', '_registered')
-
-    def __init__(self) -> None:
-        self._loop = asyncio.get_running_loop()
-        self._task = asyncio.current_task()
-        self._deadline_at: float = _INF
-        self._fired = False
-        self._pending = 0.0
-        self._registered = False
+    __slots__ = ('_loop', '_at', '_registered')
 
     def arm(self, seconds: float) -> None:
-        """(Re-)set the deadline; ``seconds <= 0`` disables it.
+        if seconds <= 0:
+            self.disarm()
+            return
+        loop = self._loop
+        if loop is None:
+            loop = self._loop = asyncio.get_running_loop()
+        self._at = loop.time() + seconds
+        if not self._registered:
+            _ensure_scanner_running(loop)
+            _Scanner._REGISTRY.add(self)
+            self._registered = True
 
-        Safe to call repeatedly.  Resets ``fired`` so a recovered
-        deadline can be reused across phases on the same connection.
-        """
-        self._fired = False
-        if seconds > 0:
-            self._deadline_at = self._loop.time() + seconds
-            if not self._registered:
-                _ensure_scanner_running(self._loop)
-                _Scanner._REGISTRY.add(self)
-                self._registered = True
-        else:
-            self._deadline_at = _INF
-            if self._registered:
-                _Scanner._REGISTRY.discard(self)
-                self._registered = False
+    def when(self) -> float:
+        """Loop time it expires at; ``inf`` while disarmed."""
+        return self._at
 
     def disarm(self) -> None:
-        """Drop the deadline.  Idempotent."""
-        self._deadline_at = _INF
+        self._at = _INF
         if self._registered:
             _Scanner._REGISTRY.discard(self)
             self._registered = False
 
-    def _fire_from_scanner(self) -> None:
-        """Invoked by [`_tick`][] when ``_deadline_at`` has passed."""
-        self._fired = True
-        self._deadline_at = _INF
+
+class Deadline(_Armed):
+    """A deadline the shared scanner enforces: *on_expiry* runs once it passes,
+    on the loop, synchronously, at most one tick late.
+    """
+
+    __slots__ = ('_on_expiry',)
+
+    def __init__(self, on_expiry: Callable[[], None]) -> None:
+        self._loop = None
+        self._at = _INF
         self._registered = False
-        _Scanner._REGISTRY.discard(self)
-        if self._task is not None and not self._task.done():
-            self._task.cancel()
+        self._on_expiry = on_expiry
 
-    @property
-    def fired(self) -> bool:
-        return self._fired
+    def _expire(self) -> None:
+        self.disarm()
+        self._on_expiry()
 
-    def guard(self, seconds: float) -> 'ConnectionDeadline':
-        """Arm the deadline and return ``self`` as a context manager.
 
-        Caller pattern::
+class Guard(_Armed):
+    """Bound the body of ``with guard.within(seconds):`` and raise ``TimeoutError``.
 
-            with dl.guard(cfg.header_timeout):
-                await reader.readuntil(...)
+    Expiry cancels the task that created the guard; a read that completes in
+    the tick the deadline fires is still a timeout, as with ``asyncio.timeout``.
+    """
 
-        Matches the observable behaviour of ``async with asyncio.timeout(d):``
-        — a fired deadline manifests as ``TimeoutError``, and a read that
-        completes in the same tick the deadline fires is a timeout, which is
-        ``asyncio.timeout``'s convention too.
+    __slots__ = ('_task', '_seconds', '_fired')
 
-        ``self`` *is* the context manager, so guards cannot nest or overlap:
-        each connection owns one of these and uses it sequentially from the
-        single task that constructed it.
-        """
-        self._pending = seconds
+    def __init__(self, seconds: float = 0.0) -> None:
+        self._loop = None
+        self._at = _INF
+        self._registered = False
+        self._task = asyncio.current_task()
+        self._seconds = seconds
+        self._fired = False
+
+    def within(self, seconds: float) -> 'Guard':
+        self._seconds = seconds
         return self
 
-    def __enter__(self) -> 'ConnectionDeadline':
-        self.arm(self._pending)
+    def _expire(self) -> None:
+        self.disarm()
+        self._fired = True
+        task = self._task
+        if task is not None and not task.done():
+            task.cancel()
+
+    # Enter and exit inline arm and disarm: they run on every request.
+    def __enter__(self) -> 'Guard':
+        self._fired = False
+        if self._seconds > 0:
+            loop = self._loop
+            if loop is None:
+                loop = self._loop = asyncio.get_running_loop()
+            self._at = loop.time() + self._seconds
+            if not self._registered:
+                _ensure_scanner_running(loop)
+                _Scanner._REGISTRY.add(self)
+                self._registered = True
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
-        self.disarm()
+        self._at = _INF
+        if self._registered:
+            _Scanner._REGISTRY.discard(self)
+            self._registered = False
         if self._fired and (exc_type is None or exc_type is asyncio.CancelledError):
-            task = asyncio.current_task()
-            if task is not None:
-                # Clear the cancel that ``_fire_from_scanner`` requested;
-                # the read either raised CancelledError (suppressed here)
-                # or completed normally in the same tick the scanner
-                # fired.  Either way the surrounding task must not stay
-                # in cancelled state.
-                task.uncancel()
+            # The cancel this guard requested must not outlive it.
+            self._task.uncancel()
             raise TimeoutError
         return False
 
 
-class WriteDeadline:
-    """Bound writer drain with a task owner selected per arm.
+class SharedGuard(_Armed):
+    """A ``Guard`` several tasks may enter at once, as concurrent drains do.
 
-    Concurrent riders must not rearm or interpret firing. The owner closes the
-    transport on deadline, resolving every rider; one shared scanner serves all.
+    The first to enter owns the deadline and is the one cancelled; a task that
+    enters while another owns it rides along without rearming it.
     """
 
-    __slots__ = ('_loop', '_owner', '_deadline_at', '_fired',
-                 '_seconds', '_registered')
+    __slots__ = ('_task', '_seconds', '_fired')
 
     def __init__(self, seconds: float) -> None:
-        # Left unannotated deliberately: beartype instruments annotated
-        # attribute assignments with ``die_if_unbearable``, and it cannot
-        # resolve a quoted forward reference from that call site.
+        # No task yet: a writer may be built outside the loop.
         self._loop = None
-        self._owner = None
-        self._deadline_at: float = _INF
-        self._fired = False
+        self._at = _INF
+        self._registered = False
+        self._task = None
         self._seconds = seconds
-        self._registered = False
+        self._fired = False
 
-    @property
-    def fired(self) -> bool:
-        return self._fired
+    _expire = Guard._expire
 
-    def _fire_from_scanner(self) -> None:
-        """Invoked by [`_tick`][] when ``_deadline_at`` has passed."""
-        self._fired = True
-        self._deadline_at = _INF
-        self._registered = False
-        _Scanner._REGISTRY.discard(self)
-        if self._owner is not None and not self._owner.done():
-            self._owner.cancel()
-
-    def __enter__(self) -> 'WriteDeadline':
-        if self._owner is None:
+    # Enter and exit inline arm and disarm: a writer drains once per response.
+    def __enter__(self) -> 'SharedGuard':
+        if self._task is None and self._seconds > 0:
             loop = self._loop
             if loop is None or loop is not _Scanner._LOOP:
-                # First arm, or the writer outlived the loop it was built
-                # under (worker fork, test isolation).
+                # First enter, or the writer outlived the loop it was armed under.
                 loop = self._loop = asyncio.get_running_loop()
+                self._registered = False
+            self._task = asyncio.current_task()
             self._fired = False
-            self._owner = asyncio.current_task()
-            self._deadline_at = loop.time() + self._seconds
+            self._at = loop.time() + self._seconds
             if not self._registered:
                 _ensure_scanner_running(loop)
                 _Scanner._REGISTRY.add(self)
@@ -208,61 +201,14 @@ class WriteDeadline:
 
     def __exit__(self, exc_type, exc, tb) -> bool:
         task = asyncio.current_task()
-        if self._owner is not task:
-            # A concurrent drain that rode along on someone else's window.
+        if self._task is not task:
             return False
-        self._owner = None
-        self._deadline_at = _INF
+        self._task = None
+        self._at = _INF
         if self._registered:
             _Scanner._REGISTRY.discard(self)
             self._registered = False
         if self._fired and (exc_type is None or exc_type is asyncio.CancelledError):
-            if task is not None:
-                # Clear the cancel ``_fire_from_scanner`` requested; the
-                # drain either raised CancelledError (suppressed here) or
-                # completed in the same tick the scanner fired.  Either
-                # way the surrounding task must not stay cancelled.
-                task.uncancel()
+            task.uncancel()
             raise TimeoutError
         return False
-
-
-class WsIdleWatchdog:
-    """Service quiet WebSocket control/deferred reads through the shared scanner.
-
-    Receive/send touch activity; disarm removes the watch. Quiet connections
-    invoke the callback roughly each tick without per-connection timer handles.
-    """
-
-    __slots__ = ('_loop', '_idle_s', '_deadline_at', '_callback', '_registered')
-
-    def __init__(self, callback, *, idle_s: float | None = None) -> None:
-        self._loop = asyncio.get_running_loop()
-        self._idle_s: float = _TICK_S if idle_s is None else idle_s
-        self._deadline_at: float = _INF
-        self._callback = callback
-        self._registered = False
-
-    def touch(self) -> None:
-        """Mark connection activity; the watchdog goes quiet for _idle_s."""
-        self._deadline_at = self._loop.time() + self._idle_s
-        if not self._registered:
-            _ensure_scanner_running(self._loop)
-            _Scanner._REGISTRY.add(self)
-            self._registered = True
-
-    def _fire_from_scanner(self) -> None:
-        """Invoked by [`_tick`][] when the connection has been idle."""
-        # Re-arm first: the callback may schedule work, but this watchdog
-        # keeps watching (once per tick) until disarm().
-        self._deadline_at = self._loop.time() + self._idle_s
-        cb = self._callback
-        if cb is not None:
-            cb()
-
-    def disarm(self) -> None:
-        """Stop watching.  Idempotent."""
-        self._deadline_at = _INF
-        if self._registered:
-            _Scanner._REGISTRY.discard(self)
-            self._registered = False

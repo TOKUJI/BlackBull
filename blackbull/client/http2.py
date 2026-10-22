@@ -22,6 +22,7 @@ from ..headers import Headers
 from ..protocol.framing import (is_informational, parse_content_length,
                                 parse_status, response_has_content)
 from ..server.cap_log import log_cap_hit
+from ..server.deadline import Deadline
 from ..server.rate_window import ByteRateFloor
 from ..server.http2_ws import HTTP2StreamReader
 from ..server.recipient import AbstractReader
@@ -230,7 +231,7 @@ class _PendingResponse:
     #: path which ends a response — completion, refusal, GOAWAY, a lost
     #: connection, ``__aexit__`` — inherits the disarm by going through
     #: ``_drop_pending`` as it already does.
-    deadline: asyncio.TimerHandle | None = None
+    deadline: Deadline | None = None
     #: Which phase [`deadline`][] is timing, so a handover re-stamps
     #: [`opened_at`][] and a re-arm within one phase does not.
     phase: _Phase | None = None
@@ -251,7 +252,7 @@ class _PendingResponse:
         """Stop the deadline.  Idempotent — the response may end because it
         completed, because it was refused, or because the connection did."""
         if self.deadline is not None:
-            self.deadline.cancel()
+            self.deadline.disarm()
             self.deadline = None
 
 
@@ -1339,8 +1340,9 @@ class HTTP2Client:
         timeout = float(getattr(get_settings(), phase.value))
         if timeout <= 0:
             return
-        pending.deadline = loop.call_later(
-            timeout, self._on_stream_stalled, stream_id, timeout)
+        pending.deadline = Deadline(
+            lambda: self._on_stream_stalled(stream_id, timeout))
+        pending.deadline.arm(timeout)
 
     def _on_stream_stalled(self, stream_id: int, timeout: float) -> None:
         """Schedule deadline refusal; re-check stream liveness in _refuse_stream.

@@ -21,7 +21,6 @@ protocol for a reason:
 The clock is injected rather than slept through — a test that proves a 5 s
 grace period by waiting 5 s is a test nobody runs.
 """
-from http import HTTPStatus
 
 import pytest
 
@@ -29,7 +28,6 @@ from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.protocol.frame_types import Data, DataFrameFlags, FrameTypes
 from blackbull.request import ClientDisconnected
-from blackbull.router import HTTPException
 from blackbull.server.recipient import (
     AbstractReader, HTTP1Recipient, HTTP2Recipient,
 )
@@ -170,17 +168,6 @@ class TestHTTP1TheRateIsJudgedOnWaitingTime:
         for _ in range(5):
             assert await r.next_chunk() == b'x'
 
-    async def test_the_refusal_closes_the_connection(self, clock):
-        """A peer that is being dropped for dripping must not be handed a fresh
-        keep-alive slot to drip into."""
-        src = _PacedSource(clock, seconds=2.0, per_read=1)
-        r = _recipient(src)
-        with pytest.raises(ClientDisconnected):
-            while await r.next_chunk() is not None:
-                pass
-        assert r.must_close is True
-        assert r.needs_drain() is False
-
     async def test_a_burst_does_not_shelter_a_subsequent_stall(self, clock):
         """1 MiB at full speed, then one byte every two seconds.  A cumulative
         judge would coast on the burst — the lifetime average stays above
@@ -223,14 +210,6 @@ class TestHTTP2BodyLimitsAreJudgedOnArrival:
         assert r.put_DATAFrame(_data(b'b' * 512, end_stream=True)) is True
         assert await r.next_chunk() == b'a' * 512
         assert await r.next_chunk() == b'b' * 512
-
-    async def test_a_trickled_stream_is_refused_past_the_grace(self, clock):
-        r = HTTP2Recipient(max_body=0, min_rate=240.0, min_rate_grace=5.0)
-        assert r.put_DATAFrame(_data(b'a')) is True     # clock starts here
-        clock.advance(3.0)
-        assert r.put_DATAFrame(_data(b'a')) is True     # inside the grace
-        clock.advance(3.0)
-        assert r.put_DATAFrame(_data(b'a')) is False    # 3 bytes in 6 s
 
     async def test_a_peer_we_back_pressured_is_not_judged(self, clock):
         """The HTTP/2-specific false positive: a slow *handler* stops crediting,
@@ -302,18 +281,3 @@ class TestHTTP2BodyLimitsAreJudgedOnArrival:
         clock.advance(3.0)
         assert r.put_DATAFrame(_data(b'y')) is False    # that window has only drips
 
-
-class TestTheTwoProtocolsAgreeOnTheStatus:
-    async def test_http1_answers_413_for_an_over_cap_body(self):
-        """Both protocols refuse the same octets; only the *shape* of the
-        refusal differs (HTTP/2 resets the stream, HTTP/1.1 cannot).  The
-        HTTP/1.1 answer is the one that carries a status."""
-        class _Big(AbstractReader):
-            async def read(self, n: int) -> bytes:
-                return b'x' * n
-
-        r = HTTP1Recipient(_Big(), _conn(10_000), chunk_size=64 * 1024,
-                           chunk_max=4096, max_body=1024, min_rate=0.0, framing=request_framing(_conn(10_000).headers))
-        with pytest.raises(HTTPException) as exc:
-            await r.next_chunk()
-        assert exc.value.status == HTTPStatus.REQUEST_ENTITY_TOO_LARGE

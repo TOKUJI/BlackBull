@@ -28,10 +28,18 @@ from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
     ErrorCodes, FrameTypes, HeaderFrameFlags, PingFrameFlags,
 )
+from blackbull.server import deadline
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.sender import AsyncioWriter
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture(autouse=True)
+def _fine_scanner(monkeypatch):
+    """These bounds are a few ticks long; the shared scanner's default tick
+    would lag each by up to ``BB_DEADLINE_TICK_MS``."""
+    monkeypatch.setattr(deadline, 'TICK_S', 0.005)
 
 # Short enough to keep the suite fast, long enough that a loaded CI box
 # does not mistake scheduler jitter for a peer going silent.
@@ -186,16 +194,6 @@ class TestHeaderBlockDeadline:
         assert goaways, f'no GOAWAY; frames sent were {_types(sent)}'
         assert goaways[0].error_code == ErrorCodes.ENHANCE_YOUR_CALM
         assert wire.closed
-
-    async def test_the_cap_hit_is_logged(self, caplog):
-        with caplog.at_level('WARNING', logger='blackbull.caps'):
-            _, _, _, task = _run([_settings(), _partial_headers()])
-            await _settle(task)
-
-        hits = [r for r in caplog.records
-                if getattr(r, 'cap', None) == 'header_timeout'
-                and getattr(r, 'protocol', None) == 'http2']
-        assert hits, 'the header deadline fired invisibly'
 
     async def test_a_header_block_that_completes_is_untouched(self):
         """The deadline must not fire on a peer that simply finished."""

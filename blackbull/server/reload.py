@@ -13,9 +13,10 @@ import threading
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
+from ..protocol.rsock import _INHERIT_FDS_ENV
+
 logger = logging.getLogger(__name__)
 
-_INHERIT_FDS_ENV = 'BB_INHERIT_FDS'
 
 #: Default extensions watched when the user does not specify ``include``.
 #: Templates and config files are intentionally NOT watched by default —

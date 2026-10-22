@@ -7,7 +7,6 @@ import inspect
 import json
 import logging
 import logging.handlers
-import os
 import queue as _queue_mod
 import sys
 import threading
@@ -15,6 +14,8 @@ from functools import wraps
 from inspect import iscoroutinefunction
 from copy import copy
 from typing import Literal
+
+from .env import read_setting
 
 
 def log(fn):
@@ -229,15 +230,15 @@ def _build_sink_handlers(
     always batch; synchronous logging is the per-record-flush option.
     """
     if log_format is None:
-        log_format = os.environ.get('BB_LOG_FORMAT', '')
+        log_format = read_setting('log_format')
     if syslog_addr is None:
-        syslog_addr = os.environ.get('BB_SYSLOG_ADDR', '')
+        syslog_addr = read_setting('log_syslog_addr')
     if batch_size is None:
-        batch_size = _int_env('BB_LOG_BATCH_SIZE', 64)
+        batch_size = read_setting('log_batch_size')
     if batch_timeout_ms is None:
-        batch_timeout_ms = _int_env('BB_LOG_BATCH_TIMEOUT_MS', 5)
+        batch_timeout_ms = read_setting('log_batch_timeout_ms')
     if log_file is None:
-        log_file = os.environ.get('BB_LOG_FILE', '')
+        log_file = read_setting('log_file')
 
     # Open each worker's append-mode sink after fork.
     log_file = log_file.strip()
@@ -271,19 +272,6 @@ def _build_sink_handlers(
     if log_format.strip().lower() == 'json':
         handler.setFormatter(JsonFormatter())
     return [handler]
-
-
-def _int_env(name: str, default: int) -> int:
-    """Read an int env var, falling back to *default* on unset/unparseable.
-
-    Local to ``logger`` (mirrors ``blackbull.env._int_env``) so the module
-    stays free of the settings stack — logging is configured before, and
-    independently of, ``get_settings()``.
-    """
-    try:
-        return int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
 
 
 class _DeferredFormatQueueHandler(logging.handlers.QueueHandler):

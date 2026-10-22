@@ -7,10 +7,19 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
-from collections.abc import Callable
 from typing import Any
 
+from .env import setting
+
 logger = logging.getLogger('blackbull.config')
+
+
+def _parse_bool(value: str) -> bool:
+    """Parse a ``BLACKBULL_RELOAD``-style truthy string (``1/true/yes/on``)."""
+    return value.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+_DEPLOYMENT = 'Deployment'
 
 
 @dataclasses.dataclass(frozen=True)
@@ -24,18 +33,18 @@ class AppConfig:
     explicit ``run(...)`` argument overrides them.
     """
 
-    #: TLS certificate file.  Enables HTTPS — and therefore HTTP/2 via ALPN —
-    #: when paired with ``keyfile``.
-    certfile: str | None = None
-
-    #: TLS private key file.  Required alongside ``certfile`` for HTTPS / HTTP/2.
-    keyfile: str | None = None
-
-    #: TCP port to bind.  ``0`` lets the OS pick a free ephemeral port.
-    port: int = 0
-
-    #: AF_UNIX socket path.  Mutually exclusive with a TCP ``port`` bind.
-    unix_path: str | None = None
+    certfile: str | None = setting(
+        'BLACKBULL_CERT', None, parse=str, section=_DEPLOYMENT,
+        doc='TLS certificate file.  Enables HTTPS, and therefore HTTP/2 via ALPN, when paired with the key.')
+    keyfile: str | None = setting(
+        'BLACKBULL_KEY', None, parse=str, section=_DEPLOYMENT,
+        doc='TLS private key file.  Required alongside the certificate for HTTPS and HTTP/2.')
+    port: int = setting(
+        'BLACKBULL_PORT', 0, parse=int, section=_DEPLOYMENT,
+        doc='TCP port to bind.  `0` lets the OS pick a free ephemeral port.')
+    unix_path: str | None = setting(
+        'BLACKBULL_UNIX_PATH', None, parse=str, section=_DEPLOYMENT,
+        doc='AF_UNIX socket path.  Mutually exclusive with a TCP port bind.')
 
     #: Inherited listening socket fd (systemd-style socket activation).
     inherited_fd: int | None = None
@@ -56,41 +65,24 @@ class AppConfig:
     #: depth.  ``None`` defers to ``BB_WS_QUEUE_DEPTH`` (default ``0``).
     ws_queue_depth: int | None = None
 
-    #: Enable auto-reload (requires the ``[reload]`` extra).
-    reload: bool = False
+    reload: bool = setting(
+        'BLACKBULL_RELOAD', False, parse=_parse_bool, section=_DEPLOYMENT,
+        doc='Enable auto-reload (`1`, `true`, `yes` or `on`; requires the `[reload]` extra).')
 
     #: Directories / files to watch under auto-reload.  ``None`` watches the
     #: current working directory.
     reload_paths: list[str] | None = None
 
 
-def _parse_bool(value: str) -> bool:
-    """Parse a ``BLACKBULL_RELOAD``-style truthy string (``1/true/yes/on``)."""
-    return value.strip().lower() in ('1', 'true', 'yes', 'on')
-
-
-# Deploy-time ``run()`` settings resolvable from ``BLACKBULL_*`` environment
-# variables: ``{field: (env var, coercer)}``.  Server-tuning knobs (``workers``,
-# ``max_connections``, the queue depths, timeouts, window sizes) are sourced
-# from ``BB_*`` in [`blackbull.env`][blackbull.env] and are deliberately *not* duplicated
-# here — ``BLACKBULL_*`` is the deployment namespace, ``BB_*`` the tuning one.
-_ENV_VARS: dict[str, tuple[str, Callable[[str], Any]]] = {
-    'certfile':  ('BLACKBULL_CERT', str),
-    'keyfile':   ('BLACKBULL_KEY', str),
-    'port':      ('BLACKBULL_PORT', int),
-    'unix_path': ('BLACKBULL_UNIX_PATH', str),
-    'reload':    ('BLACKBULL_RELOAD', _parse_bool),
-}
-
-# Sentinel defaults for every ``run()`` parameter, mirroring ``serve``'s own
-# built-in defaults.  Used as the lowest-precedence fallback and to decide
-# whether an ``AppConfig`` field was actually declared (vs. left at its default).
+#: ``run()`` parameters and their built-in defaults; an ``AppConfig`` field
+#: left at its default does not override the environment.
 _DEFAULTS: dict[str, Any] = {
-    'certfile': None, 'keyfile': None, 'port': 0, 'unix_path': None,
-    'inherited_fd': None, 'workers': None, 'max_connections': None,
-    'stream_queue_depth': None, 'ws_queue_depth': None,
-    'reload': False, 'reload_paths': None,
-}
+    f.name: f.default for f in dataclasses.fields(AppConfig)}
+
+#: The deploy-time settings a ``BLACKBULL_*`` variable can supply.  Tuning
+#: knobs come from ``BB_*`` in [`blackbull.env`][blackbull.env] instead.
+_ENV_VARS: dict[str, dataclasses.Field] = {
+    f.name: f for f in dataclasses.fields(AppConfig) if 'env' in f.metadata}
 
 
 def _load_dotenv_values() -> dict[str, str]:
@@ -140,7 +132,8 @@ def resolve_run_config(
             continue
 
         if name in _ENV_VARS:
-            env_name, coerce = _ENV_VARS[name]
+            env_name = _ENV_VARS[name].metadata['env']
+            coerce = _ENV_VARS[name].metadata['parse']
             raw = os.environ.get(env_name)
             if raw is not None:
                 resolved[name], sources[name] = coerce(raw), f'${env_name}'
