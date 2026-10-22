@@ -11,7 +11,7 @@ import pytest
 from blackbull.client import ClientConnection
 from blackbull.client.exceptions import (ConnectionError, ProtocolError,
                                          ResponseTooLarge)
-from blackbull.client.http1 import HTTP1Client, HTTP1ResponseRecipient
+from blackbull.client.http1 import Fate, HTTP1Client, HTTP1ResponseRecipient
 from blackbull.client.websocket import WebSocketClient
 from blackbull.server.sender import AbstractWriter
 
@@ -56,6 +56,17 @@ def _client(reader) -> HTTP1Client:
     client._reader = reader
     client._writer = _Writer()
     return client
+
+
+async def _assert_abandoned(client: HTTP1Client) -> None:
+    with pytest.raises(ConnectionError, match='abandoned'):
+        await client.request('GET', '/after')
+
+
+async def _assert_usable(client: HTTP1Client) -> None:
+    """The next request reaches the wire and finds the peer gone."""
+    with pytest.raises(ConnectionError, match='closed before response'):
+        await client.request('GET', '/after')
 
 
 def _head(status: int, reason: str = 'OK', headers: bytes = b'', *,
@@ -126,7 +137,7 @@ async def test_receive_close_delimited_body_until_eof_and_marks_nonreusable():
     response = await recipient.receive(reader)
 
     assert response.body == b'close-delimited'
-    assert recipient.reusable is False
+    assert recipient.fate is not Fate.REUSE
 
 
 @pytest.mark.asyncio
@@ -137,7 +148,7 @@ async def test_stream_close_delimited_body_until_eof_and_marks_nonreusable():
     chunks = [chunk async for chunk in recipient.stream(reader)]
 
     assert b''.join(chunks) == b'close-delimited'
-    assert recipient.reusable is False
+    assert recipient.fate is not Fate.REUSE
 
 
 @pytest.mark.asyncio
@@ -211,20 +222,7 @@ async def test_close_delimited_buffering_enforces_total_before_accumulating_exce
         await recipient.receive(reader)
 
     assert reader.peek() == b'not-retained'
-    assert recipient.framing_broken is True
-
-
-@pytest.mark.asyncio
-async def test_final_chunked_coding_in_a_transfer_encoding_list_is_chunked():
-    reader = _Reader(
-        _head(200, headers=b'Transfer-Encoding: gzip, chunked\r\n')
-        + _chunked_body(b'encoded-payload')
-    )
-
-    response = await HTTP1ResponseRecipient(request_method='GET').receive(reader)
-
-    assert response.body == b'encoded-payload'
-    assert reader.peek() == b''
+    assert recipient.fate is Fate.BROKEN
 
 
 @pytest.mark.parametrize('method', [
@@ -242,7 +240,7 @@ async def test_noncanonical_methods_are_not_head_or_connect(method):
 
     assert response.body == b'body'
     assert reader.peek().startswith(b'HTTP/1.1 200')
-    assert recipient.reusable is True
+    assert recipient.fate is Fate.REUSE
 
 
 @pytest.mark.parametrize('method, bodyless', [
@@ -264,109 +262,6 @@ async def test_canonical_head_and_connect_types_keep_exact_semantics(
         assert reader.peek() == b'body'
 
 
-@pytest.mark.parametrize('header', [
-    b'gzip, chunked,\r\n',
-    b'gzip,,chunked\r\n',
-    b'gzip;parameter="a,b", chunked\r\n',
-    b'gzip;parameter="a\tb", chunked\r\n',
-    b'gzip;parameter="a\\tb", chunked\r\n',
-    b'gzip;parameter="a\\\"b", chunked\r\n',
-    b'gzip;parameter="a\\\\b", chunked\r\n',
-    b'GZip, ChUnKeD\r\n',
-])
-@pytest.mark.asyncio
-async def test_transfer_encoding_http_list_forms_use_final_chunked(header):
-    reader = _Reader(_head(200, headers=b'Transfer-Encoding: ' + header)
-                     + _chunked_body(b'payload'))
-
-    response = await HTTP1ResponseRecipient(request_method='GET').receive(reader)
-
-    assert response.body == b'payload'
-    assert reader.peek() == b''
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('headers', [
-    pytest.param(b'Transfer-Encoding: gzip\r\n'
-                 b'Transfer-Encoding: chunked\r\n',
-                 id='repeated-fields-combined'),
-    pytest.param(b'Transfer-Encoding: gzip,\r\n'
-                 b'Transfer-Encoding: ,chunked\r\n',
-                 id='repeated-empty-members-ignored'),
-])
-async def test_transfer_encoding_repeated_fields_are_combined_in_order(headers):
-    reader = _Reader(
-        _head(200, headers=headers)
-        + _chunked_body(b'payload'))
-
-    response = await HTTP1ResponseRecipient(request_method='GET').receive(reader)
-
-    assert response.body == b'payload'
-
-
-@pytest.mark.parametrize('te_headers', [
-    b'Transfer-Encoding:\r\n',
-    b'Transfer-Encoding:\r\nTransfer-Encoding: \t\r\n',
-])
-@pytest.mark.asyncio
-async def test_present_empty_transfer_encoding_with_content_length_is_refused(
-        te_headers):
-    """The server refuses Content-Length beside Transfer-Encoding on the
-    presence of the field, not on what the field parses to, so an empty one
-    counts.  RFC 9112 §6.3 item 3 gives the precedence *and* calls the message
-    one that "ought to be handled as an error"; taking the precedence alone
-    leaves the client trusting whichever field an intermediary did not."""
-    reader = _Reader(
-        _head(200, headers=te_headers + b'Content-Length: 4\r\n')
-        + b'body-through-eof')
-    recipient = HTTP1ResponseRecipient(request_method='GET')
-
-    with pytest.raises(ProtocolError):
-        await recipient.receive(reader)
-
-    assert recipient.framing_broken is True
-
-
-@pytest.mark.parametrize('te_headers', [
-    b'Transfer-Encoding:\r\n',
-    b'Transfer-Encoding:\r\nTransfer-Encoding: \t\r\n',
-])
-@pytest.mark.asyncio
-async def test_present_empty_transfer_encoding_with_content_length_streaming(
-        te_headers):
-    """The streaming entry point answers the same field pair the same way."""
-    reader = _Reader(
-        _head(200, headers=te_headers + b'Content-Length: 4\r\n')
-        + b'body-through-eof')
-    recipient = HTTP1ResponseRecipient(request_method='GET')
-
-    with pytest.raises(ProtocolError):
-        [chunk async for chunk in recipient.stream(reader)]
-
-    assert recipient.framing_broken is True
-
-
-@pytest.mark.parametrize('header', [
-    b'gzip;parameter="unterminated\r\n',
-    b'gzip;parameter="a\x00b", chunked\r\n',
-    b'gzip;parameter="a\\\x01b", chunked\r\n',
-    b'gzip;parameter="a' + b'\\' + b'\r\n',
-    b'gzip;parameter=\r\n',
-    b'gzip;=value\r\n',
-    b'gzip parameter=value\r\n',
-])
-@pytest.mark.asyncio
-async def test_malformed_transfer_encoding_poisoned_recipient(header):
-    reader = _Reader(_head(200, headers=b'Transfer-Encoding: ' + header)
-                     + b'body')
-    recipient = HTTP1ResponseRecipient(request_method='GET')
-
-    with pytest.raises(ProtocolError):
-        await recipient.receive(reader)
-
-    assert recipient.framing_broken is True
-
-
 @pytest.mark.asyncio
 async def test_malformed_transfer_encoding_poisoned_http1client():
     reader = _Reader(_head(200, headers=b'Transfer-Encoding: gzip;bad\r\n')
@@ -376,78 +271,8 @@ async def test_malformed_transfer_encoding_poisoned_http1client():
     with pytest.raises(ProtocolError):
         await client.request('GET', '/')
 
-    assert client._framing_broken is True
-    with pytest.raises(ConnectionError):
+    with pytest.raises(ConnectionError, match='abandoned'):
         await client.request('GET', '/second')
-
-
-@pytest.mark.asyncio
-async def test_too_many_empty_transfer_encoding_members_are_rejected():
-    reader = _Reader(_head(200, headers=b'Transfer-Encoding: ' + b',' * 17
-                                  + b'\r\n'))
-
-    with pytest.raises(ProtocolError):
-        await HTTP1ResponseRecipient(request_method='GET').receive(reader)
-
-
-@pytest.mark.asyncio
-async def test_nonfinal_chunked_transfer_encoding_is_close_delimited():
-    reader = _Reader(_head(200, headers=b'Transfer-Encoding: chunked, gzip\r\n')
-                     + b'wire-payload')
-    recipient = HTTP1ResponseRecipient(request_method='GET')
-
-    response = await recipient.receive(reader)
-
-    assert response.body == b'wire-payload'
-    assert recipient.reusable is False
-
-
-@pytest.mark.asyncio
-async def test_stream_uses_final_chunked_coding_in_a_transfer_encoding_list():
-    reader = _Reader(
-        _head(200, headers=b'Transfer-Encoding: gzip, chunked\r\n')
-        + _chunked_body(b'encoded-payload')
-    )
-
-    chunks = [chunk async for chunk in
-              HTTP1ResponseRecipient(request_method='GET').stream(reader)]
-
-    assert b''.join(chunks) == b'encoded-payload'
-    assert reader.peek() == b''
-
-
-@pytest.mark.asyncio
-async def test_nonchunked_transfer_encoding_with_content_length_is_refused():
-    """Whether or not chunked is the final coding, the two framing fields
-    together are the response-splitting shape, and one repository should not
-    hold two answers to one field pair."""
-    reader = _Reader(
-        _head(200, headers=(b'Transfer-Encoding: gzip\r\n'
-                           b'Content-Length: 3\r\n'))
-        + b'encoded-payload'
-    )
-
-    recipient = HTTP1ResponseRecipient(request_method='GET')
-
-    with pytest.raises(ProtocolError):
-        await recipient.receive(reader)
-
-    assert recipient.framing_broken is True
-
-
-@pytest.mark.asyncio
-async def test_nonchunked_transfer_encoding_alone_is_close_delimited():
-    """The control for the refusal above: Transfer-Encoding without
-    Content-Length keeps §6.3 item 4's response branch — chunked is not the
-    final coding, so the length is the connection's."""
-    reader = _Reader(_head(200, headers=b'Transfer-Encoding: gzip\r\n')
-                     + b'encoded-payload')
-
-    recipient = HTTP1ResponseRecipient(request_method='GET')
-    response = await recipient.receive(reader)
-
-    assert response.body == b'encoded-payload'
-    assert recipient.reusable is False
 
 
 @pytest.mark.asyncio
@@ -463,7 +288,7 @@ async def test_self_delimited_response_can_be_reused_by_http1client():
 
     assert first.body == b'one'
     assert second.body == b'two'
-    assert client._framing_broken is False
+    await _assert_usable(client)
 
 
 @pytest.mark.asyncio
@@ -523,7 +348,7 @@ async def test_partial_declared_stream_leaves_body_unread_and_poison_closes():
 
     await stream.aclose()
 
-    assert client._framing_broken is True
+    await _assert_abandoned(client)
     assert raw.close_calls == 1
     assert reader.peek() == b'cdef'
 
@@ -546,8 +371,7 @@ async def test_partial_stream_owns_reader_and_aclose_poison_connection(body):
     await stream.aclose()
 
     assert client._active_response is None
-    assert client._framing_broken is True
-    with pytest.raises(ConnectionError):
+    with pytest.raises(ConnectionError, match='abandoned'):
         await client.request('GET', '/second')
 
 
@@ -564,7 +388,7 @@ async def test_breaking_async_for_keeps_connection_busy_until_stream_is_closed()
     with pytest.raises(ConnectionError):
         await client.read_response()
     await stream.aclose()
-    assert client._framing_broken is True
+    await _assert_abandoned(client)
 
 
 @pytest.mark.asyncio
@@ -581,8 +405,7 @@ async def test_partial_stream_cancellation_poison_connection():
         await pending
 
     assert client._active_response is None
-    assert client._framing_broken is True
-    with pytest.raises(ConnectionError):
+    with pytest.raises(ConnectionError, match='abandoned'):
         await client.request('GET', '/second')
 
 
@@ -602,7 +425,7 @@ async def test_stream_cancellation_while_waiting_for_chunk_size_poison_closes():
     with pytest.raises(asyncio.CancelledError):
         await pending
 
-    assert client._framing_broken is True
+    await _assert_abandoned(client)
     assert raw.close_calls == 1
     assert reader.peek() == b''
 
@@ -622,7 +445,7 @@ async def test_stream_cancellation_while_waiting_for_close_eof_poison_closes():
     with pytest.raises(asyncio.CancelledError):
         await pending
 
-    assert client._framing_broken is True
+    await _assert_abandoned(client)
     assert raw.close_calls == 1
     assert reader.peek() == b''
 
@@ -638,7 +461,7 @@ async def test_complete_self_delimited_stream_remains_reusable():
     assert b''.join([chunk async for chunk in client.stream('GET', '/')]) == b'one'
     assert b''.join([chunk async for chunk in client.stream('GET', '/')]) == b'two'
 
-    assert client._framing_broken is False
+    await _assert_usable(client)
 
 
 @pytest.mark.asyncio
@@ -665,7 +488,7 @@ async def test_read_response_keeps_low_level_fault_injection_reusable_on_error()
     response = await client.read_response()
 
     assert response.body == b'ok'
-    assert client._framing_broken is False
+    await _assert_usable(client)
 
 
 @pytest.mark.asyncio
@@ -712,57 +535,7 @@ async def test_response_field_prohibited_controls_retire_connection(value):
     with pytest.raises(ProtocolError):
         await client.request('GET', '/')
 
-    assert client._framing_broken is True
-    assert raw.close_calls == 1
-
-
-@pytest.mark.asyncio
-async def test_every_octet_is_judged_by_the_rule_and_not_by_a_sample():
-    """RFC 9110 §5.5 admits HTAB, VCHAR and obs-text — and nothing else.
-
-    The samples above name the octets an attacker reaches for.  This one
-    names the rule, so any rewrite of the check (a comprehension, a
-    translation table) has to answer for all 256 rather than for the seven
-    that were thought of.
-    """
-    for octet in range(256):
-        value = b'a' + bytes([octet]) + b'b'
-        reader = _Reader(_head(200, headers=b'X-Test: ' + value
-                               + b'\r\nContent-Length: 0\r\n'))
-        recipient = HTTP1ResponseRecipient('GET')
-
-        if (octet < 0x20 and octet != 0x09) or octet == 0x7f:
-            with pytest.raises(ProtocolError):
-                await recipient.receive(reader)
-        else:
-            response = await recipient.receive(reader)
-            assert response.headers.get(b'x-test') == value
-
-
-@pytest.mark.asyncio
-async def test_response_field_trims_only_legal_sp_and_htab_ows():
-    reader = _Reader(
-        _head(200, headers=(b'X-Test: \t value\tinside \t\r\n'
-                            b'Content-Length: 0\r\n')))
-
-    response = await HTTP1ResponseRecipient('GET').receive(reader)
-
-    assert response.headers.get(b'x-test') == b'value\tinside'
-
-
-@pytest.mark.asyncio
-async def test_invalid_control_cannot_be_stripped_into_chunked_framing():
-    reader = _Reader(
-        _head(200, headers=b'Transfer-Encoding: \x0bchunked\x0c\r\n')
-        + _chunked_body(b'must-remain'))
-    client = _client(reader)
-    raw = _RawWriter()
-    client._raw_writer = raw
-
-    with pytest.raises(ProtocolError):
-        await client.request('GET', '/')
-
-    assert reader.peek() == _chunked_body(b'must-remain')
+    await _assert_abandoned(client)
     assert raw.close_calls == 1
 
 
@@ -785,9 +558,6 @@ async def test_preflight_content_length_failure_leaves_connection_reusable(api):
             await anext(body_stream)
 
     assert bytes(client._writer.data) == b''  # type: ignore[union-attr]
-    assert client._active_response is None
-    assert client._framing_broken is False
-    assert client._reusable is True
     assert raw.close_calls == 0
     assert (await client.request('GET', '/next')).body == b'ok'
 
@@ -810,8 +580,6 @@ async def test_preflight_invalid_connection_option_leaves_connection_reusable(ap
             await anext(body_stream)
 
     assert bytes(client._writer.data) == b''  # type: ignore[union-attr]
-    assert client._active_response is None
-    assert client._reusable is True
     assert raw.close_calls == 0
     assert (await client.request('GET', '/next')).body == b'ok'
 
@@ -835,8 +603,7 @@ async def test_failure_after_request_head_was_sent_retires_connection(api):
             await anext(body_stream)
 
     assert bytes(writer.data).startswith(b'POST / HTTP/1.1\r\n')
-    assert client._framing_broken is True
-    assert client._reusable is False
+    await _assert_abandoned(client)
     assert raw.close_calls == 1
 
 
@@ -917,9 +684,9 @@ async def test_generic_101_preserves_transport_and_refuses_more_http(api):
 
     assert reader.peek() == switched
     assert raw.close_calls == 0
-    assert client._handoff_ready is True
     with pytest.raises(ConnectionError):
         await client.request('GET', '/next')
+    assert await client.handoff().read() == switched
 
 
 @pytest.mark.parametrize('switch', ['101', 'connect'])
@@ -963,9 +730,6 @@ async def test_nonpersistent_protocol_switch_closes_without_handoff(
         assert response.status == status
 
     assert reader.peek() == switched
-    assert client._protocol_switched is True
-    assert client._reusable is False
-    assert client._handoff_ready is False
     assert raw.close_calls == 1
     with pytest.raises(ConnectionError, match='no completed CONNECT or 101'):
         client.handoff()
@@ -1039,7 +803,6 @@ async def test_client_owns_switched_transport_until_handoff():
     await client.__aexit__(None, None, None)
 
     assert raw.close_calls == 1
-    assert client._handoff_ready is False
     with pytest.raises(ConnectionError, match='context is closed'):
         client.handoff()
 
@@ -1103,7 +866,7 @@ class TestContentlessResponsesDoNotClaimABoundary:
         response = await recipient.receive(reader)
 
         assert response.body == b''
-        assert recipient.reusable is reusable
+        assert (recipient.fate is Fate.REUSE) is reusable
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('method,wire', [
@@ -1121,7 +884,7 @@ class TestContentlessResponsesDoNotClaimABoundary:
         response = await recipient.receive(reader)
 
         assert response.body == b''
-        assert recipient.reusable is True
+        assert recipient.fate is Fate.REUSE
 
     @pytest.mark.asyncio
     async def test_a_204_claiming_zero_length_is_still_reusable(self):
@@ -1135,7 +898,7 @@ class TestContentlessResponsesDoNotClaimABoundary:
         response = await recipient.receive(reader)
 
         assert response.body == b''
-        assert recipient.reusable is True
+        assert recipient.fate is Fate.REUSE
 
     @pytest.mark.asyncio
     async def test_the_octets_after_a_refused_204_are_left_unread(self):
@@ -1147,7 +910,7 @@ class TestContentlessResponsesDoNotClaimABoundary:
 
         await recipient.receive(reader)
 
-        assert recipient.reusable is False
+        assert recipient.fate is not Fate.REUSE
         assert reader.peek() == b'odd', 'the reader consumed what it refuses'
 
     @pytest.mark.asyncio
@@ -1163,8 +926,7 @@ class TestContentlessResponsesDoNotClaimABoundary:
         response = await recipient.receive(reader)
 
         assert response.status == 101
-        assert recipient.protocol_switched is False
-        assert recipient.reusable is False
+        assert recipient.fate is Fate.RETIRE
 
     @pytest.mark.asyncio
     async def test_a_successful_connect_ignores_the_fields_it_must_ignore(self):
@@ -1179,8 +941,7 @@ class TestContentlessResponsesDoNotClaimABoundary:
         response = await recipient.receive(reader)
 
         assert response.status == 200
-        assert recipient.protocol_switched is True
-        assert recipient.tunnel is True
+        assert recipient.fate is Fate.SWITCH
 
     @pytest.mark.asyncio
     async def test_an_interim_head_claiming_a_boundary_retires_the_connection(self):
@@ -1194,7 +955,7 @@ class TestContentlessResponsesDoNotClaimABoundary:
         response = await recipient.receive(reader)
 
         assert response.status == 200
-        assert recipient.reusable is False
+        assert recipient.fate is not Fate.REUSE
 
     @pytest.mark.asyncio
     async def test_a_boundary_violation_survives_a_protocol_switch(self):
@@ -1207,6 +968,5 @@ class TestContentlessResponsesDoNotClaimABoundary:
         response = await recipient.receive(reader)
         assert response.status == 101
 
-        assert recipient.protocol_switched is False, \
+        assert recipient.fate is Fate.RETIRE, \
             'an ambiguous connection is not switching anything'
-        assert recipient.reusable is False

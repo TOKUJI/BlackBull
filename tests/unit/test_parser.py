@@ -242,8 +242,8 @@ class TestParse:
 
     def test_lf_terminated_http_version_rejected(self):
         """RFC 9112 §2.3 — a version token ending in LF is not `HTTP/d.d`."""
-        from blackbull.server.http1_actor import BadRequestError
-        with pytest.raises(BadRequestError):
+        from blackbull.server.http1_actor import MessageError
+        with pytest.raises(MessageError):
             scope = _get_scope(b'GET / HTTP/1.1\n\r\nHost: h\r\n\r\n')
             pytest.fail(
                 'LF-terminated HTTP-version was accepted with '
@@ -285,10 +285,10 @@ class TestParse:
         0x7F,  # DEL — CTL
     ])
     def test_non_tchar_rejected_in_method(self, bad_byte):
-        from blackbull.server.http1_actor import BadRequestError
+        from blackbull.server.http1_actor import MessageError
         method = b'GE' + bytes([bad_byte])
         req = b'%b /x HTTP/1.1\r\nHost: x:80\r\n\r\n' % method
-        with pytest.raises(BadRequestError):
+        with pytest.raises(MessageError):
             _get_scope(req)
 
     def test_tchar_accepted_in_header_name(self):
@@ -300,10 +300,10 @@ class TestParse:
 
     @pytest.mark.parametrize('bad_byte', [0x20, 0x28, 0x40, 0x7B, 0x7F])
     def test_non_tchar_rejected_in_header_name(self, bad_byte):
-        from blackbull.server.http1_actor import BadRequestError
+        from blackbull.server.http1_actor import MessageError
         bad_name = b'bad' + bytes([bad_byte])
         req = b'GET /x HTTP/1.1\r\nHost: x:80\r\n' + bad_name + b': v\r\n\r\n'
-        with pytest.raises(BadRequestError):
+        with pytest.raises(MessageError):
             _get_scope(req)
 
     def test_htab_allowed_in_field_value(self):
@@ -322,10 +322,10 @@ class TestParse:
         0x7F,  # DEL
     ])
     def test_ctl_rejected_in_field_value(self, ctl_byte):
-        from blackbull.server.http1_actor import BadRequestError
+        from blackbull.server.http1_actor import MessageError
         bad_value = b'val' + bytes([ctl_byte]) + b'ue'
         req = b'GET / HTTP/1.1\r\nHost: x:80\r\nx-h: ' + bad_value + b'\r\n\r\n'
-        with pytest.raises(BadRequestError):
+        with pytest.raises(MessageError):
             _get_scope(req)
 
     @pytest.mark.parametrize('ok_byte', [
@@ -493,12 +493,12 @@ class TestParseHeadersNoneContract:
         """The same octets are accepted or refused identically on both
         transports — one grammar, two header models."""
         frame, h1_request = build(value)
-        from blackbull.server.http1_actor import BadRequestError
+        from blackbull.server.http1_actor import MessageError
         actor = object.__new__(_HTTP1Actor)
         actor._ssl = False
         try:
             actor._parse(h1_request)
-        except BadRequestError:
+        except MessageError:
             http1_ok = False
         else:
             http1_ok = True
@@ -837,11 +837,11 @@ class TestH1H2MethodAcceptSetParity:
 
     @staticmethod
     def _h1_accepts(method: bytes) -> bool:
-        from blackbull.server.http1_actor import BadRequestError
+        from blackbull.server.http1_actor import MessageError
         try:
             conn = object.__new__(_HTTP1Actor)._parse(
                 b'%s / HTTP/1.1\r\nHost: x\r\n\r\n' % method)
-        except BadRequestError:
+        except MessageError:
             return False
         return conn is not None
 

@@ -30,10 +30,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
 
 from provenance import stamp  # noqa: E402
 
-from blackbull.server.http1_actor import (  # noqa: E402
-    _LINE_CACHE_MAX,
-    HTTP1Actor,
-)
+from blackbull.protocol.http1 import _LINE_CACHE_MAX  # noqa: E402
+from blackbull.server.http1_actor import HTTP1Actor  # noqa: E402
 
 NAMES = [
     b'User-Agent', b'Accept', b'Accept-Encoding', b'Accept-Language',

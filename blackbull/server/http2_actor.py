@@ -18,7 +18,7 @@ from ..event_aggregator import EventAggregator
 from ..logger import log, debug_gate
 from ..protocol.frame import FrameFactory
 from ..protocol.field_grammar import PROHIBITED_TRAILER_FIELDS
-from ..protocol.framing import method_is
+from ..protocol.framing import method_is, parse_content_length
 from ..protocol.frame_types import (
     ErrorCodes, FrameBase, FrameFormatError, FrameTypes,
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
@@ -62,23 +62,6 @@ class _StreamRecipient(Protocol):
 def _req_headers(conn: Connection) -> Headers:
     """The one source both header readers share, so they cannot drift apart."""
     return conn.headers
-
-
-def _extract_content_length(conn: Connection) -> int | None:
-    """Return the request's content-length, or None if absent or unparseable.
-
-    The "must equal the sum of DATA payloads" rule the caller enforces is
-    RFC 9113 §8.1.1 (RFC 7540 located it at §8.1.2.6).
-    """
-    for name, value in _req_headers(conn):
-        nb = name if isinstance(name, bytes) else bytes(name)
-        if nb == b'content-length':
-            try:
-                n = int(value if isinstance(value, bytes) else bytes(value))
-            except (ValueError, TypeError):
-                return None
-            return n if n >= 0 else None
-    return None
 
 
 def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
@@ -1334,6 +1317,14 @@ class HTTP2Actor(Actor):
 
         assert conn is not None  # not malformed → parse_headers built a Connection
         self._fill_scope_connection(conn)
+        try:
+            # RFC 9113 §8.1.1: a length other than one canonical number is malformed.
+            stream.expected_content_length = parse_content_length(
+                conn.headers._index.get(b'content-length', ()), canonical=True)
+        except ValueError:
+            await self.send_frame(
+                self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
+            return True
 
         if conn.type == 'websocket':
             # RFC 8441 Extended CONNECT.  Threaded natively even under
@@ -1341,7 +1332,6 @@ class HTTP2Actor(Actor):
             # that lane round-trips only the HTTP app boundary.  Reaching here
             # with the setting off means a non-conforming peer: we never
             # advertised ENABLE_CONNECT_PROTOCOL.
-            stream.expected_content_length = _extract_content_length(conn)
             stream.conn = conn
             if not self._ws_over_h2_enabled:
                 await self.send_frame(self.factory.rst_stream(
@@ -1352,7 +1342,6 @@ class HTTP2Actor(Actor):
             await self._handle_h2_websocket(stream, tg, log_record)
             return True
 
-        stream.expected_content_length = _extract_content_length(conn)
         stream.conn = conn
         # Before anything can refuse the request and write its own response:
         # that response owes the same content rules as the application's.

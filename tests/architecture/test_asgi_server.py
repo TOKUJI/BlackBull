@@ -36,7 +36,7 @@ import pytest
 
 from blackbull.server.server import ASGIServer
 from blackbull.server.recipient import RecipientFactory
-from blackbull.server.http1_actor import request_framing
+from blackbull.protocol.http1 import request_framing
 
 from tests.harness import fed
 

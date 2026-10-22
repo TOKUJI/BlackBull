@@ -8,7 +8,8 @@ from __future__ import annotations
 import asyncio
 
 from .read_buffer import ReadBuffer
-from .recipient import AbstractReader, IncompleteReadError, ReadLimitExceeded
+from ..protocol.http1 import IncompleteReadError, ReadLimitExceeded
+from .recipient import AbstractReader
 
 __all__ = ('BufferReader', 'ConnectionProtocol')
 

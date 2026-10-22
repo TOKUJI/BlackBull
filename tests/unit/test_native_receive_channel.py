@@ -34,7 +34,7 @@ from blackbull.server.recipient import (
     AbstractReader, HTTP1Recipient, HTTP2Recipient,
     IncompleteReadError,
 )
-from blackbull.server.http1_actor import request_framing
+from blackbull.protocol.http1 import request_framing
 
 
 class _Source:

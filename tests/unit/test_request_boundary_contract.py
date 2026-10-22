@@ -14,7 +14,7 @@ from blackbull import BlackBull
 from blackbull.connection import Connection
 from blackbull.native import asgi_send_boundary
 from blackbull.protocol.field_grammar import FieldError
-from blackbull.server.http1_actor import BadRequestError, HTTP1Actor
+from blackbull.server.http1_actor import MessageError, HTTP1Actor
 
 
 def _scope(headers, **extra) -> dict:
@@ -31,7 +31,7 @@ def _native(field_line: bytes):
            + b'\r\n\r\n')
     try:
         return list(object.__new__(HTTP1Actor)._parse(raw).headers)
-    except BadRequestError:
+    except MessageError:
         return 'refused'
 
 

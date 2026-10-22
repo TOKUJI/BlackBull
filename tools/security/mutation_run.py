@@ -40,28 +40,25 @@ PORT, TLS_PORT = 8131, 8451
 #: (name, file under blackbull/, exact source removed, replacement)
 MUTATIONS = (
     ('cl-te-rejection',
-     'server/http1_actor.py',
-     """    if cls and tes:
-        raise BadRequestError(
-            'Content-Length and Transfer-Encoding both present '
-            '(smuggling vector)')""",
-     """    if cls and tes:
+     'protocol/http1.py',
+     """    if cls:
+        raise MessageError('Content-Length and Transfer-Encoding both present '
+                           '(smuggling vector)')""",
+     """    if cls:
         pass  # MUTATION: CL+TE smuggling rejection neutralized"""),
     ('malformed-content-length',
-     'server/http1_actor.py',
-     """        except ValueError as exc:
-            raise BadRequestError(str(exc)) from exc
-
-    if tes:""",
-     """        except ValueError as exc:
-            declared = 0  # MUTATION: malformed Content-Length accepted
-
-    if tes:"""),
+     'protocol/http1.py',
+     """            return parse_content_length(cls), False
+        except ValueError as exc:
+            raise MessageError(str(exc)) from exc""",
+     """            return parse_content_length(cls), False
+        except ValueError:
+            return 0, False  # MUTATION: malformed Content-Length accepted"""),
     ('te-list-rejection',
-     'server/http1_actor.py',
-     """        if members == [(b'chunked', ())]:
-            return declared  # RFC 9112 \u00a76.1 \u2014 the one accepted form""",
-     """        return declared  # MUTATION: any TE list accepted"""),
+     'protocol/http1.py',
+     """    if members == [(b'chunked', ())]:
+        return None, True""",
+     """    return None, True  # MUTATION: any TE list accepted"""),
     # G5-3 recall: revert the BLA-525 fix (3025eb95) — a satisfiable range
     # whose end is at or beyond EOF must clip to the last byte, not 416.
     # Restoring the 416 is the regression the harness must catch.

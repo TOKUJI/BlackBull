@@ -24,7 +24,7 @@ import pytest
 
 from blackbull.client.exceptions import (ClientError, ConnectionError,
                                          ResponseTooLarge)
-from blackbull.client.http1 import HTTP1Client, HTTP1ResponseRecipient
+from blackbull.client.http1 import Fate, HTTP1Client, HTTP1ResponseRecipient
 from blackbull.server.recipient import AbstractWriter
 
 from tests.harness import fed
@@ -75,14 +75,14 @@ class TestRefusalPoisonsTheConnection:
         recipient = HTTP1ResponseRecipient()
         with pytest.raises(ResponseTooLarge):
             await recipient.receive(_Canned(_with_injected_body(head)))
-        assert recipient.framing_broken, 'the stream position is unknown'
+        assert recipient.fate is Fate.BROKEN, 'the stream position is unknown'
 
     @pytest.mark.asyncio
     async def test_a_malformed_status_line_also_breaks_framing(self):
         recipient = HTTP1ResponseRecipient()
         with pytest.raises(ClientError):
             await recipient.receive(_Canned(b'GARBAGE\r\n\r\n'))
-        assert recipient.framing_broken
+        assert recipient.fate is Fate.BROKEN
 
     @pytest.mark.asyncio
     async def test_the_client_refuses_to_read_past_a_refusal(self, monkeypatch):

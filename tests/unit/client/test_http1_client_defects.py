@@ -38,53 +38,6 @@ def _response(fields: bytes, body: bytes = b'') -> bytes:
 # C-M2 — a response that declares two different lengths is not a response
 # ===========================================================================
 
-class TestConflictingContentLength:
-    @pytest.mark.parametrize('cl_headers', [
-        pytest.param(b'content-length: 5\r\ncontent-length: 10\r\n',
-                     id='two-different-lengths'),
-        pytest.param(b'content-length: 5, 10\r\n',
-                     id='comma-combined-form'),
-    ])
-    async def test_two_different_lengths_are_refused(self, cl_headers):
-        """CL.CL desync: believe the wrong one and the surplus becomes the
-        next keep-alive response's status line.
-
-        The server refuses this on the request side already
-        (`_validate_message_framing`); a client that does not refuse it on
-        the response side is the same defect facing the other way.  One
-        header line, two values is the same conflict, different spelling.
-        """
-        reader = _Reader(_response(cl_headers, b'HELLOSURPLUS!'))
-
-        with pytest.raises(ProtocolError):
-            await _recipient().receive(reader)
-
-    async def test_repeated_but_equal_lengths_are_accepted(self):
-        """RFC 9110 §8.6 permits the repeat when the values agree.
-
-        Refusing it would break a response nothing is wrong with — and the
-        server applies exactly this rule to requests, including the leading
-        -zero normalisation.
-        """
-        reader = _Reader(_response(
-            b'content-length: 5\r\ncontent-length: 005\r\n', b'HELLO'))
-
-        response = await _recipient().receive(reader)
-
-        assert response.body == b'HELLO'
-
-    async def test_a_single_length_still_works(self):
-        reader = _Reader(_response(b'content-length: 5\r\n', b'HELLO'))
-
-        response = await _recipient().receive(reader)
-
-        assert response.body == b'HELLO'
-
-
-# ===========================================================================
-# C-M3 — stream() must stream
-# ===========================================================================
-
 class TestStreamingIsIncremental:
     async def test_a_content_length_body_arrives_in_chunks(self):
         """The docstring says "yield body chunks lazily"; one

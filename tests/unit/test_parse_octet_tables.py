@@ -22,7 +22,7 @@ from blackbull.protocol.field_grammar import (
 )
 from blackbull.server.http1_actor import (
     _TARGET_ALLOWED_OCTETS,
-    BadRequestError,
+    MessageError,
     HTTP1Actor,
 )
 
@@ -88,13 +88,13 @@ def _req(target: bytes = b'/', host: bytes = b'localhost') -> bytes:
 
 @pytest.mark.parametrize('bad', [b'\x00', b'\x1f', b'\x7f', b'\x80', b'\xff'])
 def test_parse_rejects_forbidden_target_octet(actor, bad):
-    with pytest.raises(BadRequestError):
+    with pytest.raises(MessageError):
         actor._parse(_req(target=b'/a' + bad + b'b'))
 
 
 @pytest.mark.parametrize('bad', [b'/', b'?', b'#', b' ', b'\t', b'@'])
 def test_parse_rejects_forbidden_host_octet(actor, bad):
-    with pytest.raises(BadRequestError):
+    with pytest.raises(MessageError):
         actor._parse(_req(host=b'exam' + bad + b'ple'))
 
 
@@ -108,7 +108,7 @@ def test_parse_accepts_a_clean_request(actor):
 def test_parse_rejects_empty_target(actor):
     # `not path` guarded this before the table and still has to: an empty
     # target survives `translate` (nothing to reject) but is not a target.
-    with pytest.raises(BadRequestError):
+    with pytest.raises(MessageError):
         actor._parse(b'GET  HTTP/1.1\r\nHost: localhost\r\n\r\n')
 
 
@@ -130,7 +130,7 @@ def test_parse_rejects_empty_target(actor):
 def test_absolute_form_rejects_a_ctl_in_the_authority(actor, part, bad):
     target = ((b'http://ho' + bad + b'st/path') if part == 'authority'
               else (b'ht' + bad + b'tp://host/path'))
-    with pytest.raises(BadRequestError, match='request-target'):
+    with pytest.raises(MessageError, match='request-target'):
         actor._parse(_req(target=target))
 
 
@@ -156,7 +156,7 @@ def test_tchar_table_classifies_all_256_octets_identically():
 
 @pytest.mark.parametrize('name', [b'x y', b'x\x00y', b'x(y', b'x\ty', b'x\x80y'])
 def test_parse_rejects_non_token_header_name(actor, name):
-    with pytest.raises(BadRequestError):
+    with pytest.raises(MessageError):
         actor._parse(b'GET / HTTP/1.1\r\nHost: h\r\n' + name + b': v\r\n\r\n')
 
 
@@ -181,14 +181,14 @@ def _hdr(extra: bytes) -> bytes:
 @pytest.mark.parametrize('bad', [b'\x00', b'\x01', b'\x08', b'\x0b', b'\x0c',
                                  b'\x1f', b'\x7f'])
 def test_parse_rejects_ctl_in_header_value(actor, bad):
-    with pytest.raises(BadRequestError):
+    with pytest.raises(MessageError):
         actor._parse(_hdr(b'X-Thing: a' + bad + b'b'))
 
 
 @pytest.mark.parametrize('bad', [b'\r', b'\n'])
 def test_parse_rejects_bare_cr_or_lf_in_header_value(actor, bad):
     # Neither is a line terminator on its own; both are smuggling vectors.
-    with pytest.raises(BadRequestError):
+    with pytest.raises(MessageError):
         actor._parse(_hdr(b'X-Thing: a' + bad + b'b'))
 
 
@@ -204,5 +204,5 @@ def test_parse_allows_htab_inside_a_header_value(actor, line, expected):
 def test_ctl_in_request_line_still_reports_the_request_line_error(actor):
     # The pre-scan covers the whole block, so a CTL in the request target
     # trips it — but the target check must still be what rejects the request.
-    with pytest.raises(BadRequestError, match='request-target'):
+    with pytest.raises(MessageError, match='request-target'):
         actor._parse(b'GET /a\x01b HTTP/1.1\r\nHost: h\r\n\r\n')

@@ -163,7 +163,9 @@ Learned entries remain per connection and bounded by count, line size and
 accounted bytes. Shared seeds must be immutable, validated by the real
 grammar, drawn from specification-enumerated values, and exclude framing
 fields. Do not turn observations from one peer into shared state.
-Read `blackbull/server/parser.py` and its cache tests.
+Both roles read HTTP/1.1 through `blackbull/protocol/http1.py`; a rule that
+differs by role belongs in its role policy section, with its RFC 9112 section.
+Read it and its cache tests.
 
 ## Protocol and deadline owners
 

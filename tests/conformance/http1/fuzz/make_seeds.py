@@ -95,7 +95,7 @@ SEEDS: dict[str, bytes] = {
     ),
 
     # HTTP/1.0 — no required Host, default close semantics.  Exercises
-    # _should_keep_alive's HTTP/1.0 branch.
+    # the HTTP/1.0 branch of persistence.
     'seed_http10': send_then_read(
         b'GET / HTTP/1.0\r\n\r\n'
     ),

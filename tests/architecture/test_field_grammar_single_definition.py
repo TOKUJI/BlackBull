@@ -20,7 +20,6 @@ assign it.
 import ast
 import pathlib
 
-import blackbull.client.http1 as client_http1
 import blackbull.connection as connection_module
 import blackbull.headers as headers_module
 import blackbull.middleware.cache as cache_module
@@ -30,7 +29,7 @@ import blackbull.router as router
 import blackbull.server.http1_actor as http1_actor
 import blackbull.server.http2_actor as http2_actor
 import blackbull.server.parser as parser
-import blackbull.server.recipient as recipient
+import blackbull.protocol.http1 as codec_http1
 from blackbull.protocol import field_grammar
 from blackbull.protocol.frame_types import (
     field_name_is_valid, field_value_has_boundary_whitespace,
@@ -38,16 +37,14 @@ from blackbull.protocol.frame_types import (
 
 #: Each reader and the grammar names it imports.
 _READERS = {
-    http1_actor: ('FIELD_VALUE_ALLOWED_OCTETS', 'COMMON_METHODS_OCTETS',
-                  'method_token_is_valid', 'field_line', 'host_field_value'),
+    http1_actor: ('host_field_value',),
+    codec_http1: ('FIELD_VALUE_ALLOWED_OCTETS', 'COMMON_METHODS_OCTETS', 'TCHAR_OCTETS',
+                  'method_token_is_valid', 'field_line', 'PROHIBITED_TRAILER_FIELDS'),
     http2_actor: ('PROHIBITED_TRAILER_FIELDS',),
     connection_module: ('normalized_fields', 'host_field_value', 'media_type'),
     frame_types: ('LOWERCASE_TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     headers_module: ('TCHAR_OCTETS', 'LOWERCASE_TCHAR_OCTETS',
                      'FIELD_VALUE_ALLOWED_OCTETS'),
-    recipient: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS', 'field_line',
-                'PROHIBITED_TRAILER_FIELDS'),
-    client_http1: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     framing_module: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     cache_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET', 'if_none_match_hit',
                    'list_members'),

@@ -28,7 +28,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3]))
 from provenance import stamp  # noqa: E402
 
 try:
-    from blackbull.server.http1_actor import _DEFAULT_LINES  # noqa: E402
+    from blackbull.protocol.http1 import _DEFAULT_LINES  # noqa: E402
 except ImportError:                       # a build without the shared table
     _DEFAULT_LINES = {}
 
