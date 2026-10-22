@@ -842,14 +842,18 @@ class Server:
         peername = transport.get_extra_info('peername')
         sockname = transport.get_extra_info('sockname')
         # Actors and ASGI require (host, port), including UNIX and IPv6.
-        if isinstance(sockname, (str, bytes)):
-            sockname = (_unix_address(sockname), None)
-        if isinstance(peername, (str, bytes)):
-            peername = (_unix_address(peername), None)
-        if isinstance(sockname, tuple) and len(sockname) > 2:
+        if isinstance(sockname, tuple):
             sockname = sockname[:2]
-        if isinstance(peername, tuple) and len(peername) > 2:
+        elif isinstance(sockname, str):
+            sockname = (sockname, None)
+        elif isinstance(sockname, bytes):
+            sockname = (_unix_address(sockname), None)
+        if isinstance(peername, tuple):
             peername = peername[:2]
+        elif isinstance(peername, str):
+            peername = (peername, None)
+        elif isinstance(peername, bytes):
+            peername = (_unix_address(peername), None)
         ssl_object = transport.get_extra_info('ssl_object')
         ssl_flag = ssl_object is not None
         alpn = ssl_object.selected_alpn_protocol() if ssl_object else None
