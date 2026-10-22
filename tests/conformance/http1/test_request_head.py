@@ -36,6 +36,7 @@ REFUSED = {
     'duplicate-content-type': (_head(b'/', b'Content-Type: text/plain', b'Content-Type: text/html'), 400),
     'underscore-content-length': (_head(b'/', b'Content-Length: 1', b'Content_Length: 99', method=b'POST'), 400),
     'underscore-transfer-encoding': (_head(b'/', b'Content-Length: 1', b'Transfer_Encoding: chunked', method=b'POST'), 400),
+    'content-length-over-uint64': (_head(b'/', b'Content-Length: 99999999999999999999', method=b'POST'), 413),
     'ws-without-key': (_head(b'/ws', b'Upgrade: websocket', b'Connection: Upgrade',
                              b'Sec-WebSocket-Version: 13'), 400),
     'ws-malformed-key': (_head(b'/ws', b'Upgrade: websocket', b'Connection: Upgrade',
@@ -51,7 +52,10 @@ REFUSED = {
 
 
 @pytest.mark.parametrize('raw,status', REFUSED.values(), ids=REFUSED.keys())
-async def test_a_refused_head_is_answered_and_closed(raw, status):
+@pytest.mark.parametrize('force_asgi', [0, 1], ids=['native', 'compat'])
+async def test_a_refused_head_is_answered_and_closed(raw, status, force_asgi, monkeypatch):
+    monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', str(force_asgi))
+    monkeypatch.setenv('BB_MAX_BODY_SIZE', '1024')
     called = []
 
     async def app(conn, receive, send):
