@@ -25,8 +25,8 @@ def h2_section(block, *, sid=1, split=False, end_stream=True, self_dependent=Fal
             + _make_h2_frame(FrameTypes.CONTINUATION, 4, sid, block[cut:]))
 
 
-async def h2_connect(server):
-    wire = await server.wire()
+async def h2_connect(server, **wire_kwargs):
+    wire = await server.wire(**wire_kwargs)
     await wire.send(b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
                     + _make_h2_frame(FrameTypes.SETTINGS))
     while True:

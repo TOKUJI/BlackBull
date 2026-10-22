@@ -111,6 +111,10 @@ for listener, socks in server.bound_listeners:
 `server.port` and `server.unix_path` describe the first listener, as they
 always did.
 
+For Linux abstract UNIX sockets, `server.unix_path` retains the leading NUL
+used to connect. Application addresses derived from the socket and logs
+render it as `@name`; the port is `None`.
+
 ## Startup is all-or-nothing
 
 BlackBull does not publish or serve a partial listener set. It first acquires
