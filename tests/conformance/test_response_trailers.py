@@ -9,16 +9,17 @@ from tests.conformance.http2._harness import h2_connect, h2_section, h2_terminal
 @pytest.mark.asyncio
 @pytest.mark.parametrize('protocol', ['http1', 'http2'])
 @pytest.mark.parametrize('force_asgi', [0, 1], ids=['native', 'compat'])
-@pytest.mark.parametrize('method,status', [('GET', 200), ('HEAD', 200),
-                                         ('GET', 204), ('GET', 205), ('GET', 304)])
+@pytest.mark.parametrize('method,status,length', [
+    ('GET', 200, b'5'), ('HEAD', 200, b'5'), ('HEAD', 200, b'0'),
+    ('HEAD', 200, None), ('GET', 204, b'5'), ('GET', 205, b'5'), ('GET', 304, None)])
 @pytest.mark.parametrize('form', ['no-body', 'split', 'native-combined', 'empty-body'])
 async def test_empty_trailer_response_preserves_head_and_next_request(
-        monkeypatch, protocol, force_asgi, method, status, form):
+        monkeypatch, protocol, force_asgi, method, status, length, form):
     monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', str(force_asgi))
     calls = []
     headers = [(b'x-head', b'present')]
-    if method != 'HEAD' and status != 304:
-        headers.append((b'content-length', b'5'))
+    if length is not None:
+        headers.append((b'content-length', length))
     trailers = [(b'x-checksum', b'empty')]
 
     async def app(conn, receive, send):
@@ -62,6 +63,8 @@ async def test_empty_trailer_response_preserves_head_and_next_request(
                 tail = [(k, v) for k, v in fields if k == b'x-checksum']
             if sid == 1:
                 assert (b'x-head', b'present') in fields
+                if method == 'HEAD' and length is not None:
+                    assert (b'content-length', length) in fields
                 assert body == b''
                 assert tail == (trailers if method == 'GET' and status == 200 else [])
             else:

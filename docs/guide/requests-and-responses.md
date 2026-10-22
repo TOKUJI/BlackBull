@@ -528,6 +528,8 @@ HEAD responses never carry content or a trailer section.  The response is
 complete after its header section even if the application declared trailers;
 later trailer events are ignored so they cannot become bytes in the next
 keep-alive response.
+An explicit `Content-Length` describes the corresponding GET representation,
+independently of the body events supplied for HEAD.
 
 Informational responses and status `204` carry neither content nor framing
 fields.  A `205` carries no content and is emitted with `Content-Length: 0` so

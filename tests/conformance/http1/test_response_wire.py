@@ -116,11 +116,20 @@ async def test_trailers_close_a_chunked_body(events, body):
     assert wire_body == body
 
 
-async def test_head_sends_neither_body_nor_trailers():
+@pytest.mark.parametrize('force_asgi', [0, 1], ids=['native', 'compat'])
+@pytest.mark.parametrize('expects_trailers', [False, True])
+@pytest.mark.parametrize('body_events', [(_body(),), (_body(b'hello'),),
+                                       (_body(b'a', True), _body(b'b'))])
+async def test_head_sends_neither_body_nor_trailers(
+        monkeypatch, force_asgi, expects_trailers, body_events):
+    monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', str(force_asgi))
     head, body = _split(await _wire(
-        _replay(_start(headers=[(b'content-length', b'5')], trailers=True), _body(b'hello'),
+        _replay(_start(headers=[(b'content-length', b'5')], trailers=expects_trailers), *body_events,
                 _trailers((b'x-checksum', b'abc123'))),
         b'HEAD / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'))
+    assert head.startswith(b'http/1.1 200 ok\r\n')
+    assert b'\r\ncontent-length: 5' in head
+    assert b'transfer-encoding:' not in head
     assert (body, b'x-checksum' in head) == (b'', False)
 
 

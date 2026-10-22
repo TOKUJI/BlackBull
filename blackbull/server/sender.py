@@ -714,7 +714,7 @@ class HTTP1Sender(BaseSender):
         elif code == 205:
             self._expect_trailers = False
             framing = b'content-length: 0\r\n'
-        elif code == 304:
+        elif code == 304 or (self._head_mode and app_length is not None):
             self._expect_trailers = False
             if app_length is not None:
                 framing = _content_length_line(app_length)
