@@ -3819,6 +3819,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/http1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/protocol/rsock/" class="md-nav__link">
         
   
@@ -6048,7 +6076,9 @@ Learned entries remain per connection and bounded by count, line size and
 accounted bytes. Shared seeds must be immutable, validated by the real
 grammar, drawn from specification-enumerated values, and exclude framing
 fields. Do not turn observations from one peer into shared state.
-Read <code>blackbull/server/parser.py</code> and its cache tests.</p>
+Both roles read HTTP/1.1 through <code>blackbull/protocol/http1.py</code>; a rule that
+differs by role belongs in its role policy section, with its RFC 9112 section.
+Read it and its cache tests.</p>
 <h2 id="protocol-and-deadline-owners">Protocol and deadline owners<a class="headerlink" href="#protocol-and-deadline-owners" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

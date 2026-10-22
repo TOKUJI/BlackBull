@@ -3825,6 +3825,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../protocol/http1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../protocol/rsock/" class="md-nav__link">
         
   
@@ -4975,49 +5003,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.IncompleteReadError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        IncompleteReadError
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="IncompleteReadError">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.IncompleteReadError.partial" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        partial
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.ProtocolError" class="md-nav__link">
     <span class="md-ellipsis">
       
         ProtocolError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.ReadLimitExceeded" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ReadLimitExceeded
       
     </span>
   </a>
@@ -6469,49 +6458,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.IncompleteReadError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        IncompleteReadError
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="IncompleteReadError">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.IncompleteReadError.partial" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        partial
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.ProtocolError" class="md-nav__link">
     <span class="md-ellipsis">
       
         ProtocolError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.recipient.ReadLimitExceeded" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ReadLimitExceeded
       
     </span>
   </a>
@@ -6894,11 +6844,11 @@ correctness (control frames are still serviced at the next read).</p>
 <ul>
 <li>a complete head → returned;</li>
 <li>EOF before a single byte of it → <code>b''</code>, an idle close;</li>
-<li>EOF part-way through → <a class="autorefs autorefs-internal" href="#blackbull.server.recipient.IncompleteReadError"><code>IncompleteReadError</code></a> carrying the
+<li>EOF part-way through → <a class="autorefs autorefs-internal" href="../../protocol/http1/#blackbull.protocol.http1.IncompleteReadError"><code>IncompleteReadError</code></a> carrying the
   partial, which is a truncated request and not an idle close.</li>
 </ul>
 <p><em>limit</em> bounds the whole head and is what stops an unbounded read; 0
-disables it, and an overrun raises <a class="autorefs autorefs-internal" href="#blackbull.server.recipient.ReadLimitExceeded"><code>ReadLimitExceeded</code></a>.</p>
+disables it, and an overrun raises [<code>ReadLimitExceeded</code>][].</p>
 <p>The Internals page argues why this is a contract every reader meets
 rather than a capability the caller sniffs for.</p>
 
@@ -6945,7 +6895,7 @@ Concrete transport readers override this.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Read through <em>sep</em>; <em>limit</em> &gt; 0 bounds it (<a class="autorefs autorefs-internal" href="#blackbull.server.recipient.ReadLimitExceeded"><code>ReadLimitExceeded</code></a>).</p>
+        <p>Read through <em>sep</em>; <em>limit</em> &gt; 0 bounds it ([<code>ReadLimitExceeded</code>][]).</p>
 
 
     </div>
@@ -7505,82 +7455,6 @@ window is moot once the stream closes (RFC 9113 §5.1).</p>
 
 
 
-<h3 id="blackbull.server.recipient.IncompleteReadError" class="doc doc-heading">
-            <code>IncompleteReadError</code>
-
-
-<a href="#blackbull.server.recipient.IncompleteReadError" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="EOFError">EOFError</span></code></p>
-
-
-
-        <p>Raised by AbstractReader when the peer closes the connection mid-read.</p>
-<p>Mirrors asyncio.IncompleteReadError but is not tied to asyncio, so
-handlers that depend on AbstractReader remain runtime-agnostic.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-<div class="doc doc-object doc-attribute">
-
-
-
-<h4 id="blackbull.server.recipient.IncompleteReadError.partial" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">partial</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-property"><code>property</code></small>
-  </span>
-
-<a href="#blackbull.server.recipient.IncompleteReadError.partial" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Whatever had been read when the peer went away.</p>
-<p>A truncated head and an idle close are the same exception with
-different payloads, and the caller answers 400 for one and nothing at
-all for the other — so the payload is part of the contract, not a
-debugging aid.</p>
-
-    </div>
-
-</div>
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
 <h3 id="blackbull.server.recipient.ProtocolError" class="doc doc-heading">
             <code>ProtocolError</code>
 
@@ -7598,57 +7472,6 @@ debugging aid.</p>
 <p><code>close_code</code> is the RFC 6455 §7.4 status code that should appear in
 the CLOSE frame sent to the peer.  Defaults to 1002 (PROTOCOL_ERROR);
 UTF-8 violations use 1007.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.recipient.ReadLimitExceeded" class="doc doc-heading">
-            <code>ReadLimitExceeded</code>
-
-
-<a href="#blackbull.server.recipient.ReadLimitExceeded" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="Exception">Exception</span></code></p>
-
-
-
-        <p>A bounded reader operation was given a byte budget and passed it.</p>
-<p>Belongs to the reader contract, not to any protocol: the reader hands back
-what it <code>saw</code> and the protocol decides which status that becomes.
-<code>docs/about/internals.md</code> §One breach, two verdicts is that decision.</p>
 
 
 

@@ -3825,6 +3825,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../protocol/http1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../protocol/rsock/" class="md-nav__link">
         
   
@@ -4374,17 +4402,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.http1_actor.BadRequestError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        BadRequestError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.http1_actor.HTTP1Actor" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4413,28 +4430,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.http1_actor.HeaderTooLargeError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HeaderTooLargeError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.http1_actor.NotImplementedFramingError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        NotImplementedFramingError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.http1_actor.RequestActor" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4459,28 +4454,6 @@
         
       </ul>
     </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.http1_actor.UnsupportedVersionError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        UnsupportedVersionError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.http1_actor.request_framing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        request_framing
-      
-    </span>
-  </a>
   
 </li>
         
@@ -5739,17 +5712,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.http1_actor.BadRequestError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        BadRequestError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.http1_actor.HTTP1Actor" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5778,28 +5740,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.http1_actor.HeaderTooLargeError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        HeaderTooLargeError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.http1_actor.NotImplementedFramingError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        NotImplementedFramingError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.http1_actor.RequestActor" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5824,28 +5764,6 @@
         
       </ul>
     </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.http1_actor.UnsupportedVersionError" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        UnsupportedVersionError
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.http1_actor.request_framing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        request_framing
-      
-    </span>
-  </a>
   
 </li>
         
@@ -5911,40 +5829,6 @@ RequestActor owns the lifetime of a single HTTP request.</p>
 
 
 
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.http1_actor.BadRequestError" class="doc doc-heading">
-            <code>BadRequestError</code>
-
-
-<a href="#blackbull.server.http1_actor.BadRequestError" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="Exception">Exception</span></code></p>
-
-
-
-        <p>Raised by <code>HTTP1Actor._parse</code> on an RFC 9112 framing violation.</p>
-<p>The actor's keep-alive loop catches this and sends a 400 Bad Request
-before closing the connection — never tries to dispatch the malformed
-request to the app.</p>
-
-
-
-
-
-
-
-
-
-    </div>
-
-</div>
 
 <div class="doc doc-object doc-class">
 
@@ -6016,74 +5900,6 @@ EventAggregator still receives the lifecycle events.</p>
 
 
   </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.http1_actor.HeaderTooLargeError" class="doc doc-heading">
-            <code>HeaderTooLargeError</code>
-
-
-<a href="#blackbull.server.http1_actor.HeaderTooLargeError" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="Exception">Exception</span></code></p>
-
-
-
-        <p>Raised when a request header line or the whole header block exceeds
-the configured limit (<code>BB_HEADER_MAX_LINE</code> / <code>BB_HEADER_MAX_TOTAL</code>).</p>
-<p>The actor answers with 431 Request Header Fields Too Large (RFC 6585
-§5) and closes the connection.  Distinct from <a class="autorefs autorefs-internal" href="#blackbull.server.http1_actor.BadRequestError"><code>BadRequestError</code></a>
-because the response status differs.</p>
-
-
-
-
-
-
-
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.http1_actor.NotImplementedFramingError" class="doc doc-heading">
-            <code>NotImplementedFramingError</code>
-
-
-<a href="#blackbull.server.http1_actor.NotImplementedFramingError" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="Exception">Exception</span></code></p>
-
-
-
-        <p>RFC 9112 §6.1 — the request used a Transfer-Encoding the server
-does not implement.  Answered with 501 Not Implemented (a separate
-response code from <a class="autorefs autorefs-internal" href="#blackbull.server.http1_actor.BadRequestError"><code>BadRequestError</code></a>'s 400).</p>
-
-
-
-
-
-
-
-
 
     </div>
 
@@ -6171,63 +5987,6 @@ escape the app call (e.g. a raising global middleware).</p>
 
 </div>
 
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.http1_actor.UnsupportedVersionError" class="doc doc-heading">
-            <code>UnsupportedVersionError</code>
-
-
-<a href="#blackbull.server.http1_actor.UnsupportedVersionError" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="Exception">Exception</span></code></p>
-
-
-
-        <p>RFC 9110 §15.6.6 — the request-line carried a well-formed
-<code>HTTP/x.y</code> version whose major version the server does not support
-(RFC9112-2.3-INVALID-VERSION).  Answered with 505 HTTP Version Not
-Supported and the connection is closed.  Distinct from
-<a class="autorefs autorefs-internal" href="#blackbull.server.http1_actor.BadRequestError"><code>BadRequestError</code></a>: the request <em>grammar</em> was valid.</p>
-
-
-
-
-
-
-
-
-
-    </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.server.http1_actor.request_framing" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">request_framing</span><span class="p">(</span><span class="n">headers</span><span class="p">)</span></code>
-
-<a href="#blackbull.server.http1_actor.request_framing" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Return the body framing a request head declares: <code>(Content-Length or
-None, chunked)</code>.</p>
-<p><em>headers</em> keeps the request contract (lowercase names).  Raises
-<a class="autorefs autorefs-internal" href="#blackbull.server.http1_actor.BadRequestError"><code>BadRequestError</code></a> for ambiguous framing and
-<code>NotImplementedFramingError</code> for a coding other than bare chunked.</p>
-
-
-    </div>
-
-</div>
 
 
 

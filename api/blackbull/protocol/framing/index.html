@@ -3957,6 +3957,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../http1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../rsock/" class="md-nav__link">
         
   
@@ -5870,7 +5898,7 @@ carry content.</p>
 
 
 <h3 id="blackbull.protocol.framing.parse_content_length" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">parse_content_length</span><span class="p">(</span><span class="n">fields</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">parse_content_length</span><span class="p">(</span><span class="n">fields</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">canonical</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
 <a href="#blackbull.protocol.framing.parse_content_length" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -5880,7 +5908,8 @@ carry content.</p>
         <p>The length every <code>Content-Length</code> occurrence agrees on, or <code>None</code>.</p>
 <p>Occurrences are <code>#field-value</code> lists too, so each member counts.  Raises
 <code>ValueError</code> when a member is not <code>1*DIGIT</code> or the members disagree;
-the message names the values it could not reconcile.</p>
+the message names the values it could not reconcile.  <em>canonical</em> also
+refuses a list and a leading zero, as HTTP/1.1's field-line check does.</p>
 
 
     </div>

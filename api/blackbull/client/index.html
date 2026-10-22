@@ -1899,6 +1899,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.Fate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.HTTP1Client" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4710,6 +4721,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../protocol/http1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../protocol/rsock/" class="md-nav__link">
         
   
@@ -6513,6 +6552,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.client.Fate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.client.HTTP1Client" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7609,6 +7659,54 @@ Trailers-Only shape.  It is always false on HTTP/1.1.</p>
 
 
 
+<h3 id="blackbull.client.Fate" class="doc doc-heading">
+            <code>Fate</code>
+
+
+<a href="#blackbull.client.Fate" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="enum.Enum">Enum</span></code></p>
+
+
+
+        <p>What a finished response leaves its connection fit for.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.client.HTTP1Client" class="doc doc-heading">
             <code>HTTP1Client</code>
 
@@ -8048,7 +8146,7 @@ here: a caller's <code>Content-Length</code> is checked against the body and
 then written once, canonically.  A caller's <code>Transfer-Encoding</code> is
 honoured only where rewriting it cannot change what the body means —
 the value <code>chunked</code>, the one framing this client writes — and
-refused otherwise; see <code>_check_transfer_encoding</code>.
+refused otherwise.
 A body whose length is known goes out as that many raw octets, a
 stream included, with the total checked as it goes; one whose length
 is not knowable up front is chunk-framed instead.</p>

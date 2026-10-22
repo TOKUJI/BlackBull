@@ -3819,6 +3819,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/protocol/http1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/protocol/rsock/" class="md-nav__link">
         
   
@@ -6291,7 +6319,7 @@ tier with the probe unchanged, and reports which clean PASS rows flip to
 FAIL/TIMEOUT.  A mutation with at least one flip is DETECTED.  The
 current mutations: the CL+TE smuggling rejection, the malformed
 Content-Length rejection, and the TE-list rejection (all in
-<code>server/http1_actor.py</code>'s framing), plus the G5-3 <strong>recall</strong> entry
+<code>protocol/http1.py</code>'s request framing), plus the G5-3 <strong>recall</strong> entry
 <code>bla-525-range-revert</code> — it reverts the filed BLA-525 fix in
 <code>middleware/static.py</code> (a satisfiable range ending at or beyond EOF
 clipping to 206 becomes a 416 again) and the harness must catch the
