@@ -7,7 +7,7 @@ conformance or absence of defects.
 
 | Surface | Check | Scope |
 |---|---|---|
-| HTTP/1.1 | tests/conformance/http1/ | RFC 9110/9112 framing, dispatch and resource refusals |
+| HTTP/1.1 | Http11Probe plus tests/conformance/http1/ | RFC 9110/9112 framing, dispatch and resource refusals |
 | HTTP/2 + HPACK | h2spec plus tests/conformance/http2/ | h2spec's RFC 7540/7541 cases; in-tree RFC 9113 behavior |
 | WebSocket | Autobahn plus in-tree tests | RFC 6455/7692 framing, compression and limits |
 | WebSocket over HTTP/2 | tests/conformance/http2/test_rfc8441.py | Opt-in RFC 8441 transport |
@@ -29,6 +29,38 @@ nginx differential test requires Docker/testcontainers and skips when they
 are unavailable. For a changed recorded status, decide whether it is a
 regression before regenerating the corpus under Docker; do not update the
 expectation merely to make a test pass.
+
+## HTTP/1.1 — Http11Probe
+
+With the .NET SDK available, run:
+
+```bash
+uv pip install -e .
+just http11probe both
+```
+
+The runner pins Http11Probe to `d4bc93f2843ac77fcaae71f25069ce1534952e1a`,
+starts and stops native and compatibility targets, and saves each lane's JSON
+under `bench/results/http11probe/<UTC time>-<revision>/`.
+This local check is separate from the conformance workflow above.
+
+On 2026-10-22, revision `809c1c0b` produced the following JSON counts:
+
+| Lane | Scored passed | Failed | Warnings | Errors | Unscored |
+|---|---:|---:|---:|---:|---:|
+| Native | 153 | 1 | 5 | 0 | 54 |
+| Compatibility | 153 | 1 | 5 | 0 | 54 |
+
+Each lane ran 213 cases, 159 scored. The CLI's `158/159` score includes the
+five warnings; the JSON's `passed` count excludes them.
+
+`MAL-CL-OVERFLOW` expects 400 or a close without a response for
+`Content-Length: 99999999999999999999`. BlackBull intentionally returns
+413 and closes before reading the body. The decimal value is syntactically
+valid; refusing content above the configured body limit is consistent with
+[RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110.html#section-8.6)
+and [§15.5.14](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.14).
+The probe reports this status mismatch as a failure; do not count it as a pass.
 
 ## HTTP/2 — h2spec
 
