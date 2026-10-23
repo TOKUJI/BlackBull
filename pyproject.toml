@@ -11,6 +11,9 @@ name = "blackbull"
 version = "0.81.0"
 description = "Async native-Connection web framework with ASGI 3.0 interop, a from-scratch HTTP/1.1 parser, HTTP/2 frame layer, and WebSocket codec. HPACK delegates to the hpack library."
 readme = "README.md"
+# 3.11 floor drops around its upstream EOL (2027-10); policy lives in
+# docs/getting-started/installation.md.  Bump together with classifiers and
+# the test.yml matrix.
 requires-python = ">=3.11"
 
 authors = [

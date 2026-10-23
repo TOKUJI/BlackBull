@@ -111,6 +111,9 @@ Hello, world!
 
 ## Install
 
+BlackBull requires Python 3.11 or later; see the
+[Python support policy](https://TOKUJI.github.io/BlackBull/getting-started/installation/#python-support-policy).
+
 ```bash
 pip install blackbull
 pip install 'blackbull[compression]'      # add brotli + zstandard codecs

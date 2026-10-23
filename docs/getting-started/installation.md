@@ -2,6 +2,14 @@
 
 BlackBull requires **Python 3.11+**.
 
+## Python support policy
+
+BlackBull currently supports Python 3.11 and later.
+
+Support for Python 3.11 is planned to end around its upstream end-of-life
+in October 2027.  Users are encouraged to migrate to Python 3.12 or later
+before then.
+
 ## From PyPI
 
 ```bash
