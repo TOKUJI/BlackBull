@@ -201,7 +201,7 @@ async def _http2_body_octets(client: HTTP2Client, total: int, *,
     """
     future = asyncio.get_running_loop().create_future()
     client._responses[1] = _PendingResponse(future=future)
-    head = client._factory.create(FrameTypes.HEADERS, 4, 1)
+    head = client.factory.create(FrameTypes.HEADERS, 4, 1)
     head.pseudo_headers[PseudoHeaders.STATUS] = '200'
     await client._on_response_headers(head)
     shared = bytes(frame_size) if share_one_slice else None
@@ -209,9 +209,9 @@ async def _http2_body_octets(client: HTTP2Client, total: int, *,
         payload = shared if shared is not None else bytes(frame_size)
         await asyncio.sleep(0)
         await client._on_response_data(
-            client._factory.create(FrameTypes.DATA, 0, 1, data=payload))
+            client.factory.create(FrameTypes.DATA, 0, 1, data=payload))
     await client._on_response_data(
-        client._factory.create(FrameTypes.DATA, 1, 1, data=b''))
+        client.factory.create(FrameTypes.DATA, 1, 1, data=b''))
     return len((await future).body)
 
 

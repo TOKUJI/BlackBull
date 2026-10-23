@@ -74,6 +74,16 @@ metadata; reinstall an editable checkout after changing that version.
   `WsIdleWatchdog` are replaced by `Deadline`, `Guard` and `SharedGuard`.
 - The `h2_priority_update_buffer` cap record names its protocol `http2`, as
   every other HTTP/2 record does.
+- The HTTP/2 client applies the server's frame rules (RFC 9113): it refuses
+  SETTINGS out of range, `ENABLE_PUSH=1` from a server, a zero or overflowing
+  WINDOW_UPDATE, PING, SETTINGS or GOAWAY on a stream, RST_STREAM on an idle
+  stream and a server PRIORITY_UPDATE, meters control-frame floods, and ends
+  the connection with ENHANCE_YOUR_CALM (was COMPRESSION_ERROR) when a field
+  block exceeds `BB_CLIENT_HEAD_MAX_TOTAL`.
+- HTTP/2, both roles: frames on a stream the endpoint itself reset are
+  ignored rather than answered with RST_STREAM (RFC 9113 §5.1); GOAWAY on a
+  stream and a HEADERS too short for its priority fields are connection
+  errors.
 - WebSocket over HTTP/2 returns flow-control credit as the WebSocket codec
   consumes data, in the server and the client alike, so at most one stream
   window is buffered. DATA past the window resets the stream
@@ -86,6 +96,9 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Removed
 
+- `blackbull.client.ResponderFactory` and `blackbull.server.response`. One
+  HTTP/2 core, `blackbull.server.http2_connection.HTTP2Connection`, answers
+  control frames for the server and the client.
 - `AsyncioReader`, `PrefixReader` and `HTTP2WSReader`. `AbstractReader` no
   longer reads lines byte by byte: `readuntil` and `read_head` raise
   `NotImplementedError` except on `BufferReader`.

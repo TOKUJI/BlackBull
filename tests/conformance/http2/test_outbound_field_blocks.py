@@ -1,18 +1,15 @@
 import asyncio
 from http import HTTPStatus
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 from hpack import Decoder
 import pytest
 
-from blackbull.client.response import SettingsResponder as ClientSettings
 from blackbull.client.http2 import HTTP2Client
 from blackbull.native import _native_from_asgi
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import ErrorCodes, FrameTypes, PseudoHeaders, serialize_field_block
-from blackbull.server.response import SettingsResponder as ServerSettings
 from blackbull.server.sender import AbstractWriter, HTTP2Sender, build_response_headers, build_trailers
+from tests.conformance.http2._harness import CoreEndpoint
 
 
 FIELDS = [(b'x-large', b'~' * 40000), (b'x-state', b'reused')]
@@ -79,26 +76,19 @@ async def test_large_field_blocks_decode_in_encoder_order(kind, limit):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('side', ['server', 'client'])
 @pytest.mark.parametrize('sizes', [(32768,), (32768, 16384), (1, 32768), (2**24, 16384)])
-async def test_frame_setting_is_connection_owned_and_validates_every_entry(side, sizes):
+async def test_frame_setting_is_connection_owned_and_validates_every_entry(sizes):
     factory = FrameFactory()
     writer = Writer()
     existing = HTTP2Sender(writer, factory, 1)
     control = HTTP2Sender(writer, factory, 0)
-    error = AsyncMock()
-    sent = AsyncMock()
-    handler = SimpleNamespace(factory=factory, _factory=factory,
-                              _senders={1: existing}, send_frame=sent,
-                              _send_raw_frame=sent, _connection_error=error,
-                              _fail_connection=error)
+    endpoint = CoreEndpoint(factory)
+    endpoint._senders[1] = existing
     data = b'\x00\x01\x00\x00\x00\x00' + b''.join(
         b'\x00\x05' + size.to_bytes(4, 'big') for size in sizes)
-    responder = ServerSettings if side == 'server' else ClientSettings
-    await responder(factory.create(FrameTypes.SETTINGS, 0, 0, data=data)).respond(handler)
+    await endpoint.on_settings(factory.create(FrameTypes.SETTINGS, 0, 0, data=data))
     valid = all(16384 <= size < 2**24 for size in sizes)
-    assert sent.await_count == int(valid)
-    assert error.await_count == int(not valid)
+    assert bool(endpoint.failures) is not valid
     assert factory.encoder.header_table_size == (0 if valid else 4096)
     for sender in (existing, control, HTTP2Sender(writer, factory, 3)):
         assert sender.max_frame_size == (sizes[-1] if valid else 16384)
@@ -165,8 +155,8 @@ def test_field_block_boundaries(kind, prefix, size):
 async def test_raw_client_escape_preserves_oversized_frame():
     client = HTTP2Client('localhost', 1)
     writer = Writer()
-    client._control_sender = HTTP2Sender(writer, client._factory, 0)
-    frame = client._factory.create(FrameTypes.HEADERS, 1, 1)
+    client._control_sender = HTTP2Sender(writer, client.factory, 0)
+    frame = client.factory.create(FrameTypes.HEADERS, 1, 1)
     frame.headers = FIELDS
     await client.send_raw_frame(frame)
     emitted = frames(writer.writes[0])

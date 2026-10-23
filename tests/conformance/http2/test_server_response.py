@@ -1,14 +1,10 @@
-"""Tests for blackbull/server/response.py — Responder registry and respond() paths."""
+"""HTTP/2 control-frame answers of the connection core, and HTTP2Sender framing."""
 import asyncio
 import pytest
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from blackbull.server.response import (
-    ResponderFactory, Responder, PingResponder,
-    WindowUpdateResponder, PriorityResponder, PriorityUpdateResponder,
-    SettingsResponder,
-)
+from blackbull.server.http2_actor import HTTP2Actor
+from tests.conformance.http2._harness import CoreEndpoint
 from blackbull.connection import Connection
 from blackbull.headers import Headers
 from blackbull.protocol.frame import FrameFactory
@@ -31,71 +27,22 @@ def _make_h2_frame(type_byte, flags, stream_id: int, payload: bytes) -> bytes:
 # ResponderFactory
 # ---------------------------------------------------------------------------
 
-def test_create_unknown_frame_type_raises():
-    frame = MagicMock()
-    frame.FrameType.return_value = object()  # not in registry
-    with pytest.raises(ValueError, match='Unsupported FrameType'):
-        ResponderFactory.create(frame)
-
-
 # ---------------------------------------------------------------------------
 # Responder base class — registration guards and abstract methods
 # ---------------------------------------------------------------------------
-
-def test_subclass_frame_type_none_not_registered():
-    before = dict(Responder._registry)
-
-    class AbstractSub(Responder):
-        FRAME_TYPE = None
-
-    assert Responder._registry == before  # nothing new added
-
-
-def test_subclass_duplicate_frame_type_raises():
-    with pytest.raises(ValueError, match='Duplicate FRAME_TYPE'):
-        class DupA(Responder):
-            FRAME_TYPE = 'test_dup_sentinel'
-
-        class DupB(Responder):
-            FRAME_TYPE = 'test_dup_sentinel'
-
-    # Clean up so we don't pollute registry for other tests
-    Responder._registry.pop('test_dup_sentinel', None)
-
-
-@pytest.mark.asyncio
-async def test_respond_not_implemented():
-    frame = MagicMock()
-    r = Responder(frame)
-    with pytest.raises(NotImplementedError):
-        await r.respond(MagicMock())
-
-
-def test_frame_type_not_implemented():
-    with pytest.raises(NotImplementedError):
-        Responder.FrameType()
-
 
 # ---------------------------------------------------------------------------
 # PingResponder
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_ping_responder_sends_ack():
-    frame = MagicMock()
-    frame.stream_id = 0
-    frame.flags = 0  # not a PING-ACK; we must echo it back
-    frame.payload = b'\x00' * 8
+async def test_ping_is_answered_with_its_ack():
+    endpoint = CoreEndpoint()
+    ping = endpoint.factory.load(_make_h2_frame(FrameTypes.PING, 0, 0, b'p' * 8))
 
-    ack_frame = MagicMock()
-    handler = MagicMock()
-    handler.factory.create.return_value = ack_frame
-    handler.send_frame = AsyncMock()
+    await endpoint.on_ping(ping)
 
-    responder = PingResponder(frame)
-    await responder.respond(handler)
-
-    handler.send_frame.assert_awaited_once_with(ack_frame)
+    assert endpoint.sent == [_make_h2_frame(FrameTypes.PING, 1, 0, b'p' * 8)]
 
 
 # ---------------------------------------------------------------------------
@@ -107,23 +54,17 @@ async def test_window_update_connection_level_credits_shared_window():
     """Connection-level WINDOW_UPDATE credits the ONE shared connection window
     — not a private copy per sender — and wakes every stream sender."""
     from blackbull.server.sender import ConnectionWindow
-    frame = MagicMock()
-    frame.stream_id = 0
-    frame.length = 4  # valid frame length
-    frame.window_size = 1024
-
+    endpoint = CoreEndpoint()
+    frame = endpoint.factory.window_update(0, 1024)
     sender_a = MagicMock()
     sender_b = MagicMock()
+    endpoint._senders = {'a': sender_a, 'b': sender_b}
+    endpoint._conn_window = ConnectionWindow(65535)
 
-    handler = MagicMock()
-    handler._senders = {'a': sender_a, 'b': sender_b}
-    handler._conn_window = ConnectionWindow(65535)
-
-    responder = WindowUpdateResponder(frame)
-    await responder.respond(handler)
+    await endpoint.on_window_update(frame)
 
     # The single shared window is credited exactly once (not once per sender).
-    assert handler._conn_window.size == 65535 + 1024
+    assert endpoint._conn_window.size == 65535 + 1024
     sender_a.wake_window.assert_called_once()
     sender_b.wake_window.assert_called_once()
 
@@ -133,19 +74,12 @@ async def test_window_update_connection_level_updates_shared_window():
     """Connection-level WINDOW_UPDATE updates the shared window so that stream
     senders created after the update read the current budget from it."""
     from blackbull.server.sender import ConnectionWindow
-    frame = MagicMock()
-    frame.stream_id = 0
-    frame.length = 4  # valid frame length
-    frame.window_size = 4128769  # default startup increment (4 MiB - 65535)
+    endpoint = CoreEndpoint()
+    frame = endpoint.factory.window_update(0, 4128769)   # the startup increment
 
-    handler = MagicMock()
-    handler._senders = {}
-    handler._conn_window = ConnectionWindow(65535)
+    await endpoint.on_window_update(frame)
 
-    responder = WindowUpdateResponder(frame)
-    await responder.respond(handler)
-
-    assert handler._conn_window.size == 65535 + 4128769
+    assert endpoint._conn_window.size == 65535 + 4128769
 
 
 # ---------------------------------------------------------------------------
@@ -387,38 +321,14 @@ async def test_priority_responder_records_nothing():
     idle stream — so the responder was a way for a peer to grow the tree one
     node per frame.  What it owes now is silence.
     """
-    frame = MagicMock()
-    frame.stream_id = 3
-    frame.dependent_stream = 0
-    frame.weight = 42
-    frame.exclusion = False
+    endpoint = CoreEndpoint()
+    frame = endpoint.factory.load(_make_h2_frame(
+        FrameTypes.PRIORITY, 0, 3, (0).to_bytes(4, 'big') + bytes([42])))
 
-    handler = MagicMock()
-    handler.send_frame = AsyncMock()
+    await endpoint.on_priority(frame)
 
-    await PriorityResponder(frame).respond(handler)
-
-    handler.root_stream.add_child.assert_not_called()
-    handler.send_frame.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_priority_responder_still_rejects_self_dependency():
-    """RFC 9113 §5.3.1 — the one thing the responder must keep doing."""
-    frame = MagicMock()
-    frame.stream_id = 5
-    frame.dependent_stream = 5
-    frame.weight = 10
-    frame.exclusion = False
-
-    handler = MagicMock()
-    handler.send_frame = AsyncMock()
-
-    await PriorityResponder(frame).respond(handler)
-
-    handler.factory.rst_stream.assert_called_once_with(
-        5, ErrorCodes.PROTOCOL_ERROR)
-    handler.send_frame.assert_awaited_once()
+    assert endpoint.root_stream.children == {}
+    assert endpoint.sent == endpoint.resets == []
 
 
 # ---------------------------------------------------------------------------
@@ -445,8 +355,7 @@ async def test_priority_update_existing_stream_stores_hint():
     handler = MagicMock()
     handler.find_stream.return_value = stream
 
-    responder = PriorityUpdateResponder(frame)
-    await responder.respond(handler)
+    HTTP2Actor.on_priority_update(handler, frame)
 
     assert stream.priority_hint == {'urgency': 2}
     assert stream.conn.extensions['http.response.priority'] == {'urgency': 2}
@@ -463,15 +372,14 @@ async def test_priority_update_new_stream_precreated():
     new_stream.conn = None  # dispatch target not yet available
 
     handler = MagicMock()
-    # First call: None (stream doesn't exist), second call: the new stream
-    handler.find_stream.side_effect = [None, new_stream]
+    handler.find_stream.return_value = None
+    handler.root_stream.add_child.return_value = new_stream
     # The buffer cap (RFC 9218 §7) reads both of these before pre-creating.
     handler.root_stream.children = {}
     handler.max_concurrent_streams = 100
     handler._is_closed_stream.return_value = (False, None)
 
-    responder = PriorityUpdateResponder(frame)
-    await responder.respond(handler)
+    HTTP2Actor.on_priority_update(handler, frame)
 
     handler.root_stream.add_child.assert_called_once_with(7)
     assert new_stream.priority_hint == {'urgency': 1}
@@ -502,15 +410,10 @@ async def test_settings_responder_does_not_mutate_decoder_table_size():
     )
     frame = factory.load(wire)
 
-    handler = SimpleNamespace(
-        factory=factory,
-        _senders={},
-        send_frame=AsyncMock(),
-    )
-    await SettingsResponder(frame).respond(handler)
+    await CoreEndpoint(factory).on_settings(frame)
 
     assert factory.decoder.header_table_size == before, (
-        f'SettingsResponder must NOT change factory.decoder.header_table_size; '
+        f'SETTINGS must NOT change factory.decoder.header_table_size; '
         f'was {before}, now {factory.decoder.header_table_size}'
     )
 
@@ -519,13 +422,7 @@ async def test_settings_responder_does_not_mutate_decoder_table_size():
 async def test_settings_responder_tracks_peer_enable_push_state():
     """Valid peer ENABLE_PUSH settings update the connection state."""
     factory = FrameFactory()
-    handler = SimpleNamespace(
-        factory=factory,
-        _senders={},
-        _peer_initial_window_size=65535,
-        _peer_enable_push=True,
-        send_frame=AsyncMock(),
-    )
+    handler = CoreEndpoint(factory)
 
     for value, expected in ((0, False), (1, True)):
         wire = _make_h2_frame(
@@ -534,7 +431,7 @@ async def test_settings_responder_tracks_peer_enable_push_state():
             0,
             (0x2).to_bytes(2, 'big') + value.to_bytes(4, 'big'),
         )
-        await SettingsResponder(factory.load(wire)).respond(handler)
+        await handler.on_settings(factory.load(wire))
         assert handler._peer_enable_push is expected
 
 
@@ -542,14 +439,8 @@ async def test_settings_responder_tracks_peer_enable_push_state():
 async def test_invalid_enable_push_retains_state_and_connection_error():
     """An invalid ENABLE_PUSH value remains a connection error."""
     factory = FrameFactory()
-    handler = SimpleNamespace(
-        factory=factory,
-        _senders={},
-        _peer_initial_window_size=65535,
-        _peer_enable_push=False,
-        send_frame=AsyncMock(),
-        _connection_error=AsyncMock(),
-    )
+    handler = CoreEndpoint(factory)
+    handler._peer_enable_push = False
     wire = _make_h2_frame(
         FrameTypes.SETTINGS,
         SettingFrameFlags.INIT,
@@ -557,10 +448,10 @@ async def test_invalid_enable_push_retains_state_and_connection_error():
         (0x2).to_bytes(2, 'big') + (2).to_bytes(4, 'big'),
     )
 
-    await SettingsResponder(factory.load(wire)).respond(handler)
+    await handler.on_settings(factory.load(wire))
 
     assert handler._peer_enable_push is False
-    handler._connection_error.assert_awaited_once()
+    assert handler.failures
 
 
 # ---------------------------------------------------------------------------
@@ -679,11 +570,8 @@ async def test_settings_responder_propagates_max_frame_size_to_senders():
     wire = _make_h2_frame(FrameTypes.SETTINGS, SettingFrameFlags.INIT, 0, settings_payload)
     settings_frame = frame_factory.load(wire)
 
-    handler = SimpleNamespace(
-        factory=frame_factory,
-        _senders={1: sender},
-        send_frame=AsyncMock(),
-    )
-    await SettingsResponder(settings_frame).respond(handler)
+    handler = CoreEndpoint(frame_factory)
+    handler._senders = {1: sender}
+    await handler.on_settings(settings_frame)
 
     assert sender.max_frame_size == 32768

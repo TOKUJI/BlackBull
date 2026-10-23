@@ -14,7 +14,6 @@ from blackbull.server.recipient import HTTP2Recipient
 from blackbull.server.sender import (
     AsyncioWriter, ConnectionWindow, HTTP2Sender,
 )
-from blackbull.server.response import WindowUpdateResponder, PriorityResponder
 
 
 def _make_h2_frame(type_byte, flags=0, stream_id=0, payload=b''):
@@ -88,7 +87,7 @@ async def test_connection_window_update_credits_shared_window_once():
     # Two live senders sharing the connection window.
     handler._senders = {1: _new_sender(handler.factory, 1, conn),
                         3: _new_sender(handler.factory, 3, conn)}
-    await WindowUpdateResponder(frame).respond(handler)
+    await handler.on_window_update(frame)
     # Credited once — not once per sender.
     assert conn.size == start + 1000
 
@@ -151,24 +150,6 @@ async def test_goaway_early_return_signals_recipients():
 # ---------------------------------------------------------------------------
 # 1.10 — PRIORITY with an unknown dependent stream must not crash
 # ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_priority_unknown_dependency_does_not_crash():
-    handler = _make_actor()
-    frame = MagicMock()
-    frame.stream_id = 7          # not in the tree
-    frame.dependent_stream = 99  # also unknown
-    frame.exclusion = False
-    frame.weight = 16
-    # The defect this guards is an AttributeError out of ``respond`` that
-    # unwound the frame loop and killed every stream on the connection
-    # without a GOAWAY.  It must still not raise — and, since §5.3 is
-    # deprecated and BlackBull records no dependency state, it must also
-    # not park a node in the tree for an idle stream the peer merely named
-    # (see tests/unit/test_h2_priority_state_bounds.py).
-    await PriorityResponder(frame).respond(handler)
-    assert handler.root_stream.find_child(7) is None
-
 
 # ---------------------------------------------------------------------------
 # 1.14 (#3) — an over-sized frame is rejected without buffering its payload

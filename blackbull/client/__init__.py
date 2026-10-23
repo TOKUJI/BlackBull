@@ -10,7 +10,6 @@ from .client import Client
 from .http1 import (Fate, HTTP1Client, HTTP1RequestSender, HTTP1ResponseRecipient,
                     HTTP1UpgradeSession)
 from .http2 import ClientResponse, HTTP2Client
-from .response import ResponderFactory
 from blackbull.fault_injection.scenario_h1 import (
     Abort,
     ReadResponse,
@@ -42,7 +41,6 @@ __all__ = [
     'HTTP1UpgradeSession',
     'HTTP2Client',
     'ReadResponse',
-    'ResponderFactory',
     'Scenario',
     'ScenarioResult',
     'SendRawBytes',

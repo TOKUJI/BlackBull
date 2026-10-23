@@ -26,8 +26,7 @@ from ..server.deadline import Deadline
 from ..server.rate_window import ByteRateFloor
 from ..server.http2_ws import HTTP2StreamReader
 from ..server.recipient import AbstractReader
-from ..server.sender import (AbstractWriter, AsyncioWriter, ConnectionWindow,
-                             HTTP2Sender)
+from ..server.sender import AbstractWriter, AsyncioWriter, HTTP2Sender
 from ..utils import HTTP2 as _HTTP2_PREFACE
 from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
                        open_connection as _open_connection)
@@ -54,7 +53,8 @@ from ..fault_injection.scenario_h2_client import (
     Sleep as _ScSleep,
     encode_frame as _sc_encode_frame,
 )
-from .response import ResponderFactory
+from ..protocol.stream import StreamState
+from ..server.http2_connection import SKIP, HTTP2Connection
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +67,6 @@ _FRAME_HEADER_BYTES = 9
 #: ``HTTP2Client._receive_frame``.
 _FRAME_READ_TIMEOUT: float = 30.0
 
-#: RFC 9113 §6.10.
-_OPENS_A_FIELD_BLOCK = frozenset({FrameTypes.HEADERS, FrameTypes.PUSH_PROMISE})
-
 #: What a raw-stream consumer acts on, and therefore all its queue takes.
 #: A stream reader takes DATA (payload and END_STREAM) and RST_STREAM (EOF);
 #: the RFC 8441 Extended CONNECT handshake reads HEADERS.
@@ -78,33 +75,16 @@ _OPENS_A_FIELD_BLOCK = frozenset({FrameTypes.HEADERS, FrameTypes.PUSH_PROMISE})
 #: count of each.  A whitelist and not a blacklist because a queue slot is
 #: spent by whoever sends the frame: every excluded type has a destination
 #: of its own, and the queue was the destination of everything unnamed.
+#: The frames a field block arrives in (RFC 9113 §6.10).
+_BLOCK_FRAME_TYPES = frozenset({
+    FrameTypes.HEADERS, FrameTypes.CONTINUATION, FrameTypes.PUSH_PROMISE,
+})
+
 _RAW_STREAM_FRAME_TYPES = frozenset({
     FrameTypes.DATA, FrameTypes.HEADERS, FrameTypes.RST_STREAM,
 })
 
-class _DiscardedFrame:
-    """Marker for a frame rejected at the stream level before dispatch."""
-
-    __slots__ = ('length', 'stream_id')
-
-    def __init__(self, length: int, stream_id: int) -> None:
-        self.length = length
-        self.stream_id = stream_id
-
-    def FrameType(self):
-        return None
-
-
-_InboundFrame = FrameBase | _UnknownFrame | _DiscardedFrame
-
-
-# (minimum/exact length, connection-wide rule, settings ACK selector).
-_FIXED_LENGTH_RULES = {
-    FrameTypes.WINDOW_UPDATE: (4, True, 'exact'),
-    FrameTypes.PRIORITY: (5, False, 'exact'),
-    FrameTypes.GOAWAY: (8, True, 'minimum'),
-    FrameTypes.SETTINGS: (6, True, 'settings'),
-}
+_InboundFrame = FrameBase | _UnknownFrame
 
 
 class _ConnectionFailed(Exception):
@@ -266,7 +246,7 @@ def _record_frame(result, frame) -> None:
     result.server_bytes_received += 9 + int(getattr(frame, 'length', 0) or 0)
 
 
-class HTTP2Client:
+class HTTP2Client(HTTP2Connection):
     """Async HTTP/2 client.
 
     Use as an async context manager::
@@ -281,6 +261,10 @@ class HTTP2Client:
     odd, monotonically-increasing client-initiated stream ID
     (RFC 7540 §5.1.1) and the responses are demultiplexed by the receive loop.
     """
+
+    _PEER_PARITY = 0
+    #: RFC 9113 §6.5.2: a server that announces ENABLE_PUSH announces 0.
+    _ENABLE_PUSH_VALUES = (0,)
 
     def __init__(self, host: str, port: int, *,
                  ssl: _ssl.SSLContext | None = None,
@@ -302,20 +286,21 @@ class HTTP2Client:
         # enforced half is kept because the refusal has to name it.
         (self._advertised_header_list_size,
          self._enforced_header_list_size) = _header_list_size()
-        self._factory = FrameFactory(
-            max_header_list_size=self._enforced_header_list_size)
+        self._init_connection(
+            FrameFactory(max_header_list_size=self._enforced_header_list_size),
+            field_block_max=get_settings().client_head_max_total,
+            field_block_cap='client_head_max_total')
         self._push_permitted: bool = get_settings().client_h2_enable_push
         self._control_sender: HTTP2Sender | None = None
         #: Detached refusal tasks; ``_spawn`` says what holding them buys.
         self._detached: set[asyncio.Future] = set()
-        self._senders: dict[int, HTTP2Sender] = {}
 
         # Client-initiated streams use odd IDs starting at 1 (RFC 7540 §5.1.1).
         self._next_stream_id = 1
 
         self._responses: dict[int, _PendingResponse] = {}
 
-        # Streams that bypass ResponderFactory dispatch — used by the
+        # Streams that bypass the response dispatch — used by the
         # RFC 8441 WebSocket-over-H2 client.  When a frame arrives on a
         # stream id in this dict, it is pushed into the queue instead of
         # being routed through the request/response state machine.
@@ -325,23 +310,8 @@ class HTTP2Client:
 
         self._receive_task: asyncio.Task | None = None
 
-        # The peer's announced SETTINGS_INITIAL_WINDOW_SIZE.  Only the seed
-        # is kept here; the per-stream windows live in the senders, because
-        # the sender is what waits on them.
-        self.initial_window_size: int = DEFAULT_INITIAL_WINDOW_SIZE
-
-        # The connection-level send window (RFC 9113 §6.9.1) is one budget
-        # every stream debits, so it is owned here and handed to each sender
-        # rather than allocated per sender.  Held apart from the senders
-        # because it outlives them: a stream that finishes sending stops
-        # needing credit, but the credit it spent is still gone.
-        self._conn_window = ConnectionWindow(DEFAULT_INITIAL_WINDOW_SIZE)
-
         self._unacked_conn: int = 0
 
-        # While these are set the peer owes CONTINUATION (RFC 9113 §6.10).
-        self._open_field_block = None
-        self._field_block_opened_at: float | None = None
         self._failure: str | None = None
         self._goaway_received: bool = False
         # Set when the receive loop ends for any reason.  ``_goaway_received``
@@ -426,7 +396,7 @@ class HTTP2Client:
         # The only SETTINGS this client sends, hence the only place a
         # generation is opened.
         self._control_sender = HTTP2Sender(
-            self._writer, self._factory, 0,
+            self._writer, self.factory, 0,
             flow_control_timeout=get_settings().client_write_timeout,
             flow_control_cap='client_write_timeout')
         self._settings_sent += 1
@@ -434,7 +404,7 @@ class HTTP2Client:
         if not self._push_permitted:
             enable_push = 0
             self._no_push_generation = self._settings_sent
-        await self._control_sender(self._factory.settings(
+        await self._control_sender(self.factory.settings(
             enable_push=enable_push,
             max_header_list_size=self._advertised_header_list_size,
         ))
@@ -497,7 +467,7 @@ class HTTP2Client:
 
         Every header producer, including extended CONNECT, must reuse this context.
         """
-        return self._factory
+        return self.factory
 
     async def request(self, method: str | HTTPMethod, path: str, *,
                       headers: Iterable[tuple[str | bytes, str | bytes]] = (),
@@ -529,7 +499,7 @@ class HTTP2Client:
         if not body:
             flags |= int(HeaderFrameFlags.END_STREAM)
 
-        h_frame = self._factory.create(FrameTypes.HEADERS, flags, stream_id)
+        h_frame = self.factory.create(FrameTypes.HEADERS, flags, stream_id)
         h_frame.pseudo_headers[PseudoHeaders.METHOD] = str(method)
         h_frame.pseudo_headers[PseudoHeaders.PATH] = path
         h_frame.pseudo_headers[PseudoHeaders.SCHEME] = self._scheme
@@ -543,7 +513,7 @@ class HTTP2Client:
 
             if body:
                 # Splitting and flow control are ``_write_data``'s; the
-                # credit it waits on arrives via ``_on_window_update``.  Run
+                # credit it waits on arrives via ``on_window_update``.  Run
                 # as a task so the refusal can reach it — ``upload`` on
                 # [`_PendingResponse`][] says why that matters, and this
                 # await is the one it would otherwise park on.
@@ -568,16 +538,18 @@ class HTTP2Client:
             # receive loop only knows about streams the peer answered.  A
             # send that never reached the wire has no answer coming, so its
             # entry would sit in ``_responses`` until GOAWAY or __aexit__ —
-            # a dict that grows once per failed send.
-            self._drop_pending(stream_id)
+            # a dict that grows once per failed send.  Anything the peer
+            # still sends on it is ignored as after our own reset (§5.1).
+            self._drop_pending(stream_id, via_rst=True)
             raise
         finally:
             # Released on the last *send*, never on the last receive — the
             # early-401 hazard is ``_drop_pending``'s to explain.  Nothing
             # sends on this stream past this point, so the sweeps in
-            # ``_on_window_update`` and ``_on_initial_window_size`` have no
+            # of the connection core's WINDOW_UPDATE and SETTINGS handling have no
             # reason to keep reaching it.
             self._senders.pop(stream_id, None)
+            self._release_stream(stream_id)
 
         # The question is asked, so from here the peer owes an answer and the
         # wait for it is bounded.  Not one line earlier: a send parked on our
@@ -600,8 +572,9 @@ class HTTP2Client:
             # cancelled task group — takes the deadline with it.  Left armed,
             # it would later refuse a stream nobody is waiting on: a cap
             # record against a peer that was never judged, and an exception
-            # set on a future no one will retrieve.
-            self._drop_pending(stream_id)
+            # set on a future no one will retrieve.  The rest of the response
+            # is ignored as after our own reset (§5.1).
+            self._drop_pending(stream_id, via_rst=True)
             raise
 
     async def execute_scenario(
@@ -790,6 +763,8 @@ class HTTP2Client:
         q: asyncio.Queue = asyncio.Queue(
             maxsize=get_settings().client_raw_queue_depth)
         self._raw_streams[stream_id] = q
+        if stream_id not in self.root_stream.children:
+            self._open_stream(stream_id)
         return q
 
     def unregister_raw_stream(self, stream_id: int) -> None:
@@ -797,7 +772,8 @@ class HTTP2Client:
 
         The one door a closed client still admits: this is teardown, nothing
         here needs the connection, and a cleanup path that raises after close
-        turns an orderly shutdown into an error.
+        turns an orderly shutdown into an error.  What the peer still sends
+        on the stream is ignored as after our own reset (§5.1).
         """
         self._raw_streams.pop(stream_id, None)
         self._stream_readers.pop(stream_id, None)
@@ -805,6 +781,7 @@ class HTTP2Client:
         # unregisters — its shutdown sends the CLOSE frame first — so this is
         # that stream's last-send boundary, the same one ``request()`` uses.
         self._senders.pop(stream_id, None)
+        self._release_stream(stream_id, via_rst=True)
 
     def _signal_raw_stream(self, stream_id: int, queue: asyncio.Queue,
                            code: ErrorCodes) -> int:
@@ -822,7 +799,7 @@ class HTTP2Client:
         if queue.full():
             while not queue.empty():
                 displaced += _flow_controlled_length(queue.get_nowait())
-        queue.put_nowait(self._factory.rst_stream(
+        queue.put_nowait(self.factory.rst_stream(
             stream_id=stream_id, error_code=code))
         return displaced
 
@@ -860,7 +837,7 @@ class HTTP2Client:
                 return
             try:
                 await self._send_raw_frame(
-                    self._factory.window_update(stream_id, n))
+                    self.factory.window_update(stream_id, n))
             except Exception:
                 logger.debug('could not credit stream %d', stream_id)
 
@@ -900,7 +877,7 @@ class HTTP2Client:
             stream_id, queue, ErrorCodes.ENHANCE_YOUR_CALM)
         self.unregister_raw_stream(stream_id)
         try:
-            await self._send_raw_frame(self._factory.rst_stream(
+            await self._send_raw_frame(self.factory.rst_stream(
                 stream_id, ErrorCodes.ENHANCE_YOUR_CALM))
             # Credited under the shared-window rule ``_on_response_data``
             # explains, and the backlog counts too: a raw stream's DATA is
@@ -917,20 +894,21 @@ class HTTP2Client:
     def _allocate_stream_id(self) -> int:
         sid = self._next_stream_id
         self._next_stream_id += 2
+        self._open_stream(sid)
         return sid
 
     def _make_sender(self, stream_id: int) -> HTTP2Sender:
         if stream_id not in self._senders:
             assert self._writer is not None
             # Seeded here and not left at the RFC default because
-            # ``_on_initial_window_size`` only delta-adjusts senders that
+            # SETTINGS_INITIAL_WINDOW_SIZE only delta-adjusts senders that
             # already exist: one created after the SETTINGS exchange would
             # never learn the value.  The server's ``make_sender`` seeds at
             # construction for the same reason.
             self._senders[stream_id] = HTTP2Sender(
-                self._writer, self._factory, stream_id,
+                self._writer, self.factory, stream_id,
                 conn_window=self._conn_window,
-                initial_window=self.initial_window_size,
+                initial_window=self._peer_initial_window_size,
                 flow_control_timeout=get_settings().client_write_timeout,
                 flow_control_cap='client_write_timeout')
         return self._senders[stream_id]
@@ -966,7 +944,7 @@ class HTTP2Client:
             # payload is not read, so it stays in the socket and the next
             # 9-byte read would land inside it.  Draining it first to keep the
             # stream option open would cost whatever the peer declared.
-            await self._fail_connection(
+            await self._connection_error(
                 ErrorCodes.FRAME_SIZE_ERROR,
                 f'frame length {length} exceeds '
                 f'BB_CLIENT_H2_MAX_FRAME_SIZE={max_frame}')
@@ -988,88 +966,9 @@ class HTTP2Client:
             return None
         return await self._load(header + payload)
 
-    async def _load(self, data: bytes) -> _InboundFrame | None:
-        """Parse one frame.  A whole block is decoded in the constructor, so
-        this is one of the two places a parse can fail."""
-        rejected = await self._validate_frame(data)
-        if rejected is not None:
-            return rejected
-        try:
-            frame = self._factory.load(data)
-        except _ConnectionFailed:
-            raise
-        except Exception as exc:
-            await self._fail_parse(exc)
-            return None  # unreachable: _fail_parse raises
-        if (isinstance(frame, FrameBase)
-                and frame.FrameType() is FrameTypes.HEADERS
-                and frame.malformed):
-            await self._reject_stream(
-                frame.stream_id, ErrorCodes.PROTOCOL_ERROR,
-                frame.malformed_reason or 'malformed HEADERS frame')
-            return _DiscardedFrame(frame.length, frame.stream_id)
-        if (isinstance(frame, FrameBase)
-                and frame.FrameType() is FrameTypes.PRIORITY
-                and frame.stream_id == 0):
-            await self._fail_connection(
-                ErrorCodes.PROTOCOL_ERROR,
-                'PRIORITY frame must use a non-zero stream')
-        if (isinstance(frame, FrameBase)
-                and frame.FrameType() is FrameTypes.PRIORITY
-                and frame.dependent_stream == frame.stream_id):
-            return await self._reject_stream_frame(
-                frame.length, frame.stream_id, ErrorCodes.PROTOCOL_ERROR,
-                'PRIORITY frame depends on its own stream')
-        return frame
-
-    async def _validate_frame(self, data: bytes) -> _DiscardedFrame | None:
-        """Apply fixed wire-length and HEADERS shape rules before dispatch."""
-        length = int.from_bytes(data[:3], 'big', signed=False)
-        try:
-            frame_type = FrameTypes(data[3:4])
-        except ValueError:
-            return None
-        stream_id = int.from_bytes(data[5:9], 'big') & 0x7fffffff
-        flags = data[4]
-        if frame_type is FrameTypes.HEADERS:
-            payload = data[9:9 + length]
-            offset = 0
-            if flags & int(HeaderFrameFlags.PADDED):
-                if length < 1 or payload[0] >= length:
-                    await self._fail_connection(
-                        ErrorCodes.PROTOCOL_ERROR, 'malformed HEADERS padding')
-                offset = 1 + payload[0]
-            if flags & int(HeaderFrameFlags.PRIORITY) and length < offset + 5:
-                await self._fail_connection(
-                    ErrorCodes.FRAME_SIZE_ERROR,
-                    'HEADERS priority payload is shorter than 5 bytes')
-            return None
-        rule = _FIXED_LENGTH_RULES.get(frame_type)
-        if rule is None:
-            return None
-        expected, connection_wide, shape = rule
-        valid = (length >= expected if shape == 'minimum'
-                 else length == expected)
-        if shape == 'settings':
-            valid = length == 0 if flags & int(SettingFrameFlags.ACK) \
-                else length % 6 == 0
-        if valid:
-            return None
-        message = f'{frame_type.name} length {length} is invalid'
-        if connection_wide or stream_id == 0:
-            await self._fail_connection(ErrorCodes.FRAME_SIZE_ERROR, message)
-        return await self._reject_stream_frame(
-            length, stream_id, ErrorCodes.FRAME_SIZE_ERROR, message)
-
-    async def _reject_stream_frame(self, length: int, stream_id: int,
-                                   code: ErrorCodes, message: str
-                                   ) -> _DiscardedFrame:
-        await self._reject_stream(stream_id, code, message)
-        return _DiscardedFrame(length, stream_id)
-
     async def _reject_stream(self, stream_id: int, code: ErrorCodes,
                              message: str) -> None:
-        pending = self._drop_pending(stream_id)
+        pending = self._drop_pending(stream_id, via_rst=True)
         if pending is not None and not pending.future.done():
             pending.future.set_exception(StreamReset(stream_id, int(code)))
         queue = self._raw_streams.get(stream_id)
@@ -1081,43 +980,14 @@ class HTTP2Client:
         if reader is not None:
             reader.put_disconnect()
             displaced += reader.take_uncredited()
+        self._senders.pop(stream_id, None)
+        self._release_stream(stream_id, via_rst=True)
         try:
-            await self._send_raw_frame(self._factory.rst_stream(stream_id, code))
+            await self._send_raw_frame(self.factory.rst_stream(stream_id, code))
             await self._credit_connection(displaced)
         except Exception:
             logger.debug('could not send RST_STREAM for stream %d: %s',
                          stream_id, message)
-
-    async def _fail_parse(self, exc: Exception) -> None:
-        """End the connection with the code the failure earned.
-
-        COMPRESSION_ERROR for everything told the peer its HPACK state was
-        unusable (§5.4.1) over a wrong length octet — or over our own bug.
-        Connection-wide in every arm: §6.1, §6.4 and §6.7 say so, and §4.3
-        leaves an undecoded block's table unrecoverable.  §4.2's stream-error
-        option is ``_receive_frame``'s, not this one's.
-        """
-        if isinstance(exc, FrameFormatError):
-            await self._fail_connection(exc.error_code, str(exc))
-        elif isinstance(exc, OversizedHeaderListError):
-            # Log only header-budget HPACK failures as cap hits. requested is limit+1,
-            # a lower bound on decoded bytes; encoded length is the wrong unit.
-            log_cap_hit('client_h2_max_header_list_size',
-                        requested=self._enforced_header_list_size + 1,
-                        limit=self._enforced_header_list_size,
-                        protocol='http2')
-            await self._fail_connection(
-                ErrorCodes.COMPRESSION_ERROR,
-                f'could not decode the field block: {exc}')
-        elif isinstance(exc, HPACKError):
-            await self._fail_connection(
-                ErrorCodes.COMPRESSION_ERROR,
-                f'could not decode the field block: {exc}')
-        else:
-            logger.exception('HTTP/2 frame parse failed')
-            await self._fail_connection(
-                ErrorCodes.INTERNAL_ERROR,
-                f'the client failed to parse a frame: {exc!r}')
 
     async def _next_frame(self) -> _InboundFrame | None:
         """The next frame — deadlined only while a field block is open.
@@ -1125,7 +995,7 @@ class HTTP2Client:
         ``_receive_frame`` waits for a frame to begin without a bound; a peer
         that owes CONTINUATION has instead stopped mid-message.
         """
-        opened_at = self._field_block_opened_at
+        opened_at = self._block_opened_at
         if opened_at is None:
             return await self._receive_frame()
         timeout = get_settings().client_head_timeout
@@ -1137,106 +1007,11 @@ class HTTP2Client:
         except TimeoutError:
             log_cap_hit('client_head_timeout', requested=timeout,
                         limit=timeout, protocol='http2')
-            await self._fail_connection(
+            await self._connection_error(
                 ErrorCodes.ENHANCE_YOUR_CALM,
                 f'field block incomplete after '
                 f'BB_CLIENT_HEAD_TIMEOUT={timeout}s')
-            return None  # unreachable: _fail_connection raises
-
-    async def _fail_connection(self, code: ErrorCodes, message: str) -> None:
-        """End the connection, telling the peer why before telling the caller.
-
-        Never one stream: HPACK state is connection-wide, so a block the
-        decoder did not walk leaves it unable to read any later block.
-        """
-        last_stream_id = max(self._next_stream_id - 2, 0)  # §6.8
-        try:
-            await self._send_raw_frame(
-                self._factory.goaway(last_stream_id, code))
-        except Exception:
-            # exc_info because a bug in the frame we build looks from here
-            # exactly like a peer that has gone away.
-            logger.warning('could not send GOAWAY(%r)', code, exc_info=True)
-        raise _ConnectionFailed(message)
-
-    async def _absorb_field_block(self, frame) -> _InboundFrame | None:
-        """Reassemble a split field block; return what to dispatch, or
-        ``None`` while the block is still open.
-
-        RFC 9113 §4.3 requires the block decompressed *even if the frames are
-        to be discarded*: the decoder's dynamic table advances as a side
-        effect, and it is connection-wide.
-        """
-        frame_type = frame.FrameType()
-        open_frame = self._open_field_block
-        if open_frame is not None:
-            # §6.10 — a block is atomic on the wire, so even an unknown type
-            # that §5.5 would have us ignore ends the connection here.
-            if frame_type is not FrameTypes.CONTINUATION:
-                name = frame_type.name if frame_type is not None else 'unknown'
-                await self._fail_connection(
-                    ErrorCodes.PROTOCOL_ERROR,
-                    f'expected CONTINUATION, got {name}')
-            if frame.stream_id != open_frame.stream_id:
-                await self._fail_connection(
-                    ErrorCodes.PROTOCOL_ERROR,
-                    f'CONTINUATION on stream {frame.stream_id} while stream '
-                    f'{open_frame.stream_id} has a field block open')
-            return await self._extend_field_block(open_frame, frame)
-        if frame_type is FrameTypes.CONTINUATION:
-            await self._fail_connection(
-                ErrorCodes.PROTOCOL_ERROR,
-                'CONTINUATION without a preceding HEADERS')
-        if frame_type in _OPENS_A_FIELD_BLOCK and not frame.end_headers:
-            self._open_field_block = frame
-            self._field_block_opened_at = asyncio.get_running_loop().time()
-            await self._guard_field_block(frame)
-            return None
-        return frame
-
-    async def _extend_field_block(self, open_frame, frame):
-        payload = frame.payload or b''
-        # A bytearray extends in amortised O(1); ``bytes += bytes`` is O(n^2).
-        if not isinstance(open_frame.raw_block, bytearray):
-            open_frame.raw_block = bytearray(open_frame.raw_block)
-        open_frame.raw_block += payload
-        await self._guard_field_block(open_frame)
-        if not frame.end_headers:
-            return None
-        self._open_field_block = None
-        self._field_block_opened_at = None
-        try:
-            open_frame.parse_payload()
-        except _ConnectionFailed:
-            raise
-        except Exception as exc:
-            # §4.3.  hpack may have applied part of the block to the dynamic
-            # table before raising, so there is no sound way to carry on.
-            await self._fail_parse(exc)
-        if getattr(open_frame, 'malformed', False):
-            await self._reject_stream(
-                open_frame.stream_id, ErrorCodes.PROTOCOL_ERROR,
-                getattr(open_frame, 'malformed_reason', None)
-                or 'malformed HEADERS frame')
-            return _DiscardedFrame(open_frame.length, open_frame.stream_id)
-        return open_frame
-
-    async def _guard_field_block(self, open_frame) -> None:
-        """The field block is the HTTP/2 spelling of "the head", so it answers
-        to the head's total.  Called on every append, so the cap bounds the
-        memory and not just the answer.
-
-        Connection-wide, unlike the same budget in ``_on_response_headers``:
-        there the block had been decoded, here it has not.
-        """
-        max_total = get_settings().client_head_max_total
-        seen = len(open_frame.raw_block)
-        if max_total and seen > max_total:
-            log_cap_hit('client_head_max_total', requested=seen,
-                        limit=max_total, protocol='http2')
-            await self._fail_connection(
-                ErrorCodes.COMPRESSION_ERROR,
-                f'field block exceeds BB_CLIENT_HEAD_MAX_TOTAL={max_total}')
+            return None  # unreachable: _after_goaway raises
 
     async def _receive_loop(self) -> None:
         try:
@@ -1244,35 +1019,42 @@ class HTTP2Client:
                 frame = await self._next_frame()
                 if frame is None:
                     break
-                frame = await self._absorb_field_block(frame)
-                if frame is None:
+                stream = await self._admit(frame)
+                if stream is SKIP:
                     continue
-                if isinstance(frame, _DiscardedFrame):
-                    continue
-                # Only whitelisted frames enter raw-stream queues. Keep connection bookkeeping
-                # and PUSH_PROMISE validation on the normal dispatcher; fold CONTINUATION first.
-                reader = self._stream_readers.get(frame.stream_id)
-                if reader is not None and frame.FrameType() in _RAW_STREAM_FRAME_TYPES:
-                    await self._to_reader(reader, frame)
-                    continue
-                raw_q = self._raw_streams.get(frame.stream_id)
-                if raw_q is not None and frame.FrameType() in _RAW_STREAM_FRAME_TYPES:
-                    try:
-                        raw_q.put_nowait(frame)
-                    except asyncio.QueueFull:
-                        # Inside the loop's try: outside it, the catch-all
-                        # below would end every stream to bound one.
-                        await self._refuse_raw_stream(frame)
-                    continue
+                frame_type = frame.FrameType()
+                if frame_type in _BLOCK_FRAME_TYPES:
+                    if frame_type is FrameTypes.CONTINUATION or not frame.end_headers:
+                        frame = await self._assemble(frame, stream)
+                        if frame is None or stream is None:
+                            continue    # incomplete, or decoded for a stream we reset
+                        frame_type = frame.FrameType()
+                    if frame_type is FrameTypes.HEADERS and frame.malformed:
+                        await self._reject_stream(
+                            frame.stream_id, ErrorCodes.PROTOCOL_ERROR,
+                            frame.malformed_reason or 'malformed HEADERS frame')
+                        continue
+                if frame_type in _RAW_STREAM_FRAME_TYPES:
+                    # Only these enter a raw stream; connection bookkeeping and
+                    # PUSH_PROMISE stay on the dispatcher below.
+                    reader = self._stream_readers.get(frame.stream_id)
+                    if reader is not None:
+                        await self._to_reader(reader, frame)
+                        continue
+                    raw_q = self._raw_streams.get(frame.stream_id)
+                    if raw_q is not None:
+                        try:
+                            raw_q.put_nowait(frame)
+                        except asyncio.QueueFull:
+                            await self._refuse_raw_stream(frame)
+                        continue
                 try:
-                    await ResponderFactory.create(frame).respond(self)
+                    await self._dispatch(frame, frame_type, stream)
                 except _ConnectionFailed:
-                    # A responder that ended the connection on purpose is not
-                    # a responder that crashed: swallowing it leaves the loop
-                    # reading on a connection it has just GOAWAYed.
+                    # Ending the connection on purpose is not a crashed handler.
                     raise
                 except Exception:
-                    logger.exception('responder failed for frame %r', frame)
+                    logger.exception('handling failed for frame %r', frame)
         except _ConnectionFailed as exc:
             self._failure = str(exc)
             logger.warning('HTTP/2 connection ended: %s', exc)
@@ -1292,10 +1074,98 @@ class HTTP2Client:
                         self._failure or 'connection closed before response'))
             self._end_raw_streams()
 
-    # ---- internal: callbacks invoked by Responders -----------------------
+    async def _dispatch(self, frame, frame_type, stream) -> None:
+        if frame_type is FrameTypes.HEADERS:
+            await self._on_response_headers(frame)
+        elif frame_type is FrameTypes.DATA:
+            await self._on_response_data(frame)
+        elif frame_type is FrameTypes.WINDOW_UPDATE:
+            await self.on_window_update(frame)
+        elif frame_type is FrameTypes.SETTINGS:
+            await self.on_settings(frame)
+        elif frame_type is FrameTypes.PING:
+            await self.on_ping(frame)
+        elif frame_type is FrameTypes.RST_STREAM:
+            await self.on_rst_stream(frame, stream)
+        elif frame_type is FrameTypes.PRIORITY:
+            await self.on_priority(frame)
+        elif frame_type is FrameTypes.PUSH_PROMISE:
+            await self._on_push_promise(frame)
+        elif frame_type is FrameTypes.GOAWAY:
+            self._on_goaway(frame)
+        elif frame_type is FrameTypes.PRIORITY_UPDATE:
+            # RFC 9218 §7.1: only a client sends it.
+            await self._connection_error(ErrorCodes.PROTOCOL_ERROR,
+                                         'PRIORITY_UPDATE from a server')
 
-    def _drop_pending(self, stream_id: int, *,
-                      aborted: bool = True) -> '_PendingResponse | None':
+    # ---- connection-core hooks -------------------------------------------
+
+    async def _send_control(self, frame) -> None:
+        await self._send_raw_frame(frame)
+
+    async def _reset(self, stream_id: int, code: ErrorCodes, *,
+                     additional_credit: int = 0) -> None:
+        await self._reject_stream(stream_id, code, f'stream error {code.name}')
+        if additional_credit:
+            await self._credit_connection(additional_credit)
+
+    def _retire_all(self) -> None:
+        pass    # the receive loop's teardown fails every waiter
+
+    async def _after_goaway(self, reason: str) -> None:
+        raise _ConnectionFailed(reason)
+
+    def _peer_reset(self, stream_id: int, error_code) -> None:
+        pending = self._drop_pending(stream_id, via_rst=True, by_peer=True)
+        if pending is not None and not pending.future.done():
+            pending.future.set_exception(StreamReset(stream_id, int(error_code)))
+        self._release_stream(stream_id, via_rst=True, by_peer=True)
+
+    async def _open_peer_stream(self, frame, stream=None):
+        """A server opens a stream only by promising it (RFC 9113 §8.4)."""
+        if stream is not None:
+            stream.state = StreamState.OPEN
+            return stream
+        await self._connection_error(
+            ErrorCodes.PROTOCOL_ERROR, f'HEADERS on idle stream {frame.stream_id}')
+        return SKIP
+
+    def _stream_sender(self, stream_id: int):
+        return self._senders.get(stream_id)
+
+    async def _return_connection_credit(self, n: int) -> None:
+        await self._credit_connection(n)
+
+    def _accepts_push_promise(self) -> bool:
+        return True
+
+    def _settings_acknowledged(self) -> None:
+        """RFC 9113 §6.5.3: our parameters take effect at the peer's ACK."""
+        self._settings_acked += 1
+
+    def _field_block_refused(self, exc: Exception) -> None:
+        if isinstance(exc, OversizedHeaderListError):
+            # requested is limit+1, a lower bound on the decoded bytes.
+            log_cap_hit('client_h2_max_header_list_size',
+                        requested=self._enforced_header_list_size + 1,
+                        limit=self._enforced_header_list_size, protocol='http2')
+
+    def _open_stream(self, stream_id: int) -> None:
+        self.root_stream.add_child(stream_id).state = StreamState.OPEN
+
+    def _release_stream(self, stream_id: int, *, via_rst: bool = False,
+                        by_peer: bool = False) -> None:
+        """Close *stream_id* once nothing of this client still uses it."""
+        if (stream_id in self._responses or stream_id in self._senders
+                or stream_id in self._raw_streams or stream_id in self._stream_readers):
+            return
+        if self.root_stream.children.pop(stream_id, None) is not None:
+            self._mark_closed(stream_id, via_rst, by_peer=by_peer)
+
+    # ---- internal: response callbacks ------------------------------------
+
+    def _drop_pending(self, stream_id: int, *, aborted: bool = True, via_rst: bool = False,
+                      by_peer: bool = False) -> '_PendingResponse | None':
         """Release response state and its deadline; retire uploads only when aborted.
 
         A final response may arrive while its request upload is still in progress.
@@ -1309,6 +1179,7 @@ class HTTP2Client:
             if pending.upload is not None and not pending.upload.done():
                 pending.upload.cancel()
             self._senders.pop(stream_id, None)
+        self._release_stream(stream_id, via_rst=via_rst, by_peer=by_peer)
         return pending
 
     def _spawn(self, coro) -> None:
@@ -1376,7 +1247,7 @@ class HTTP2Client:
         timeout task runs. Budget refusals default to CANCEL; header aggregate
         breaches use ENHANCE_YOUR_CALM.
         """
-        pending = self._drop_pending(stream_id)
+        pending = self._drop_pending(stream_id, via_rst=True)
         if pending is None:
             return
         log_cap_hit(cap, requested=seen, limit=limit, protocol='http2')
@@ -1384,7 +1255,7 @@ class HTTP2Client:
             pending.future.set_exception(error)
         try:
             await self._send_raw_frame(
-                self._factory.rst_stream(stream_id, code))
+                self.factory.rst_stream(stream_id, code))
         except Exception:
             # The refusal already happened; a peer that has gone away cannot
             # also be told about it, and raising here would replace the
@@ -1397,14 +1268,14 @@ class HTTP2Client:
 
         Do not report to blackbull.caps: this is a protocol breach, not a local budget.
         """
-        pending = self._drop_pending(stream_id)
+        pending = self._drop_pending(stream_id, via_rst=True)
         if pending is None:
             return
         if not pending.future.done():
             pending.future.set_exception(error)
         try:
             await self._send_raw_frame(
-                self._factory.rst_stream(stream_id, ErrorCodes.PROTOCOL_ERROR))
+                self.factory.rst_stream(stream_id, ErrorCodes.PROTOCOL_ERROR))
         except Exception:
             # The refusal already happened; a peer that has gone away cannot
             # also be told about it, and raising here would replace the
@@ -1663,7 +1534,7 @@ class HTTP2Client:
         pending.unacked += n
         if not end_stream and pending.unacked >= _WINDOW_UPDATE_THRESHOLD:
             await self._send_raw_frame(
-                self._factory.window_update(stream_id, pending.unacked))
+                self.factory.window_update(stream_id, pending.unacked))
             pending.unacked = 0
         await self._credit_connection(n)
 
@@ -1675,7 +1546,7 @@ class HTTP2Client:
         self._unacked_conn += n
         if self._unacked_conn >= _WINDOW_UPDATE_THRESHOLD:
             await self._send_raw_frame(
-                self._factory.window_update(0, self._unacked_conn))
+                self.factory.window_update(0, self._unacked_conn))
             self._unacked_conn = 0
 
     async def _complete(self, stream_id: int, *, ended_on_head: bool = False) -> None:
@@ -1692,6 +1563,9 @@ class HTTP2Client:
                 f'declared Content-Length {pending.declared}, received '
                 f'{pending.body_seen} body octets'))
             return
+        stream = self.root_stream.children.get(stream_id)
+        if stream is not None:
+            stream.state = StreamState.HALF_CLOSED_REMOTE
         pending = self._drop_pending(stream_id, aborted=False)
         if pending is None or pending.future.done():
             return
@@ -1703,35 +1577,6 @@ class HTTP2Client:
             ended_on_head=ended_on_head,
         )
         pending.future.set_result(response)
-
-    def _on_window_update(self, frame) -> None:
-        increment = frame.window_size
-        if frame.stream_id == 0:
-            # Credited once, not once per sender: they all debit this same
-            # object, so a per-sender credit would multiply the peer's grant.
-            # Waking is still per sender, because each parks on its own event.
-            self._conn_window.size += increment
-            for sender in self._senders.values():
-                sender.wake_window()
-        else:
-            sender = self._senders.get(frame.stream_id)
-            if sender is not None:
-                sender.window_update(increment)
-
-    def _on_initial_window_size(self, value: int) -> None:
-        # RFC 9113 §6.9.2 — when SETTINGS_INITIAL_WINDOW_SIZE changes,
-        # adjust every active stream's send-window by the delta rather than
-        # overwriting it (overwriting loses bytes already sent / received).
-        delta = value - self.initial_window_size
-        self.initial_window_size = value
-        if delta != 0:
-            for sender in self._senders.values():
-                sender.adjust_initial_window(delta)
-
-    def _on_settings_ack(self) -> None:
-        """RFC 9113 §6.5.3 — the ACK is the synchronisation point at which
-        the parameters we sent take effect for the peer."""
-        self._settings_acked += 1
 
     def _push_forbidden(self) -> bool:
         """True once ENABLE_PUSH=0 has been both sent and acknowledged.
@@ -1751,9 +1596,11 @@ class HTTP2Client:
         after the decode, never instead of it.
         """
         if not self._push_forbidden():
+            # The promised stream's frames are read and dropped until it ends.
+            self._open_stream(frame.promised_stream_id)
             logger.debug('PUSH_PROMISE on stream %d dropped', frame.stream_id)
             return
-        await self._fail_connection(
+        await self._connection_error(
             ErrorCodes.PROTOCOL_ERROR,
             f'PUSH_PROMISE on stream {frame.stream_id} after '
             f'SETTINGS_ENABLE_PUSH=0 was acknowledged')
@@ -1768,15 +1615,6 @@ class HTTP2Client:
                 self._drop_pending(sid)
                 pending.future.set_exception(ConnectionError(
                     f'connection closed by peer (GOAWAY error_code={frame.error_code})'))
-
-    def _on_rst_stream(self, frame) -> None:
-        pending = self._drop_pending(frame.stream_id)
-        if pending is None:
-            return
-        if not pending.future.done():
-            pending.future.set_exception(
-                StreamReset(frame.stream_id, int(frame.error_code)))
-
 
 # ---------------------------------------------------------------------------
 # Helpers

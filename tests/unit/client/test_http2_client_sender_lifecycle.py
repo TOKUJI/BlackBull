@@ -1,7 +1,7 @@
 """A sender is released when its stream can no longer send.
 
 ``HTTP2Client._senders`` was inserted into and never removed, and both
-``_on_window_update`` (stream 0) and ``_on_initial_window_size`` sweep every
+``on_window_update`` (stream 0) and ``_on_initial_window_size`` sweep every
 entry.  The peer chooses how often those sweeps run and the client chooses how
 long the dict is, so the cost was O(requests x peer-chosen frames) and the
 memory was never returned.
@@ -84,7 +84,7 @@ class TestSenderRelease:
         parked on has been dropped.
         """
         c = _client()
-        c._on_initial_window_size(10)          # park after ten octets
+        c._set_peer_initial_window(10)          # park after ten octets
         task = asyncio.create_task(c.request('POST', '/', body=b'z' * 100))
         # Two turns, not one: the body write is a task now, so that a refusal
         # can cancel it (a stream refused mid-upload otherwise parked the
@@ -99,7 +99,7 @@ class TestSenderRelease:
         await c._complete(1)                    # early END_STREAM response
         await asyncio.sleep(0)
 
-        c._on_window_update(_StreamWindowUpdate(stream_id=1, increment=100))
+        await c.on_window_update(_StreamWindowUpdate(stream_id=1, increment=100))
         await asyncio.sleep(0)
         assert c._writer.payload_bytes == 100, 'the credit reached nobody'
 

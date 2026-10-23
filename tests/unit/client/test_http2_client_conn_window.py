@@ -81,7 +81,7 @@ class TestConnectionWindowIsShared:
         await asyncio.wait(tasks, timeout=0.25)
         stalled = writer.payload_bytes
 
-        c._on_window_update(_ConnectionWindowUpdate(increment=80000))
+        await c.on_window_update(_ConnectionWindowUpdate(increment=80000))
         await asyncio.wait(tasks, timeout=0.25)
         for task in tasks:
             task.cancel()
@@ -92,7 +92,7 @@ class TestConnectionWindowIsShared:
 
 
 class _ConnectionWindowUpdate:
-    """Stand-in for the WINDOW_UPDATE frame ``_on_window_update`` reads."""
+    """Stand-in for the WINDOW_UPDATE frame ``on_window_update`` reads."""
 
     stream_id = 0
 

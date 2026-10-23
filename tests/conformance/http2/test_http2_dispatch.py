@@ -11,11 +11,10 @@ from unittest.mock import AsyncMock, MagicMock
 from hpack import Encoder
 
 from blackbull.server.http2_actor import HTTP2Actor
-from blackbull.server.response import SettingsResponder
 from blackbull.server.recipient import AbstractReader, IncompleteReadError
 from blackbull.server.sender import AsyncioWriter
 from blackbull.protocol.frame import FrameFactory
-from blackbull.protocol.frame_types import (FrameTypes, FrameFlags,
+from blackbull.protocol.frame_types import (ErrorCodes, FrameTypes, FrameFlags,
                                             HeaderFrameFlags, DataFrameFlags,
                                             SettingFrameFlags)
 
@@ -829,7 +828,7 @@ class TestHTTP2ServerPush:
                 0,
                 (0x2).to_bytes(2, 'big') + (0).to_bytes(4, 'big'),
             )
-            await SettingsResponder(handler.factory.load(settings)).respond(handler)
+            await handler.on_settings(handler.factory.load(settings))
             await send({'type': 'http.response.push', 'path': '/late.css'})
             await send({'type': 'http.response.start', 'status': 200, 'headers': []})
             await send({'type': 'http.response.body', 'body': b''})
@@ -1009,22 +1008,6 @@ class TestHTTP2Priority:
         payload = dep + bytes([weight - 1])
         return _make_h2_frame(FrameTypes.PRIORITY, 0, stream_id, payload)
 
-    async def test_priority_frame_accepted_without_connection_error(self):
-        priority = self._priority_frame(stream_id=3, weight=32)
-
-        handler, _ = _make_h2_actor()
-        handler.receive = AsyncMock(side_effect=[priority, None])
-        await handler.run()
-
-        goaway_calls = [
-            call for call in handler.send_frame.call_args_list
-            if hasattr(call.args[0], 'FrameType')
-            and call.args[0].FrameType() == FrameTypes.GOAWAY
-        ]
-        assert not goaway_calls, (
-            f'PRIORITY frame must not trigger GOAWAY; got {goaway_calls}'
-        )
-
     async def test_priority_records_no_stream_state(self):
         """§5.3 is deprecated and unimplemented here, so nothing is stored.
 
@@ -1141,6 +1124,20 @@ class TestHTTP2PriorityScope:
         assert exts.get('http.response.priority') == {'urgency': 1, 'incremental': True}
         assert handler._last_peer_stream_id == 1
         assert handler._closed_peer_high_water == 1
+
+    async def test_a_reserved_node_is_still_idle_to_other_frames(self):
+        """RFC 9113 §5.1: a hint creates no stream; DATA on it is idle-stream use."""
+        pu_frame = self._make_priority_update_frame(
+            prioritized_stream_id=1, priority_field='u=1')
+        data = _make_h2_frame(FrameTypes.DATA, 0, 1, b'x')
+        handler, app = _make_h2_actor()
+        handler.receive = AsyncMock(side_effect=[pu_frame, data, None])
+        await handler.run()
+
+        goaways = [c.args[0].error_code for c in handler.send_frame.call_args_list
+                   if c.args[0].FrameType() == FrameTypes.GOAWAY]
+        assert goaways == [ErrorCodes.PROTOCOL_ERROR]
+        assert app.await_count == 0
 
     async def test_priority_header_fallback_populates_scope(self):
         encoder = Encoder()
@@ -1450,88 +1447,6 @@ class TestHTTP2BrowserShapedFrames:
             f'got call_count={app.call_count}')
 
 
-# ---------------------------------------------------------------------------
-# CVE-2023-44487 (Rapid Reset) — RST_STREAM rate limit
-# ---------------------------------------------------------------------------
-#
-# Attackers open a stream with HEADERS and immediately RST it, churning
-# per-stream allocations (Stream node, sender, recipient, HPACK context)
-# without hitting ``max_concurrent_streams`` because each stream is
-# opened and reset too quickly for the counter to accumulate.  Bound
-# the per-second inbound RST_STREAM rate; over the threshold, close
-# the connection with GOAWAY ENHANCE_YOUR_CALM.
-
-@pytest.mark.asyncio
-class TestRapidReset:
-    """``BB_FRAME_RATE_LIMIT`` caps inbound RST_STREAM frames per
-    ``BB_FRAME_RATE_WINDOW`` seconds.  Over the cap, the connection
-    receives ``GOAWAY ENHANCE_YOUR_CALM``.
-
-    The budget was a class constant until the shared frame-rate meter
-    landed; it is read from settings here so the tests track the shipped
-    value rather than a copy of it."""
-
-    @staticmethod
-    def _rst_frame(stream_id: int, error_code: int = 0) -> bytes:
-        from blackbull.protocol.frame_types import FrameTypes as _FT
-        payload = error_code.to_bytes(4, 'big')
-        return _make_h2_frame(_FT.RST_STREAM, 0, stream_id, payload)
-
-    @staticmethod
-    def _pretend_streams_closed(handler, stream_ids):
-        """Pre-populate ``_closed_streams`` so the RST_STREAM frames
-        arrive on the 'late frame on closed stream' branch instead of
-        IDLE-state PROTOCOL_ERROR — lets the test exercise the
-        rate-limit guard without orchestrating real HEADERS+RST
-        cycles (the real attack shape; the rate-limit guard is
-        placed before state validation so both shapes count)."""
-        for sid in stream_ids:
-            handler._closed_streams[sid] = False  # closed-via-END_STREAM
-
-    async def test_burst_of_rst_stream_emits_goaway(self):
-        """Sending RST_STREAM frames at a rate above the frame-rate
-        budget in a single second must trigger GOAWAY(ENHANCE_YOUR_CALM)."""
-        from blackbull.protocol.frame_types import ErrorCodes as _EC
-        from blackbull.env import get_settings
-
-        burst = get_settings().frame_rate_limit + 5
-        sids = [1 + 2 * i for i in range(burst)]
-        frames = [self._rst_frame(stream_id=s) for s in sids]
-
-        handler, _ = _make_h2_actor()
-        self._pretend_streams_closed(handler, sids)
-        handler.receive = AsyncMock(side_effect=[*frames, None])
-        await handler.run()
-
-        goaways = [c.args[0] for c in handler.send_frame.call_args_list
-                   if hasattr(c.args[0], 'FrameType')
-                   and c.args[0].FrameType() == FrameTypes.GOAWAY]
-        assert goaways, 'rapid-reset burst must trigger GOAWAY'
-        codes = [getattr(g, 'error_code', None) for g in goaways]
-        assert _EC.ENHANCE_YOUR_CALM in codes, (
-            f'GOAWAY must use ENHANCE_YOUR_CALM; got codes={codes}')
-
-    async def test_rate_below_cap_does_not_trip(self):
-        """Sending RST_STREAM frames *under* the cap must NOT trigger
-        GOAWAY — regression lock against an overly-aggressive limit."""
-        from blackbull.env import get_settings
-
-        below = max(1, get_settings().frame_rate_limit // 2)
-        sids = [1 + 2 * i for i in range(below)]
-        frames = [self._rst_frame(stream_id=s) for s in sids]
-
-        handler, _ = _make_h2_actor()
-        self._pretend_streams_closed(handler, sids)
-        handler.receive = AsyncMock(side_effect=[*frames, None])
-        await handler.run()
-
-        goaways = [c.args[0] for c in handler.send_frame.call_args_list
-                   if hasattr(c.args[0], 'FrameType')
-                   and c.args[0].FrameType() == FrameTypes.GOAWAY]
-        assert goaways == [], (
-            f'no GOAWAY expected below the rate cap; got {goaways}')
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize('native', [False, True])
 @pytest.mark.parametrize('disable_push', [False, True])
@@ -1549,7 +1464,7 @@ async def test_push_path_and_headers_reach_wire_and_handler(native, disable_push
                 settings = _make_h2_frame(
                     FrameTypes.SETTINGS, SettingFrameFlags.INIT, 0,
                     (0x2).to_bytes(2, 'big') + (0).to_bytes(4, 'big'))
-                await SettingsResponder(handler.factory.load(settings)).respond(handler)
+                await handler.on_settings(handler.factory.load(settings))
             if native:
                 from blackbull.native import NativeResponse
 

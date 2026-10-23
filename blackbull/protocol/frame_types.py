@@ -464,15 +464,11 @@ class Headers(FrameBase):
         self.malformed: bool = False
         self.malformed_reason: str | None = None
 
-        self.raw_block: bytes = b''
+        # A block that CONTINUATION extends grows in place.
+        self.raw_block: bytes | bytearray = (
+            (data or b'') if self.end_headers else bytearray(data or b''))
 
-        if self.length <= 0:
-            return
-        # handle payload
-
-        self.raw_block = data or b''
-
-        if self.end_headers:
+        if self.length > 0 and self.end_headers:
             self.parse_payload()
 
     def parse_payload(self):
@@ -650,7 +646,8 @@ class PushPromise(FrameBase):
         self.decoder = decoder
         self.end_headers = HeaderFrameFlags.END_HEADERS & self.flags
         self.padded = HeaderFrameFlags.PADDED & self.flags
-        self.raw_block: bytes = data or b''
+        self.raw_block: bytes | bytearray = (
+            (data or b'') if self.end_headers else bytearray(data or b''))
         buf = BytesIO(self.raw_block)
         if self.padded:  # §6.6 puts the pad octet before the promised id
             buf.read(1)

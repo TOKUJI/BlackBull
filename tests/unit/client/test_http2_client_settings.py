@@ -122,6 +122,7 @@ async def _connected(peer_bytes: bytes = b'') -> HTTP2Client:
     c._raw_writer = _FakeRawWriter()          # type: ignore[assignment]
     c._writer = _RecordingWriter()            # type: ignore[assignment]
     c._reader = _CannedReader(peer_bytes)     # type: ignore[assignment]
+    c._open_stream(1)                          # the request the peer answers
     await c._start()
     assert c._receive_task is not None
     await asyncio.wait_for(c._receive_task, 1.0)
@@ -389,7 +390,7 @@ class TestEnablePushZero:
         c = await _connected(_settings_ack() + _push_promise(promise))
 
         assert _written(c, FrameTypes.GOAWAY), 'the promise was not refused'
-        assert c._factory.decoder.decode(later, raw=True) == [
+        assert c.factory.decoder.decode(later, raw=True) == [
             (b'x-pushed', b'yes')], (
             'the promise was refused without decoding it — the connection-'
             'wide table never saw its insertions')

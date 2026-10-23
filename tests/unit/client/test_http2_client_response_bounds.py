@@ -133,6 +133,7 @@ def _client() -> HTTP2Client:
 
 def _pending(c: HTTP2Client, stream_id: int = 1) -> asyncio.Future:
     future = asyncio.get_running_loop().create_future()
+    c._open_stream(stream_id)
     c._responses[stream_id] = _PendingResponse(future=future)
     return future
 
@@ -153,7 +154,7 @@ async def _feed_data(c: HTTP2Client, stream_id: int, payload: bytes, *,
     pending = c._responses.get(stream_id)
     if pending is not None and not pending.final_seen:
         await _feed_headers(c, stream_id, [])
-    frame = c._factory.create(FrameTypes.DATA, 1 if end_stream else 0,
+    frame = c.factory.create(FrameTypes.DATA, 1 if end_stream else 0,
                               stream_id, data=payload)
     await c._on_response_data(frame)
 
@@ -165,7 +166,7 @@ async def _feed_headers(c: HTTP2Client, stream_id: int,
     """A response head.  *status* below 200 makes it an informational
     response, which must not start the progress clock; ``None`` omits
     ``:status`` so the frame is a trailer section (RFC 9113 §8.1)."""
-    frame = c._factory.create(FrameTypes.HEADERS, 5 if end_stream else 4,
+    frame = c.factory.create(FrameTypes.HEADERS, 5 if end_stream else 4,
                               stream_id)
     if status is not None:
         frame.pseudo_headers[PseudoHeaders.STATUS] = str(status)
@@ -465,9 +466,9 @@ class TestThePerStreamProgressDeadline:
         async def _ended_by_peer_reset():
             _pending(c, 3)
             await _feed_headers(c, 3, [('x-a', 'b')])
-            c._on_rst_stream(c._factory.create(
+            await c.on_rst_stream(c.factory.create(
                 FrameTypes.RST_STREAM, 0, 3,
-                data=int(ErrorCodes.CANCEL).to_bytes(4, 'big')))
+                data=int(ErrorCodes.CANCEL).to_bytes(4, 'big')), c.root_stream.children.get(3))
 
         async def _ended_by_refusal():
             _pending(c, 5)
@@ -578,11 +579,11 @@ class TestTheWaitForTheResponseToBegin:
         monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '30')
         monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', '0.2')
         c = _client()
-        c._on_initial_window_size(10)          # the upload parks after 10 B
+        c._set_peer_initial_window(10)          # the upload parks after 10 B
         call = asyncio.ensure_future(c.request('POST', '/', body=b'z' * 5000))
         await _settle()
         await _feed_headers(c, 1, [('x-a', 'b')], status=401)   # mid-upload
-        c._on_window_update(c._factory.window_update(1, 5000))  # it finishes
+        await c.on_window_update(c.factory.window_update(1, 5000))  # it finishes
         await _settle()
         with pytest.raises(TimeoutError) as excinfo:
             await asyncio.wait_for(call, 2.0)
@@ -596,13 +597,13 @@ class TestTheWaitForTheResponseToBegin:
         our own flow-control window has not finished asking."""
         monkeypatch.setenv('BB_CLIENT_HEAD_TIMEOUT', '0.2')
         c = _client()
-        c._on_initial_window_size(10)
+        c._set_peer_initial_window(10)
         call = asyncio.ensure_future(c.request('POST', '/', body=b'z' * 5000))
         await _settle()
         await asyncio.sleep(0.5)               # far past the cap, still asking
         assert not caps_log, f'charged for our own backpressure: {caps_log}'
         assert not call.done()
-        c._on_window_update(c._factory.window_update(1, 5000))
+        await c.on_window_update(c.factory.window_update(1, 5000))
         await _settle()
         await _feed_headers(c, 1, [('x-a', 'b')], end_stream=True)
         assert (await asyncio.wait_for(call, 2.0)).status == 200
@@ -773,7 +774,7 @@ class TestAFrameThatDeliversNothingIsNotProgress:
         c = _client()
         _pending(c)
         await _feed_headers(c, 1, [])
-        padded = c._factory.create(
+        padded = c.factory.create(
             FrameTypes.DATA, 0x8, 1,
             data=bytes([255]) + b'' + b'\x00' * 255)
         for _ in range(200):
@@ -805,7 +806,7 @@ class TestARefusalDuringAnUploadReachesTheCaller:
         awaits the response, so without the cancellation it never returns."""
         monkeypatch.setenv('BB_CLIENT_BODY_MAX_TOTAL', '1000')
         c = _client()
-        c._on_initial_window_size(10)          # the upload parks after 10 B
+        c._set_peer_initial_window(10)          # the upload parks after 10 B
         call = asyncio.ensure_future(c.request('POST', '/', body=b'z' * 5000))
         for _ in range(4):
             await asyncio.sleep(0)

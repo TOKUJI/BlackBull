@@ -38,15 +38,21 @@ def _client() -> HTTP2Client:
 
 
 async def _final_headers(c: HTTP2Client, stream_id: int) -> None:
-    frame = c._factory.create(FrameTypes.HEADERS, 4, stream_id)
+    frame = c.factory.create(FrameTypes.HEADERS, 4, stream_id)
     frame.pseudo_headers[':status'] = '200'
     await c._on_response_headers(frame)
 
 
 async def _data(c, stream_id, payload, *, end_stream=False):
-    frame = c._factory.create(
+    frame = c.factory.create(
         FrameTypes.DATA, 1 if end_stream else 0, stream_id, data=payload)
     await c._on_response_data(frame)
+
+
+def _expect(c: HTTP2Client, stream_id: int, future: asyncio.Future) -> None:
+    """A request on *stream_id* whose response *future* awaits."""
+    c._open_stream(stream_id)
+    c._responses[stream_id] = _PendingResponse(future=future)
 
 
 @pytest.mark.asyncio
@@ -57,7 +63,7 @@ async def test_h2_rate_floor_is_off_by_default(monkeypatch):
     monkeypatch.setattr(http2, '_monotonic', clock.time)
     c = _client()
     future = asyncio.get_running_loop().create_future()
-    c._responses[1] = _PendingResponse(future=future)
+    _expect(c, 1, future)
     await _final_headers(c, 1)
     await _data(c, 1, b'x')
     clock.now = 10.0
@@ -82,7 +88,7 @@ async def test_h2_nonempty_slow_drip_fails_with_client_rate_cap(
     caplog.clear()
     c = _client()
     future = asyncio.get_running_loop().create_future()
-    c._responses[1] = _PendingResponse(future=future)
+    _expect(c, 1, future)
     await _final_headers(c, 1)
     await _data(c, 1, b'1234567890')
     clock.now = 2.0
@@ -114,8 +120,8 @@ async def test_h2_rate_floor_charges_empty_data_and_resets_only_one_stream(
     c = _client()
     f1 = asyncio.get_running_loop().create_future()
     f2 = asyncio.get_running_loop().create_future()
-    c._responses[1] = _PendingResponse(future=f1)
-    c._responses[3] = _PendingResponse(future=f2)
+    _expect(c, 1, f1)
+    _expect(c, 3, f2)
     await _final_headers(c, 1)
     await _final_headers(c, 3)
     await _data(c, 1, b'1234567890')
@@ -143,7 +149,7 @@ async def test_h2_rate_floor_fast_payload_rolls_the_window(monkeypatch):
     monkeypatch.setattr(http2, '_monotonic', clock.time)
     c = _client()
     future = asyncio.get_running_loop().create_future()
-    c._responses[1] = _PendingResponse(future=future)
+    _expect(c, 1, future)
     await _final_headers(c, 1)
     await _data(c, 1, b'a' * 20)
     clock.now = 1.1
@@ -164,7 +170,7 @@ async def test_h2_rate_floor_excludes_think_time_before_first_payload(monkeypatc
     monkeypatch.setattr(http2, '_monotonic', clock.time)
     c = _client()
     future = asyncio.get_running_loop().create_future()
-    c._responses[1] = _PendingResponse(future=future)
+    _expect(c, 1, future)
     await _final_headers(c, 1)
     clock.now = 100.0
     await _data(c, 1, b'first')
@@ -185,10 +191,10 @@ async def test_h2_padding_does_not_pay_the_rate_floor(monkeypatch, caplog):
     caplog.clear()
     c = _client()
     future = asyncio.get_running_loop().create_future()
-    c._responses[1] = _PendingResponse(future=future)
+    _expect(c, 1, future)
     await _final_headers(c, 1)
     await _data(c, 1, b'first')
-    padded = c._factory.create(FrameTypes.DATA, 0x8, 1,
+    padded = c.factory.create(FrameTypes.DATA, 0x8, 1,
                                data=bytes([255]) + b'\x00' * 255)
     assert padded.payload == b''
     clock.now = 1.1
@@ -212,14 +218,14 @@ async def test_h2_rate_floor_settles_terminal_wait(monkeypatch, terminal):
     monkeypatch.setattr(http2, '_monotonic', clock.time)
     c = _client()
     future = asyncio.get_running_loop().create_future()
-    c._responses[1] = _PendingResponse(future=future)
+    _expect(c, 1, future)
     await _final_headers(c, 1)
     await _data(c, 1, b'first')
     clock.now = 1.1
     if terminal == 'data':
         await _data(c, 1, b'', end_stream=True)
     else:
-        frame = c._factory.create(FrameTypes.HEADERS, 5, 1)
+        frame = c.factory.create(FrameTypes.HEADERS, 5, 1)
         frame.headers.append(('grpc-status', '0'))
         await c._on_response_headers(frame)
     assert isinstance(future.exception(), TimeoutError)
@@ -237,8 +243,8 @@ async def test_h2_rate_refusal_credits_connection_and_preserves_other_stream(
     c = _client()
     bad = asyncio.get_running_loop().create_future()
     good = asyncio.get_running_loop().create_future()
-    c._responses[1] = _PendingResponse(future=bad)
-    c._responses[3] = _PendingResponse(future=good)
+    _expect(c, 1, bad)
+    _expect(c, 3, good)
     await _final_headers(c, 1)
     await _final_headers(c, 3)
     await _data(c, 1, b'x')
