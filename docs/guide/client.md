@@ -191,6 +191,12 @@ the context has exited; `StreamReset` only from HTTP/2, only from the
 `request()` whose stream was reset; `HandshakeError` only from
 `WebSocketClient.connect()` and `WebSocketH2Client`'s Extended CONNECT.
 
+`WebSocketClient.connect()` validates the HTTP/1.1 upgrade fields and the
+selected subprotocol; extensions are not offered. An invalid handshake raises
+`HandshakeError` (with the HTTP parsing error as its cause, if applicable).
+Rejection, timeout or cancellation closes the connection. Enter a new client
+context before retrying. HTTP/2 Extended CONNECT uses its own handshake rules.
+
 ### A stall is not a `ClientError`, on purpose
 
 Every time bound in the client — the connect deadline, the head and body

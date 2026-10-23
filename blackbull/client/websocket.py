@@ -13,6 +13,8 @@ from ..asgi import WebSocketDisconnectEvent, WebSocketReceiveEvent
 
 import logging
 from ..headers import Headers
+from ..protocol.field_grammar import TCHAR_OCTETS, list_members
+from ..protocol.http1 import MessageError, connection_options
 from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
                                 WebSocketRecipient)
 from ..server.sender import AbstractWriter, AsyncioWriter
@@ -20,7 +22,7 @@ from ..env import get_settings
 from ..server.ws_codec import WSOpcode, encode_frame
 from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
                        open_connection as _open_connection)
-from .exceptions import HandshakeError
+from .exceptions import HandshakeError, ProtocolError
 from .http1 import HTTP1RequestSender, HTTP1ResponseRecipient
 
 logger = logging.getLogger(__name__)
@@ -203,10 +205,12 @@ class WebSocketClient:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        if self._raw_writer is not None:
+        connection, self._raw_writer = self._raw_writer, None
+        self._reader = self._writer = None
+        if connection is not None:
             try:
-                self._raw_writer.close()
-                await self._raw_writer.wait_closed()
+                connection.close()
+                await connection.wait_closed()
             except Exception:
                 pass  # best-effort close on context exit; peer may already be gone.
 
@@ -223,6 +227,18 @@ class WebSocketClient:
         A peer can accept the connection and then never send the 101, so the
         transport-level deadline does not cover this wait.  ``None`` opts out.
         """
+        if self._raw_writer is None:
+            raise HandshakeError('WebSocket connect requires an open connection')
+        try:
+            return await self._handshake(path, subprotocols, response_timeout)
+        except BaseException as exc:
+            await self.__aexit__(None, None, None)
+            if isinstance(exc, (MessageError, ProtocolError)):
+                raise HandshakeError('invalid WebSocket HTTP response') from exc
+            raise
+
+    async def _handshake(self, path: str, subprotocols: Iterable[bytes],
+                         response_timeout: float | None) -> WebSocketSession:
         assert self._writer is not None and self._reader is not None
         assert self._raw_writer is not None
 
@@ -242,28 +258,39 @@ class WebSocketClient:
             request_headers.append(b'sec-websocket-protocol', b', '.join(offered))
 
         await HTTP1RequestSender(self._writer).send('GET', path, request_headers)
+        recipient = HTTP1ResponseRecipient()
         if response_timeout is None:
-            response = await HTTP1ResponseRecipient().receive(
+            response = await recipient.receive(
                 self._reader, method='GET')
         else:
             async with asyncio.timeout(response_timeout):
-                response = await HTTP1ResponseRecipient().receive(
+                response = await recipient.receive(
                     self._reader, method='GET')
 
-        if response.status != HTTPStatus.SWITCHING_PROTOCOLS:
+        if (recipient.http_version != b'HTTP/1.1'
+                or response.status != HTTPStatus.SWITCHING_PROTOCOLS):
             raise HandshakeError(
                 f'server rejected WebSocket upgrade: status={response.status}')
-        accept = response.headers.get(b'sec-websocket-accept')
-        if accept != expected_accept:
+        headers = response.headers
+        if list_members(headers.get_combined(b'upgrade') or b'') != [b'websocket']:
+            raise HandshakeError('invalid WebSocket Upgrade header')
+        options = connection_options(headers)
+        if b'upgrade' not in options:
+            raise HandshakeError('missing WebSocket Connection upgrade token')
+        accepts = headers.getlist(b'sec-websocket-accept')
+        if len(accepts) != 1 or accepts[0][1] != expected_accept:
             raise HandshakeError(
-                f'invalid Sec-WebSocket-Accept: got {accept!r}, expected {expected_accept!r}')
+                'invalid Sec-WebSocket-Accept')
 
-        # Normalize an absent or empty subprotocol to None.
-        chosen_raw = response.headers.get(b'sec-websocket-protocol')
-        chosen: bytes | None = chosen_raw if chosen_raw else None
-        if chosen is not None and offered and chosen not in offered:
+        protocols = headers.getlist(b'sec-websocket-protocol')
+        chosen = protocols[0][1] if protocols else None
+        if protocols and (len(protocols) != 1 or not chosen
+                          or chosen.translate(None, TCHAR_OCTETS)
+                          or chosen not in offered):
             raise HandshakeError(
-                f'server selected subprotocol {chosen!r} which the client did not offer')
+                f'invalid or unoffered WebSocket subprotocol {chosen!r}')
+        if headers.getlist(b'sec-websocket-extensions'):
+            raise HandshakeError('server selected an unoffered WebSocket extension')
 
         return WebSocketSession(self._reader, self._writer, self._raw_writer,
                                 subprotocol=chosen,
