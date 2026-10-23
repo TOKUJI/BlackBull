@@ -167,7 +167,7 @@ class Settings:
         doc='Maximum bytes in an HTTP/1.1 request-line or field line. Oversized request lines receive 400; oversized header fields receive 431.')
     header_max_total: int = setting(
         'BB_HEADER_MAX_TOTAL', 65536, minimum=0, config=('limits', 'header_max_total'), section=_section,
-        doc='Maximum bytes in the HTTP/1.1 request-line and header block. A request-line budget breach yields `400`; header-field overflow yields `431`.')
+        doc='Maximum bytes in the HTTP/1.1 request-line and header block. A request-line budget breach yields `400`; header-field overflow yields `431`. Also caps an HTTP/2 encoded field block (GOAWAY ENHANCE_YOUR_CALM).')
     body_chunk_size: int = setting(
         'BB_BODY_CHUNK_SIZE', 65536, minimum=1, section=_section,
         doc='Maximum read slice in bytes for chunked HTTP/1.1 request bodies, independent of peer-declared chunk size. Must be positive; invalid values use the default. Content-Length bodies use `BB_BODY_CHUNK_MAX` instead.')
@@ -193,7 +193,7 @@ class Settings:
     _section = 'Async HTTP client'
     client_head_max_total: int = setting(
         'BB_CLIENT_HEAD_MAX_TOTAL', 65536, minimum=0, section=_section,
-        doc='HTTP/1.1 response-head bytes including status line and terminator; excess raises `ResponseTooLarge`. HTTP/2 separately caps encoded field-block accumulation (connection COMPRESSION_ERROR) and decoded fields across informational, final and trailer sections on one stream (stream refusal). Per-section decoded HPACK accounting is `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE`. `0` disables.')
+        doc='HTTP/1.1 response-head bytes including status line and terminator; excess raises `ResponseTooLarge`. HTTP/2 separately caps encoded field-block accumulation (GOAWAY ENHANCE_YOUR_CALM) and decoded fields across informational, final and trailer sections on one stream (stream refusal). Per-section decoded HPACK accounting is `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE`. `0` disables.')
     client_head_max_line: int = setting(
         'BB_CLIENT_HEAD_MAX_LINE', 8192, minimum=0, section=_section,
         doc='Bytes per HTTP/1.1 status, field, chunk-size or trailer line. Excess raises `ResponseTooLarge`. `0` disables; `BB_CLIENT_HEAD_MAX_TOTAL` separately bounds head accumulation.')

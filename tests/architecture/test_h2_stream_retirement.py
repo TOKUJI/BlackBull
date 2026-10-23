@@ -27,7 +27,6 @@ import blackbull.server.http2_actor as http2_actor
 from blackbull.server.http2_actor import HTTP2Actor, _CLOSED_STREAMS_CAP
 from blackbull.server.http2_ws import HTTP2StreamReader
 from blackbull.server.recipient import AbstractReader
-from blackbull.server.response import PriorityUpdateResponder, RstStreamResponder
 from blackbull.server.sender import AbstractWriter
 
 
@@ -211,7 +210,7 @@ async def test_reset_retires_every_owner_once_and_unparks_producer(peer_reset: b
     reset = actor.factory.rst_stream(1, ErrorCodes.CANCEL)
 
     if peer_reset:
-        await RstStreamResponder(reset).respond(actor)
+        await actor.on_rst_stream(reset, actor.find_stream(reset.stream_id))
     else:
         await actor.send_frame(reset)
     await asyncio.wait_for(producer_done.wait(), timeout=1)
@@ -223,7 +222,7 @@ async def test_reset_retires_every_owner_once_and_unparks_producer(peer_reset: b
     assert recipient.disconnected
     assert recipient.credit_takes == 1
     assert _live_ownership(actor) == (0, 0, 0, 0, 0, 0)
-    assert actor._closed_streams[1] is True
+    assert actor._closed_streams[1] == (2 if peer_reset else 1)   # who reset it
 
     actor._make_done_cb(1)(task)
     assert recipient.credit_takes == 1
@@ -269,7 +268,7 @@ async def test_local_refusal_before_task_creation_leaves_only_closed_history():
     assert calls == 0
     assert len(resets) == 1
     assert _live_ownership(actor) == (0, 0, 0, 0, 0, 0)
-    assert actor._closed_streams[1] is True
+    assert actor._closed_streams[1] == 1      # reset by us
     assert actor._closed_peer_high_water == 1
 
 
@@ -285,7 +284,7 @@ async def test_ownerless_local_reset_records_exact_id_without_advancing_watermar
     actor = _actor(app=app)
     await actor.send_frame(actor.factory.rst_stream(99, ErrorCodes.CANCEL))
 
-    assert actor._closed_streams[99] is True
+    assert actor._closed_streams[99] == 0     # never opened: not ignored later
     assert actor._closed_peer_high_water == 0
 
     actor._reader = _YieldingReader(_headers(1) + _headers(99))
@@ -443,7 +442,7 @@ async def test_local_reset_retires_before_a_failed_wire_write():
     assert sender._closed
     assert recipient.disconnected
     assert _live_ownership(actor) == (0, 0, 0, 0, 0, 0)
-    assert actor._closed_streams[1] is True
+    assert actor._closed_streams[1] == 1      # reset by us
 
 
 @pytest.mark.asyncio
@@ -490,10 +489,10 @@ async def _close_stream(
     if origin == 'peer_reset':
         stream = actor.root_stream.add_child(stream_id)
         stream.on_headers_received(end_stream=False)
-        await RstStreamResponder(
-            actor.factory.rst_stream(stream_id, ErrorCodes.CANCEL)
-        ).respond(actor)
+        reset = actor.factory.rst_stream(stream_id, ErrorCodes.CANCEL)
+        await actor.on_rst_stream(reset, actor.find_stream(reset.stream_id))
     elif origin == 'local_reset':
+        actor.root_stream.add_child(stream_id).on_headers_received(end_stream=False)
         await actor.send_frame(
             actor.factory.rst_stream(stream_id, ErrorCodes.CANCEL))
     else:
@@ -533,14 +532,14 @@ async def test_late_rst_stream_is_never_answered(origin: str):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ('origin', 'answered'),
-    (('peer_reset', True), ('local_reset', True),
+    (('peer_reset', True), ('local_reset', False),
      ('completed', False), ('evicted', False)),
 )
 async def test_late_window_update_is_answered_only_after_a_reset(
     origin: str, answered: bool,
 ):
-    """RFC 9113 §5.1 — after RST_STREAM a late frame is a stream error; after
-    END_STREAM the late WINDOW_UPDATE is ignored."""
+    """RFC 9113 §5.1 — after the peer's RST_STREAM a late frame is a stream
+    error; after our own, or after END_STREAM, the late WINDOW_UPDATE is ignored."""
     actor = _actor()
     await _close_stream(actor, 1, origin)
     actor._reader = _Reader(
@@ -571,13 +570,15 @@ async def test_late_data_returns_credit_on_every_closed_origin(origin: str):
         f.window_size for f in sent
         if f.FrameType() == FrameTypes.WINDOW_UPDATE and f.stream_id == 0
     ]
-    assert [f.error_code for f in resets] == [ErrorCodes.STREAM_CLOSED]
+    # §5.1: frames after our own RST_STREAM are ignored, but still credited.
+    assert [f.error_code for f in resets] == (
+        [] if origin == 'local_reset' else [ErrorCodes.STREAM_CLOSED])
     assert len(b'late') in updates
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('origin', _CLOSED_ORIGINS)
-async def test_late_headers_is_a_connection_error_on_every_origin(origin: str):
+async def test_late_headers_is_a_connection_error_unless_we_reset_the_stream(origin: str):
     actor = _actor()
     await _close_stream(actor, 1, origin)
     actor._reader = _Reader(_headers(1))
@@ -587,7 +588,7 @@ async def test_late_headers_is_a_connection_error_on_every_origin(origin: str):
     sent = _frames(actor)
     assert [
         f.error_code for f in sent if f.FrameType() == FrameTypes.GOAWAY
-    ] == [ErrorCodes.STREAM_CLOSED]
+    ] == ([] if origin == 'local_reset' else [ErrorCodes.STREAM_CLOSED])
     assert not [f for f in sent if f.FrameType() == FrameTypes.RST_STREAM]
 
 
@@ -772,7 +773,7 @@ async def test_connection_teardown_cancels_pending_credit_before_goaway(fatal: b
     if fatal:
         await actor._connection_error(ErrorCodes.PROTOCOL_ERROR, "fatal")
     else:
-        await actor._close_connection(ErrorCodes.NO_ERROR)
+        await actor._connection_error(ErrorCodes.NO_ERROR)
     owned_after_teardown = credit_task in actor._credit_flush_tasks
     release_credit.set()
     await asyncio.gather(credit_task, return_exceptions=True)
@@ -810,7 +811,7 @@ async def test_priority_update_for_closed_stream_creates_no_owner():
     raw = _wire(FrameTypes.PRIORITY_UPDATE, 0, 0, (3).to_bytes(4, "big") + b"u=1")
     frame = actor.factory.load(raw)
 
-    await PriorityUpdateResponder(frame).respond(actor)
+    actor.on_priority_update(frame)
 
     assert actor.find_stream(3) is None
     assert _live_ownership(actor) == (0, 0, 0, 0, 0, 0)
@@ -839,7 +840,7 @@ async def test_idle_priority_reset_does_not_close_lower_legal_peer_stream():
     await actor.run()
 
     assert calls == 1
-    assert actor._closed_streams[99] is True
+    assert actor._closed_streams[99] == 0     # idle when reset: not ignored later
     assert actor._closed_peer_high_water == 1
     assert not [
         frame for frame in _frames(actor) if frame.FrameType() == FrameTypes.GOAWAY
@@ -863,7 +864,7 @@ async def test_push_stream_joins_and_leaves_common_ownership_registry():
     assert sorted(calls) == ["/", "/asset"]
     assert _live_ownership(actor) == (0, 0, 0, 0, 0, 0)
     assert actor._closed_peer_high_water == 1
-    assert actor._closed_push_high_water == 2
+    assert actor._closed_local_high_water == 2
 
 
 @pytest.mark.asyncio
@@ -902,9 +903,8 @@ async def test_promised_stream_reset_during_write_preserves_other_streams():
         )
 
         await asyncio.wait_for(writer.promise_written.wait(), timeout=1)
-        await RstStreamResponder(
-            actor.factory.rst_stream(2, ErrorCodes.CANCEL)
-        ).respond(actor)
+        reset = actor.factory.rst_stream(2, ErrorCodes.CANCEL)
+        await actor.on_rst_stream(reset, actor.find_stream(reset.stream_id))
         writer.release_promise.set()
         survivor_release.set()
         await push_task
@@ -956,9 +956,8 @@ async def test_parent_reset_during_promise_write_resets_promised_stream():
         actor._active_stream_count = 2
 
         await asyncio.wait_for(writer.promise_written.wait(), timeout=1)
-        await RstStreamResponder(
-            actor.factory.rst_stream(1, ErrorCodes.CANCEL)
-        ).respond(actor)
+        reset = actor.factory.rst_stream(1, ErrorCodes.CANCEL)
+        await actor.on_rst_stream(reset, actor.find_stream(reset.stream_id))
         writer.release_promise.set()
         sibling_release.set()
 
@@ -999,9 +998,8 @@ async def test_parent_reset_preserves_cancellation_when_promised_reset_fails():
         actor._active_stream_count = 1
 
         await asyncio.wait_for(control_sender.promise_written.wait(), timeout=1)
-        await RstStreamResponder(
-            actor.factory.rst_stream(1, ErrorCodes.CANCEL)
-        ).respond(actor)
+        reset = actor.factory.rst_stream(1, ErrorCodes.CANCEL)
+        await actor.on_rst_stream(reset, actor.find_stream(reset.stream_id))
         control_sender.release_promise.set()
 
     actor._task_group = None
@@ -1074,7 +1072,7 @@ def test_closed_history_is_bounded_with_independent_peer_and_push_watermarks():
 
     assert len(actor._closed_streams) <= _CLOSED_STREAMS_CAP
     assert actor._closed_peer_high_water % 2 == 1
-    assert actor._closed_push_high_water % 2 == 0
+    assert actor._closed_local_high_water % 2 == 0
 
 
 @pytest.mark.asyncio

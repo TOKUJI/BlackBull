@@ -287,14 +287,15 @@ async def test_client_stream_reset_during_upload_does_not_return_send_credit():
     second = None
     try:
         await writer.entered.wait()
-        client._on_rst_stream(client.frame_factory.rst_stream(1, ErrorCodes.CANCEL))
+        reset = client.frame_factory.rst_stream(1, ErrorCodes.CANCEL)
+        await client.on_rst_stream(reset, client.root_stream.children.get(1))
         with pytest.raises(StreamReset):
             await first
         second = asyncio.create_task(client.request('POST', '/', body=b'world'))
         await _turn()
         await _turn()
         assert writer.body() == b'hello'
-        client._on_window_update(client.frame_factory.window_update(0, 5))
+        await client.on_window_update(client.frame_factory.window_update(0, 5))
         await _turn()
         await _turn()
         assert writer.body(3) == b'world'
@@ -328,7 +329,7 @@ async def test_websocket_close_waits_for_credit_and_ends_stream():
         await _turn()
         assert writer.body() == b''
         assert not task.done()
-        client._on_window_update(client.frame_factory.window_update(0, 8))
+        await client.on_window_update(client.frame_factory.window_update(0, 8))
         await task
         assert len(writer.body(1)) == 8  # masked CLOSE with the two-byte status code
         assert writer.frames[-1][:3] == (0, 1, 1)

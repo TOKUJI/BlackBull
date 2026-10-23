@@ -342,53 +342,6 @@ from blackbull.protocol.frame_types import ErrorCodes as _ErrorCodes  # noqa: E4
 @pytest.mark.asyncio
 class TestContinuationFloodGuard:
 
-    async def test_continuation_flood_emits_goaway_enhance_your_calm(self):
-        """10 × 16 KiB CONTINUATION frames (160 KiB total) on one
-        stream — above the 64 KiB BB_HEADER_MAX_TOTAL default —
-        must trigger GOAWAY ENHANCE_YOUR_CALM and the app must
-        NOT be invoked."""
-        called: list[dict] = []
-
-        async def app(scope, receive, send):
-            called.append(scope)
-
-        # Initial HEADERS (END_HEADERS=0) with a tiny valid header block.
-        encoder = Encoder()
-        seed_block = encoder.encode([
-            (b':method', b'GET'),
-            (b':path', b'/'),
-            (b':scheme', b'https'),
-            (b':authority', b'example.com'),
-        ])
-        h_frame = _make_h2_frame(
-            FrameTypes.HEADERS, SettingFrameFlags.INIT, 1, seed_block)
-        # Each CONTINUATION carries 16 KiB of arbitrary bytes — the
-        # actor does not parse them until END_HEADERS, so any bytes
-        # work for the size accumulation test.
-        chunk = b'x' * 16384
-        cont = _make_h2_frame(
-            FrameTypes.CONTINUATION, SettingFrameFlags.INIT, 1, chunk)
-
-        handler = _make_handler(app)
-        handler.receive = AsyncMock(side_effect=[
-            h_frame, *(cont for _ in range(10)), None,
-        ])
-        await handler.run()
-
-        assert called == [], (
-            'app handler must not be invoked when CONTINUATION flood '
-            'exceeds the header-block cap')
-
-        goaways = [c.args[0] for c in handler.send_frame.call_args_list
-                if hasattr(c.args[0], 'FrameType')
-                and c.args[0].FrameType() == FrameTypes.GOAWAY]
-        assert any(
-            getattr(frame, 'error_code', None) == _ErrorCodes.ENHANCE_YOUR_CALM
-            for frame in goaways
-        ), (
-            'expected GOAWAY(ENHANCE_YOUR_CALM); '
-            f'got GOAWAYs={[getattr(frame, "error_code", None) for frame in goaways]}')
-
     async def test_continuation_within_cap_still_dispatches(self):
         """The guard must not regress legitimate fragmented HEADERS
         that stay under BB_HEADER_MAX_TOTAL."""
@@ -422,3 +375,28 @@ class TestContinuationFloodGuard:
         assert rsts == [], (
             f'no RST_STREAM expected on legitimate fragmented HEADERS; '
             f'got {rsts}')
+
+
+@pytest.mark.asyncio
+async def test_a_split_block_on_a_stream_we_reset_is_decoded_and_dropped():
+    """RFC 9113 §4.3, §5.1: the block's table updates apply, its request does not."""
+    from tests.caps._drive import _h2_answer, h2_request, make_app
+    from tests.conformance.http2._harness import h2_connect
+    from tests.harness import served
+
+    encoder = Encoder()
+    indexed = encoder.encode([(b'x-indexed', b'1')])
+    request = encoder.encode([(b':method', b'GET'), (b':path', b'/'), (b':scheme', b'http'),
+                              (b':authority', b'x'), (b'x-indexed', b'1')])
+    async with served(make_app()) as s:
+        wire = await h2_connect(s)
+        await wire.send(h2_request(1) + _make_h2_frame(
+            FrameTypes.PRIORITY, 0, 1, (1).to_bytes(4, 'big') + b'\x0f'))
+        assert await _h2_answer(wire) == 'RST_STREAM PROTOCOL_ERROR'
+        await wire.send(_make_h2_frame(FrameTypes.HEADERS, 0, 1, indexed[:1])
+                        + _make_h2_frame(FrameTypes.CONTINUATION, HeaderFrameFlags.END_HEADERS,
+                                         1, indexed[1:])
+                        + _make_h2_frame(FrameTypes.HEADERS,
+                                         HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM,
+                                         3, request))
+        assert await _h2_answer(wire) == 'complete'

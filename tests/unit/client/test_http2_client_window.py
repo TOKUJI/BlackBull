@@ -39,7 +39,7 @@ class TestClientWindowSeeding:
         peer's announced initial window, not the RFC default — including a
         window below the default (e.g. 1024), or late senders overrun."""
         c = _client()
-        c._on_initial_window_size(window)
+        c._set_peer_initial_window(window)
         sender = c._make_sender(stream_id)
         assert sender.stream_window_size == window
 
@@ -48,7 +48,7 @@ class TestClientWindowSeeding:
         c = _client()
         sender = c._make_sender(1)
         assert sender.stream_window_size == DEFAULT_INITIAL_WINDOW_SIZE
-        c._on_initial_window_size(70000)
+        c._set_peer_initial_window(70000)
         assert sender.stream_window_size == (
             DEFAULT_INITIAL_WINDOW_SIZE + (70000 - DEFAULT_INITIAL_WINDOW_SIZE))
 

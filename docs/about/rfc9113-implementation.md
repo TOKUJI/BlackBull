@@ -5,6 +5,15 @@ This page records constraints that must survive implementation changes;
 `tests/conformance/http2/` and the [conformance workflow](conformance.md)
 provide executable checks.
 
+## One core, two roles
+
+`HTTP2Connection` (`blackbull/server/http2_connection.py`) owns frame
+admission, stream state, field-block assembly, the control frames, flow
+windows and error scope for the server and the client alike. A role decides
+only what an opened stream means and whether the peer may push.
+`tests/conformance/http2/test_rules_both_roles.py` runs each shared rule on
+both roles.
+
 ## Connection setup
 
 Bindings select ALPN or prior-knowledge h2c. Keep preface reads and initial
@@ -33,8 +42,9 @@ An undecoded or corrupt block affects connection-wide decoder state; it cannot
 be handled by resetting only its stream. Keep other frame types off the
 connection while a field block is open.
 
-`HTTP2Actor` bounds accumulated CONTINUATION bytes with `BB_HEADER_MAX_TOTAL`
-and an unfinished block with `BB_HEADER_TIMEOUT`; both send GOAWAY
+Accumulated CONTINUATION bytes are bounded by `BB_HEADER_MAX_TOTAL`
+(client: `BB_CLIENT_HEAD_MAX_TOTAL`) and an unfinished block by
+`BB_HEADER_TIMEOUT` (client: `BB_CLIENT_HEAD_TIMEOUT`); both send GOAWAY
 `ENHANCE_YOUR_CALM`. Only one block can be open per connection. The shared
 decoder separately bounds decompressed fields; decode failures, including
 that limit, end the connection with `COMPRESSION_ERROR`. Otherwise valid
@@ -46,7 +56,7 @@ stream ownership. Mutating the encoder for a block never sent makes later
 sibling blocks undecodable.
 
 Read `blackbull/protocol/frame.py`, `frame_types.py` and
-`blackbull/server/http2_actor.py`.
+`blackbull/server/http2_connection.py`.
 
 ## Flow control
 
@@ -86,7 +96,13 @@ Preserve RFC connection-versus-stream error scope when validating fixed-size
 control frames. A frame whose length or padding breaks its type's layout
 raises `FrameFormatError` with the RFC's code, and the frame loop answers it
 with GOAWAY: every such case, HEADERS padding included, is a connection error.
-Unknown frame types are ignored only outside an open field block. Read `HTTP2Actor` and control responders in `blackbull/server/response.py`.
+Unknown frame types are ignored only outside an open field block.
+
+A frame on a stream this endpoint reset is ignored (§5.1): DATA still
+returns its connection credit and a field block is still decoded. On a
+stream the peer reset or that ended, HEADERS is a connection
+`STREAM_CLOSED` error and other frames are answered with RST_STREAM
+`STREAM_CLOSED`, except WINDOW_UPDATE after an ordinary end.
 
 ## Message validation
 

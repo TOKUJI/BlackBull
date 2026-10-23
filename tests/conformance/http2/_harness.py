@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from hpack import Encoder
 
+from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
+from blackbull.server.http2_connection import HTTP2Connection
 from blackbull.server.recipient import AbstractReader, IncompleteReadError
 from tests.harness import read_h2_frame
 
@@ -106,3 +108,32 @@ class _BufferReader(AbstractReader):
         chunk = bytes(self._buf[:n])
         del self._buf[:n]
         return chunk
+
+
+class CoreEndpoint(HTTP2Connection):
+    """The connection core alone, recording what it sends and resets."""
+
+    def __init__(self, factory=None) -> None:
+        self._init_connection(factory or FrameFactory(), field_block_max=0,
+                              field_block_cap='header_max_total')
+        self.sent: list[bytes] = []
+        self.resets: list[tuple[int, int]] = []
+        self.failures: list[str] = []
+
+    async def _send_control(self, frame) -> None:
+        self.sent.append(frame.save())
+
+    async def _reset(self, stream_id, code, *, additional_credit=0) -> None:
+        self.resets.append((stream_id, code))
+
+    def _retire_all(self) -> None:
+        pass
+
+    async def _after_goaway(self, reason: str) -> None:
+        self.failures.append(reason)
+
+    def _peer_reset(self, stream_id, error_code) -> None:
+        pass
+
+    def _stream_sender(self, stream_id):
+        return self._senders.get(stream_id)

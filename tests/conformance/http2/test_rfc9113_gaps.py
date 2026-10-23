@@ -65,60 +65,8 @@ def _sent_goaway_codes(handler) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# G1-G2: Stream state validation — idle / half-closed(remote)
+# G2: Stream state validation — half-closed(remote)
 # ═══════════════════════════════════════════════════════════════════════
-
-class TestG1IdleStreamReceivesNonOpeningFrames:
-    """RFC 9113 §5.1 (idle): Receiving any frame other than HEADERS or PRIORITY
-    on an idle stream MUST be treated as PROTOCOL_ERROR (connection error)."""
-
-    @pytest.mark.asyncio
-    async def test_data_on_idle_stream_is_protocol_error(self):
-        handler, app = _make_h2_actor()
-        # Stream 1 is idle.  Send DATA without opening it first.
-        data_frame = _make_h2_frame(FrameTypes.DATA, 0, stream_id=1,
-                                    payload=b'hello')
-        handler.receive = AsyncMock(side_effect=[self._settings(), data_frame, None])
-        await handler.run()
-        # Must have sent RST_STREAM or GOAWAY with PROTOCOL_ERROR.
-        self._assert_error_sent(handler, ErrorCodes.PROTOCOL_ERROR)
-
-
-    @pytest.mark.asyncio
-    async def test_window_update_on_idle_stream_is_protocol_error(self):
-        """WINDOW_UPDATE on idle stream → PROTOCOL_ERROR."""
-        handler, app = _make_h2_actor()
-        wu = _make_h2_frame(FrameTypes.WINDOW_UPDATE, 0, stream_id=7,
-                            payload=(1000).to_bytes(4, 'big'))
-        handler.receive = AsyncMock(side_effect=[self._settings(), wu, None])
-        await handler.run()
-        self._assert_error_sent(handler, ErrorCodes.PROTOCOL_ERROR)
-
-    @staticmethod
-    def _settings():
-        return _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
-
-    @staticmethod
-    def _assert_error_sent(handler, expected_code):
-        """Check that handler.send_frame was called with an error frame."""
-        for call in handler.send_frame.call_args_list:
-            frame = call.args[0]
-            if hasattr(frame, 'error_code') and frame.error_code == expected_code:
-                return
-        # Also check RST_STREAM frames for the code
-        for call in handler.send_frame.call_args_list:
-            frame = call.args[0]
-            if hasattr(frame, 'FrameType'):
-                ftype = frame.FrameType()
-                if ftype == FrameTypes.RST_STREAM and frame.error_code == expected_code:
-                    return
-                if ftype == FrameTypes.GOAWAY and frame.error_code == expected_code:
-                    return
-        pytest.fail(
-            f'Expected error code {expected_code} ({ErrorCodes(expected_code).name}) '
-            f'but it was not sent.  Frames sent: '
-            f'{[c.args[0] for c in handler.send_frame.call_args_list]}')
-
 
 class TestG2HalfClosedRemoteReceivesData:
     """RFC 9113 §5.1 (half-closed remote): Receiving frames other than
@@ -164,53 +112,6 @@ class TestG2HalfClosedRemoteReceivesData:
         pytest.fail(
             f'Expected RST_STREAM on stream {stream_id} with '
             f'{ErrorCodes(expected_code).name}, but not found.')
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# G3, G8: WINDOW_UPDATE with zero increment → PROTOCOL_ERROR
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestG3WindowUpdateZeroIncrement:
-    """RFC 9113 §6.9: WINDOW_UPDATE with flow-control window increment of 0
-    MUST be treated as PROTOCOL_ERROR (stream error for stream-level,
-    connection error for connection-level)."""
-
-    @pytest.mark.asyncio
-    async def test_stream_wu_zero_increment_is_protocol_error(self):
-        handler, app = _make_h2_actor()
-        h = _make_headers_frame(1, end_stream=False)
-        wu_zero = _make_h2_frame(FrameTypes.WINDOW_UPDATE, 0, stream_id=1,
-                                 payload=(0).to_bytes(4, 'big'))
-        handler.receive = AsyncMock(side_effect=[
-            self._settings(), h, wu_zero, None])
-        await handler.run()
-        # Must send RST_STREAM on stream 1 with PROTOCOL_ERROR.
-        for call in handler.send_frame.call_args_list:
-            frame = call.args[0]
-            if hasattr(frame, 'FrameType') and frame.FrameType() == FrameTypes.RST_STREAM:
-                if frame.stream_id == 1 and frame.error_code == ErrorCodes.PROTOCOL_ERROR:
-                    return
-        pytest.fail('Expected RST_STREAM PROTOCOL_ERROR for WU increment 0')
-
-    @pytest.mark.asyncio
-    async def test_connection_wu_zero_increment_is_connection_error(self):
-        handler, app = _make_h2_actor()
-        wu_zero = _make_h2_frame(FrameTypes.WINDOW_UPDATE, 0, stream_id=0,
-                                 payload=(0).to_bytes(4, 'big'))
-        handler.receive = AsyncMock(side_effect=[
-            self._settings(), wu_zero, None])
-        await handler.run()
-        # Must send GOAWAY with PROTOCOL_ERROR.
-        for call in handler.send_frame.call_args_list:
-            frame = call.args[0]
-            if hasattr(frame, 'FrameType') and frame.FrameType() == FrameTypes.GOAWAY:
-                if frame.error_code == ErrorCodes.PROTOCOL_ERROR:
-                    return
-        pytest.fail('Expected GOAWAY PROTOCOL_ERROR for connection WU increment 0')
-
-    @staticmethod
-    def _settings():
-        return _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -515,42 +416,6 @@ class TestG4CompressionErrors:
     """RFC 9113 §4.3/§5.4.1 — a field block that cannot be decoded is a
     connection error of type COMPRESSION_ERROR: GOAWAY, never RST_STREAM."""
 
-    @pytest.mark.parametrize('block', [
-        b'\x80', b'\x00', b'\x3f\xe1\x3f',
-    ])
-    @pytest.mark.asyncio
-    async def test_undecodable_block_goes_away_with_compression_error(self, block):
-        handler, app = _make_h2_actor()
-        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
-        handler.receive = AsyncMock(side_effect=[
-            settings, _make_raw_headers_frame(block), None])
-        await handler.run()
-
-        assert _sent_goaway_codes(handler) == [ErrorCodes.COMPRESSION_ERROR]
-        assert _sent_rst_streams(handler, 1) == []
-        assert handler._goaway_sent
-        assert app.await_count == 0
-
-    @pytest.mark.asyncio
-    async def test_an_undecodable_block_split_across_continuation(self):
-        """The block is decoded when the last CONTINUATION lands, not when
-        the HEADERS frame is loaded, so that path needs the same answer."""
-        handler, app = _make_h2_actor()
-        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
-        flags = int(HeaderFrameFlags.END_STREAM)
-        handler.receive = AsyncMock(side_effect=[
-            settings,
-            _make_h2_frame(FrameTypes.HEADERS, flags, 1, b'\x00'),
-            _make_h2_frame(FrameTypes.CONTINUATION,
-                           int(HeaderFrameFlags.END_HEADERS), 1, b'\x80'),
-            None])
-        await handler.run()
-
-        assert _sent_goaway_codes(handler) == [ErrorCodes.COMPRESSION_ERROR]
-        assert _sent_rst_streams(handler, 1) == []
-        assert handler._goaway_sent
-        assert app.await_count == 0
-
     @pytest.mark.asyncio
     async def test_an_undecodable_promised_block_goes_away_the_same_way(self):
         """A client may not push at all, but the block it sent is still
@@ -585,191 +450,6 @@ class TestG4CompressionErrors:
 
         assert app.await_count == 1
         assert _sent_goaway_codes(handler) == []
-
-
-class TestG4FrameFormatErrors:
-    """RFC 9113 §4.2, §6.1-§6.7 — a frame whose length or padding breaks its
-    type's layout is a connection error: GOAWAY with the code its section
-    names, and the frame loop ends rather than raising out of run()."""
-
-    _PADDED = int(HeaderFrameFlags.PADDED)
-
-    @pytest.mark.parametrize(('frame', 'code'), [
-        # §6.4 — RST_STREAM is exactly 4 octets.
-        (_make_h2_frame(FrameTypes.RST_STREAM, 0, 1, b'\x00\x00\x00'),
-         ErrorCodes.FRAME_SIZE_ERROR),
-        # §6.7 — PING is exactly 8 octets.
-        (_make_h2_frame(FrameTypes.PING, 0, 0, b'\x00' * 5),
-         ErrorCodes.FRAME_SIZE_ERROR),
-        # §6.1 — padding at least as long as the payload.
-        (_make_h2_frame(FrameTypes.DATA, int(DataFrameFlags.PADDED), 1,
-                        b'\x05abcd'),
-         ErrorCodes.PROTOCOL_ERROR),
-        # §6.6 borrows §6.2's rule.
-        (_make_h2_frame(FrameTypes.PUSH_PROMISE,
-                        int(HeaderFrameFlags.END_HEADERS) | _PADDED, 1,
-                        bytes([200]) + (2).to_bytes(4, 'big') + b'\x82' * 12),
-         ErrorCodes.PROTOCOL_ERROR),
-        # §6.2 — the same rule for HEADERS, which used to reset the stream.
-        (_make_h2_frame(FrameTypes.HEADERS,
-                        int(HeaderFrameFlags.END_HEADERS) | _PADDED, 1,
-                        bytes([10]) + b'\x82\x84'),
-         ErrorCodes.PROTOCOL_ERROR),
-        # Controls: their responders already answered this way.
-        (_make_h2_frame(FrameTypes.WINDOW_UPDATE, 0, 0, b'\x00\x00\x01'),
-         ErrorCodes.FRAME_SIZE_ERROR),
-        (_make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'\x00' * 5),
-         ErrorCodes.FRAME_SIZE_ERROR),
-    ], ids=['rst_stream', 'ping', 'data_padding', 'push_promise_padding',
-            'headers_padding', 'window_update', 'settings'])
-    @pytest.mark.asyncio
-    async def test_a_misshapen_frame_goes_away_with_its_code(self, frame, code):
-        handler, app = _make_h2_actor()
-        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
-        handler.receive = AsyncMock(side_effect=[settings, frame, None])
-        await handler.run()
-
-        assert _sent_goaway_codes(handler) == [code]
-        assert _sent_rst_streams(handler, 1) == []
-        assert app.await_count == 0
-
-    @pytest.mark.asyncio
-    async def test_headers_padding_checked_when_the_last_continuation_lands(self):
-        """A block split across CONTINUATION is parsed only when it is
-        complete, so that path needs the same answer."""
-        handler, app = _make_h2_actor()
-        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
-        handler.receive = AsyncMock(side_effect=[
-            settings,
-            _make_h2_frame(FrameTypes.HEADERS, self._PADDED, 1,
-                           bytes([10]) + b'\x82'),
-            _make_h2_frame(FrameTypes.CONTINUATION,
-                           int(HeaderFrameFlags.END_HEADERS), 1, b'\x84'),
-            None])
-        await handler.run()
-
-        assert _sent_goaway_codes(handler) == [ErrorCodes.PROTOCOL_ERROR]
-        assert _sent_rst_streams(handler, 1) == []
-        assert app.await_count == 0
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# G7: RST_STREAM on idle stream (§6.4)
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestG7RstStreamOnIdleStream:
-    """RFC 9113 §6.4: RST_STREAM MUST NOT be sent for a stream in the idle
-    state.  Receiving one MUST → PROTOCOL_ERROR connection error."""
-
-    @pytest.mark.asyncio
-    async def test_rst_on_idle_stream_is_protocol_error(self):
-        handler, app = _make_h2_actor()
-        rst = _make_h2_frame(FrameTypes.RST_STREAM, 0, stream_id=99,
-                             payload=(ErrorCodes.CANCEL).to_bytes(4, 'big'))
-        handler.receive = AsyncMock(side_effect=[
-            _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''), rst, None])
-        await handler.run()
-        for call in handler.send_frame.call_args_list:
-            frame = call.args[0]
-            if hasattr(frame, 'FrameType') and frame.FrameType() == FrameTypes.GOAWAY:
-                if frame.error_code == ErrorCodes.PROTOCOL_ERROR:
-                    return
-        pytest.fail('Expected GOAWAY PROTOCOL_ERROR for RST on idle stream')
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# G9: Unknown frame types MUST be ignored (§4.1)
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestG9UnknownFrameTypesIgnored:
-    """RFC 9113 §4.1: Implementations MUST ignore and discard frames of
-    unknown types.  §5.5 reinforces this — unknown frames are not errors."""
-
-    @pytest.mark.asyncio
-    async def test_unknown_frame_type_is_ignored_not_errored(self):
-        handler, app = _make_h2_actor()
-        # Frame type 0xFE is unregistered.  It must be silently ignored.
-        unknown = _make_h2_frame(b'\xfe', 0, stream_id=0, payload=b'\x00' * 8)
-        settings = _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b'')
-        handler.receive = AsyncMock(side_effect=[settings, unknown, None])
-        await handler.run()
-        # Must NOT have sent RST_STREAM or GOAWAY for the unknown type.
-        for call in handler.send_frame.call_args_list:
-            frame = call.args[0]
-            if hasattr(frame, 'FrameType'):
-                ftype = frame.FrameType()
-                if ftype in (FrameTypes.RST_STREAM, FrameTypes.GOAWAY):
-                    pytest.fail(
-                        f'Unknown frame type caused {ftype.name} — '
-                        f'must be silently ignored per RFC 9113 §4.1/§5.5')
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# G10: MUST NOT send RST_STREAM in response to RST_STREAM (§5.4.2)
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestG10NoRstInResponseToRst:
-    """RFC 9113 §5.4.2: To avoid looping, an endpoint MUST NOT send a
-    RST_STREAM in response to a RST_STREAM frame."""
-
-    @pytest.mark.asyncio
-    async def test_rst_is_not_responded_with_rst(self):
-        handler, app = _make_h2_actor()
-        # Open stream 1
-        h = _make_headers_frame(1, end_stream=False)
-        # Send RST on stream 1
-        rst = _make_h2_frame(FrameTypes.RST_STREAM, 0, stream_id=1,
-                             payload=(ErrorCodes.CANCEL).to_bytes(4, 'big'))
-        handler.receive = AsyncMock(side_effect=[
-            _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''), h, rst, None])
-        await handler.run()
-        sent = _sent_rst_streams(handler, 1)
-        assert not sent, (
-            f'Handler sent {len(sent)} RST_STREAM(s) in response to '
-            f'RST_STREAM. RFC 9113 §5.4.2 forbids this.')
-
-    @pytest.mark.asyncio
-    async def test_late_rst_on_a_reset_closed_stream_is_not_answered(self):
-        """The retained closed-id path has no live stream to validate."""
-        handler, app = _make_h2_actor()
-        h = _make_headers_frame(1, end_stream=False)
-        rst = _make_h2_frame(FrameTypes.RST_STREAM, 0, stream_id=1,
-                             payload=(ErrorCodes.CANCEL).to_bytes(4, 'big'))
-        # The first RST retires stream 1 and records it as reset; the second
-        # is the late frame that must draw no answer.
-        handler.receive = AsyncMock(side_effect=[
-            _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''), h, rst, rst, None])
-        await handler.run()
-        sent = _sent_rst_streams(handler, 1)
-        assert not sent, (
-            f'Handler sent {len(sent)} RST_STREAM(s) after a stream was '
-            f'closed by RST_STREAM. RFC 9113 §5.4.2 forbids this.')
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# G11: PRIORITY frame length validation (§6.3)
-# ═══════════════════════════════════════════════════════════════════════
-
-class TestG11PriorityFrameLengthValidation:
-    """RFC 9113 §6.3: A PRIORITY frame with a length other than 5 octets
-    MUST be treated as a stream error of type FRAME_SIZE_ERROR."""
-
-    @pytest.mark.asyncio
-    async def test_priority_frame_wrong_length_is_frame_size_error(self):
-        handler, app = _make_h2_actor()
-        h = _make_headers_frame(1, end_stream=False)
-        # PRIORITY with 3 bytes payload (should be 5)
-        bad_prio = _make_h2_frame(FrameTypes.PRIORITY, 0, stream_id=1,
-                                  payload=b'\x00' * 3)
-        handler.receive = AsyncMock(side_effect=[
-            _make_h2_frame(FrameTypes.SETTINGS, 0, 0, b''), h, bad_prio, None])
-        await handler.run()
-        for call in handler.send_frame.call_args_list:
-            frame = call.args[0]
-            if hasattr(frame, 'FrameType') and frame.FrameType() == FrameTypes.RST_STREAM:
-                if frame.stream_id == 1 and frame.error_code == ErrorCodes.FRAME_SIZE_ERROR:
-                    return
-        pytest.fail('Expected RST_STREAM FRAME_SIZE_ERROR for PRIORITY length != 5')
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1021,7 +701,7 @@ class TestG15ClientPushPromise:
 
         assert _sent_goaway_codes(handler) == [ErrorCodes.PROTOCOL_ERROR]
         assert _sent_rst_streams(handler, 1) == []
-        assert 'client sent PUSH_PROMISE' in connection_error.call_args.args[1]
+        assert 'may not push' in connection_error.call_args.args[1]
         assert app.await_count == 0
 
     @pytest.mark.parametrize('head', [
@@ -1043,7 +723,7 @@ class TestG15ClientPushPromise:
 
         assert _sent_goaway_codes(handler) == [ErrorCodes.PROTOCOL_ERROR]
         assert _sent_rst_streams(handler, 1) == []
-        assert 'client sent PUSH_PROMISE' in connection_error.call_args.args[1]
+        assert 'may not push' in connection_error.call_args.args[1]
 
     @pytest.mark.asyncio
     async def test_a_client_request_still_reaches_the_app(self):

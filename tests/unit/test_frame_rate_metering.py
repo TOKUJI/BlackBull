@@ -124,21 +124,6 @@ def _goaway_codes(sent) -> list[int]:
             if getattr(f, 'FrameType', None) and f.FrameType() == FrameTypes.GOAWAY]
 
 
-class TestPingFlood:
-    """CVE-2019-9512 — one ACK write per PING."""
-
-    async def test_within_the_budget_every_ping_is_answered(self):
-        _, sent = await _drive([_settings()] + [_ping()] * _LIMIT)
-        acks = [f for f in sent
-                if getattr(f, 'FrameType', None)
-                and f.FrameType() == FrameTypes.PING
-                and f.flags & PingFrameFlags.ACK]
-        assert len(acks) == _LIMIT, (
-            f'{len(acks)} of {_LIMIT} PINGs answered — the meter refused a '
-            f'peer that stayed inside its budget')
-        assert ErrorCodes.ENHANCE_YOUR_CALM not in _goaway_codes(sent)
-
-
 class TestSettingsFlood:
     """CVE-2019-9515 — one ACK write per SETTINGS."""
 
