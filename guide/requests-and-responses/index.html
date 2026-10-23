@@ -6704,10 +6704,14 @@ ignores a supplied <code>Content-Length</code>, and writes the zero chunk only w
 trailer section begins.  To split a trailer section across events, set
 <code>more_trailers=True</code> on every event except the last.  HTTP/2 collects those
 parts into one trailing HEADERS block carrying <code>END_STREAM</code>.</p>
+<p>For an empty body where trailers are permitted, trailer events may follow the
+response start directly; the response headers are sent first.</p>
 <p>HEAD responses never carry content or a trailer section.  The response is
 complete after its header section even if the application declared trailers;
 later trailer events are ignored so they cannot become bytes in the next
-keep-alive response.</p>
+keep-alive response.
+An explicit <code>Content-Length</code> describes the corresponding GET representation,
+independently of the body events supplied for HEAD.</p>
 <p>Informational responses and status <code>204</code> carry neither content nor framing
 fields.  A <code>205</code> carries no content and is emitted with <code>Content-Length: 0</code> so
 its boundary remains explicit on a persistent connection.  A <code>304</code> also
