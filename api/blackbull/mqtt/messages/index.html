@@ -3778,17 +3778,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.PropertyInfo" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PropertyInfo
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.mqtt.messages.ProtocolLevel" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3804,17 +3793,6 @@
     <span class="md-ellipsis">
       
         PublishFlagBits
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.PublishFlags" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PublishFlags
       
     </span>
   </a>
@@ -3866,17 +3844,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.decode_publish_flags" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        decode_publish_flags
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.mqtt.messages.decode_variable_byte_integer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3921,32 +3888,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.extract_flags" class="md-nav__link">
+  <a href="#blackbull.mqtt.messages.split_shared" class="md-nav__link">
     <span class="md-ellipsis">
       
-        extract_flags
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.extract_packet_type" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        extract_packet_type
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.get_property_info" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_property_info
+        split_shared
       
     </span>
   </a>
@@ -6321,17 +6266,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.PropertyInfo" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PropertyInfo
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.mqtt.messages.ProtocolLevel" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6347,17 +6281,6 @@
     <span class="md-ellipsis">
       
         PublishFlagBits
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.PublishFlags" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PublishFlags
       
     </span>
   </a>
@@ -6409,17 +6332,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.decode_publish_flags" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        decode_publish_flags
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.mqtt.messages.decode_variable_byte_integer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6464,32 +6376,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.extract_flags" class="md-nav__link">
+  <a href="#blackbull.mqtt.messages.split_shared" class="md-nav__link">
     <span class="md-ellipsis">
       
-        extract_flags
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.extract_packet_type" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        extract_packet_type
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.mqtt.messages.get_property_info" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        get_property_info
+        split_shared
       
     </span>
   </a>
@@ -7717,54 +7607,6 @@ were listed (§3.11).</p>
 
 
 
-<h3 id="blackbull.mqtt.messages.PropertyInfo" class="doc doc-heading">
-            <code>PropertyInfo</code>
-
-
-<a href="#blackbull.mqtt.messages.PropertyInfo" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="typing.NamedTuple">NamedTuple</span></code></p>
-
-
-
-        <p>Static description of one MQTT 5.0 property identifier (§2.2.2.2).</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
 <h3 id="blackbull.mqtt.messages.ProtocolLevel" class="doc doc-heading">
             <code>ProtocolLevel</code>
 
@@ -7828,54 +7670,6 @@ were listed (§3.11).</p>
 
         <p>Single-bit flags in the PUBLISH fixed header (§3.3.1).</p>
 <p>QoS is the two-bit subfield at <code>PUBLISH_QOS_SHIFT</code>.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.mqtt.messages.PublishFlags" class="doc doc-heading">
-            <code>PublishFlags</code>
-
-
-<a href="#blackbull.mqtt.messages.PublishFlags" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><span title="typing.NamedTuple">NamedTuple</span></code></p>
-
-
-
-        <p>Decoded PUBLISH fixed-header flags (§3.3.1).</p>
 
 
 
@@ -8028,33 +7822,15 @@ Raises <a class="autorefs autorefs-internal" href="#blackbull.mqtt.messages.Inco
 
 
 <h3 id="blackbull.mqtt.messages.decode_properties" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">decode_properties</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">offset</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">decode_properties</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
 
 <a href="#blackbull.mqtt.messages.decode_properties" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>§2.2.2 — Decode a properties block; return <code>(props, consumed)</code>.</p>
-<p><code>consumed</code> counts the Property Length prefix plus the property bytes.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.mqtt.messages.decode_publish_flags" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">decode_publish_flags</span><span class="p">(</span><span class="n">flags_byte</span><span class="p">)</span></code>
-
-<a href="#blackbull.mqtt.messages.decode_publish_flags" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Decode DUP/QoS/RETAIN (MQTT §3.3.1); reject QoS=3 as malformed.</p>
+        <p>§2.2.2 — Decode the properties block <em>data</em> starts with; return
+<code>(props, consumed)</code>, the Property Length prefix included.</p>
 
 
     </div>
@@ -8065,15 +7841,17 @@ Raises <a class="autorefs autorefs-internal" href="#blackbull.mqtt.messages.Inco
 
 
 <h3 id="blackbull.mqtt.messages.decode_variable_byte_integer" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">decode_variable_byte_integer</span><span class="p">(</span><span class="n">data</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">decode_variable_byte_integer</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">pos</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.mqtt.messages.decode_variable_byte_integer" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>§1.5.5 — Decode a Variable Byte Integer; return <code>(value, consumed)</code>.</p>
-<p>Trailing bytes beyond the integer are ignored (the caller tracks them).</p>
+        <p>§1.5.5 — Decode the Variable Byte Integer at <em>pos</em>; return
+<code>(value, pos after it)</code>.</p>
+<p>A fourth octet that still continues is malformed.  A non-minimal encoding
+decodes normally: §1.5.5's minimum-bytes rule is not enforced.</p>
 
 
     </div>
@@ -8137,52 +7915,16 @@ Raises <a class="autorefs autorefs-internal" href="#blackbull.mqtt.messages.Inco
 <div class="doc doc-object doc-function">
 
 
-<h3 id="blackbull.mqtt.messages.extract_flags" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">extract_flags</span><span class="p">(</span><span class="n">first_byte</span><span class="p">)</span></code>
+<h3 id="blackbull.mqtt.messages.split_shared" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">split_shared</span><span class="p">(</span><span class="n">topic_filter</span><span class="p">)</span></code>
 
-<a href="#blackbull.mqtt.messages.extract_flags" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>§2.1.1 — Flags occupy bits 3-0 of the first fixed-header byte.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.mqtt.messages.extract_packet_type" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">extract_packet_type</span><span class="p">(</span><span class="n">first_byte</span><span class="p">)</span></code>
-
-<a href="#blackbull.mqtt.messages.extract_packet_type" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.mqtt.messages.split_shared" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>§2.1.1 — Packet type is bits 7-4 of the first fixed-header byte.</p>
-<p>Type 0 is Reserved/forbidden (§2.1.1 Table 2-1) and raises <code>ValueError</code>.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.mqtt.messages.get_property_info" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">get_property_info</span><span class="p">(</span><span class="n">identifier</span><span class="p">)</span></code>
-
-<a href="#blackbull.mqtt.messages.get_property_info" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Return the <a class="autorefs autorefs-internal" href="#blackbull.mqtt.messages.PropertyInfo"><code>PropertyInfo</code></a> for a property identifier, or None.</p>
+        <p>§4.8.2 — <code>$share/{ShareName}/{filter}</code> as <code>(share, filter)</code>; None
+for a filter that is not shared or has no filter portion.</p>
 
 
     </div>
