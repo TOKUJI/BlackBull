@@ -16,7 +16,7 @@
         <link rel="prev" href="../http1/">
       
       
-        <link rel="next" href="../response/">
+        <link rel="next" href="../scenario/">
       
       
         
@@ -2069,34 +2069,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../response/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -4566,6 +4538,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../server/http2_connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../server/http2_ws/" class="md-nav__link">
         
   
@@ -4854,34 +4854,6 @@
     
   
     request_target
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../server/response/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
   
 
     
@@ -6021,6 +5993,8 @@ Trailers-Only shape.  It is always false on HTTP/1.1.</p>
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="HTTP2Connection (blackbull.server.http2_connection.HTTP2Connection)" href="../../server/http2_connection/#blackbull.server.http2_connection.HTTP2Connection">HTTP2Connection</a></code></p>
 
 
 
@@ -6246,7 +6220,8 @@ its frame reached the peer.</p>
         <p>Stop routing frames for <em>stream_id</em> into its raw-frame queue.</p>
 <p>The one door a closed client still admits: this is teardown, nothing
 here needs the connection, and a cleanup path that raises after close
-turns an orderly shutdown into an error.</p>
+turns an orderly shutdown into an error.  What the peer still sends
+on the stream is ignored as after our own reset (§5.1).</p>
 
 
     </div>

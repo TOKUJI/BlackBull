@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/response/">
+        <link rel="canonical" href="https://TOKUJI.github.io/BlackBull/api/blackbull/server/http2_connection/">
       
       
-        <link rel="prev" href="../request_target/">
+        <link rel="prev" href="../http2_actor/">
       
       
-        <link rel="next" href="../sender/">
+        <link rel="next" href="../http2_ws/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>response - BlackBull</title>
+        <title>http2_connection - BlackBull</title>
       
     
     
@@ -72,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blackbullserverresponse" class="md-skip">
+        <a href="#blackbullserverhttp2_connection" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              response
+              http2_connection
             
           </span>
         </div>
@@ -1879,34 +1879,6 @@
     
   
     http2
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../client/response/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
   
 
     
@@ -4383,6 +4355,170 @@
                 
   
   
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_connection
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#blackbull.server.http2_connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        http2_connection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="http2_connection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP2Connection
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="HTTP2Connection">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection.on_ping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_ping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection.on_priority" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_priority
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection.on_rst_stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_rst_stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection.on_settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection.on_window_update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_window_update
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
   
   
     <li class="md-nav__item">
@@ -4682,203 +4818,6 @@
   
 
       </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-    
-  
-  
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#blackbull.server.response" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        response
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="response">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.PingResponder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PingResponder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.PriorityResponder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PriorityResponder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.PriorityUpdateResponder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PriorityUpdateResponder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.Responder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Responder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.ResponderFactory" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ResponderFactory
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.RstStreamResponder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        RstStreamResponder
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="RstStreamResponder">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.RstStreamResponder.respond" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        respond
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.SettingsResponder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SettingsResponder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.WindowUpdateResponder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WindowUpdateResponder
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -5749,89 +5688,78 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#blackbull.server.response" class="md-nav__link">
+  <a href="#blackbull.server.http2_connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        response
+        http2_connection
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="response">
+    <nav class="md-nav" aria-label="http2_connection">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.response.PingResponder" class="md-nav__link">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        PingResponder
+        HTTP2Connection
       
     </span>
   </a>
   
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.PriorityResponder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PriorityResponder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.PriorityUpdateResponder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        PriorityUpdateResponder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.Responder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Responder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.ResponderFactory" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        ResponderFactory
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.RstStreamResponder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        RstStreamResponder
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="RstStreamResponder">
+    <nav class="md-nav" aria-label="HTTP2Connection">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.response.RstStreamResponder.respond" class="md-nav__link">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection.on_ping" class="md-nav__link">
     <span class="md-ellipsis">
       
-        respond
+        on_ping
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection.on_priority" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_priority
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection.on_rst_stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_rst_stream
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection.on_settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.http2_connection.HTTP2Connection.on_window_update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_window_update
       
     </span>
   </a>
@@ -5840,28 +5768,6 @@
         
       </ul>
     </nav>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.SettingsResponder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SettingsResponder
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.server.response.WindowUpdateResponder" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        WindowUpdateResponder
-      
-    </span>
-  </a>
   
 </li>
         
@@ -5890,24 +5796,26 @@
   
 
 
-<h1 id="blackbullserverresponse"><code>blackbull.server.response</code><a class="headerlink" href="#blackbullserverresponse" title="Permanent link">&para;</a></h1>
+<h1 id="blackbullserverhttp2_connection"><code>blackbull.server.http2_connection</code><a class="headerlink" href="#blackbullserverhttp2_connection" title="Permanent link">&para;</a></h1>
 
 
 <div class="doc doc-object doc-module">
 
 
 
-<h2 id="blackbull.server.response" class="doc doc-heading">
-            <code>blackbull.server.response</code>
+<h2 id="blackbull.server.http2_connection" class="doc doc-heading">
+            <code>blackbull.server.http2_connection</code>
 
 
-<a href="#blackbull.server.response" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#blackbull.server.http2_connection" class="headerlink" title="Permanent link">&para;</a></h2>
 
     <div class="doc doc-contents first">
 
-        <p>HTTP/2 control-frame responders.</p>
-<p>State remains on the owning HTTP2Actor. Validate a control frame before
-acting; preserve required connection-versus-stream error scope.</p>
+        <p>The HTTP/2 connection core (RFC 9113) that the server and the client share.</p>
+<p><a class="autorefs autorefs-internal" href="#blackbull.server.http2_connection.HTTP2Connection"><code>HTTP2Connection</code></a> admits frames by stream state, assembles field blocks,
+answers SETTINGS, PING, WINDOW_UPDATE, PRIORITY, RST_STREAM and GOAWAY, and
+decides the error scope.  A role subclasses it and supplies what a stream
+means to it; the rules that differ by role are in the role policy section.</p>
 
 
 
@@ -5932,266 +5840,22 @@ acting; preserve required connection-versus-stream error scope.</p>
 
 
 
-<h3 id="blackbull.server.response.PingResponder" class="doc doc-heading">
-            <code>PingResponder</code>
+<h3 id="blackbull.server.http2_connection.HTTP2Connection" class="doc doc-heading">
+            <code>HTTP2Connection</code>
 
 
-<a href="#blackbull.server.response.PingResponder" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.server.response.Responder)" href="#blackbull.server.response.Responder">Responder</a></code></p>
-
-
-
-        <p>Answers a PING with PING(ACK) carrying the same payload (RFC 9113 §6.7).</p>
-<p>A PING that already carries ACK is the answer to one of ours and is
-dropped; a PING on any stream but 0 is a connection PROTOCOL_ERROR.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.response.PriorityResponder" class="doc doc-heading">
-            <code>PriorityResponder</code>
-
-
-<a href="#blackbull.server.response.PriorityResponder" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.server.http2_connection.HTTP2Connection" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.server.response.Responder)" href="#blackbull.server.response.Responder">Responder</a></code></p>
 
 
 
-        <p>Validate and discard legacy dependency priorities (RFC 9113 §6.3).</p>
-<p>Reject self-dependency; do not create nodes for idle streams. Scheduling
-uses RFC 9218 priority hints rather than this deprecated dependency tree.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.response.PriorityUpdateResponder" class="doc doc-heading">
-            <code>PriorityUpdateResponder</code>
-
-
-<a href="#blackbull.server.response.PriorityUpdateResponder" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.server.response.Responder)" href="#blackbull.server.response.Responder">Responder</a></code></p>
-
-
-
-        <p>RFC 9218 §7.1 — receive PRIORITY_UPDATE, log the hint, do not schedule.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.response.Responder" class="doc doc-heading">
-            <code>Responder</code>
-
-
-<a href="#blackbull.server.response.Responder" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Base for HTTP/2 frame responders.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.response.ResponderFactory" class="doc doc-heading">
-            <code>ResponderFactory</code>
-
-
-<a href="#blackbull.server.response.ResponderFactory" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Builds the responder registered for a frame's type.</p>
-<p>Raises <code>ValueError</code> for a type no responder claims.  The server
-dispatches only the control frames it acts on, so an unclaimed type is the
-caller's decision rather than a default to fall through to — unlike the
-client-side factory of the same name, which drops what it does not handle.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h3 id="blackbull.server.response.RstStreamResponder" class="doc doc-heading">
-            <code>RstStreamResponder</code>
-
-
-<a href="#blackbull.server.response.RstStreamResponder" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.server.response.Responder)" href="#blackbull.server.response.Responder">Responder</a></code></p>
-
-
-
-        <p>Retire the reset stream and return unconsumed connection credit.</p>
-<p>Cancel its handler and record closed-via-RST so later frames follow
-RFC 9113 §5.1 closed-stream rules.</p>
+        <p>One endpoint of an HTTP/2 connection, either role.</p>
+<p>A role sets <code>_PEER_PARITY</code> (the parity of the stream ids the peer opens)
+and implements the hooks: <code>_send_control</code>, <code>_reset</code>, <code>_after_goaway</code>,
+<code>_retire_all</code>, <code>_peer_reset</code>, <code>_peer_goaway</code>, <code>_open_peer_stream</code>,
+<code>_on_push_promise</code> and <code>_field_block_refused</code>.</p>
 
 
 
@@ -6217,135 +5881,113 @@ RFC 9113 §5.1 closed-stream rules.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.server.response.RstStreamResponder.respond" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">respond</span><span class="p">(</span><span class="n">handler</span><span class="p">)</span></code>
+<h4 id="blackbull.server.http2_connection.HTTP2Connection.on_ping" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">on_ping</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#blackbull.server.response.RstStreamResponder.respond" class="headerlink" title="Permanent link">&para;</a></h4>
+<a href="#blackbull.server.http2_connection.HTTP2Connection.on_ping" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
 
-        <p>Terminate the named stream and log the reason.</p>
-<p>RFC 9113 §6.4 validation:
-  - RST_STREAM with stream_id 0 is a connection PROTOCOL_ERROR.
-  - RST_STREAM on a stream in the IDLE state is a connection
-    PROTOCOL_ERROR.</p>
+        <p>§6.7: answer with the ACK; an ACK is the answer to ours.</p>
 
 
     </div>
 
 </div>
 
+<div class="doc doc-object doc-function">
 
 
-  </div>
+<h4 id="blackbull.server.http2_connection.HTTP2Connection.on_priority" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">on_priority</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.http2_connection.HTTP2Connection.on_priority" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>§5.3.1: a stream cannot depend on itself.</p>
+
 
     </div>
 
 </div>
 
-<div class="doc doc-object doc-class">
+<div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.server.http2_connection.HTTP2Connection.on_rst_stream" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">on_rst_stream</span><span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">stream</span><span class="p">)</span></code>
 
-<h3 id="blackbull.server.response.SettingsResponder" class="doc doc-heading">
-            <code>SettingsResponder</code>
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
 
-
-<a href="#blackbull.server.response.SettingsResponder" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.server.http2_connection.HTTP2Connection.on_rst_stream" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.server.response.Responder)" href="#blackbull.server.response.Responder">Responder</a></code></p>
 
+        <p>§6.4: an RST_STREAM on an idle stream is a connection error.</p>
 
-
-        <p>Validates the peer's SETTINGS, applies them, and ACKs (RFC 9113 §6.5).</p>
-<p>Nothing is applied until every parameter has passed its range check, so a
-frame carrying one bad value leaves connection state untouched rather than
-half-updated.  A changed <code>SETTINGS_INITIAL_WINDOW_SIZE</code> reaches open
-streams as a delta (§6.9.2), which may leave an already drained send window
-negative — later credit adds to the negative value before DATA may go out.
-A SETTINGS that is itself an ACK is not answered.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
 
     </div>
 
 </div>
 
-<div class="doc doc-object doc-class">
+<div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.server.http2_connection.HTTP2Connection.on_settings" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">on_settings</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span></code>
 
-<h3 id="blackbull.server.response.WindowUpdateResponder" class="doc doc-heading">
-            <code>WindowUpdateResponder</code>
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
 
-
-<a href="#blackbull.server.response.WindowUpdateResponder" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#blackbull.server.http2_connection.HTTP2Connection.on_settings" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
     <div class="doc doc-contents ">
-            <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Responder (blackbull.server.response.Responder)" href="#blackbull.server.response.Responder">Responder</a></code></p>
+
+        <p>§6.5: validate every parameter, then apply them and ACK.</p>
 
 
+    </div>
 
-        <p>Credits a flow-control window and wakes what was blocked on it.</p>
-<p>RFC 9113 §6.9.  Stream 0 credits the one shared connection window and every
-blocked stream sender re-checks; any other identifier credits that stream's
-sender alone.  A window is 31 bits, so an increment that would overflow it
-— and likewise an increment of zero — is an error at the level it arrived
-on: fatal to the connection on stream 0, a RST_STREAM on a stream.</p>
+</div>
+
+<div class="doc doc-object doc-function">
 
 
+<h4 id="blackbull.server.http2_connection.HTTP2Connection.on_window_update" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">on_window_update</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.server.http2_connection.HTTP2Connection.on_window_update" class="headerlink" title="Permanent link">&para;</a></h4>
 
 
+    <div class="doc doc-contents ">
+
+        <p>§6.9: credit the connection or one stream; zero and overflow are
+errors at the level they arrived on.</p>
 
 
+    </div>
 
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
+</div>
 
 
 

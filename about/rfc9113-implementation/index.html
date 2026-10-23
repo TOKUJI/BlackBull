@@ -1893,34 +1893,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/response/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/client/scenario/" class="md-nav__link">
         
   
@@ -4378,6 +4350,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/http2_connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
         
   
@@ -4666,34 +4666,6 @@
     
   
     request_target
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/blackbull/server/response/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
   
 
     
@@ -5551,6 +5523,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#one-core-two-roles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One core, two roles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#connection-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5698,6 +5681,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#one-core-two-roles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One core, two roles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#connection-setup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5799,6 +5793,13 @@
 This page records constraints that must survive implementation changes;
 <code>tests/conformance/http2/</code> and the <a href="../conformance/">conformance workflow</a>
 provide executable checks.</p>
+<h2 id="one-core-two-roles">One core, two roles<a class="headerlink" href="#one-core-two-roles" title="Permanent link">&para;</a></h2>
+<p><code>HTTP2Connection</code> (<code>blackbull/server/http2_connection.py</code>) owns frame
+admission, stream state, field-block assembly, the control frames, flow
+windows and error scope for the server and the client alike. A role decides
+only what an opened stream means and whether the peer may push.
+<code>tests/conformance/http2/test_rules_both_roles.py</code> runs each shared rule on
+both roles.</p>
 <h2 id="connection-setup">Connection setup<a class="headerlink" href="#connection-setup" title="Permanent link">&para;</a></h2>
 <p>Bindings select ALPN or prior-knowledge h2c. Keep preface reads and initial
 SETTINGS in the HTTP/2 binding/actor boundary; connection detection must not
@@ -5820,8 +5821,9 @@ CONTINUATION requirement.</p>
 An undecoded or corrupt block affects connection-wide decoder state; it cannot
 be handled by resetting only its stream. Keep other frame types off the
 connection while a field block is open.</p>
-<p><code>HTTP2Actor</code> bounds accumulated CONTINUATION bytes with <code>BB_HEADER_MAX_TOTAL</code>
-and an unfinished block with <code>BB_HEADER_TIMEOUT</code>; both send GOAWAY
+<p>Accumulated CONTINUATION bytes are bounded by <code>BB_HEADER_MAX_TOTAL</code>
+(client: <code>BB_CLIENT_HEAD_MAX_TOTAL</code>) and an unfinished block by
+<code>BB_HEADER_TIMEOUT</code> (client: <code>BB_CLIENT_HEAD_TIMEOUT</code>); both send GOAWAY
 <code>ENHANCE_YOUR_CALM</code>. Only one block can be open per connection. The shared
 decoder separately bounds decompressed fields; decode failures, including
 that limit, end the connection with <code>COMPRESSION_ERROR</code>. Otherwise valid
@@ -5831,7 +5833,7 @@ refusals.</p>
 stream ownership. Mutating the encoder for a block never sent makes later
 sibling blocks undecodable.</p>
 <p>Read <code>blackbull/protocol/frame.py</code>, <code>frame_types.py</code> and
-<code>blackbull/server/http2_actor.py</code>.</p>
+<code>blackbull/server/http2_connection.py</code>.</p>
 <h2 id="flow-control">Flow control<a class="headerlink" href="#flow-control" title="Permanent link">&para;</a></h2>
 <p>Debit both stream and connection send credit before the first suspension.
 Drain completion is not a credit grant; cancellation must not refund bytes
@@ -5862,7 +5864,12 @@ retire output owners and pending credit work before closing.</p>
 control frames. A frame whose length or padding breaks its type's layout
 raises <code>FrameFormatError</code> with the RFC's code, and the frame loop answers it
 with GOAWAY: every such case, HEADERS padding included, is a connection error.
-Unknown frame types are ignored only outside an open field block. Read <code>HTTP2Actor</code> and control responders in <code>blackbull/server/response.py</code>.</p>
+Unknown frame types are ignored only outside an open field block.</p>
+<p>A frame on a stream this endpoint reset is ignored (§5.1): DATA still
+returns its connection credit and a field block is still decoded. On a
+stream the peer reset or that ended, HEADERS is a connection
+<code>STREAM_CLOSED</code> error and other frames are answered with RST_STREAM
+<code>STREAM_CLOSED</code>, except WINDOW_UPDATE after an ordinary end.</p>
 <h2 id="message-validation">Message validation<a class="headerlink" href="#message-validation" title="Permanent link">&para;</a></h2>
 <p>Use the same HTTP field grammar across transports. HTTP/2 additionally
 refuses uppercase names and leading/trailing field whitespace. Validate

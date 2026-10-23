@@ -16,7 +16,7 @@
         <link rel="prev" href="../http1_actor/">
       
       
-        <link rel="next" href="../http2_ws/">
+        <link rel="next" href="../http2_connection/">
       
       
         
@@ -1879,34 +1879,6 @@
     
   
     http2
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../client/response/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
   
 
     
@@ -4442,6 +4414,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.http2_actor.HTTP2Actor.on_priority_update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_priority_update
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.http2_actor.HTTP2Actor.receive" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4499,6 +4482,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../http2_connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -4799,34 +4810,6 @@
     
   
     request_target
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../response/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
   
 
     
@@ -5729,6 +5712,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.http2_actor.HTTP2Actor.on_priority_update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        on_priority_update
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.http2_actor.HTTP2Actor.receive" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5853,7 +5847,7 @@ StreamActor owns the lifetime of a single HTTP/2 stream.</p>
 
     <div class="doc doc-contents ">
             <p class="doc doc-class-bases">
-              Bases: <code><a class="autorefs autorefs-internal" title="Actor (blackbull.actor.Actor)" href="../../actor/#blackbull.actor.Actor">Actor</a></code></p>
+              Bases: <code><a class="autorefs autorefs-internal" title="Actor (blackbull.actor.Actor)" href="../../actor/#blackbull.actor.Actor">Actor</a></code>, <code><a class="autorefs autorefs-internal" title="HTTP2Connection (blackbull.server.http2_connection.HTTP2Connection)" href="../http2_connection/#blackbull.server.http2_connection.HTTP2Connection">HTTP2Connection</a></code></p>
 
 
 
@@ -5883,6 +5877,24 @@ surfacing to the caller.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.http2_actor.HTTP2Actor.on_priority_update" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">on_priority_update</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.http2_actor.HTTP2Actor.on_priority_update" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>RFC 9218 §7.1: record a stream's priority hint; nothing schedules on it.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 

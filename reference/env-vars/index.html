@@ -2129,34 +2129,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/response/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/client/scenario/" class="md-nav__link">
         
   
@@ -4614,6 +4586,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/http2_connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    http2_connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/http2_ws/" class="md-nav__link">
         
   
@@ -4902,34 +4902,6 @@
     
   
     request_target
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/blackbull/server/response/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    response
   
 
     
@@ -6196,7 +6168,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_HEADER_MAX_TOTAL</code></td>
 <td><code>65536</code></td>
-<td>Maximum bytes in the HTTP/1.1 request-line and header block. A request-line budget breach yields <code>400</code>; header-field overflow yields <code>431</code>.</td>
+<td>Maximum bytes in the HTTP/1.1 request-line and header block. A request-line budget breach yields <code>400</code>; header-field overflow yields <code>431</code>. Also caps an HTTP/2 encoded field block (GOAWAY ENHANCE_YOUR_CALM).</td>
 </tr>
 <tr>
 <td><code>BB_BODY_CHUNK_SIZE</code></td>
@@ -6254,7 +6226,7 @@ For failure types and buffered/streaming tradeoffs, see <a href="../../guide/cli
 <tr>
 <td><code>BB_CLIENT_HEAD_MAX_TOTAL</code></td>
 <td><code>65536</code></td>
-<td>HTTP/1.1 response-head bytes including status line and terminator; excess raises <code>ResponseTooLarge</code>. HTTP/2 separately caps encoded field-block accumulation (connection COMPRESSION_ERROR) and decoded fields across informational, final and trailer sections on one stream (stream refusal). Per-section decoded HPACK accounting is <code>BB_CLIENT_H2_MAX_HEADER_LIST_SIZE</code>. <code>0</code> disables.</td>
+<td>HTTP/1.1 response-head bytes including status line and terminator; excess raises <code>ResponseTooLarge</code>. HTTP/2 separately caps encoded field-block accumulation (GOAWAY ENHANCE_YOUR_CALM) and decoded fields across informational, final and trailer sections on one stream (stream refusal). Per-section decoded HPACK accounting is <code>BB_CLIENT_H2_MAX_HEADER_LIST_SIZE</code>. <code>0</code> disables.</td>
 </tr>
 <tr>
 <td><code>BB_CLIENT_HEAD_MAX_LINE</code></td>
