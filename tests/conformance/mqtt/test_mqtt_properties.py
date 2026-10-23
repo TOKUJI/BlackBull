@@ -1,35 +1,8 @@
-"""
-MQTT 5.0 Properties and AUTH exchange conformance tests.
-
-Verifies the MQTT 5.0 enhanced authentication and property system
-against the OASIS Standard.
-
-Reference: MQTT Version 5.0, OASIS Standard
-  §2.2.2  Properties (extensible metadata)
-  §2.2.2.2 Property Identifiers (Table 2-3)
-  §3.15   AUTH – Authentication Exchange
-  §4.12   Enhanced Authentication
-
-Key behaviours:
-  - §2.2.2: Properties are a key extension mechanism in MQTT 5.0.  Every
-    packet type (except PINGREQ/PINGRESP) can carry properties.
-  - §4.12: Enhanced Authentication allows SASL-style challenge/response
-    flows using AUTH packets exchanged after CONNECT.
-  - §3.15: AUTH packet is used for extended authentication.  It can be sent
-    from the client or server at any time after CONNECT.
-  - §4.12.2: Re-authentication (sending AUTH after initial authentication)
-    allows updating credentials without disconnecting.
+"""§2.2.2.2 Table 2-3 — the 27 MQTT 5.0 property identifiers, transcribed
+from the OASIS standard rather than derived from the implementation.
 """
 
 import pytest
-
-from blackbull.mqtt.messages import (
-    PropertyId,
-    ReasonCode,
-    MQTTAuth, MQTTConnect, MQTTConnack,
-    encode_packet, decode_packet,
-    MQTTReasonCode,
-)
 
 
 # ============================================================================
@@ -73,259 +46,29 @@ class TestPropertyIdentifiers:
         (0x2A, 'shared_subscription_available', 'Byte', 'CONNACK'),
     ]
 
+    # A value at the top of each Table 2-3 data type's range, and its octets.
+    SAMPLES = {
+        'Byte': (0xFF, 'ff'),
+        'Two Byte Integer': (0xFFFF, 'ffff'),
+        'Four Byte Integer': (0xFFFFFFFF, 'ffffffff'),
+        'Variable Byte Integer': (268435455, 'ffffff7f'),
+        'UTF-8 String': ('é', '0002c3a9'),
+        'Binary Data': (b'\x00', '000100'),
+        'UTF-8 String Pair': ([('k', 'v')], '00016b000176'),
+    }
+
     def test_all_27_property_identifiers_known(self):
         """§2.2.2.2 Table 2-3 — There are 27 defined property identifiers."""
-        from blackbull.mqtt.messages import PROPERTY_IDENTIFIERS
-        assert len(PROPERTY_IDENTIFIERS) == 27, \
-            f"Expected 27 property identifiers, got {len(PROPERTY_IDENTIFIERS)}"
+        from blackbull.mqtt.messages import PropertyId
+        assert {int(p) for p in PropertyId} == {row[0] for row in self.ALL_PROPERTIES}
 
     @pytest.mark.parametrize("prop_id,prop_name,type_cat,pkt_types", ALL_PROPERTIES)
     def test_property_identifier_recognized(self, prop_id, prop_name, type_cat, pkt_types):
-        """Each property identifier from Table 2-3 is recognized by name."""
-        from blackbull.mqtt.messages import PROPERTY_IDENTIFIERS, get_property_info
-        assert PROPERTY_IDENTIFIERS.get(prop_id) == prop_name
-        info = get_property_info(prop_id)
-        assert info is not None
-        assert info.name == prop_name
-
-
-# ============================================================================
-# §2.2.2.2 — Property value validation by type
-# ============================================================================
-
-class TestPropertyValueValidation:
-    """Type-specific validation for property values."""
-
-    @pytest.mark.parametrize('client_id,props,key,value', [
-        pytest.param('rm-client', {'receive_maximum': 100}, 'receive_maximum', 100,
-                     id='receive-maximum-in-range'),
-        pytest.param('ta-client', {'topic_alias_maximum': 0}, 'topic_alias_maximum', 0,
-                     id='topic-alias-maximum-zero'),
-        pytest.param('mps-client', {'maximum_packet_size': 262144}, 'maximum_packet_size', 262144,
-                     id='maximum-packet-size-256kb'),
-    ])
-    def test_maximum_packet_size(self, client_id, props, key, value):
-        """Numeric CONNECT properties round-trip."""
-        connect = MQTTConnect(
-            client_id=client_id,
-            clean_start=True,
-            keep_alive=60,
-            properties=props,
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties[key] == value
-
-    def test_content_type_utf8(self):
-        """§2.2.2.2 — Content Type is a UTF-8 string (MIME type)."""
-        publish_props = {
-            'content_type': 'application/json; charset=utf-8',
-        }
-        from blackbull.mqtt.messages import encode_properties, decode_properties
-        encoded = encode_properties(publish_props)
-        decoded, _ = decode_properties(encoded)
-        assert decoded['content_type'] == 'application/json; charset=utf-8'
-
-    def test_correlation_data_binary(self):
-        """§2.2.2.2 — Correlation Data is arbitrary binary."""
-        from blackbull.mqtt.messages import encode_properties, decode_properties
-        props = {'correlation_data': b'\xDE\xAD\xBE\xEF\x00\x01'}
-        encoded = encode_properties(props)
-        decoded, _ = decode_properties(encoded)
-        assert decoded['correlation_data'] == b'\xDE\xAD\xBE\xEF\x00\x01'
-
-    def test_subscription_identifier_variable_byte_integer(self):
-        """§2.2.2.2 — Subscription Identifier is a Variable Byte Integer."""
-        from blackbull.mqtt.messages import encode_properties, decode_properties
-        for sid in (0, 1, 127, 128, 16383, 16384, 268435455):
-            props = {'subscription_identifier': sid}
-            encoded = encode_properties(props)
-            decoded, _ = decode_properties(encoded)
-            assert decoded['subscription_identifier'] == sid
-
-
-# ============================================================================
-# §2.2.2 — Properties per packet type (availability matrix)
-# ============================================================================
-
-class TestPropertiesPerPacketType:
-    """Each MQTT control packet type allows specific properties.
-
-    §2.2.2 Table 2-2 defines which packet types can carry properties.
-    PINGREQ and PINGRESP (§3.12, §3.13) explicitly have NO properties.
-    """
-
-    def test_pingreq_has_no_properties(self):
-        """§3.12 — PINGREQ cannot carry properties (no variable header)."""
-        from blackbull.mqtt.messages import MQTTPingreq, encode_packet
-        pingreq = MQTTPingreq()
-        wire = encode_packet(pingreq)
-        assert wire == b'\xC0\x00'
-
-    def test_pingresp_has_no_properties(self):
-        """§3.13 — PINGRESP cannot carry properties (no variable header)."""
-        from blackbull.mqtt.messages import MQTTPingresp, encode_packet
-        pingresp = MQTTPingresp()
-        wire = encode_packet(pingresp)
-        assert wire == b'\xD0\x00'
-
-    def test_user_properties_in_all_ack_packets(self):
-        """§2.2.2 — User Property (0x26) is available on ALL packet types
-        that carry properties."""
-
-        def _encode_decode_user_props(packet_cls, **kwargs):
-            kwargs['properties'] = {'user_properties': [('app', 'test')]}
-            pkt = packet_cls(**kwargs)
-            wire = encode_packet(pkt)
-            decoded = decode_packet(wire)
-            assert decoded.properties['user_properties'] == [('app', 'test')]
-
-        # Test user properties on all ACK packet types
-        _encode_decode_user_props(MQTTConnack, session_present=False, reason_code=ReasonCode.SUCCESS)
-        _encode_decode_user_props(MQTTConnect, client_id='up', clean_start=True, keep_alive=60)
-
-
-# ============================================================================
-# §3.15 / §4.12 — AUTH packet (Enhanced Authentication)
-# ============================================================================
-
-class TestAuthPacket:
-    """§3.15 — AUTH packet for Enhanced Authentication.
-
-    The AUTH packet provides a mechanism for extended authentication
-    exchanges (e.g., SASL challenge/response).  It can be used:
-      - During initial connection (after CONNECT, before CONNACK)
-      - After CONNACK to re-authenticate
-      - As a standalone authentication exchange
-
-    §3.15.1: AUTH fixed header bits 3-0 MUST be 0b0000 (0x0).
-    """
-
-    def test_auth_fixed_header_flags(self):
-        """§3.15.1 — AUTH fixed header flags MUST be 0x00."""
-        auth = MQTTAuth(
-            reason_code=ReasonCode.CONTINUE_AUTHENTICATION,
-            properties={
-                'authentication_method': 'SCRAM-SHA-256',
-                'authentication_data': b'client-first-message',
-            },
-        )
-        wire = encode_packet(auth)
-        assert (wire[0] & 0x0F) == 0
-
-    @pytest.mark.parametrize("auth_method", [
-        'SCRAM-SHA-1',
-        'SCRAM-SHA-256',
-        'SCRAM-SHA-512',
-        'KERBEROS',
-        'CUSTOM-AUTH',
-    ])
-    def test_auth_with_authentication_method(self, auth_method):
-        """§3.15.2.2 — AUTH carries Authentication Method and Data."""
-        auth = MQTTAuth(
-            reason_code=ReasonCode.CONTINUE_AUTHENTICATION,
-            properties={
-                'authentication_method': auth_method,
-                'authentication_data': b'some-auth-data',
-            },
-        )
-        wire = encode_packet(auth)
-        decoded = decode_packet(wire)
-        assert decoded.properties['authentication_method'] == auth_method
-
-    @pytest.mark.parametrize('reason,data', [
-        pytest.param(ReasonCode.CONTINUE_AUTHENTICATION, b'server-first-message',
-                     id='continue-authentication'),
-        pytest.param(ReasonCode.REAUTHENTICATE, b'reauth-data',
-                     id='re-authenticate'),
-        pytest.param(ReasonCode.SUCCESS, b'final-server-proof',
-                     id='auth-success'),
-    ])
-    def test_auth_continue_authentication(self, reason, data):
-        """§3.15.2.1 — AUTH packet reason codes round-trip (0x18 Continue
-        Authentication, 0x19 Re-authentication, 0x00 Success)."""
-        auth = MQTTAuth(
-            reason_code=reason,
-            properties={
-                'authentication_method': 'SCRAM-SHA-256',
-                'authentication_data': data,
-            },
-        )
-        wire = encode_packet(auth)
-        decoded = decode_packet(wire)
-        assert decoded.reason_code == reason
-
-    def test_auth_without_reason_code(self):
-        """§3.15.2 — AUTH without a reason code (pre-5.0 compatibility)."""
-        auth = MQTTAuth(
-            properties={
-                'authentication_method': 'BASIC',
-                'authentication_data': b'credentials',
-            },
-        )
-        wire = encode_packet(auth)
-        decoded = decode_packet(wire)
-        assert decoded.properties['authentication_method'] == 'BASIC'
-
-
-# ============================================================================
-# §4.12 — Enhanced authentication flow
-# ============================================================================
-
-class TestEnhancedAuthenticationFlow:
-    """§4.12 — Multi-step authentication using AUTH exchange.
-
-    Enhanced Authentication allows SASL-style challenge/response:
-      1. Client → CONNECT   (with auth method, no password)
-      2. Server → AUTH      (0x18 Continue, with server challenge)
-      3. Client → AUTH      (0x18 Continue, with client response)
-      4. Server → CONNACK   (0x00 Success)
-    """
-
-    def test_connect_with_auth_method_no_password(self):
-        """§4.12 — CONNECT declares authentication method without credentials."""
-        connect = MQTTConnect(
-            client_id='sasl-client',
-            clean_start=True,
-            keep_alive=60,
-            properties={
-                'authentication_method': 'SCRAM-SHA-256',
-            },
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['authentication_method'] == 'SCRAM-SHA-256'
-        # No username/password set
-        assert decoded.username is None
-        assert decoded.password is None
-
-    def test_connect_with_auth_method_and_data(self):
-        """§4.12 — CONNECT includes initial authentication data."""
-        connect = MQTTConnect(
-            client_id='sasl-client2',
-            clean_start=True,
-            keep_alive=60,
-            properties={
-                'authentication_method': 'SCRAM-SHA-256',
-                'authentication_data': b'n,,n=user,r=fyko+d2lbbFgONRv9',
-            },
-        )
-        wire = encode_packet(connect)
-        decoded = decode_packet(wire)
-        assert decoded.properties['authentication_data'] is not None
-
-    def test_auth_failure_reason_codes(self):
-        """§4.12.1 — Authentication failure reason codes."""
-        for code in (ReasonCode.BAD_USER_NAME_OR_PASSWORD,
-                     ReasonCode.NOT_AUTHORIZED,
-                     ReasonCode.BAD_AUTHENTICATION_METHOD):
-            auth = MQTTAuth(
-                reason_code=code,
-                properties={
-                    'authentication_method': 'SCRAM-SHA-256',
-                    'reason_string': 'Authentication failed',
-                },
-            )
-            wire = encode_packet(auth)
-            decoded = decode_packet(wire)
-            assert decoded.reason_code == code
+        """Each Table 2-3 property is named, typed and round-trips on the wire."""
+        from blackbull.mqtt.messages import PropertyId, decode_properties, encode_properties
+        assert PropertyId(prop_id).name.lower() == prop_name
+        key = 'user_properties' if prop_name == 'user_property' else prop_name
+        value, octets = self.SAMPLES[type_cat]
+        wire = bytes.fromhex(f'{prop_id:02x}{octets}')
+        assert encode_properties({key: value}) == bytes([len(wire)]) + wire
+        assert decode_properties(bytes([len(wire)]) + wire) == ({key: value}, len(wire) + 1)

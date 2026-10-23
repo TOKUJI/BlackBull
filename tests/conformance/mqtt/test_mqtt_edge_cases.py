@@ -460,6 +460,6 @@ class TestReservedPacketTypes:
 
     def test_packet_type_0_is_forbidden(self, mqtt):
         """§2.1.1 — Control Packet Type 0 is reserved."""
-        from blackbull.mqtt.messages import extract_packet_type
+        from blackbull.mqtt.messages import decode_packet
         with pytest.raises(ValueError, match='[Rr]eserved|[Ff]orbidden|[Uu]nknown'):
-            extract_packet_type(0x00)
+            decode_packet(bytes([0x00, 0x00]))

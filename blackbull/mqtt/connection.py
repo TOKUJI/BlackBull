@@ -23,7 +23,7 @@ from .messages import (
     MQTTConnect, MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
     MQTTSubscribe, MQTTUnsubscribe, MQTTPingreq,
     MQTTDisconnect, MQTTAuth, MQTTMessage,
-    IncompletePacket, MQTTDecodeError, ReasonCode, _read_vbi_at,
+    IncompletePacket, MQTTDecodeError, ReasonCode, decode_variable_byte_integer,
     decode_packet,
 )
 from ..server.cap_log import log_cap_hit
@@ -85,7 +85,7 @@ class PacketFramer:
         if not buffer[0] >> 4:
             return
         try:
-            remaining_length, after = _read_vbi_at(buffer, 1, min(len(buffer), 5))
+            remaining_length, after = decode_variable_byte_integer(buffer, 1, min(len(buffer), 5))
         except (IncompletePacket, MQTTDecodeError, ValueError):
             return
         declared = after + remaining_length

@@ -96,6 +96,10 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Removed
 
+- From `blackbull.mqtt.messages`: `extract_packet_type`, `extract_flags`,
+  `PublishFlags`, `decode_publish_flags`, `PROPERTY_IDENTIFIERS`,
+  `PropertyInfo`, `get_property_info` and `decode_properties`'s `offset`.
+  `decode_packet` reads the fixed header; `PropertyId` names each property.
 - `blackbull.client.ResponderFactory` and `blackbull.server.response`. One
   HTTP/2 core, `blackbull.server.http2_connection.HTTP2Connection`, answers
   control frames for the server and the client.

@@ -22,8 +22,7 @@ ALLOWED = {
     ('tests/conformance/mqtt/test_mqtt_edge_cases.py',
      'test_packet_type_0_is_forbidden'):
         'Table 2-1 に無い予約値のプローブは名前が存在しない',
-    ('tests/conformance/mqtt/test_mqtt_packet_structure.py',
-     'TestReasonCodes'):
+    ('tests/unit/test_mqtt_messages.py', 'TestReasonCodes'):
         '§2.4 の独立転記 — 実装の値から導かない仕様検証',
     ('tests/conformance/mqtt/test_mqtt_properties.py',
      'TestPropertyIdentifiers'):
