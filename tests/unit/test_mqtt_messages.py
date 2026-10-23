@@ -14,12 +14,8 @@ import pytest
 
 from blackbull.mqtt.messages import (
     # Control packet dataclasses
-    MQTTConnect, MQTTConnack,
-    MQTTPublish, MQTTPuback, MQTTPubrec, MQTTPubrel, MQTTPubcomp,
-    MQTTSubscribe, MQTTSuback,
-    MQTTUnsubscribe, MQTTUnsuback,
-    MQTTPingreq, MQTTPingresp,
-    MQTTDisconnect, MQTTAuth,
+    MQTTConnect, MQTTPublish, MQTTSuback,
+    MQTTPingreq, MQTTPingresp, MQTTDisconnect,
     # Enums
     MQTTPacketType, MQTTReasonCode, ProtocolLevel, ReasonCode,
     RESERVED_FLAGS_0010,
@@ -60,29 +56,89 @@ class TestPacketTypeEnum:
 # MQTTReasonCode enum
 # ============================================================================
 
-class TestReasonCodeEnum:
-    """MQTTReasonCode enum — all MQTT 5.0 reason codes."""
+class TestReasonCodes:
+    """MQTT 5.0 — Reason Codes (§3.x for each packet type).
 
-    def test_the_success_code_reports_success(self):
-        success = MQTTReasonCode(int(ReasonCode.SUCCESS))
-        assert success.name == 'Success'
-        assert success.is_success is True
-        assert success.is_error is False
+    MQTT 5.0 standardizes reason codes across all acknowledgment packets.
+    §3.2.2.2 (CONNACK), §3.4.2.1 (PUBACK), §3.5.2.1 (PUBREC),
+    §3.6.2.1 (PUBREL), §3.7.2.1 (PUBCOMP), §3.9.2.1 (SUBACK),
+    §3.11.2.1 (UNSUBACK), §3.14.2.1 (DISCONNECT), §3.15.2.1 (AUTH).
+    """
 
-    def test_the_error_codes_report_error(self):
+    # §2.4 の独立転記 — 実装の enum から導かず、数値と名前の対応を検証する。
+    # ReasonCode.SUCCESS の正準ラベルは 'Success' で、DISCONNECT では
+    # "Normal disconnection" とも読まれる。
+    TABLE_2_9 = [
+        (0x00, 'Success'),
+        (0x01, 'Granted QoS 1'),
+        (0x02, 'Granted QoS 2'),
+        (0x04, 'Disconnect with Will Message'),
+        (0x10, 'No matching subscribers'),  # PUBACK/PUBREC reason code
+        (0x11, 'No subscription existed'),  # UNSUBACK
+        (0x18, 'Continue authentication'),  # AUTH
+        (0x19, 'Re-authenticate'),          # AUTH
+        (0x80, 'Unspecified error'),
+        (0x81, 'Malformed Packet'),
+        (0x82, 'Protocol Error'),
+        (0x83, 'Implementation specific error'),
+        (0x84, 'Unsupported Protocol Version'),
+        (0x85, 'Client Identifier not valid'),
+        (0x86, 'Bad User Name or Password'),
+        (0x87, 'Not authorized'),
+        (0x88, 'Server unavailable'),
+        (0x89, 'Server busy'),
+        (0x8A, 'Banned'),
+        (0x8B, 'Server shutting down'),
+        (0x8C, 'Bad authentication method'),
+        (0x8D, 'Keep Alive timeout'),
+        (0x8E, 'Session taken over'),
+        (0x8F, 'Topic Filter invalid'),
+        (0x90, 'Topic Name invalid'),
+        (0x91, 'Packet Identifier in use'),
+        (0x92, 'Packet Identifier not found'),
+        (0x93, 'Receive Maximum exceeded'),
+        (0x94, 'Topic Alias invalid'),
+        (0x95, 'Packet too large'),
+        (0x96, 'Message rate too high'),
+        (0x97, 'Quota exceeded'),
+        (0x98, 'Administrative action'),
+        (0x99, 'Payload format invalid'),
+        (0x9A, 'Retain not supported'),
+        (0x9B, 'QoS not supported'),
+        (0x9C, 'Use another server'),
+        (0x9D, 'Server moved'),
+        (0x9E, 'Shared Subscriptions not supported'),
+        (0x9F, 'Connection rate exceeded'),
+        (0xA0, 'Maximum connect time'),
+        (0xA1, 'Subscription Identifiers not supported'),
+        (0xA2, 'Wildcard Subscriptions not supported'),
+    ]
+
+    @pytest.mark.parametrize("code,expected_name", TABLE_2_9)
+    def test_reason_code_recognized(self, code, expected_name):
+        """All MQTT 5.0 reason codes are recognized by name."""
+        rc = MQTTReasonCode(code)
+        assert rc.name == expected_name
+
+    def test_the_table_covers_the_whole_registry(self):
+        assert {code for code, _ in self.TABLE_2_9} == \
+            {int(rc) for rc in ReasonCode}
+
+    def test_a_code_below_unspecified_error_reports_success(self):
+        for code in (ReasonCode.SUCCESS, ReasonCode.GRANTED_QOS_1,
+                     ReasonCode.GRANTED_QOS_2, ReasonCode.DISCONNECT_WITH_WILL,
+                     ReasonCode.NO_MATCHING_SUBSCRIBERS,
+                     ReasonCode.NO_SUBSCRIPTION_EXISTED,
+                     ReasonCode.CONTINUE_AUTHENTICATION,
+                     ReasonCode.REAUTHENTICATE):
+            assert MQTTReasonCode(int(code)).is_success
+
+    def test_a_code_from_unspecified_error_up_reports_error(self):
         for code in (ReasonCode.UNSPECIFIED_ERROR, ReasonCode.MALFORMED_PACKET,
-                     ReasonCode.NOT_AUTHORIZED,
+                     ReasonCode.PROTOCOL_ERROR,
                      ReasonCode.TOPIC_FILTER_INVALID,
                      ReasonCode.PAYLOAD_FORMAT_INVALID):
-            reason = MQTTReasonCode(int(code))
-            assert reason.is_error is True
-            assert reason.is_success is False
-
-    def test_a_code_and_its_label_cannot_drift(self):
-        assert MQTTReasonCode(int(ReasonCode.TOPIC_FILTER_INVALID)).name \
-            == 'Topic Filter invalid'
-        assert MQTTReasonCode(int(ReasonCode.TOPIC_NAME_INVALID)).name \
-            == 'Topic Name invalid'
+            assert MQTTReasonCode(int(code)).is_error
 
     def test_unknown_reason_code_handled(self):
         """Undefined reason codes should not crash but return 'Unknown'."""

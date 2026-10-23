@@ -16,9 +16,6 @@ import pytest
      "name='limit', type=int, coercer=1, required=True, default=None"),
     ('blackbull.grpc.registry', 'GrpcMethod', ('handler', 'streaming', 'client_streaming'),
      'handler=str, streaming=False', 'handler=1, streaming=False'),
-    ('blackbull.mqtt.messages', 'PropertyInfo', ('identifier', 'name', 'wire_type'),
-     "identifier=PropertyId.CONTENT_TYPE, name='content_type', wire_type='utf8'",
-     "identifier='invalid', name='content_type', wire_type='utf8'"),
     ('blackbull.mqtt.extension', 'Subscription', ('topic', 'callback'),
      "topic='t', callback=str", "topic='t', callback=1"),
 ])
@@ -28,7 +25,6 @@ from beartype.claw import beartype_package
 from beartype.roar import BeartypeCallHintParamViolation
 beartype_package('blackbull')
 from {module} import {name} as Record
-from blackbull.mqtt.messages import PropertyId
 record = Record({arguments})
 assert Record.__module__ == {module!r}
 assert Record._fields == {fields!r}

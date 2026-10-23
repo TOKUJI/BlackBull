@@ -28,8 +28,13 @@ from blackbull.mqtt.messages import (
     IncompletePacket,
     MQTTDisconnect,
     MQTTPacketType,
+    MQTTPingreq,
+    MQTTPingresp,
     MQTTPuback,
     MQTTPublish,
+    MQTTPubcomp,
+    MQTTPubrec,
+    MQTTPubrel,
     MQTTSuback,
     MQTTSubscribe,
     MQTTUnsuback,
@@ -122,6 +127,10 @@ SHORTER_THAN_THE_TYPE_REQUIRES = [
     ('connack-flags-only', packet(MQTTPacketType.CONNACK, b'\x00')),
     ('connack-two-octets', packet(MQTTPacketType.CONNACK, b'\x01\x00')),
     ('connect-client-id-truncated', packet(MQTTPacketType.CONNECT, _CONNECT_BODY[:-1])),
+    ('connect-password-length-cut', packet(MQTTPacketType.CONNECT, (
+        b'\x00\x04MQTT\x05\xc0\x00\x3c' + _props() + _utf8(b'x') + _utf8(b'u') + b'\x00'))),
+    ('publish-topic-length-cut', packet(MQTTPacketType.PUBLISH, b'\x00')),
+    ('connack-property-length-cut', packet(MQTTPacketType.CONNACK, b'\x00\x00\x80')),
 ]
 
 ZERO_PACKET_IDENTIFIER = [
@@ -187,108 +196,6 @@ def test_ping_carries_no_body(label, wire):
     """§3.12, §3.13 — PINGREQ and PINGRESP have no payload."""
     with pytest.raises(MQTTDecodeError):
         decode_packet(wire)
-
-
-# ---------------------------------------------------------------------------
-# The legal forms the same rules must keep accepting
-# ---------------------------------------------------------------------------
-
-def test_a_shortened_ack_still_decodes():
-    """§3.4.2.1 — Remaining Length 2 omits the reason code and properties."""
-    message, consumed = decode_packet(packet(MQTTPacketType.PUBACK, b'\x00\x07'))
-    assert message == MQTTPuback(packet_id=7, reason_code=ReasonCode.SUCCESS, properties={})
-    assert consumed == 4
-
-
-def test_a_reason_only_ack_still_decodes():
-    """Remaining Length 3 carries a reason code and no properties."""
-    message, _ = decode_packet(packet(MQTTPacketType.PUBACK, b'\x00\x07\x10'))
-    assert message == MQTTPuback(packet_id=7, reason_code=ReasonCode.NO_MATCHING_SUBSCRIBERS, properties={})
-
-
-def test_an_ack_with_properties_still_decodes():
-    message, _ = decode_packet(packet(
-        MQTTPacketType.PUBACK,
-        _ack_body(packet_id=7, reason=ReasonCode.SUCCESS, props=b'\x1f\x00\x00')))
-    assert message == MQTTPuback(packet_id=7, reason_code=ReasonCode.SUCCESS,
-                                 properties={'reason_string': ''})
-
-
-def test_a_packet_identifier_of_one_is_legal():
-    message, _ = decode_packet(packet(MQTTPacketType.PUBACK, b'\x00\x01'))
-    assert message.packet_id == 1
-
-
-def test_empty_and_reason_only_disconnect_and_auth_still_decode():
-    assert decode_packet(packet(MQTTPacketType.DISCONNECT))[0] == MQTTDisconnect()
-    assert decode_packet(packet(MQTTPacketType.DISCONNECT, b'\x00'))[0] == \
-        MQTTDisconnect(reason_code=ReasonCode.SUCCESS)
-    assert decode_packet(packet(MQTTPacketType.AUTH))[0] == MQTTAuth()
-    assert decode_packet(packet(MQTTPacketType.AUTH, b'\x18'))[0] == \
-        MQTTAuth(reason_code=ReasonCode.CONTINUE_AUTHENTICATION)
-
-
-def test_a_connack_with_an_empty_properties_block_still_decodes():
-    """§3.2.2 — MQTT 5 CONNACK ends with a Property Length, minimum 3 octets."""
-    assert decode_packet(packet(MQTTPacketType.CONNACK, b'\x01\x00\x00'))[0] == \
-        MQTTConnack(session_present=True, reason_code=ReasonCode.SUCCESS, properties={})
-
-
-def test_legal_payloads_still_decode():
-    subscribe = packet(MQTTPacketType.SUBSCRIBE,
-                       _ack_body(props=b'') + _ONE_FILTER,
-                       flags=RESERVED_FLAGS_0010)
-    assert decode_packet(subscribe)[0] == MQTTSubscribe(
-        packet_id=1, subscriptions=[('a/b', 0)], properties={},
-        subscription_options=[{'qos': 0, 'no_local': False,
-                               'retain_as_published': False,
-                               'retain_handling': 0}])
-    unsubscribe = packet(MQTTPacketType.UNSUBSCRIBE,
-                         _ack_body(props=b'') + _utf8(b'a/b'),
-                         flags=RESERVED_FLAGS_0010)
-    assert decode_packet(unsubscribe)[0] == MQTTUnsubscribe(
-        packet_id=1, topics=['a/b'], properties={})
-    suback = packet(MQTTPacketType.SUBACK, _ack_body(props=b'') + b'\x01')
-    assert decode_packet(suback)[0] == MQTTSuback(
-        packet_id=1, reason_codes=[ReasonCode.GRANTED_QOS_1], properties={})
-    unsuback = packet(MQTTPacketType.UNSUBACK, _ack_body(props=b'') + b'\x00')
-    assert decode_packet(unsuback)[0] == MQTTUnsuback(
-        packet_id=1, reason_codes=[ReasonCode.SUCCESS], properties={})
-    publish = packet(MQTTPacketType.PUBLISH,
-                     _publish_body(topic=b'a/b', packet_id=9, payload=b'body'),
-                     flags=0x2)
-    assert decode_packet(publish)[0] == MQTTPublish(
-        topic='a/b', payload=b'body', qos=1, packet_id=9)
-    assert decode_packet(packet(MQTTPacketType.CONNECT, _CONNECT_BODY))[0] == \
-        MQTTConnect(client_id='x', clean_start=True, keep_alive=60,
-                    proto_level=5)
-
-
-def test_a_pre_v5_connect_carries_no_properties_block():
-    """§3.1.2.11 — the Properties block exists from MQTT 5 on."""
-    message = MQTTConnect(client_id='x', clean_start=True, keep_alive=60,
-                          proto_level=4)
-    assert decode_packet(encode_packet(message))[0] == message
-
-
-def test_a_pre_v5_connect_carries_no_will_properties():
-    """§3.1.3.2 — and neither does the Will's."""
-    message = MQTTConnect(client_id='x', clean_start=True, keep_alive=60,
-                          proto_level=4, will_topic='w', will_payload=b'p')
-    assert decode_packet(encode_packet(message))[0] == message
-
-
-def test_a_legal_message_round_trips():
-    messages = [
-        MQTTConnect(client_id='x', clean_start=True, keep_alive=60),
-        MQTTPuback(packet_id=3),
-        MQTTSuback(packet_id=3, reason_codes=[ReasonCode.SUCCESS, ReasonCode.GRANTED_QOS_1]),
-        MQTTUnsuback(packet_id=3, reason_codes=[ReasonCode.SUCCESS]),
-        MQTTPublish(topic='a/b', payload=b'x', qos=1, packet_id=4),
-        MQTTDisconnect(reason_code=ReasonCode.SESSION_TAKEN_OVER),
-    ]
-    for message in messages:
-        assert decode_packet(encode_packet(message))[0] == message
 
 
 def test_a_malformed_packet_never_reaches_the_framer():
@@ -359,3 +266,99 @@ def test_non_minimal_variable_byte_integer_encodings_are_accepted():
         packet(MQTTPacketType.PUBLISH, _publish_body(props=b'\x0b\x81\x00')))
     assert message.properties == {'subscription_identifier': 1}
     assert consumed == 9
+
+
+def _subscription(qos: int, *, no_local: bool = False) -> dict:
+    return {'qos': qos, 'no_local': no_local, 'retain_as_published': False,
+            'retain_handling': 0}
+
+
+# Each packet type's canonical wire form, written out from §3 by hand.
+WIRE = [
+    ('connect', MQTTConnect(client_id='x', clean_start=True, keep_alive=60),
+     '100e00044d5154540502003c00000178'),
+    ('connect-will-username-password', MQTTConnect(
+        client_id='c', clean_start=True, keep_alive=10, username='u', password=b'p',
+        will_topic='w', will_payload=b'!', will_qos=1, will_retain=True),
+     '101b00044d51545405ee000a0000016300000177000121000175000170'),
+    ('connect-keep-alive-max-with-properties', MQTTConnect(
+        client_id='x', clean_start=True, keep_alive=65535,
+        properties={'session_expiry_interval': 30}),
+     '101300044d5154540502ffff05110000001e000178'),
+    ('connect-level-4-will', MQTTConnect(
+        client_id='x', clean_start=True, keep_alive=60, proto_level=4, will_topic='w',
+        will_payload=b'p'), '101300044d5154540406003c000178000177000170'),
+    ('connect-level-4-username-only', MQTTConnect(
+        client_id='', clean_start=False, keep_alive=0, proto_level=4, username='u'),
+     '100f00044d515454048000000000000175'),
+    ('connack', MQTTConnack(session_present=True), '2003010000'),
+    ('publish-qos0', MQTTPublish(topic='a/b', payload=b'x'), '30070003612f620078'),
+    ('publish-qos1-dup-retain', MQTTPublish(topic='a', payload=b'', qos=1, packet_id=10,
+                                            dup=True, retain=True), '3b06000161000a00'),
+    ('publish-property', MQTTPublish(topic='t', payload=b'p',
+                                     properties={'message_expiry_interval': 60}),
+     '300a00017405020000003c70'),
+    ('puback', MQTTPuback(packet_id=7), '400400070000'),
+    ('puback-reason-user-property', MQTTPuback(
+        packet_id=1, reason_code=ReasonCode.NO_MATCHING_SUBSCRIBERS,
+        properties={'user_properties': [('k', 'v')]}), '400b000110072600016b000176'),
+    ('pubrec', MQTTPubrec(packet_id=7), '500400070000'),
+    ('pubrel', MQTTPubrel(packet_id=7), '620400070000'),
+    ('pubcomp', MQTTPubcomp(packet_id=7), '700400070000'),
+    ('subscribe', MQTTSubscribe(packet_id=1, subscriptions=[('a/b', 1)],
+                                subscription_options=[_subscription(1, no_local=True)]),
+     '82090001000003612f6205'),
+    ('suback', MQTTSuback(packet_id=1, reason_codes=[ReasonCode.GRANTED_QOS_1,
+                                                     ReasonCode.UNSPECIFIED_ERROR]),
+     '90050001000180'),
+    ('unsubscribe', MQTTUnsubscribe(packet_id=2, topics=['a']), 'a206000200000161'),
+    ('unsuback', MQTTUnsuback(packet_id=2, reason_codes=[ReasonCode.SUCCESS]), 'b00400020000'),
+    ('pingreq', MQTTPingreq(), 'c000'),
+    ('pingresp', MQTTPingresp(), 'd000'),
+    ('disconnect', MQTTDisconnect(), 'e000'),
+    ('disconnect-with-will', MQTTDisconnect(reason_code=ReasonCode.DISCONNECT_WITH_WILL),
+     'e0020400'),
+    ('auth', MQTTAuth(), 'f000'),
+    ('publish-256-octet-topic-and-binary', MQTTPublish(
+        topic='t' * 256, payload=b'', properties={'correlation_data': b'c' * 256}),
+     '308704' + '0100' + '74' * 256 + '8302' + '09' + '0100' + '63' * 256),
+    ('auth-continue', MQTTAuth(reason_code=ReasonCode.CONTINUE_AUTHENTICATION, properties={
+        'authentication_method': 'm', 'authentication_data': b'd'}), 'f00a18081500016d16000164'),
+]
+
+
+# Shorter legal forms the encoder never writes (§3.4.2.1, §3.14.2.1, §3.15.2.1).
+DECODES_AS = [
+    ('puback-identifier-only', '40020007', MQTTPuback(packet_id=7)),
+    ('puback-reason-only', '4003000710',
+     MQTTPuback(packet_id=7, reason_code=ReasonCode.NO_MATCHING_SUBSCRIBERS)),
+    ('disconnect-reason-only', 'e00100', MQTTDisconnect(reason_code=ReasonCode.SUCCESS)),
+    ('auth-reason-only', 'f00118', MQTTAuth(reason_code=ReasonCode.CONTINUE_AUTHENTICATION)),
+]
+
+
+@pytest.mark.parametrize('label,message,wire', WIRE, ids=[row[0] for row in WIRE])
+def test_each_packet_type_has_one_wire_form(label, message, wire):
+    wire = bytes.fromhex(wire)
+    assert encode_packet(message) == wire
+    assert decode_packet(wire) == message
+    assert decode_packet(wire)[1] == len(wire)
+
+
+def test_a_subscription_option_left_out_is_written_as_zero():
+    assert encode_packet(MQTTSubscribe(
+        packet_id=1, subscriptions=[('a/b', 1)], subscription_options=[{'no_local': True}],
+    )).hex() == '82090001000003612f6205'
+
+
+@pytest.mark.parametrize('value', [-1, 268_435_456])
+def test_a_variable_byte_integer_out_of_range_is_refused(value):
+    """§1.5.5 — four octets carry at most 268,435,455."""
+    with pytest.raises(MQTTDecodeError):
+        encode_variable_byte_integer(value)
+    assert encode_variable_byte_integer(268_435_455) == b'\xff\xff\xff\x7f'
+
+
+@pytest.mark.parametrize('label,wire,message', DECODES_AS, ids=[row[0] for row in DECODES_AS])
+def test_a_shorter_legal_form_still_decodes(label, wire, message):
+    assert decode_packet(bytes.fromhex(wire)) == message

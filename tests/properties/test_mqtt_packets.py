@@ -20,7 +20,6 @@ from blackbull.mqtt.messages import (
     decode_packet,
     MQTTPublish, MQTTConnect, MQTTSuback,
     MQTTReasonCode,
-    extract_packet_type, extract_flags,
 )
 
 
@@ -128,8 +127,8 @@ def test_fixed_header_type_and_flags(topic, qos, data):
                           packet_id=1 if qos > 0 else None)
     wire = encode_packet(publish)
     assert len(wire) >= 2, "Every MQTT packet has at least 2 bytes (fixed header)"
-    ptype = extract_packet_type(wire[0])
-    flags = extract_flags(wire[0])
+    ptype = wire[0] >> 4
+    flags = wire[0] & 0x0F
     assert ptype == 3  # PUBLISH type
     assert (flags >> 1) & 0x3 == qos  # QoS occupies bits 2-1
 

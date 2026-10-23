@@ -210,6 +210,9 @@ class TestSharedSubscriptions:
         and §4.7.2 — '$'-prefixed topics match literal subscriptions."""
         assert topic_matches_filter(topic, filter_str) is True
 
+    def test_a_share_without_a_filter_matches_nothing(self):
+        assert topic_matches_filter('$share/g', '$share/g') is False
+
     def test_shared_subscription_share_name_no_wildcards(self):
         """§4.8 — $share and ShareName MUST NOT contain wildcards."""
         with pytest.raises(ValueError, match='[Ss]hare.*wildcard|[Ss]hare.*\\+'):

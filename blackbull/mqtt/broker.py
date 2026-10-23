@@ -22,7 +22,7 @@ from .messages import (
     MQTTSubscribe, MQTTSuback,
     MQTTUnsubscribe, MQTTUnsuback, MQTTPingresp, MQTTAuth,
     ProtocolLevel, ReasonCode, SESSION_EXPIRY_NEVER,
-    topic_matches_filter, validate_topic_name, validate_topic_filter, encode_packet,
+    split_shared, topic_matches_filter, validate_topic_name, validate_topic_filter, encode_packet,
 )
 
 logger = logging.getLogger(__name__)
@@ -206,21 +206,6 @@ def _valid_filter(topic_filter: str) -> bool:
         return validate_topic_filter(topic_filter)
     except ValueError:
         return False
-
-
-def _parse_share(topic_filter: str) -> tuple[str, str] | None:
-    """§4.8.2 — split ``$share/{ShareName}/{filter}`` into ``(share, filter)``.
-
-    Returns ``None`` for a non-shared filter or one too malformed to carry a
-    filter portion at all (validation proper is [`validate_topic_filter`][];
-    this only extracts the group key).
-    """
-    if not topic_filter.startswith('$share/'):
-        return None
-    parts = topic_filter.split('/', 2)
-    if len(parts) < 3:
-        return None
-    return parts[1], parts[2]
 
 
 @dataclass(frozen=True, slots=True)
@@ -769,7 +754,7 @@ class BrokerActor(Actor):
                 reason_codes.append(ReasonCode.TOPIC_FILTER_INVALID)
                 continue
             opts = dict(options[index]) if index < len(options) else {}
-            share = _parse_share(topic_filter)
+            share = split_shared(topic_filter)
             # §3.8.3.1 [MQTT-3.8.3-4] — No Local on a Shared Subscription is a
             # Protocol Error: per §4.13 the server sends DISCONNECT with
             # PROTOCOL_ERROR and closes the connection (no SUBACK).
@@ -821,12 +806,12 @@ class BrokerActor(Actor):
         subscribes to any more, so the cursor dict cannot grow without bound
         as groups come and go."""
         stale = {share for f in removed_filters
-                 if (share := _parse_share(f)) is not None}
+                 if (share := split_shared(f)) is not None}
         if not stale:
             return
         for session in self._sessions.values():
             for topic_filter, _qos, _opts in session['subscriptions']:
-                stale.discard(_parse_share(topic_filter))
+                stale.discard(split_shared(topic_filter))
         for share in stale:
             self._share_rotation.pop(share, None)
 
@@ -986,7 +971,7 @@ class BrokerActor(Actor):
             for topic_filter, qos, opts in session['subscriptions']:
                 if not topic_matches_filter(publish.topic, topic_filter):
                     continue
-                share = _parse_share(topic_filter)
+                share = split_shared(topic_filter)
                 if share is not None:
                     # §4.8.2 — an independent delivery channel: collect the
                     # connected members; exactly-one delivery happens below.

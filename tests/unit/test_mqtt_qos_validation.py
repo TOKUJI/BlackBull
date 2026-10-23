@@ -1,7 +1,7 @@
 """QoS 3 is malformed, and the broker used to route it.
 
-`decode_publish_flags` masks two bits (§3.3.1) and returns whatever they
-hold, so `0b11` decodes to `qos=3`.  Nothing downstream rejects it:
+The decoder masked two bits (§3.3.1) and returned whatever they held, so
+`0b11` decoded to `qos=3`.  Nothing downstream rejects it:
 `_on_publish` acknowledges only qos 1 and 2, so a qos-3 PUBLISH is
 delivered to subscribers and retained with **no acknowledgement at all**.
 
@@ -20,7 +20,7 @@ from blackbull.mqtt.broker import (
     Attach, BrokerActor, ClientPublish, ClientSubscribe, Close, Send,
 )
 from blackbull.mqtt.messages import (
-    MQTTConnect, MQTTPublish, MQTTSubscribe, ReasonCode, decode_publish_flags,
+    MQTTConnect, MQTTDecodeError, MQTTPublish, MQTTSubscribe, ReasonCode, decode_packet,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -41,20 +41,27 @@ class RecordingConn(Actor):
         return [m for m in self.outbox if isinstance(m, Close)]
 
 
+def _publish(flags: int) -> bytes:
+    """A PUBLISH to 'a' with these fixed-header flags; a Packet Identifier
+    whenever either QoS bit is set."""
+    body = b'\x00\x01a' + (b'\x00\x01' if flags & 0b0110 else b'') + b'\x00'
+    return bytes([0x30 | flags, len(body)]) + body
+
+
 class TestTheDecoderRejectsIt:
     def test_qos_3_is_not_decoded_as_a_value(self):
         """`0b0110` is DUP=0, QoS=3, RETAIN=0."""
-        with pytest.raises(Exception):
-            decode_publish_flags(0b0110)
+        with pytest.raises(MQTTDecodeError):
+            decode_packet(_publish(0b0110))
 
     @pytest.mark.parametrize('flags,qos', [
         (0b0000, 0), (0b0010, 1), (0b0100, 2),
     ])
     def test_the_legal_values_still_decode(self, flags, qos):
-        assert decode_publish_flags(flags).qos == qos
+        assert decode_packet(_publish(flags)).qos == qos
 
     def test_dup_and_retain_still_decode(self):
-        f = decode_publish_flags(0b1101)          # DUP, QoS=2, RETAIN
+        f = decode_packet(_publish(0b1101))          # DUP, QoS=2, RETAIN
         assert (f.qos, f.dup, f.retain) == (2, True, True)
 
 
