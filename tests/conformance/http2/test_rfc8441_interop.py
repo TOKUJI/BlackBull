@@ -22,6 +22,7 @@ from types import SimpleNamespace
 import pytest
 
 from blackbull import BlackBull
+from blackbull.client import HandshakeError
 from blackbull.client.websocket_h2 import WebSocketH2Client
 from blackbull.router import Scheme
 from blackbull.server import ASGIServer
@@ -55,6 +56,7 @@ def rfc8441_server_port():
     in a forked subprocess.  Yields a namespace with ``.port``."""
     app = BlackBull()
 
+    @app.route(path='/ws-custom', scheme=Scheme.websocket)
     @app.route(path='/ws', scheme=Scheme.websocket)
     async def ws_echo(conn, receive, send):
         assert conn.type == 'websocket'
@@ -119,7 +121,7 @@ class TestRFC8441Handshake:
 
     @pytest.mark.parametrize('path', [
         pytest.param('/ws', id='default-path'),
-        pytest.param('/ws-chat', id='custom-path'),
+        pytest.param('/ws-custom', id='custom-path'),
     ])
     async def test_extended_connect_returns_200(self, rfc8441_server_port, path):
         async with WebSocketH2Client(
@@ -129,6 +131,14 @@ class TestRFC8441Handshake:
             ws = await c.connect(path=path)
             assert c.connect_status == 200
             await ws.close()
+
+    async def test_unoffered_subprotocol_is_rejected(self, rfc8441_server_port):
+        async with WebSocketH2Client(
+            '127.0.0.1', rfc8441_server_port.port,
+            ssl=_ssl_context_for_h2(),
+        ) as client:
+            with pytest.raises(HandshakeError, match='unoffered'):
+                await client.connect(path='/ws-chat')
 
 
 # ---------------------------------------------------------------------------

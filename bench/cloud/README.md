@@ -43,6 +43,7 @@ runtime state (the up.sh snapshot, the open session, the key, known hosts) in
 | job | runs | instance |
 |---|---|---|
 | `ab` | `bench/ab/ab_commit.sh` per HTTP/1.1 lane, `ab_commit_h2.sh` per HTTP/2 lane | `m7a.2xlarge` |
+| `client-ab` | frozen Python client A/A+ABBA probe, selected with `AB_CLIENT_RUN=<run-dir> just ab-verify` | `m7a.2xlarge` |
 | `compare` | `bench/compare/compare_servers.sh` | `m7a.2xlarge`; `TOPO=split` adds a load generator |
 | `httparena` | `bench/httparena/run_httparena.sh` after preparing Docker and HttpArena | `c7a.2xlarge` |
 
@@ -51,6 +52,11 @@ A job is a file in `jobs/` defining `job_preflight`, `job_runner`,
 [session.sh](session.sh).  The ab job deploys the git history (as a bundle,
 so it works from a worktree) and refuses a `REF_TREAT` that is not the
 deployed working tree.
+
+`client-ab` sends the named run's scripts and hash-verified `base`/`treat`
+snapshots, without prior logs or git history. The treatment must match the
+working Python sources. It uses Python 3.14.6 with the locked dependencies;
+the supplied probe owns the schedule, measurement boundaries and report.
 
 ## Prerequisites
 

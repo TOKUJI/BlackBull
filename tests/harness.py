@@ -196,7 +196,7 @@ async def exchange(app, *requests: bytes, **server_kwargs) -> list[Response]:
 
 
 @asynccontextmanager
-async def peer(handler):
+async def peer(handler, *, ssl: ssl.SSLContext | None = None):
     """A loopback origin whose every connection runs *handler(reader, writer)*.
 
     Yields the port.  The block ends once each handler has seen its client go.
@@ -212,7 +212,7 @@ async def peer(handler):
             except ConnectionError:
                 pass
 
-    server = await asyncio.start_server(serve, '127.0.0.1', 0)
+    server = await asyncio.start_server(serve, '127.0.0.1', 0, ssl=ssl)
     try:
         yield server.sockets[0].getsockname()[1]
     finally:

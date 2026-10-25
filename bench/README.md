@@ -80,7 +80,7 @@ Entry points are in **bold**; everything else is a part of the tool on its row.
 | File | Role |
 |---|---|
 | **`bench/cloud/session.sh`** | one session: provision → run → pull → verified teardown |
-| `bench/cloud/jobs/ab.sh`, `bench/cloud/jobs/compare.sh`, `bench/cloud/jobs/httparena.sh` | the jobs a session runs |
+| `bench/cloud/jobs/ab.sh`, `bench/cloud/jobs/client-ab.sh`, `bench/cloud/jobs/compare.sh`, `bench/cloud/jobs/httparena.sh` | the jobs a session runs |
 | `bench/cloud/remote.sh`, `bench/cloud/config.sh` | detached launch, resilient poll, pull, git deploy; settings |
 | `bench/cloud/up.sh`, `bench/cloud/install.sh`, `bench/cloud/down.sh` | provision, install, verified teardown |
 
