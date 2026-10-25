@@ -216,7 +216,106 @@ class Fate(enum.Enum):
     BROKEN = 'broken'
 
 
-class HTTP1ResponseRecipient:
+class HTTP1ResponseHeadReader:
+    """Read bounded response heads without body or connection-reuse policy."""
+
+    _boundary_declared = False
+
+    @staticmethod
+    def _connection_options(headers: Headers) -> list[bytes]:
+        try:
+            return connection_options(headers)
+        except MessageError as exc:
+            raise ProtocolError(str(exc)) from None
+
+    @staticmethod
+    async def _read_head(reader: AbstractReader) -> bytes:
+        """Read a response head under the total budget, then enforce the per-line budget.
+        """
+        cfg = get_settings()
+        timeout = cfg.client_head_timeout
+        try:
+            if timeout > 0:
+                deadline = asyncio.timeout(timeout)
+                try:
+                    async with deadline:
+                        head = await reader.read_head(cfg.client_head_max_total)
+                except TimeoutError:
+                    # Only an expired deadline is this cap refusing.  A
+                    # TimeoutError raised from inside the reader for its own
+                    # reasons belongs to whatever raised it, and naming the
+                    # cap for it would be a record of something that did not
+                    # happen.
+                    if deadline.expired():
+                        log_cap_hit('client_head_timeout', requested=timeout,
+                                    limit=timeout, protocol='http1')
+                    raise
+            else:
+                head = await reader.read_head(cfg.client_head_max_total)
+        except ReadLimitExceeded as exc:
+            log_cap_hit('client_head_max_total', requested=len(exc.seen),
+                        limit=cfg.client_head_max_total, protocol='http1')
+            raise ResponseTooLarge(
+                f'response head exceeds '
+                f'BB_CLIENT_HEAD_MAX_TOTAL={cfg.client_head_max_total}',
+                exc.seen) from None
+        except IncompleteReadError as exc:
+            raise ConnectionError('connection closed before response') from exc
+        if not head:
+            raise ConnectionError('connection closed before response')
+
+        return head
+
+    async def receive_head(
+            self, reader: AbstractReader, *, skip_interim: bool = True,
+    ) -> tuple[bytes, int, Headers]:
+        """Read through bounded interim heads and return the final head.
+
+        RFC 9110 requires clients to parse one or more 1xx responses before a
+        final response.  101 is returned immediately because the following
+        bytes belong to the switched protocol.  The count cap owns aggregate
+        work while the existing head limits continue to own each individual
+        head.
+        """
+        limit = get_settings().client_max_interim_responses
+        seen = 0
+        while True:
+            version, status, headers = await self._read_message_head(reader)
+            if (not skip_interim or status == 101
+                    or not is_informational(status)):
+                return version, status, headers
+            # Content-Length: 0 claims no boundary. What follows cannot be
+            # told apart from the final response being answered.
+            if headers.getlist(b'transfer-encoding') or _response_length(headers):
+                self._boundary_declared = True
+            seen += 1
+            if limit and seen > limit:
+                log_cap_hit('client_max_interim_responses', requested=seen,
+                            limit=limit, protocol='http1')
+                raise ResponseTooLarge(
+                    f'peer sent more than '
+                    f'BB_CLIENT_MAX_INTERIM_RESPONSES={limit} interim '
+                    f'responses without a final one')
+
+    async def _read_message_head(
+            self, reader: AbstractReader) -> tuple[bytes, int, Headers]:
+        head = await self._read_head(reader)
+        max_line = get_settings().client_head_max_line
+        try:
+            (version, status), raw, index = parse_head(
+                head, max_line, LineCache(), False)
+        except FieldsTooLarge as exc:
+            log_cap_hit('client_head_max_line', requested=exc.length,
+                        limit=max_line, protocol='http1')
+            raise ResponseTooLarge(
+                f'response header line {exc.length} bytes > '
+                f'BB_CLIENT_HEAD_MAX_LINE={max_line}', head[:max_line]) from None
+        except MessageError as exc:
+            raise ProtocolError(str(exc)) from None
+        return version, status, Headers._adopt(raw, index)
+
+
+class HTTP1ResponseRecipient(HTTP1ResponseHeadReader):
     """Reads an HTTP/1.1 response from an ``AbstractReader``.
 
     Decodes ``Content-Length``-bound, ``Transfer-Encoding: chunked``, and
@@ -308,99 +407,6 @@ class HTTP1ResponseRecipient:
         except BaseException:
             self.fate = Fate.BROKEN
             raise
-
-    @staticmethod
-    async def _read_head(reader: AbstractReader) -> bytes:
-        """Read a response head under the total budget, then enforce the per-line budget.
-        """
-        cfg = get_settings()
-        timeout = cfg.client_head_timeout
-        try:
-            if timeout > 0:
-                deadline = asyncio.timeout(timeout)
-                try:
-                    async with deadline:
-                        head = await reader.read_head(cfg.client_head_max_total)
-                except TimeoutError:
-                    # Only an expired deadline is this cap refusing.  A
-                    # TimeoutError raised from inside the reader for its own
-                    # reasons belongs to whatever raised it, and naming the
-                    # cap for it would be a record of something that did not
-                    # happen.
-                    if deadline.expired():
-                        log_cap_hit('client_head_timeout', requested=timeout,
-                                    limit=timeout, protocol='http1')
-                    raise
-            else:
-                head = await reader.read_head(cfg.client_head_max_total)
-        except ReadLimitExceeded as exc:
-            log_cap_hit('client_head_max_total', requested=len(exc.seen),
-                        limit=cfg.client_head_max_total, protocol='http1')
-            raise ResponseTooLarge(
-                f'response head exceeds '
-                f'BB_CLIENT_HEAD_MAX_TOTAL={cfg.client_head_max_total}',
-                exc.seen) from None
-        except IncompleteReadError as exc:
-            raise ConnectionError('connection closed before response') from exc
-        if not head:
-            raise ConnectionError('connection closed before response')
-
-        return head
-
-    async def _read_start(
-            self, reader: AbstractReader, *, skip_interim: bool = True,
-    ) -> tuple[bytes, int, Headers]:
-        """Read through bounded interim heads and return the final head.
-
-        RFC 9110 requires clients to parse one or more 1xx responses before a
-        final response.  101 is returned immediately because the following
-        bytes belong to the switched protocol.  The count cap owns aggregate
-        work while the existing head limits continue to own each individual
-        head.
-        """
-        limit = get_settings().client_max_interim_responses
-        seen = 0
-        while True:
-            version, status, headers = await self._read_message_head(reader)
-            if (not skip_interim or status == 101
-                    or not is_informational(status)):
-                return version, status, headers
-            # Content-Length: 0 claims no boundary. What follows cannot be
-            # told apart from the final response being answered.
-            if headers.getlist(b'transfer-encoding') or _response_length(headers):
-                self._boundary_declared = True
-            seen += 1
-            if limit and seen > limit:
-                log_cap_hit('client_max_interim_responses', requested=seen,
-                            limit=limit, protocol='http1')
-                raise ResponseTooLarge(
-                    f'peer sent more than '
-                    f'BB_CLIENT_MAX_INTERIM_RESPONSES={limit} interim '
-                    f'responses without a final one')
-
-    async def _read_message_head(
-            self, reader: AbstractReader) -> tuple[bytes, int, Headers]:
-        head = await self._read_head(reader)
-        max_line = get_settings().client_head_max_line
-        try:
-            (version, status), raw, index = parse_head(
-                head, max_line, LineCache(), False)
-        except FieldsTooLarge as exc:
-            log_cap_hit('client_head_max_line', requested=exc.length,
-                        limit=max_line, protocol='http1')
-            raise ResponseTooLarge(
-                f'response header line {exc.length} bytes > '
-                f'BB_CLIENT_HEAD_MAX_LINE={max_line}', head[:max_line]) from None
-        except MessageError as exc:
-            raise ProtocolError(str(exc)) from None
-        return version, status, Headers._adopt(raw, index)
-
-    @staticmethod
-    def _connection_options(headers: Headers) -> list[bytes]:
-        try:
-            return connection_options(headers)
-        except MessageError as exc:
-            raise ProtocolError(str(exc)) from None
 
     @staticmethod
     def _response_is_persistent(version: bytes, headers: Headers) -> bool:
@@ -514,7 +520,7 @@ class HTTP1ResponseRecipient:
             method: str | bytes | HTTPMethod | None = None,
     ) -> tuple[int, Headers, tuple[str, int | None, bool, bool]]:
         """Read the head and settle everything the body read must not decide."""
-        version, status, headers = await self._read_start(
+        version, status, headers = await self.receive_head(
             reader, skip_interim=skip_interim)
         self.http_version = version
         request_method = (method if method is not None

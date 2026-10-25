@@ -66,6 +66,10 @@ A connection owns one read buffer, server or client. `BufferReader` owns receive
 `ReadBuffer` owns bytes and cursors. Detection must not consume the prefix;
 an upgrade must retain bytes already received.
 
+The WebSocket client retains validated `Connection` options in its response
+recipient for both persistence and upgrade checks. Keep the persistence rule
+shared with ordinary HTTP responses.
+
 Treat transport size hints as advisory. Release grown allocations only
 through reader policy, which knows whether the connection is between
 messages.
@@ -168,6 +172,11 @@ differs by role belongs in its role policy section, with its RFC 9112 section.
 Read it and its cache tests.
 
 ## Protocol and deadline owners
+
+HTTP clients share `HTTP1ResponseHeadReader` for bounded response-head parsing.
+`HTTP1ResponseRecipient` owns HTTP bodies and connection reuse; WebSocket
+validates the upgrade directly and hands buffered bytes to its frame reader.
+WebSocket-over-H2 sessions reuse their CONNECT stream's sender and flow-control state.
 
 | Concern | Read first |
 |---|---|

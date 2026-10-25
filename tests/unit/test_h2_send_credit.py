@@ -314,14 +314,17 @@ async def _no_credit(n: int) -> None:
     pass
 
 
-async def test_websocket_close_waits_for_credit_and_ends_stream():
+@pytest.mark.parametrize('reuse_sender', [False, True])
+async def test_websocket_close_waits_for_credit_and_ends_stream(reuse_sender):
     writer = _Writer()
     writer.release.set()
     client = HTTP2Client('localhost', 1)
     client._writer = writer
     client._control_sender = HTTP2Sender(writer, client.frame_factory, 0)
     client._conn_window.size = 0
-    session = WebSocketH2Session(client, 1, HTTP2StreamReader(1, _no_credit))
+    kwargs = {'sender': client._make_sender(1)} if reuse_sender else {}
+    session = WebSocketH2Session(client, 1, HTTP2StreamReader(1, _no_credit),
+                                 **kwargs)
     session._disconnect_seen = True
     task = asyncio.create_task(session.close())
     try:

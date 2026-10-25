@@ -12,7 +12,7 @@ from tests.harness import Wire, peer
 
 @asynccontextmanager
 async def _origin(changes=(), *, status=b'HTTP/1.1 101 Switching Protocols',
-                  respond=True):
+                  respond=True, interim=b''):
     observed = SimpleNamespace(request=asyncio.Event(), closed=asyncio.Event(), data=None)
 
     async def handle(reader, writer):
@@ -30,7 +30,7 @@ async def _origin(changes=(), *, status=b'HTTP/1.1 101 Switching Protocols',
             fields[name] = fields[name] * 2 if values is None else values
         observed.request.set()
         if respond:
-            await wire.send(status + b'\r\n' + b''.join(
+            await wire.send(interim + status + b'\r\n' + b''.join(
                 name + b': ' + value + b'\r\n'
                 for name, values in fields.items() for value in values
             ) + b'\r\n\x81\x02ok\x88\x02\x03\xe8')
@@ -51,6 +51,7 @@ async def _origin(changes=(), *, status=b'HTTP/1.1 101 Switching Protocols',
     ({b'Sec-WebSocket-Protocol': [b'chat']}, (b'chat', b'other'), b'chat'),
     ({b'Sec-WebSocket-Protocol': [b' \tchat\t ']}, (b'chat',), b'chat'),
     ({}, (b'chat',), None),
+    ({b'Content-Length': [b'0']}, (), None),
 ])
 async def test_valid_upgrade_preserves_negotiation_and_buffered_frames(changes, offered, chosen):
     async with _origin(changes) as origin:
@@ -86,6 +87,10 @@ async def test_valid_upgrade_preserves_negotiation_and_buffered_frames(changes, 
     {b'Sec-WebSocket-Extensions': [b'permessage-deflate']},
     {b'Sec-WebSocket-Extensions': [b'']},
     {b'Sec-WebSocket-Extensions': [b'permessage-deflate', b'permessage-deflate']},
+    {b'Content-Length': [b'5']},
+    {b'Transfer-Encoding': [b'chunked']},
+    {b'Content-Length': [b'invalid']},
+    {b'Content-Length': [b'0', b'5']},
 ])
 async def test_invalid_upgrade_closes_before_returning_to_caller(changes):
     async with _origin(changes) as origin:
@@ -123,7 +128,32 @@ async def test_rejected_status_or_version_retires_connection(status, changes):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('cancel,respond', [(False, False), (True, False), (False, True)])
+async def test_rejection_does_not_wait_for_http_body():
+    async with _origin({b'Content-Length': [b'100000']},
+                       status=b'HTTP/1.1 403 Forbidden') as origin:
+        async with WebSocketClient('127.0.0.1', origin.port) as client:
+            with pytest.raises(HandshakeError):
+                await asyncio.wait_for(client.connect('/ws', response_timeout=None), 1)
+            await asyncio.wait_for(origin.closed.wait(), 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fields,accepted', [(b'', True),
+    (b'Content-Length: 1\r\n', False), (b'Transfer-Encoding: chunked\r\n', False)])
+async def test_interim_head_before_upgrade(fields, accepted):
+    async with _origin(interim=b'HTTP/1.1 103 Early Hints\r\n' + fields + b'\r\n') as origin:
+        async with WebSocketClient('127.0.0.1', origin.port) as client:
+            if accepted:
+                session = await client.connect('/ws')
+                assert (await session.receive())['text'] == 'ok'
+                assert (await session.receive())['type'] == 'websocket.disconnect'
+            else:
+                with pytest.raises(HandshakeError):
+                    await client.connect('/ws')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cancel,respond', [(False, False), (True, False)])
 async def test_interrupted_handshake_retires_connection(cancel, respond):
     async with _origin(status=b'HTTP/1.1 403 Forbidden', respond=respond) as origin:
         async with WebSocketClient('127.0.0.1', origin.port) as client:

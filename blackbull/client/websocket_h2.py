@@ -12,14 +12,17 @@ from ..asgi import ASGIEvent
 from ..env import get_settings
 from ..native import NativeResponse
 from ..protocol.frame import FrameFactory
-from ..protocol.frame_types import FrameTypes, HeaderFrameFlags, PseudoHeaders
+from ..protocol.frame_types import (ErrorCodes, FrameTypes, HeaderFrameFlags,
+                                    PseudoHeaders)
 from ..server.http2_ws import HTTP2StreamReader, HTTP2WSWriter
+from ..server.sender import HTTP2Sender
 from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, WebSocketRecipient)
 from ..server.ws_codec import WSOpcode, encode_frame
 from ._connect import DEFAULT_CONNECT_TIMEOUT
 from .client import Client
 from .exceptions import HandshakeError
 from .http2 import HTTP2Client
+from .websocket import _validate_negotiation
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +41,8 @@ class WebSocketH2Session:
     """
 
     def __init__(self, http2_client: HTTP2Client,
-                 stream_id: int, reader: HTTP2StreamReader) -> None:
+                 stream_id: int, reader: HTTP2StreamReader, *,
+                 sender: HTTP2Sender | None = None) -> None:
         self._client = http2_client
         self._stream_id = stream_id
         self._closed = False
@@ -47,7 +51,8 @@ class WebSocketH2Session:
         # ``max_frame_size`` are split into multiple DATA frames and
         # respect the peer's send window — same machinery the server
         # uses for response bodies.
-        self._sender = http2_client._make_sender(stream_id)
+        self._sender = (http2_client._make_sender(stream_id)
+                        if sender is None else sender)
         # Shared WS decode stack: DATA → byte stream → WebSocketRecipient.  ``require_masked=False`` because server
         # frames are unmasked — which also makes recipient-generated
         # PONG / echo-CLOSE frames masked, as a client's must be.
@@ -269,4 +274,15 @@ class WebSocketH2Client:
                 f':status={self._connect_status}')
 
         reader = await client.attach_stream_reader(self._stream_id)
-        return WebSocketH2Session(client, self._stream_id, reader)
+        try:
+            _validate_negotiation(frame.headers)
+        except HandshakeError:
+            try:
+                await client._reject_stream(
+                    self._stream_id, ErrorCodes.PROTOCOL_ERROR,
+                    'unoffered WebSocket negotiation')
+            finally:
+                client.unregister_raw_stream(self._stream_id)
+            raise
+
+        return WebSocketH2Session(client, self._stream_id, reader, sender=sender)
