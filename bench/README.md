@@ -99,7 +99,7 @@ Entry points are in **bold**; everything else is a part of the tool on its row.
 |---|---|
 | **`bench/httparena/validate_local.sh`** | HttpArena's validate.sh locally against a wheel (`bench/httparena/build_wheel.sh`) |
 | `bench/httparena/run_httparena.sh`, `bench/httparena/ready_check.sh` | run on the instance by the `httparena` cloud job |
-| `bench/httparena/app.py`, `bench/httparena/launcher.py`, `bench/httparena/db.py`, `bench/httparena/grpc_bench.py`, `bench/httparena/Dockerfile`, `bench/httparena/Dockerfile.dev` | the BlackBull entry vendored into HttpArena |
+| `bench/httparena/app.py`, `bench/httparena/launcher.py`, `bench/httparena/db.py`, `bench/httparena/workers.py`, `bench/httparena/grpc_bench.py`, `bench/httparena/Dockerfile`, `bench/httparena/Dockerfile.dev` | the BlackBull entry vendored into HttpArena |
 | `bench/httparena/sanic/app.py`, `bench/httparena/sanic/launcher.py`, `bench/httparena/sanic/build.sh`, `bench/httparena/sanic/Dockerfile` | this repo's sanic entry (endpoint parity, not evidence about sanic) |
 | `bench/httparena/aiohttp/app.py`, `bench/httparena/aiohttp/launcher.py`, `bench/httparena/aiohttp/build.sh`, `bench/httparena/aiohttp/Dockerfile` | this repo's aiohttp entry (likewise) |
 | `bench/httparena/install_docker_shim.sh`, `bench/httparena/patch_cpuset.sh`, `bench/httparena/patch_httparena.py`, `bench/httparena/patch_wsl2_docker.sh` | harness patches: docker tuning shim, small-instance cpusets, env knobs, WSL2 mounts |

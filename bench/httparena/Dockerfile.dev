@@ -10,6 +10,6 @@ COPY blackbull-*.whl /wheels/
 RUN cd /wheels && WHEEL=$(ls blackbull-*.whl) && \
     pip install --no-cache-dir "/wheels/${WHEEL}[compression]" asyncpg redis
 VOLUME /results
-COPY app.py launcher.py db.py grpc_bench.py ./
+COPY app.py launcher.py db.py grpc_bench.py workers.py ./
 EXPOSE 8080 8081 8443
 CMD ["python", "launcher.py"]
