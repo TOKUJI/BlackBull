@@ -321,7 +321,8 @@ async def test_websocket_close_waits_for_credit_and_ends_stream(reuse_sender):
     client = HTTP2Client('localhost', 1)
     client._writer = writer
     client._control_sender = HTTP2Sender(writer, client.frame_factory, 0)
-    client._conn_window.size = 0
+    window = client._conn_window
+    window.size = 0
     kwargs = {'sender': client._make_sender(1)} if reuse_sender else {}
     session = WebSocketH2Session(client, 1, HTTP2StreamReader(1, _no_credit),
                                  **kwargs)
@@ -335,7 +336,7 @@ async def test_websocket_close_waits_for_credit_and_ends_stream(reuse_sender):
         await task
         assert len(writer.body(1)) == 8  # masked CLOSE with the two-byte status code
         assert writer.frames[-1][:3] == (0, 1, 1)
-        assert client._conn_window.size == 0
+        assert window.size == 0
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)

@@ -16,6 +16,9 @@ PAYLOAD = ('run.py', 'driver.py', 'probe.py', 'proof.inc', 'monitor.py',
 
 @pytest.fixture
 def payload(tmp_path):
+    helpers = tmp_path / 'bench/lib'
+    helpers.mkdir(parents=True)
+    shutil.copy2(ROOT / 'bench/lib/results.py', helpers / 'results.py')
     run = tmp_path / 'bench/results/client-input/run'
     run.mkdir(parents=True)
     for name in PAYLOAD:
@@ -33,13 +36,14 @@ def payload(tmp_path):
     return tmp_path, run
 
 
-def preflight(payload):
+def preflight(payload, **environment):
     repo, run = payload
     return subprocess.run(['bash', '-c',
         'source "$JOB" && job_preflight && job_runner'],
         env={**os.environ, 'JOB': str(JOB), 'AB_CLIENT_RUN': str(run),
              'REPO_ROOT': str(repo), 'REMOTE_REPO': '/home/ubuntu/BlackBull',
-             'REMOTE_RUN': '/home/ubuntu/BlackBull/bench/results/cloud_ab/run'},
+             'REMOTE_RUN': '/home/ubuntu/BlackBull/bench/results/cloud_ab/run',
+             **environment},
         text=True, capture_output=True, timeout=10)
 
 
@@ -72,6 +76,23 @@ def test_client_job_refuses_missing_runner(payload):
     (run / 'probe.py').unlink()
     result = preflight(payload)
     assert result.returncode != 0
+
+
+def test_client_job_uses_configured_results_root(payload):
+    repo, run = payload
+    root = repo / 'custom-results'
+    root.mkdir()
+    moved = Path(shutil.move(str(run), root / 'run'))
+    result = preflight((repo, moved), BENCH_RESULTS_ROOT=str(root))
+    assert result.returncode == 0, result.stderr
+
+
+def test_client_job_refuses_input_outside_results_root(payload):
+    repo, run = payload
+    moved = Path(shutil.move(str(run), repo / 'outside'))
+    result = preflight((repo, moved))
+    assert result.returncode != 0
+    assert 'input must be a bench run directory' in result.stderr
 
 
 @pytest.mark.parametrize('client', [False, True])

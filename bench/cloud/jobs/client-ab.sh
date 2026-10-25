@@ -10,7 +10,9 @@ job_preflight() {
 import hashlib, json, sys
 from pathlib import Path
 run, repo = map(Path, sys.argv[1:3])
-if not run.resolve().is_relative_to((repo / 'bench/results').resolve()):
+sys.path.insert(0, str(repo))
+from bench.lib.results import results_root
+if not run.resolve().is_relative_to(results_root().resolve()):
     sys.exit('client-ab: input must be a bench run directory')
 for name in sys.argv[3:]:
     if not (run / name).is_file() or (run / name).is_symlink():
