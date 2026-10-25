@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
       
 
@@ -5974,6 +5974,9 @@ and <code>discard</code>, which keep the located framing fields true.</p>
 <code>ConnectionProtocol</code> performs transport callbacks and pauses, and
 <code>ReadBuffer</code> owns bytes and cursors. Detection must not consume the prefix;
 an upgrade must retain bytes already received.</p>
+<p>The WebSocket client retains validated <code>Connection</code> options in its response
+recipient for both persistence and upgrade checks. Keep the persistence rule
+shared with ordinary HTTP responses.</p>
 <p>Treat transport size hints as advisory. Release grown allocations only
 through reader policy, which knows whether the connection is between
 messages.</p>
@@ -6052,6 +6055,10 @@ Both roles read HTTP/1.1 through <code>blackbull/protocol/http1.py</code>; a rul
 differs by role belongs in its role policy section, with its RFC 9112 section.
 Read it and its cache tests.</p>
 <h2 id="protocol-and-deadline-owners">Protocol and deadline owners<a class="headerlink" href="#protocol-and-deadline-owners" title="Permanent link">&para;</a></h2>
+<p>HTTP clients share <code>HTTP1ResponseHeadReader</code> for bounded response-head parsing.
+<code>HTTP1ResponseRecipient</code> owns HTTP bodies and connection reuse; WebSocket
+validates the upgrade directly and hands buffered bytes to its frame reader.
+WebSocket-over-H2 sessions reuse their CONNECT stream's sender and flow-control state.</p>
 <table>
 <thead>
 <tr>
@@ -6136,10 +6143,10 @@ and <a href="../conformance/">Conformance</a> before changing error scope or lif
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
       
     
   </body>

@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
       
 
@@ -6117,6 +6117,13 @@ framing would be ambiguous — see
 the context has exited; <code>StreamReset</code> only from HTTP/2, only from the
 <code>request()</code> whose stream was reset; <code>HandshakeError</code> only from
 <code>WebSocketClient.connect()</code> and <code>WebSocketH2Client</code>'s Extended CONNECT.</p>
+<p><code>WebSocketClient.connect()</code> validates the HTTP/1.1 upgrade fields and the
+selected subprotocol; extensions are not offered. Rejection, timeout or
+cancellation closes the connection. Enter a new client context before retrying.
+Non-101 responses are rejected without reading their bodies. An upgrade is
+rejected if it or a preceding interim response declares an HTTP body.
+HTTP/2 Extended CONNECT also rejects unoffered subprotocols or extensions,
+resetting the stream while keeping the connection open.</p>
 <h3 id="a-stall-is-not-a-clienterror-on-purpose">A stall is not a <code>ClientError</code>, on purpose<a class="headerlink" href="#a-stall-is-not-a-clienterror-on-purpose" title="Permanent link">&para;</a></h3>
 <p>Every time bound in the client — the connect deadline, the head and body
 deadlines — raises a bare <code>TimeoutError</code>. That is a deliberate split, and it is
@@ -6327,10 +6334,10 @@ outcome lands on <code>ScenarioResult</code>.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
       
     
   </body>
