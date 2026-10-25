@@ -11,7 +11,7 @@ case "${1:-}" in
         ;;
     --preflight)
         bash -n "$CLOUD/session.sh" "$CLOUD/remote.sh" "$CLOUD/jobs/ab.sh" \
-            "$CLOUD/up.sh" "$CLOUD/install.sh" "$CLOUD/down.sh"
+            "$CLOUD/jobs/client-ab.sh" "$CLOUD/up.sh" "$CLOUD/install.sh" "$CLOUD/down.sh"
         jq -nc '{workflow:"ab-verify",ready:true}'
         exit 0
         ;;
@@ -23,4 +23,6 @@ if [ "${APPROVE_CLOUD:-}" != "1" ]; then
     echo "run-ab-verify: explicit approval required; set APPROVE_CLOUD=1" >&2
     exit 1
 fi
-exec bash "$CLOUD/session.sh" ab
+job=ab
+[ -z "${AB_CLIENT_RUN:-}" ] || job=client-ab
+exec bash "$CLOUD/session.sh" "$job"
