@@ -104,9 +104,10 @@ cp "$REPO_ROOT/bench/httparena/app.py" \
    "$REPO_ROOT/bench/httparena/launcher.py" \
    "$REPO_ROOT/bench/httparena/meta.json" \
    "$REPO_ROOT/bench/httparena/db.py" \
+   "$REPO_ROOT/bench/httparena/workers.py" \
    "$REPO_ROOT/bench/httparena/grpc_bench.py" \
    "$FW_DIR/"
-rm -f "$FW_DIR/.dockerignore"   # upstream vendors one that excludes db.py/grpc_bench.py
+rm -f "$FW_DIR/.dockerignore"   # upstream excludes local modules
 cp "$WHEEL" "$FW_DIR/"
 
 cat > "$FW_DIR/Dockerfile" <<EOF
@@ -123,7 +124,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \\
 COPY ${WHEEL_NAME} /wheels/
 RUN pip install --no-cache-dir "/wheels/${WHEEL_NAME}[compression,speed]" asyncpg redis
 VOLUME /results
-COPY app.py launcher.py db.py grpc_bench.py /app/
+COPY app.py launcher.py db.py grpc_bench.py workers.py /app/
 ENV BB_UVLOOP=0
 EXPOSE 8080 8081 8443
 CMD ["python", "launcher.py"]

@@ -6,6 +6,10 @@ directory is structured so it can be vendored under
 [`MDA2AV/HttpArena`](https://github.com/MDA2AV/HttpArena) at
 `frameworks/blackbull/` without further modification.
 
+Local fix (BLA-284): retain `workers.py`, its imports and Docker/staging entries
+when syncing upstream. A positive `WEB_WORKERS` overrides CPU affinity
+(host CPU count as fallback); launcher and DB use the same count, bounded to 1–128.
+
 ## Layout
 
 ```

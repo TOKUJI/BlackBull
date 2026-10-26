@@ -23,13 +23,13 @@ SIGINT.  No port-readiness gating — BlackBull's bind happens in
 ``serve()`` as the first awaited step, so by the time the
 subprocess is alive the kernel TCP accept queue is open.
 """
-import multiprocessing
 import os
 import signal
 import subprocess
 import sys
 import time
 
+from workers import worker_count
 
 HTTP_PORT      = int(os.environ.get('HTTPARENA_HTTP_PORT',      '8080'))
 HTTPS_H1_PORT  = int(os.environ.get('HTTPARENA_HTTPS_H1_PORT',  '8081'))
@@ -38,19 +38,8 @@ HTTPS_H2_PORT  = int(os.environ.get('HTTPARENA_HTTPS_H2_PORT',  '8443'))
 TLS_CERT       = os.environ.get('TLS_CERT', '/certs/server.crt')
 TLS_KEY        = os.environ.get('TLS_KEY',  '/certs/server.key')
 
-# Worker count — explicit override via WEB_WORKERS env var (the
-# harness sets this when sweeping nproc/2 / nproc / nproc×2).
-# Otherwise honour cgroup-aware CPU affinity if the platform exposes
-# it (Linux), else fall back to multiprocessing.cpu_count().  Capped
-# at 128 as a sanity guard.
-_web_workers = os.environ.get('WEB_WORKERS', '').strip()
-if _web_workers.isdigit() and int(_web_workers) > 0:
-    WRK_COUNT = min(int(_web_workers), 128)
-else:
-    try:
-        WRK_COUNT = min(len(os.sched_getaffinity(0)), 128)
-    except (AttributeError, OSError):
-        WRK_COUNT = multiprocessing.cpu_count()
+WRK_COUNT = worker_count()
+os.environ['WEB_WORKERS'] = str(WRK_COUNT)
 
 PY = sys.executable
 APP = os.path.join(os.path.dirname(__file__), 'app.py')

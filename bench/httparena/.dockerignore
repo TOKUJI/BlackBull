@@ -4,9 +4,7 @@
 !requirements.txt
 !app.py
 !launcher.py
-# db.py / grpc_bench.py back the async-db / crud / unary-grpc profiles and
-# are COPYed by the Dockerfile — they MUST be whitelisted or the build fails
-# with "COPY failed: stat db.py: file does not exist".
+!workers.py
 !db.py
 !grpc_bench.py
 # Dev-only: a locally-built wheel for Dockerfile.dev.  Untracked.

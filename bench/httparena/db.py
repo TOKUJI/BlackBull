@@ -3,8 +3,9 @@ the read path returns an empty result, which the profile asks for."""
 from __future__ import annotations
 
 import json
-import multiprocessing
 import os
+
+from workers import worker_count
 
 try:
     import asyncpg  # type: ignore[import-untyped]
@@ -20,22 +21,7 @@ except ValueError:
     DATABASE_MAX_CONN = 256
 
 
-def _worker_count() -> int:
-    """Mirror ``launcher.py``'s ``WRK_COUNT`` — the divisor below."""
-    env = os.environ.get('WEB_WORKERS', '').strip()
-    if env:
-        try:
-            return max(1, int(env))
-        except ValueError:
-            pass
-    try:
-        return max(1, multiprocessing.cpu_count())
-    except NotImplementedError:  # pragma: no cover
-        return 1
-
-
-# HttpArena's rule, keeping workers x per_worker under max_connections=256.
-POOL_MAX_PER_WORKER = max(1, min(DATABASE_MAX_CONN, 240) // _worker_count())
+POOL_MAX_PER_WORKER = max(1, min(DATABASE_MAX_CONN, 240) // worker_count())
 
 # Shared by every client connection this worker serves.
 _SHARED_POOL = None

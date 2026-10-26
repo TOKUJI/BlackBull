@@ -114,8 +114,8 @@ _stage_blackbull() {
     local dir="HttpArena/frameworks/$fw" install
     echo ">>> staging $fw (BB_UVLOOP=$uvloop BB_FORCE_ASGI_SCOPE=${scope:-unset})"
     _ssh "mkdir -p $dir" || return 1
-    _rsync --delete bench/httparena/{app.py,launcher.py,meta.json,db.py,grpc_bench.py} "$HA_HOST:$dir/" || return 1
-    # Upstream's stale .dockerignore keeps db.py / grpc_bench.py out of the context.
+    _rsync --delete bench/httparena/{app.py,launcher.py,meta.json,db.py,grpc_bench.py,workers.py} "$HA_HOST:$dir/" || return 1
+    # Upstream's .dockerignore excludes local modules.
     _ssh "rm -f $dir/.dockerignore" || return 1
     if [ "$LOCAL_BB_WHEEL" = 1 ]; then
         _rsync "$wheel" "$HA_HOST:$dir/" || return 1
@@ -131,7 +131,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 $install
 VOLUME /results
-COPY app.py launcher.py db.py grpc_bench.py /app/
+COPY app.py launcher.py db.py grpc_bench.py workers.py /app/
 ENV BB_UVLOOP=$uvloop
 ${scope:+ENV BB_FORCE_ASGI_SCOPE=$scope}
 EXPOSE 8080 8081 8443
