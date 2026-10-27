@@ -190,6 +190,8 @@ Semantics worth knowing:
   group — the same no-offline-queue behaviour the broker applies to non-shared
   subscriptions.
 - **Retained messages are never delivered to a shared subscription** (§4.8.2).
+- Clean Start removes the session's subscriptions. Group rotation state is
+  reclaimed only when no session retains a subscription to that group.
 - **`No Local` cannot be combined with a shared subscription** — MQTT 5 makes
   it a Protocol Error (§3.8.3.1), and the broker disconnects with `0x82`.
 - Malformed forms (`$share/g`, an empty ShareName, a wildcard in the ShareName,

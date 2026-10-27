@@ -7,6 +7,8 @@ rotation, membership changes (UNSUBSCRIBE / detach), the no-connected-member
 case, the No Local protocol error (§3.8.3.1), retained-message exclusion
 (§4.8.2), and the Retain Handling 1 rider (§3.3.1.3).
 """
+import asyncio
+
 import pytest
 
 from blackbull.actor import Actor
@@ -16,7 +18,7 @@ from blackbull.mqtt.broker import (
     Detach, Send, Close,
 )
 from blackbull.mqtt.messages import (
-    MQTTConnect, MQTTDisconnect, MQTTPublish, MQTTSubscribe, MQTTSuback,
+    MQTTConnect, MQTTConnack, MQTTDisconnect, MQTTPublish, MQTTSubscribe, MQTTSuback,
     MQTTUnsubscribe, ReasonCode,
 )
 
@@ -341,16 +343,69 @@ class TestRetainedInteraction:
 # ===========================================================================
 
 class TestRotationState:
-    async def test_rotation_state_pruned_when_group_empties(self):
+    @pytest.mark.parametrize('ending,expiry', [
+        ('unsubscribe', 0), ('detach', 0), ('expiry', 1),
+        ('clean-start', 60), ('takeover', 60),
+    ])
+    async def test_rotation_state_pruned_when_group_empties(self, ending, expiry):
+        broker = BrokerActor(max_sessions=2, max_subscriptions=1)
+        pub = RecordingConn()
+        await _attach(broker, pub, client_id='pub')
+        try:
+            for i in range(6):
+                conn = RecordingConn()
+                await _attach(broker, conn, client_id='worker',
+                              properties={'session_expiry_interval': expiry})
+                topic_filter = f'$share/g{i}/t'
+                await _subscribe(broker, conn, 1, [(topic_filter, 0)])
+                await _publish(broker, pub)
+                assert len(conn.publishes()) == 1
+                assert len(broker._share_rotation) == 1
+
+                replacement = RecordingConn()
+                if ending == 'unsubscribe':
+                    command = ClientUnsubscribe(unsubscribe=MQTTUnsubscribe(
+                        packet_id=2, topics=[topic_filter]), sender=conn)
+                elif ending == 'takeover':
+                    command = Attach(connect=_connect('worker'), sender=replacement)
+                else:
+                    command = Detach(graceful=True, sender=conn)
+                await broker._handle(command)
+                if ending == 'expiry':
+                    await asyncio.sleep(1.01)
+                if ending in ('clean-start', 'expiry'):
+                    await _attach(broker, replacement, client_id='worker')
+                assert len(broker._share_rotation) == 0
+        finally:
+            broker.close()
+
+    @pytest.mark.parametrize('clean_start', [False, True])
+    @pytest.mark.parametrize('other_filter', ['$share/other/t', '$share/pool/+'])
+    async def test_reconnect_preserves_other_members_and_the_rotation(self, clean_start, other_filter):
         broker = BrokerActor()
         a, b = await _group(broker, 2)
         pub = RecordingConn()
         await _attach(broker, pub, client_id='pub')
-        await _publish(broker, pub)
-        assert ('pool', 't') in broker._share_rotation
-
-        await broker._handle(ClientUnsubscribe(
-            unsubscribe=MQTTUnsubscribe(packet_id=5, topics=['$share/pool/t']),
-            sender=a))
-        await broker._handle(Detach(graceful=True, sender=b))  # session dropped
-        assert ('pool', 't') not in broker._share_rotation
+        others = [RecordingConn(), RecordingConn()]
+        for i, conn in enumerate(others):
+            await _attach(broker, conn, client_id=f'other{i}')
+            await _subscribe(broker, conn, 1, [(other_filter, 0)])
+        try:
+            await _publish(broker, pub, payload=b'first')
+            replacement = RecordingConn()
+            await _attach(broker, replacement, client_id='m0', clean_start=clean_start)
+            connack = next(p for p in replacement.packets() if isinstance(p, MQTTConnack))
+            assert connack.session_present is not clean_start
+            assert any(isinstance(m, Close) for m in a.outbox)
+            await broker._handle(Detach(graceful=True, sender=a))
+            if clean_start:
+                await _subscribe(broker, replacement, 1, [('$share/pool/t', 0)])
+            await _publish(broker, pub, payload=b'second')
+            await _publish(broker, pub, payload=b'third')
+            assert [p.payload for p in a.publishes()] == [b'first']
+            assert [p.payload for p in b.publishes()] == [b'second']
+            assert [p.payload for p in replacement.publishes()] == [b'third']
+            assert [p.payload for p in others[0].publishes()] == [b'first', b'third']
+            assert [p.payload for p in others[1].publishes()] == [b'second']
+        finally:
+            broker.close()
