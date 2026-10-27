@@ -1268,17 +1268,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#the-websocket-read-path-is-outside-the-hierarchy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The WebSocket read path is outside the hierarchy
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5848,17 +5837,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#the-websocket-read-path-is-outside-the-hierarchy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The WebSocket read path is outside the hierarchy
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -6144,19 +6122,10 @@ differently per cause — a test asserting "this peer is not usable", a retry
 wrapper. Catch the leaves when the recovery differs: raising a budget for
 <code>ResponseTooLarge</code> is a sensible response to it and a nonsensical response to
 <code>ProtocolError</code>.</p>
-<h3 id="the-websocket-read-path-is-outside-the-hierarchy">The WebSocket read path is outside the hierarchy<a class="headerlink" href="#the-websocket-read-path-is-outside-the-hierarchy" title="Permanent link">&para;</a></h3>
-<p>Worth knowing before you write <code>except ClientError</code> around a WebSocket loop:
-the client's WebSocket reader is the server's <code>WebSocketRecipient</code>, and it
-raises <strong><code>blackbull.server.recipient.ProtocolError</code>, which is not a
-<code>ClientError</code>.</strong> The name collides with <code>blackbull.client.ProtocolError</code> and the
-classes are unrelated.</p>
-<p>So a frame that breaches <code>BB_CLIENT_WS_MAX_FRAME_PAYLOAD</code>, a message that
-breaches <code>BB_CLIENT_WS_MAX_MESSAGE_SIZE</code>, invalid UTF-8 in a TEXT message, or a
-fragmented control frame all surface from <code>session.receive()</code> as an exception
-<code>except ClientError</code> will not catch. The disconnect event is delivered first and
-the exception on the receive after it. Until the two hierarchies are joined,
-catch <code>Exception</code> around a WebSocket receive loop, or import the server class
-explicitly and know which one you have.</p>
+<p>WebSocket <code>session.receive()</code> on HTTP/1.1 and HTTP/2 raises client
+<code>ProtocolError</code> for frame/message limit breaches and malformed frames, including
+invalid UTF-8 and fragmented control frames. Catch <code>ClientError</code> to handle these;
+the original reader exception and its <code>close_code</code> remain in <code>__cause__</code>.</p>
 <h2 id="what-the-client-waits-for">What the client waits for<a class="headerlink" href="#what-the-client-waits-for" title="Permanent link">&para;</a></h2>
 <p>The client's timeout design is one idea applied at two layers, and reading it
 as one rule is how people end up surprised by it.</p>
