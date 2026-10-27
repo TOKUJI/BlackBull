@@ -5755,6 +5755,10 @@ optional <code>uvloop</code> do not change protocol ownership.</p>
 <code>app.add_extension(...)</code> and select sockets through
 <a href="../../guide/listeners/">listeners</a>. Protocol dispatch belongs to bindings,
 not application routing or a second server runtime.</p>
+<p>The server is part of the core: <code>import blackbull</code> loads it, because the
+public listener types (<code>Listener</code>, <code>Tcp</code>, <code>Unix</code>, <code>InheritedFd</code>) and raw
+bindings are server objects. An app handed to an external ASGI host pays
+that import once, never per request.</p>
 <h2 id="actor-model">Actor model<a class="headerlink" href="#actor-model" title="Permanent link">&para;</a></h2>
 <p>Mutable protocol state has one owner. Coordinate concurrent work through
 messages and explicit lifetime boundaries, not shared locks. MQTT routing
