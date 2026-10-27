@@ -6083,6 +6083,8 @@ mosquitto_pub<span class="w"> </span>-t<span class="w"> </span><span class="s1">
   group — the same no-offline-queue behaviour the broker applies to non-shared
   subscriptions.</li>
 <li><strong>Retained messages are never delivered to a shared subscription</strong> (§4.8.2).</li>
+<li>Clean Start removes the session's subscriptions. Group rotation state is
+  reclaimed only when no session retains a subscription to that group.</li>
 <li><strong><code>No Local</code> cannot be combined with a shared subscription</strong> — MQTT 5 makes
   it a Protocol Error (§3.8.3.1), and the broker disconnects with <code>0x82</code>.</li>
 <li>Malformed forms (<code>$share/g</code>, an empty ShareName, a wildcard in the ShareName,
