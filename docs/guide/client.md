@@ -224,21 +224,10 @@ wrapper. Catch the leaves when the recovery differs: raising a budget for
 `ResponseTooLarge` is a sensible response to it and a nonsensical response to
 `ProtocolError`.
 
-### The WebSocket read path is outside the hierarchy
-
-Worth knowing before you write `except ClientError` around a WebSocket loop:
-the client's WebSocket reader is the server's `WebSocketRecipient`, and it
-raises **`blackbull.server.recipient.ProtocolError`, which is not a
-`ClientError`.** The name collides with `blackbull.client.ProtocolError` and the
-classes are unrelated.
-
-So a frame that breaches `BB_CLIENT_WS_MAX_FRAME_PAYLOAD`, a message that
-breaches `BB_CLIENT_WS_MAX_MESSAGE_SIZE`, invalid UTF-8 in a TEXT message, or a
-fragmented control frame all surface from `session.receive()` as an exception
-`except ClientError` will not catch. The disconnect event is delivered first and
-the exception on the receive after it. Until the two hierarchies are joined,
-catch `Exception` around a WebSocket receive loop, or import the server class
-explicitly and know which one you have.
+WebSocket `session.receive()` on HTTP/1.1 and HTTP/2 raises client
+`ProtocolError` for frame/message limit breaches and malformed frames, including
+invalid UTF-8 and fragmented control frames. Catch `ClientError` to handle these;
+the original reader exception and its `close_code` remain in `__cause__`.
 
 ## What the client waits for
 

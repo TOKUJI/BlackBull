@@ -1043,12 +1043,16 @@ class WebSocketRecipient(BaseRecipient):
         """
         if isinstance(item, ProtocolError):
             self._terminal_code = item.close_code
+            item = self._receive_error(item)
         elif isinstance(item, Exception):
             self._terminal_code = WSCloseCode.ABNORMAL
         if self._event_queue is not None:
             await self._event_queue.put(item)
         else:
             self._pending.append(item)
+
+    def _receive_error(self, error: ProtocolError) -> Exception:
+        return error
 
     async def _read_step(self) -> bool:
         """Process one frame; return True only when the read side is finished.
