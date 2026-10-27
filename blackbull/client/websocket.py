@@ -15,6 +15,7 @@ import logging
 from ..headers import Headers
 from ..protocol.field_grammar import TCHAR_OCTETS, list_members
 from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
+                                ProtocolError as RecipientProtocolError,
                                 WebSocketRecipient)
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ..env import get_settings
@@ -40,6 +41,13 @@ _NONCE_BYTES = 16
 
 # RFC 6455 §7.4.1 — normal closure status code.
 _CLOSE_CODE_NORMAL = 1000
+
+
+class _ClientWebSocketRecipient(WebSocketRecipient):
+    def _receive_error(self, error: RecipientProtocolError) -> ProtocolError:
+        translated = ProtocolError(str(error))
+        translated.__cause__ = error
+        return translated
 
 
 def _validate_negotiation(fields: Iterable[tuple[bytes, bytes]],
@@ -87,7 +95,7 @@ class WebSocketSession:
         # tight loop; a client typically awaits an application response
         # between reads, and read-ahead is what answers a server PING in
         # that gap.
-        self._recipient = WebSocketRecipient(reader,
+        self._recipient = _ClientWebSocketRecipient(reader,
                                              writer,
                                              require_masked=False,
                                              ws_queue_depth=_WS_EVENT_QUEUE_DEPTH,

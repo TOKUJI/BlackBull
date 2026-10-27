@@ -29,6 +29,7 @@ from blackbull.server.recipient import (ProtocolError,
                                         WebSocketRecipient)
 from blackbull.server.sender import AsyncioWriter
 from blackbull.server.ws_codec import MessageTooLarge, WSOpcode
+from blackbull.websocket import WebSocketDisconnect
 
 from tests.harness import fed
 
@@ -107,6 +108,37 @@ def _driver(raw: bytes, *, max_message_size: int,
 
 def _closed_with(writer: _FakeWriter, code: WSCloseCode) -> bool:
     return code.to_bytes(2, 'big') in bytes(writer.written)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('queue_depth', [0, 32])
+async def test_server_receive_keeps_protocol_error_and_terminal_code(native, queue_depth):
+    writer = _FakeWriter()
+    receiver = WebSocketRecipient(
+        fed(_frame(b'abc')).reader, AsyncioWriter(writer),
+        max_message_size=2, ws_queue_depth=queue_depth)
+    try:
+        if native:
+            await receiver.await_connect()
+        else:
+            assert (await receiver())['type'] == 'websocket.connect'
+        receive = receiver.next_message if native else receiver
+        with pytest.raises(ProtocolError) as caught:
+            await receive()
+        assert type(caught.value) is ProtocolError
+        assert isinstance(caught.value.__cause__, MessageTooLarge)
+        assert caught.value.close_code == 1009
+        assert receiver.terminal_code == 1009
+        if native:
+            with pytest.raises(WebSocketDisconnect) as disconnected:
+                await receive()
+            assert disconnected.value.code == 1009
+        else:
+            assert await receive() == {'type': 'websocket.disconnect', 'code': 1009}
+        assert _closed_with(writer, WSCloseCode.MESSAGE_TOO_BIG)
+    finally:
+        await receiver.shutdown()
 
 
 # ---------------------------------------------------------------------------

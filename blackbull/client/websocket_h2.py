@@ -16,13 +16,13 @@ from ..protocol.frame_types import (ErrorCodes, FrameTypes, HeaderFrameFlags,
                                     PseudoHeaders)
 from ..server.http2_ws import HTTP2StreamReader, HTTP2WSWriter
 from ..server.sender import HTTP2Sender
-from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, WebSocketRecipient)
+from ..server.recipient import _WS_EVENT_QUEUE_DEPTH
 from ..server.ws_codec import WSOpcode, encode_frame
 from ._connect import DEFAULT_CONNECT_TIMEOUT
 from .client import Client
 from .exceptions import HandshakeError
 from .http2 import HTTP2Client
-from .websocket import _validate_negotiation
+from .websocket import _ClientWebSocketRecipient, _validate_negotiation
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class WebSocketH2Session:
         # Recipient writes ride the per-stream sender via HTTP2WSWriter,
         # inheriting H2 flow control.
         # Read-ahead stays on for clients — see the note in client/websocket.py.
-        self._recipient = WebSocketRecipient(
+        self._recipient = _ClientWebSocketRecipient(
             reader,
             HTTP2WSWriter(self._sender),
             require_masked=False,
