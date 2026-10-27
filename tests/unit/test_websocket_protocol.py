@@ -1199,9 +1199,7 @@ class TestFrameLengthFormatClose:
 
     @pytest.mark.asyncio
     async def test_inline_scan_and_decoder_agree_on_the_length(self):
-        """``_frame_bytes_needed`` sizes a buffered frame independently of
-        ``read_payload``; the two must agree, or proactive servicing would
-        treat a frame the decoder refuses as never complete."""
+        """A complete invalid control frame is serviced and rejected."""
         from blackbull.server.constants import WSCloseCode
         raw = TestFrameLengthFormat._frame(
             126, 5, payload=b'ping!', opcode=0x9)
@@ -1211,7 +1209,6 @@ class TestFrameLengthFormatClose:
             AsyncioWriter(writer))
         await recipient()  # websocket.connect
 
-        assert recipient._frame_bytes_needed() == len(raw)
         assert await recipient.service_available_control_frames() is True
         assert WSCloseCode.PROTOCOL_ERROR.to_bytes(2, 'big') in bytes(
             writer.written)

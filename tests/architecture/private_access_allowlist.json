@@ -59,7 +59,7 @@
  "properties/test_grpc_properties.py": 1,
  "properties/test_handler_return_types.py": 2,
  "unit/client/test_client_body_buffer_cost.py": 7,
- "unit/client/test_client_owned_bounds.py": 41,
+ "unit/client/test_client_owned_bounds.py": 40,
  "unit/client/test_connect_timeout.py": 1,
  "unit/client/test_http1_client_desync_and_deadline.py": 2,
  "unit/client/test_http1_client_primitives.py": 4,
@@ -184,7 +184,7 @@
  "unit/test_websocket_actor_lifecycle.py": 16,
  "unit/test_websocket_injection.py": 3,
  "unit/test_websocket_object.py": 6,
- "unit/test_websocket_protocol.py": 15,
+ "unit/test_websocket_protocol.py": 14,
  "unit/test_write_many_gate.py": 13,
  "unit/test_ws_liveness_probe.py": 27,
  "unit/test_ws_native_receive_channel.py": 6

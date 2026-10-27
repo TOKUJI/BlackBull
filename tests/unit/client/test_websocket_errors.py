@@ -17,7 +17,7 @@ from tests.harness import Wire, peer, read_h2_frame
 
 
 @asynccontextmanager
-async def _session(transport, frames):
+async def _session(transport, frames, replies=None):
     completed = asyncio.get_running_loop().create_future()
     completed.add_done_callback(lambda future: future.exception())
     context = client_context = None
@@ -58,7 +58,16 @@ async def _session(transport, frames):
                 await wire.send(_make_h2_frame(FrameTypes.HEADERS, 4, sid,
                     Encoder().encode([(b':status', b'200')]))
                     + _make_h2_frame(FrameTypes.DATA, 0, sid, frames))
-            await wire.recv_all()
+            outgoing = await wire.recv_all()
+            if replies is not None:
+                if transport == 'h1':
+                    replies.extend(outgoing)
+                else:
+                    while outgoing:
+                        size = int.from_bytes(outgoing[:3], 'big')
+                        if outgoing[3] == 0 and int.from_bytes(outgoing[5:9], 'big') == sid:
+                            replies.extend(outgoing[9:9 + size])
+                        outgoing = outgoing[9 + size:]
             completed.set_result(None)
         except Exception as exc:
             completed.set_exception(exc)
@@ -147,3 +156,70 @@ async def test_receive_cancellation_is_not_translated(transport):
         receiving.cancel()
         with pytest.raises(asyncio.CancelledError):
             await receiving
+
+
+def _control_replies(data):
+    replies = []
+    while data:
+        opcode, length = data[0] & 15, data[1] & 127
+        assert data[1] & 128, 'client control replies must be masked'
+        assert length <= 125
+        key, payload = data[2:6], data[6:6 + length]
+        assert len(key) == 4 and len(payload) == length
+        replies.append((opcode, bytes(b ^ key[i % 4] for i, b in enumerate(payload))))
+        data = data[6 + length:]
+    return replies
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('transport', ['h1', 'h2'])
+@pytest.mark.parametrize('first,payload', [(0x81, b'x'), (0x82, b'x'),
+    (0x89, b'x'), (0x8a, b'x'), (0x88, b'\x03\xe8')])
+@pytest.mark.parametrize('header_only', [False, True])
+async def test_masked_server_frames_are_rejected_before_body(transport, first,
+                                                            payload, header_only):
+    frames = bytes([first, 128 | len(payload)])
+    if not header_only:
+        frames += b'\x00' * 4 + payload
+    replies = bytearray()
+    async with _session(transport, frames, replies) as session:
+        with pytest.raises(ProtocolError, match='masked server frame') as error:
+            await _receive(session)
+        assert error.value.__cause__.close_code == 1002
+        _assert_disconnect(transport, await _receive(session), 1002)
+    outgoing = _control_replies(replies)
+    assert outgoing and outgoing[0] == (8, b'\x03\xea')
+    assert all(opcode == 8 for opcode, _ in outgoing)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('transport', ['h1', 'h2'])
+@pytest.mark.parametrize('length_code', [126, 127])
+async def test_masked_server_header_does_not_wait_for_extended_length(transport, length_code):
+    async with _session(transport, bytes([0x82, 128 | length_code])) as session:
+        with pytest.raises(ProtocolError, match='masked server frame'):
+            await _receive(session)
+        _assert_disconnect(transport, await _receive(session), 1002)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('transport', ['h1', 'h2'])
+@pytest.mark.parametrize('frames,reply,code', [
+    (b'\x89\x01p\x81\x01x\x88\x02\x03\xe8', (10, b'p'), 1000),
+    (b'\x83\x00', (8, b'\x03\xea'), 1002),
+    (b'\x82\x7e\x10\x00', (8, b'\x03\xf1'), 1009),
+])
+async def test_client_control_replies_keep_mask_on_every_path(monkeypatch, transport, frames,
+                                                            reply, code):
+    monkeypatch.setenv('BB_CLIENT_WS_MAX_FRAME_PAYLOAD', '1024')
+    replies = bytearray()
+    async with _session(transport, frames, replies) as session:
+        if code == 1009:
+            with pytest.raises(ProtocolError):
+                await _receive(session)
+        elif reply[0] == 10:
+            event = await _receive(session)
+            assert event['text'] == 'x' if transport == 'h1' else event == (1, b'x')
+        _assert_disconnect(transport, await _receive(session), code)
+    outgoing = _control_replies(replies)
+    assert outgoing and outgoing[0] == reply

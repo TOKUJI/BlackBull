@@ -98,6 +98,57 @@ async def _connected(reader, writer: _FakeWriter, **kw):
     return recipient
 
 
+@pytest.mark.parametrize('require_masked', [False, True])
+@pytest.mark.parametrize('opcode,payload', [(WSOpcode.PING, b''),
+                                         (WSOpcode.CLOSE, b'\x03\xe8')])
+async def test_buffered_controls_service_exact_frame_for_either_role(require_masked,
+                                                                   opcode, payload):
+    frame = (_frame(payload, opcode=opcode) if require_masked else
+             bytes([0x80 | opcode, len(payload)]) + payload)
+    writer = _FakeWriter()
+    receiver = await _connected(fed(frame, eof=False), writer,
+                                require_masked=require_masked)
+    try:
+        assert await receiver.service_available_control_frames()
+        assert writer.written[0] & 15 == (WSOpcode.PONG if opcode == WSOpcode.PING else WSOpcode.CLOSE)
+        assert bool(writer.written[1] & 128) is not require_masked
+    finally:
+        await receiver.shutdown()
+
+
+@pytest.mark.parametrize('require_masked', [False, True])
+@pytest.mark.parametrize('valid_mask', [False, True])
+async def test_buffered_partial_control_rejects_only_a_wrong_role_mask(require_masked,
+                                                                     valid_mask):
+    masked = require_masked if valid_mask else not require_masked
+    writer = _FakeWriter()
+    receiver = await _connected(fed(bytes([0x89, 0x81 if masked else 1]), eof=False),
+                                writer, require_masked=require_masked)
+    try:
+        assert await receiver.service_available_control_frames() is not valid_mask
+        if valid_mask:
+            assert not writer.written
+        else:
+            assert writer.written[0] & 15 == WSOpcode.CLOSE
+            assert bool(writer.written[1] & 128) is not require_masked
+    finally:
+        await receiver.shutdown()
+
+
+@pytest.mark.parametrize('require_masked', [False, True])
+async def test_control_service_leaves_data_for_the_application(require_masked):
+    frame = _frame(b'x') if require_masked else b'\x81\x01x'
+    writer = _FakeWriter()
+    receiver = await _connected(fed(frame, eof=False), writer,
+                                require_masked=require_masked)
+    try:
+        assert not await receiver.service_available_control_frames()
+        assert not writer.written
+        assert await asyncio.wait_for(receiver.next_message(), 1) == 'x'
+    finally:
+        await receiver.shutdown()
+
+
 def _go_silent_for(recipient, seconds: float) -> None:
     """Pretend the last inbound frame arrived *seconds* ago."""
     recipient._last_inbound_at = asyncio.get_running_loop().time() - seconds

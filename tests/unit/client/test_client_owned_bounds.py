@@ -21,7 +21,7 @@ from blackbull.server.sender import (AbstractWriter, AsyncioWriter,
                                      HTTP2Sender)
 from blackbull.server.ws_codec import MessageTooLarge
 
-from tests.harness import served
+from tests.harness import fed, served
 
 
 @pytest.fixture(autouse=True)
@@ -103,27 +103,15 @@ def test_client_writer_runtime_log_has_owner_and_protocol(protocol, caplog):
 
 @pytest.mark.asyncio
 async def test_client_websocket_frame_runtime_log_uses_client_name(caplog):
-    class Reader(AbstractReader):
-        def __init__(self):
-            self.data = b'\x82\xfe\xff\xff'
-
-        async def read(self, n=-1):
-            return b''
-
-        async def readuntil(self, sep):
-            return sep
-
-        async def readexactly(self, n):
-            out, self.data = self.data[:n], self.data[n:]
-            return out
-
     caplog.set_level(logging.WARNING, logger='blackbull.caps')
     recipient = WebSocketRecipient(
-        Reader(), _Writer(), require_masked=False, max_frame_payload=1024,
+        fed(b'\x82\x7e\xff\xff').reader, _Writer(),
+        require_masked=False, max_frame_payload=1024,
         frame_cap_name='client_ws_max_frame_payload',
         message_cap_name='client_ws_max_message_size')
-    with pytest.raises(ProtocolError):
-        await recipient._read_step()
+    await recipient.await_connect()
+    with pytest.raises(ProtocolError, match='65535'):
+        await recipient.next_message()
     records = [r for r in caplog.records
                if getattr(r, 'cap', None) == 'client_ws_max_frame_payload']
     assert len(records) == 1

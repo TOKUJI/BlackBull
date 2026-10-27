@@ -915,6 +915,7 @@ class HTTP2Recipient(BaseRecipient):
 class WebSocketRecipient(BaseRecipient):
     """Receive complete WebSocket messages, after an initial connect event.
 
+    require_masked=True receives client frames; False receives server frames.
     ws_queue_depth=0 reads inline when the app calls receive(); a positive depth
     uses a bounded read-ahead queue. Both deliver the same events, but inline
     PING/CLOSE servicing waits for a read or the control watchdog. Registering
@@ -1057,14 +1058,16 @@ class WebSocketRecipient(BaseRecipient):
     async def _read_step(self) -> bool:
         """Process one frame; return True only when the read side is finished.
         """
-        _CONTROL_OPS = (WSOpcode.CLOSE, WSOpcode.PING, WSOpcode.PONG)
         h = await read_frame_header(self._reader)
+        if h.masked != self._require_masked:
+            raise ProtocolError('unmasked client frame' if self._require_masked
+                                else 'masked server frame')
         self._inbound_seq += 1
         self._probe_sent_at = None
 
         # RFC 6455 §5.5 — control frames MUST have payload ≤125 and
         # MUST NOT be fragmented.  Reject without reading the body.
-        if h.opcode in _CONTROL_OPS:
+        if h.opcode in _WS_CONTROL_OPS:
             if not h.fin:
                 raise ProtocolError('fragmented control frame')
             if h.length > 125:
@@ -1093,7 +1096,7 @@ class WebSocketRecipient(BaseRecipient):
             raise ProtocolError(
                 f'RSV2/RSV3 set without negotiated extension '
                 f'(rsv2={h.rsv2} rsv3={h.rsv3})')
-        if h.rsv1 and (self._decompressor is None or h.opcode in _CONTROL_OPS):
+        if h.rsv1 and (self._decompressor is None or h.opcode in _WS_CONTROL_OPS):
             raise ProtocolError(
                 f'RSV1 set on frame (opcode={h.opcode}) without '
                 f'negotiated permessage-deflate')
@@ -1117,9 +1120,6 @@ class WebSocketRecipient(BaseRecipient):
             ) from exc
         except InvalidFrameLength as exc:
             raise ProtocolError(str(exc)) from exc
-
-        if self._require_masked and not h.masked:
-            raise ProtocolError('unmasked client frame')
 
         match h.opcode:
             case WSOpcode.TEXT | WSOpcode.BINARY | WSOpcode.CONTINUATION:
@@ -1366,33 +1366,37 @@ class WebSocketRecipient(BaseRecipient):
             return
         self._start_reader(self._ws_queue_depth or _WS_EVENT_QUEUE_DEPTH)
 
-    def _frame_bytes_needed(self) -> int | None:
-        """Bytes required for the next *complete* frame, or None when it is not
-        fully buffered.  The non-blocking guarantee of
+    def _frame_bytes_needed(self, head: bytes) -> int | None:
+        """Bytes needed to process or reject the next frame; None if unavailable.
+
+        The non-blocking guarantee of
         [`service_available_control_frames`][] rests on this."""
         buffered = self._reader.buffered_len()
         if buffered < 2:
             return None
-        head = self._reader.peek(2)
+        masked = bool(head[1] & 0x80)
+        if masked != self._require_masked:
+            return 2
         len_code = head[1] & 0x7F
         ext = 2 if len_code == 126 else (8 if len_code == 127 else 0)
-        if buffered < 2 + ext + 4:                # header + mask key
+        header_size = 2 + ext + (4 if masked else 0)
+        if buffered < header_size:
             return None
         if ext:
             payload_len = int.from_bytes(self._reader.peek(2 + ext)[2:], 'big')
         else:
             payload_len = len_code
-        total = 2 + ext + 4 + payload_len
+        total = header_size + payload_len
         return total if buffered >= total else None
 
     async def service_available_control_frames(self) -> bool:
-        """Non-blocking servicing of fully-buffered inbound control frames.
+        """Non-blocking control-frame processing from buffered bytes.
 
         Answers PINGs and echoes CLOSE that arrived while the handler was
         doing something other than ``receive()`` (send-time servicing) or
-        after it went quiet (the idle watchdog).  Reads only frames already
-        fully buffered, so it never blocks and never steals the wire from an
-        inline ``receive()`` (guarded by ``_reading`` / ``_servicing``).  A
+        after it went quiet (the idle watchdog).  Reads only complete frames
+        or headers sufficient to reject them. It never blocks or steals the wire
+        from an inline ``receive()`` (guarded by ``_reading`` / ``_servicing``). A
         data frame stops the loop without being consumed — the app or a
         reader owns it.  Returns True if any frame was serviced.
         """
@@ -1408,11 +1412,11 @@ class WebSocketRecipient(BaseRecipient):
             serviced = False
             while (not self._read_finished and not self._reading
                    and self._reader.has_buffered()):
-                if self._frame_bytes_needed() is None:
-                    break
                 head = self._reader.peek(2)
                 if (head[0] & 0x0F) not in _WS_CONTROL_OPS:
                     break                     # data frame — owned by app/reader
+                if self._frame_bytes_needed(head) is None:
+                    break
                 self._read_finished = await self._drive_once()
                 serviced = True
             return serviced
@@ -1507,12 +1511,8 @@ class WebSocketRecipient(BaseRecipient):
     def has_control_frames_buffered(self) -> bool:
         """True when a control frame leads the inbound buffer.
 
-        Synchronous, O(1) gate for send-time servicing: with only data
-        frames buffered (a flood), the servicing coroutine's flag churn and
-        ``_frame_bytes_needed`` scan would run per message for nothing — a
-        data frame is owned by the app/reader, not the servicer.  Also marks
-        the connection as having observed a control frame, which activates
-        the per-message watchdog work.
+        Data frames belong to the app/reader, so skip the servicing coroutine.
+        Observing a control frame also activates the watchdog work.
         """
         if self._reader.buffered_len() < 2:
             return False

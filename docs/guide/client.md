@@ -226,8 +226,9 @@ wrapper. Catch the leaves when the recovery differs: raising a budget for
 
 WebSocket `session.receive()` on HTTP/1.1 and HTTP/2 raises client
 `ProtocolError` for frame/message limit breaches and malformed frames, including
-invalid UTF-8 and fragmented control frames. Catch `ClientError` to handle these;
-the original reader exception and its `close_code` remain in `__cause__`.
+invalid UTF-8, fragmented control frames and masked server frames.
+Catch `ClientError` to handle these; the original reader exception and its
+`close_code` remain in `__cause__`.
 
 ## What the client waits for
 

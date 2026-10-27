@@ -423,11 +423,15 @@ The following are protocol violations and raise
 
 | Violation | RFC reference |
 |---|---|
+| Unmasked client frame or masked server frame | §5.1 |
 | CONTINUATION frame with no fragmentation in progress | §5.4 |
 | New TEXT or BINARY frame while a fragment sequence is open | §5.4 |
 | Control frame (ping/pong/close) with FIN=0 | §5.5 |
 | Control frame longer than 125 bytes | §5.5 |
 | Payload length not minimal, or a 64-bit length with the top bit set | §5.2 |
+
+Mask violations are rejected from the two-byte frame header, before reading
+the mask key or payload, on both HTTP/1.1 and HTTP/2.
 
 ## Message size limits
 
