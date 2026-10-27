@@ -667,6 +667,8 @@ class BrokerActor(Actor):
         expiry = connect.properties.get('session_expiry_interval', 0)
         session_present = False
         if connect.clean_start:
+            if client_id in self._sessions:
+                self._drop_session(client_id)
             session = _new_broker_session()
             session['_expiry'] = expiry
             self._sessions[client_id] = session
@@ -805,17 +807,24 @@ class BrokerActor(Actor):
         """§4.8.2 — drop rotation cursors for share groups that no session
         subscribes to any more, so the cursor dict cannot grow without bound
         as groups come and go."""
-        stale = {share for f in removed_filters
+        stale = {f: share for f in removed_filters
                  if (share := split_shared(f)) is not None}
         if not stale:
             return
         for session in self._sessions.values():
             for topic_filter, _qos, _opts in session['subscriptions']:
-                stale.discard(split_shared(topic_filter))
-        for share in stale:
+                stale.pop(topic_filter, None)
+            if not stale:
+                return
+        for share in stale.values():
             self._share_rotation.pop(share, None)
 
     # -- session expiry (§3.1.2.11.2) ---------------------------------------
+
+    def _drop_session(self, client_id: str) -> None:
+        session = self._sessions.pop(client_id, None)
+        if session is not None and session['subscriptions']:
+            self._prune_share_rotation([s[0] for s in session['subscriptions']])
 
     def _sweep_expired(self) -> None:
         """Drop elapsed sessions before resume or total-cap decisions and from the expiry timer.
@@ -824,9 +833,8 @@ class BrokerActor(Actor):
         expired = [cid for cid, session in self._sessions.items()
                    if (at := session.get('_expires_at')) is not None and at <= now]
         for client_id in expired:
-            session = self._sessions.pop(client_id)
+            self._drop_session(client_id)
             logger.debug('MQTT session %r expired', client_id)
-            self._prune_share_rotation([s[0] for s in session['subscriptions']])
         self._arm_expiry_timer()
 
     def _arm_expiry_timer(self) -> None:
@@ -1245,9 +1253,7 @@ class BrokerActor(Actor):
                     'DISCONNECT for a session that declared 0 — ignored '
                     '(§3.14.2.2.2 Protocol Error)', client_id)
         if declared <= 0:
-            self._sessions.pop(client_id, None)
-            self._prune_share_rotation(
-                [s[0] for s in session['subscriptions']])
+            self._drop_session(client_id)
             self._arm_expiry_timer()
             return
         # The session outlives the connection from here.  SESSION_EXPIRY_NEVER
