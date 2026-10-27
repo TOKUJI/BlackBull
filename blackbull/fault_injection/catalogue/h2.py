@@ -9,6 +9,7 @@ from blackbull.fault_injection.scenario_h2 import (
     SendRawBytes,
     Sleep,
     WaitForClientFrame,
+    frame_bytes,
 )
 
 
@@ -18,18 +19,6 @@ _SETTING_MAX_FRAME_SIZE = 0x5
 
 # Minimum legal value of SETTINGS_MAX_FRAME_SIZE per RFC 9113 §6.5.2.
 _MAX_FRAME_SIZE_MIN_LEGAL = 16_384
-
-
-def _encode_frame(length: int, type_byte: int, flags: int,
-                  stream_id: int, payload: bytes = b'') -> bytes:
-    """RFC 9113 §4.1 — 9-byte frame header + payload."""
-    return (
-        length.to_bytes(3, 'big')
-        + type_byte.to_bytes(1, 'big')
-        + flags.to_bytes(1, 'big')
-        + (stream_id & 0x7fffffff).to_bytes(4, 'big')
-        + payload
-    )
 
 
 # Wire payload for a minimal HEADERS frame announcing ``:status 200``.
@@ -51,9 +40,9 @@ def half_closed_stream_no_data() -> ScenarioH2:
     """
     type_headers = 0x01
     flags_end_headers_only = 0x04  # END_HEADERS without END_STREAM
-    headers_frame = _encode_frame(
+    headers_frame = frame_bytes(
         length=len(_HEADERS_STATUS_200),
-        type_byte=type_headers,
+        type_byte=bytes([type_headers]),
         flags=flags_end_headers_only,
         stream_id=1,
         payload=_HEADERS_STATUS_200,
@@ -133,9 +122,9 @@ def headers_continuation_dropped() -> ScenarioH2:
     """
     type_headers = 0x01
     flags_no_end_headers = 0x00  # neither END_HEADERS nor END_STREAM
-    partial_headers = _encode_frame(
+    partial_headers = frame_bytes(
         length=len(_HEADERS_STATUS_200),
-        type_byte=type_headers,
+        type_byte=bytes([type_headers]),
         flags=flags_no_end_headers,
         stream_id=1,
         payload=_HEADERS_STATUS_200,
@@ -170,9 +159,9 @@ def half_closed_after_headers() -> ScenarioH2:
     """
     type_headers = 0x01
     flags_end_headers = 0x04  # END_HEADERS, but not END_STREAM
-    headers = _encode_frame(
+    headers = frame_bytes(
         length=len(_HEADERS_STATUS_200),
-        type_byte=type_headers,
+        type_byte=bytes([type_headers]),
         flags=flags_end_headers,
         stream_id=1,
         payload=_HEADERS_STATUS_200,

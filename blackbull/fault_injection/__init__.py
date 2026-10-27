@@ -36,12 +36,9 @@ from .h1_server import (
     H1FaultServer,
     H1FaultServerError,
 )
-# Role-qualified, because three scenario vocabularies share step names and a
-# bare ``SendRawBytes`` silently resolved to HTTP/2's — handing an
-# ``H1FaultServer`` a step it rejects as unknown.  The ``H1S`` prefix reads as
-# "HTTP/1.1 server-side", the half these belong to; ``scenario_h1``'s
-# unprefixed ``Abort``/``Sleep`` are the *client* side and keep their names,
-# as ``scenario_h2``'s keep ``H2``.
+# Role-qualified names: ``H1S`` is HTTP/1.1 server-side, ``H2``/``H2S`` HTTP/2
+# server-side, ``H2C`` HTTP/2 client-side; unprefixed ``Abort``/``Sleep`` are
+# the HTTP/1.1 client's.  The transport steps are one class under every name.
 from .scenario_h1_server import (
     Abort as H1SAbort,
     EndChunkedBody as H1SEndChunkedBody,
@@ -205,9 +202,7 @@ __all__ = [
 ]
 
 
-#: Deprecated spelling -> (its replacement, the step it yields).  A bare
-#: ``SendRawBytes`` in this namespace is the HTTP/2 server step, so each entry
-#: names its own role's step.
+#: Deprecated spelling -> (its replacement, the step it yields).
 _DEPRECATED_SPELLINGS = {
     'SendBytes': ('H1CSendRawBytes', H1CSendRawBytes),
     'H2CSendBytes': ('H2CSendRawBytes', H2CSendRawBytes),

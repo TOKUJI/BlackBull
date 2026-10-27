@@ -1,17 +1,19 @@
 """HTTP/1.1 server-side scenarios for a target client.
 
-Output is raw bytes. Client-side ReadResponse vocabulary belongs to the
-other role and must not be reused here.
+Output is raw bytes, assembled here rather than by the production sender.
 """
 from __future__ import annotations
 
 import enum
-import json
 from dataclasses import dataclass, field
+from typing import ClassVar
+
+from . import _scenario
+from ._scenario import Abort, HalfClose, SendRawBytes, Sleep
 
 
 class StepOpH1Server(str, enum.Enum):
-    """Tag used by the JSON serialiser."""
+    """The v1 JSON tags, still read until v1 reading is removed."""
     WAIT_FOR_REQUEST = 'WAIT_FOR_REQUEST'
     EXPECT_REQUEST = 'EXPECT_REQUEST'
     SEND_RAW = 'SEND_RAW'
@@ -26,60 +28,28 @@ class StepOpH1Server(str, enum.Enum):
     HALF_CLOSE = 'HALF_CLOSE'
 
 
-@dataclass(frozen=True)
-class WaitForRequest:
+class WaitForRequest(_scenario._WaitFor):
     """Block until a request head arrives, optionally one that matches.
 
-    A filter: with ``match`` set, heads that do not match are **read and
-    skipped** and the step keeps waiting, which on a pipelined connection
-    (RFC 9112 §9.3.2) is how a scenario breaks the POST and not the GET.
-    On ``timeout`` expiry the executor records the miss and proceeds.
-
-    **Skipping desyncs the connection**, because HTTP/1.1 responses are
-    positional: a head passed over is one the scenario can no longer
-    answer.  The count is on ``ScenarioH1ServerResult.requests_skipped``.
-
-    [`ExpectRequest`][] is the guard that skips nothing.
+    On a pipelined connection (RFC 9112 §9.3.2) this is how a scenario
+    breaks the POST and not the GET.  **Skipping desyncs the connection**,
+    because HTTP/1.1 responses are positional: a head passed over is one the
+    scenario can no longer answer.  [`ExpectRequest`][] skips nothing.
     """
-    match: dict = field(default_factory=dict)
-    timeout: float = 5.0
 
 
-@dataclass(frozen=True)
-class ExpectRequest:
+class ExpectRequest(_scenario._Expect):
     """Read one request head and record whether it matched.
 
-    A guard, not a filter: nothing is skipped and the connection stays in
-    step.  It asks whether the client under test is behaving as the
-    scenario assumes — a fault staged against `Expect: 100-continue` tests
-    nothing if the client never sent that header.
-
-    A mismatch is **recorded, not raised**:
-    ``ScenarioH1ServerResult.expectations`` collects one
-    ``(match, matched)`` pair per step.
+    A fault staged against ``Expect: 100-continue`` tests nothing if the
+    client never sent that header; the verdict lands on
+    ``ScenarioH1ServerResult.expectations``.
     """
-    match: dict = field(default_factory=dict)
-    timeout: float = 5.0
-
-
-@dataclass(frozen=True)
-class SendRawBytes:
-    """Push arbitrary bytes at the client.
-
-    The only way this server emits anything.  ``byte_interval > 0``
-    transmits one byte at a time with that delay, which is how a trickled
-    status line or a slow header block is expressed — the bytes are all
-    legal and the *pacing* is the fault, so it cannot be spelled any other
-    way.
-    """
-    data: bytes
-    byte_interval: float = 0.0
 
 
 @dataclass(frozen=True)
 class SendStatusLine:
-    """Emit status-line fields without validation; malformed values are intentional.
-    """
+    """Emit status-line fields without validation; malformed values are intentional."""
     code: int = 200
     reason: str = 'OK'
     version: str = 'HTTP/1.1'
@@ -87,14 +57,25 @@ class SendStatusLine:
     #: which is not the same as omitting the space before it).
     omit_reason: bool = False
 
+    def wire(self) -> bytes:
+        head = f'{self.version} {self.code}'
+        if not self.omit_reason:
+            head += f' {self.reason}'
+        return head.encode('latin-1') + b'\r\n'
+
 
 @dataclass(frozen=True)
 class SendHeader:
-    """Emit a header; fold=True emits obs-fold (RFC 9112 §5.2).
-    """
+    """Emit a header; ``fold=True`` emits an obs-fold continuation (RFC 9112 §5.2)."""
     name: str
     value: str
     fold: bool = False
+
+    def wire(self) -> bytes:
+        if self.fold:
+            return b' ' + self.value.encode('latin-1') + b'\r\n'
+        return (self.name.encode('latin-1') + b': '
+                + self.value.encode('latin-1') + b'\r\n')
 
 
 @dataclass(frozen=True)
@@ -102,67 +83,54 @@ class EndHeaders:
     """The blank line that ends the head.  Omit it to stage a head that
     never finishes."""
 
+    def wire(self) -> bytes:
+        return b'\r\n'
+
 
 @dataclass(frozen=True)
 class SendChunk:
     """One chunk of a chunked body (RFC 9112 §7.1).
 
     ``declared_size`` sets the chunk-size line independently of the data —
-    the HTTP/1.1 twin of ``SendFrame.declared_length``, and the single most
-    common framing fault there is.  ``extension`` appends a chunk
-    extension; ``terminator`` can be replaced to stage a bad CRLF.
+    the single most common framing fault there is.  ``extension`` appends a
+    chunk extension; ``terminator`` can be replaced to stage a bad CRLF.
     """
     data: bytes = b''
     declared_size: int | None = None
     extension: str = ''
     terminator: bytes = b'\r\n'
 
+    def wire(self) -> bytes:
+        size = len(self.data) if self.declared_size is None else self.declared_size
+        line = format(size, 'x')
+        if self.extension:
+            line += f';{self.extension}'
+        return line.encode('latin-1') + b'\r\n' + self.data + self.terminator
+
 
 @dataclass(frozen=True)
 class EndChunkedBody:
-    """The zero-length chunk that terminates a chunked body.
-
-    ``trailers`` are emitted before the final CRLF; omit this step to stage
-    a body that never terminates.
-    """
+    """The zero-length chunk that terminates a chunked body, with any
+    ``trailers``; omit this step to stage a body that never terminates."""
     trailers: tuple[tuple[str, str], ...] = ()
 
-
-@dataclass(frozen=True)
-class Sleep:
-    """Idle for ``duration`` seconds, holding the connection open.
-
-    Distinct from a slow send: nothing is written at all, so this is what
-    a client's own response deadline is measured against.
-    """
-    duration: float
-
-
-@dataclass(frozen=True)
-class Abort:
-    """Hard-close the connection (``transport.abort`` → RST on Linux).
-
-    Terminal: later steps short-circuit.
-    """
+    def wire(self) -> bytes:
+        return b'0\r\n' + b''.join(
+            name.encode('latin-1') + b': ' + value.encode('latin-1') + b'\r\n'
+            for name, value in self.trailers) + b'\r\n'
 
 
 @dataclass(frozen=True)
 class CloseGracefully:
     """Close cleanly (FIN) after whatever has been written.
 
-    Terminal.  What the client sees is an orderly EOF mid-body, not the
-    reset [`Abort`][] sends.
+    Terminal.  What the client sees is an orderly EOF, not the reset
+    [`Abort`][] sends.
     """
+    graceful: ClassVar[bool] = True
 
-
-@dataclass(frozen=True)
-class HalfClose:
-    """Shut down the sending direction only (FIN), keep reading.
-
-    **Not terminal** — later steps still run, which is the whole point.
-    ``Abort`` is not a substitute: it sends RST, discarding what is buffered
-    and leaving nothing to read.
-    """
+    def wire(self) -> bytes:
+        return b''
 
 
 Step = (WaitForRequest | ExpectRequest | SendStatusLine | SendHeader | EndHeaders
@@ -172,13 +140,17 @@ Step = (WaitForRequest | ExpectRequest | SendStatusLine | SendHeader | EndHeader
 
 @dataclass(frozen=True)
 class ScenarioH1Server:
-    """An ordered sequence of steps, plus a name for test parametrisation.
-
-    ``steps`` is a **tuple**, as on [`ScenarioH2`][]: a frozen dataclass
-    holding a mutable list is a frozen container of mutable contents.
-    """
+    """An ordered sequence of steps, plus a name for test parametrisation."""
     steps: tuple[Step, ...] = ()
     name: str = ''
+
+    _v1: ClassVar = (False, {
+        StepOpH1Server.WAIT_FOR_REQUEST: 'WaitForRequest',
+        StepOpH1Server.EXPECT_REQUEST: 'ExpectRequest',
+        StepOpH1Server.SEND_RAW: 'SendRawBytes', StepOpH1Server.SLEEP: 'Sleep',
+        StepOpH1Server.ABORT: 'Abort',
+        StepOpH1Server.CLOSE_GRACEFULLY: 'CloseGracefully',
+        StepOpH1Server.HALF_CLOSE: 'HalfClose'})
 
 
 # ---------------------------------------------------------------------------
@@ -190,25 +162,21 @@ def parse_request_head(head: bytes) -> dict:
     """Split a request head into the fields [`request_matches`][] reads.
 
     Lenient by necessity: it parses what a *client under test* actually
-    sent, including what a conforming parser would reject.  A malformed
-    request line yields empty strings rather than raising, so a scenario
-    matching on ``method`` simply will not match it.
+    sent.  A malformed request line yields empty strings rather than
+    raising, so a scenario matching on ``method`` simply will not match it.
     """
     lines = head.split(b'\r\n')
-    request_line = lines[0] if lines else b''
-    parts = request_line.split(b' ')
-    method = parts[0].decode('latin-1') if len(parts) > 0 else ''
-    target = parts[1].decode('latin-1') if len(parts) > 1 else ''
-    version = parts[2].decode('latin-1') if len(parts) > 2 else ''
+    parts = lines[0].split(b' ') if lines else []
+    method, target, version = (
+        (parts[i].decode('latin-1') if len(parts) > i else '') for i in range(3))
     headers: list[tuple[str, str]] = []
     for line in lines[1:]:
         if not line:
             break
         name, sep, value = line.partition(b':')
-        if not sep:
-            continue
-        headers.append((name.strip().decode('latin-1').lower(),
-                        value.strip().decode('latin-1')))
+        if sep:
+            headers.append((name.strip().decode('latin-1').lower(),
+                            value.strip().decode('latin-1')))
     return {'method': method, 'target': target, 'version': version,
             'headers': headers}
 
@@ -219,8 +187,7 @@ def request_matches(head: bytes, match: dict) -> bool:
     Recognised keys: ``method``, ``target``, ``version``, ``header``,
     ``header_absent``.  **Unknown keys fail closed** — an unrecognised key
     is almost certainly a typo in a scenario, and silently matching on a
-    key nobody reads would hide it.  ``frame_matches`` on the HTTP/2 side
-    made the same choice for the same reason.
+    key nobody reads would hide it.
 
     ``header`` takes ``(name, value)``; pass ``value=None`` to match on
     presence alone.  ``header_absent`` takes a name.
@@ -256,8 +223,7 @@ class ScenarioH1ServerResult:
     """What the executor observed while running a scenario.
 
     Field names match [`ScenarioH2Result`][blackbull.fault_injection.scenario_h2.ScenarioH2Result]
-    wherever the two mean the same thing, so a harness that reports on one
-    half does not need a second spelling for the other.
+    wherever the two mean the same thing.
     """
     #: Steps that completed, in order.
     steps_completed: list = field(default_factory=list)
@@ -273,145 +239,21 @@ class ScenarioH1ServerResult:
     terminated: bool = False
     #: Seconds from first connection to the last step.
     elapsed_s: float = 0.0
-    #: The client's request head, once one arrived.  HTTP/1.1-specific:
-    #: HTTP/2 has no single "head" to capture, it has frames.
+    #: The client's request head, once one arrived.
     request_head: bytes = b''
-    # Skipped HTTP/1.1 requests desynchronize positional responses; the executor
-    # cannot later answer them. HTTP/2 stream responses are independent.
+    #: Heads a ``WaitForRequest`` passed over; each desyncs the connection.
     wait_skipped: int = 0
-    #: One ``(match, matched)`` pair per [`ExpectRequest`][] step, in
-    #: order — what the scenario assumed, and whether it held.
+    #: One ``(match, matched)`` pair per [`ExpectRequest`][] step, in order.
     expectations: list = field(default_factory=list)
     #: True on successful write-side half-close; False if absent or unsupported.
     half_closed: bool = False
 
 
-# ---------------------------------------------------------------------------
-# JSON Lines serialisation — the same shape ``scenario_h2`` uses
-# ---------------------------------------------------------------------------
-
-
-def _step_to_dict(step) -> dict:
-    if isinstance(step, WaitForRequest):
-        return {'op': StepOpH1Server.WAIT_FOR_REQUEST, 'timeout': step.timeout,
-                'match': step.match}
-    if isinstance(step, ExpectRequest):
-        return {'op': StepOpH1Server.EXPECT_REQUEST, 'timeout': step.timeout,
-                'match': step.match}
-    if isinstance(step, SendRawBytes):
-        return {'op': StepOpH1Server.SEND_RAW,
-                'data': step.data.hex(),
-                'byte_interval': step.byte_interval}
-    if isinstance(step, Sleep):
-        return {'op': StepOpH1Server.SLEEP, 'duration': step.duration}
-    if isinstance(step, Abort):
-        return {'op': StepOpH1Server.ABORT}
-    if isinstance(step, CloseGracefully):
-        return {'op': StepOpH1Server.CLOSE_GRACEFULLY}
-    if isinstance(step, HalfClose):
-        return {'op': StepOpH1Server.HALF_CLOSE}
-    raise ValueError(f'cannot serialise step: {step!r}')
-
-
-def _normalise_match(match: dict | None) -> dict:
-    """JSON has no tuples, so ``header``'s pair comes back as a list.
-
-    Normalised on the way in rather than compared loosely on the way out:
-    a scenario that round-trips must equal the one it came from, and
-    ``('x', 'y') != ['x', 'y']``.
-    """
-    match = dict(match or {})
-    if 'header' in match and isinstance(match['header'], list):
-        match['header'] = tuple(match['header'])
-    return match
-
-
-def _step_from_dict(d: dict):
-    op = d['op']
-    if op == StepOpH1Server.WAIT_FOR_REQUEST:
-        return WaitForRequest(timeout=d.get('timeout', 5.0),
-                              match=_normalise_match(d.get('match')))
-    if op == StepOpH1Server.EXPECT_REQUEST:
-        return ExpectRequest(timeout=d.get('timeout', 5.0),
-                             match=_normalise_match(d.get('match')))
-    if op == StepOpH1Server.SEND_RAW:
-        return SendRawBytes(data=bytes.fromhex(d['data']),
-                            byte_interval=d.get('byte_interval', 0.0))
-    if op == StepOpH1Server.SLEEP:
-        return Sleep(duration=d['duration'])
-    if op == StepOpH1Server.ABORT:
-        return Abort()
-    if op == StepOpH1Server.CLOSE_GRACEFULLY:
-        return CloseGracefully()
-    if op == StepOpH1Server.HALF_CLOSE:
-        return HalfClose()
-    raise ValueError(f'unknown step op: {op!r}')
-
-
 def scenario_to_json(scenario: ScenarioH1Server) -> str:
-    """Serialise *scenario* to JSON Lines (one step per line).
-
-    The name sits on the first line under the op ``HEADER``, keeping the
-    file one line-oriented stream with no out-of-band metadata.
-
-    Payloads are hex, not base64: a fault scenario's bytes are frequently
-    not valid UTF-8 and are read against a packet capture by eye.
-    """
-    lines = [json.dumps({'op': 'HEADER', 'name': scenario.name})]
-    for step in scenario.steps:
-        lines.append(json.dumps(_step_to_dict(step)))
-    return '\n'.join(lines)
+    """Serialise *scenario* to JSON Lines (one step per line)."""
+    return _scenario.to_json(scenario)
 
 
 def scenario_from_json(src: str) -> ScenarioH1Server:
     """Parse JSON Lines back to a [`ScenarioH1Server`][]."""
-    name = ''
-    steps: list = []
-    for line in src.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        d = json.loads(line)
-        if d.get('op') == 'HEADER':
-            name = d.get('name', '')
-            continue
-        steps.append(_step_from_dict(d))
-    return ScenarioH1Server(steps=tuple(steps), name=name)
-
-
-# Fault step serialization must permit bytes the production sender refuses.
-
-
-def encode_status_line(step: SendStatusLine) -> bytes:
-    """``HTTP/1.1 200 OK\\r\\n``, or whatever the step says instead."""
-    head = f'{step.version} {step.code}'
-    if not step.omit_reason:
-        head += f' {step.reason}'
-    return head.encode('latin-1') + b'\r\n'
-
-
-def encode_header(step: SendHeader) -> bytes:
-    """One header line, or an obs-fold continuation of the previous one."""
-    if step.fold:
-        return b' ' + step.value.encode('latin-1') + b'\r\n'
-    return (step.name.encode('latin-1') + b': '
-            + step.value.encode('latin-1') + b'\r\n')
-
-
-def encode_chunk(step: SendChunk) -> bytes:
-    """One chunk, with the size line free to disagree with the data."""
-    size = step.declared_size
-    if size is None:
-        size = len(step.data)
-    line = format(size, 'x')
-    if step.extension:
-        line += f';{step.extension}'
-    return line.encode('latin-1') + b'\r\n' + step.data + step.terminator
-
-
-def encode_chunked_terminator(step: EndChunkedBody) -> bytes:
-    """The zero chunk, plus any trailer fields."""
-    out = b'0\r\n'
-    for name, value in step.trailers:
-        out += name.encode('latin-1') + b': ' + value.encode('latin-1') + b'\r\n'
-    return out + b'\r\n'
+    return _scenario.from_json(ScenarioH1Server, src)

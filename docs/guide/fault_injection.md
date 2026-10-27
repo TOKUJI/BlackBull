@@ -288,13 +288,13 @@ async def test_my_client_rejects_a_short_body():
 
 !!! note "Why the `H1S` prefix"
 
-    Three scenario vocabularies live in this package — HTTP/1.1 client-side,
-    HTTP/1.1 server-side, HTTP/2 server-side — and they share step names
-    because they describe the same shapes of misbehaviour.  The package
-    exports them role-qualified so an import cannot silently hand one half's
-    step to the other half's executor: `H1S…` is HTTP/1.1 server-side, `H2…`
-    is HTTP/2, and the unprefixed `Abort` / `Sleep` are the HTTP/1.1 *client*
-    vocabulary that had the names first.
+    Four scenario vocabularies live in this package, one per cell, and they
+    share step names because they describe the same shapes of misbehaviour.
+    The transport steps — `SendRawBytes`, `Sleep`, `Abort`, `HalfClose` — are
+    one class under every name.  The package exports the role-specific names
+    role-qualified: `H1S…` is HTTP/1.1 server-side, `H2…` is HTTP/2, and the
+    unprefixed `Abort` / `Sleep` are the HTTP/1.1 *client* vocabulary that
+    had the names first.
 
     Importing from the submodule directly (`from
     blackbull.fault_injection.scenario_h1_server import SendRawBytes`) gives
@@ -342,9 +342,8 @@ ScenarioH1Server(steps=(
 **Skipping desyncs the connection, and the result says so.**  HTTP/1.1
 responses are positional, so a head the step passed over is a request the
 scenario can no longer answer — everything after it is off by one.  The count
-is on `ScenarioH1ServerResult.requests_skipped`.  (On HTTP/2 the same skip is
-harmless, because streams are independent; that is why the two halves cannot
-simply share an implementation.)
+is on `ScenarioH1ServerResult.wait_skipped`.  (On HTTP/2 the same skip is
+harmless, because streams are independent.)
 
 **`ExpectRequest(match=...)` — is the client behaving as I assumed?**  Reads
 one head, skips nothing, and records the verdict:
@@ -428,6 +427,25 @@ names line up with the defences that answer them: `rapid_reset_burst`
 
 Three of them end with a long `Sleep` because *holding* the connection is
 the fault they stage; what ends those is your server's own deadline.
+
+## Saving scenarios as JSON Lines
+
+Every vocabulary writes the same format: a `HEADER` line carrying the
+format version and the scenario's own fields, then one line per step named
+by its class, with bytes as hex.
+
+```text
+{"op": "HEADER", "format": 2, "name": "half_a_status_line"}
+{"op": "WaitForRequest", "match": {}, "timeout": 5.0}
+{"op": "SendRawBytes", "data": "485454502f312e31203230", "byte_interval": 0.0}
+{"op": "CloseGracefully"}
+```
+
+Use `Scenario.to_json` / `from_json` on the HTTP/1.1 client side and the
+`scenario_*_to_json` / `scenario_*_from_json` pairs for the other three.
+Files in the earlier per-vocabulary format (no `format` key) still read,
+with a `DeprecationWarning`, until v0.84.0 at the earliest; rewrite one
+with `to_json(from_json(text))`.
 
 ## Safety locks
 

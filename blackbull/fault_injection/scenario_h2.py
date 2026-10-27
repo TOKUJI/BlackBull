@@ -6,11 +6,12 @@ SendFrame; use SendRawBytes for other or malformed frame encodings.
 """
 from __future__ import annotations
 
-import base64
-import enum
-import json
 from dataclasses import dataclass, field
-from typing import Any, Union
+import enum
+from typing import Any, ClassVar, Union
+
+from . import _scenario
+from ._scenario import Abort, HalfClose, SendRawBytes, Sleep
 
 # A FrameBase subclass — kept loose so this module does not pull in
 # the protocol package at import time when the model is being used
@@ -19,7 +20,7 @@ Frame = Any
 
 
 class StepOpH2(str, enum.Enum):
-    """Tag used by the JSON serialiser."""
+    """The v1 JSON tags, still read until v1 reading is removed."""
     SEND_FRAME = 'SEND_FRAME'
     SEND_RAW = 'SEND_RAW'
     WAIT = 'WAIT'
@@ -28,6 +29,16 @@ class StepOpH2(str, enum.Enum):
     ABORT = 'ABORT'
     GOAWAY_CLOSE = 'GOAWAY_CLOSE'
     HALF_CLOSE = 'HALF_CLOSE'
+
+
+def frame_bytes(length: int, type_byte: bytes, flags: int, stream_id: int,
+                payload: bytes = b'') -> bytes:
+    """RFC 9113 §4.1 — the 9-byte frame header, then *payload*.
+
+    *length* is written as given, so it may disagree with the payload."""
+    return (length.to_bytes(3, 'big') + bytes(type_byte)
+            + int(flags).to_bytes(1, 'big')
+            + (int(stream_id) & 0x7fffffff).to_bytes(4, 'big') + payload)
 
 
 @dataclass(frozen=True)
@@ -39,75 +50,40 @@ class SendFrame:
     frame: Frame
     declared_length: int | None = None
 
-
-@dataclass(frozen=True)
-class SendRawBytes:
-    """Push arbitrary bytes onto the connection.
-
-    Escape hatch for malformed frames (illegal type byte, length
-    exceeding ``SETTINGS_MAX_FRAME_SIZE``, etc.) that the typed
-    [`SendFrame`][] path will not produce.
-
-    ``byte_interval > 0`` transmits one byte at a time with that
-    delay — useful for stalled-handshake patterns where the client
-    is expected to enforce a preface-completion timeout.
-    """
-    data: bytes
-    byte_interval: float = 0.0
+    def wire(self) -> bytes:
+        data = serialize_frame(self.frame)
+        if self.declared_length is None:
+            return data
+        return self.declared_length.to_bytes(3, 'big') + data[3:]
 
 
-@dataclass(frozen=True)
-class WaitForClientFrame:
-    """Consume until a frame matches, skipping nonmatches.
-
-    Timeout records a miss and proceeds to the next step.
-    """
-    match: dict = field(default_factory=dict)
-    timeout: float = 5.0
+class WaitForClientFrame(_scenario._WaitFor):
+    """Consume until a frame matches, skipping nonmatches — harmless on
+    HTTP/2, where streams are independent."""
 
 
-@dataclass(frozen=True)
-class ExpectClientFrame:
-    """Consume exactly one frame and record whether it matched; never filter.
-    """
-    match: dict = field(default_factory=dict)
-    timeout: float = 5.0
-
-
-@dataclass(frozen=True)
-class Sleep:
-    """Idle for ``duration`` seconds without reading or writing."""
-    duration: float
-
-
-@dataclass(frozen=True)
-class Abort:
-    """Hard-close the connection (transport.abort → RST on Linux)."""
+class ExpectClientFrame(_scenario._Expect):
+    """Consume exactly one frame and record whether it matched; never filter."""
 
 
 @dataclass(frozen=True)
 class CloseGracefully:
-    """Send a GOAWAY then close cleanly.
+    """Send a GOAWAY then close cleanly.  Terminal, like [`Abort`][].
 
-    Subsequent scenario steps short-circuit (this is a terminator
-    just like [`Abort`][]).  ``error_code`` is one of the
+    ``error_code`` is one of the
     [`ErrorCodes`][blackbull.protocol.frame_types.ErrorCodes] values;
     ``last_stream_id`` advertises the last stream the server is
-    willing to process — pass ``0`` to refuse all client streams,
-    or the highest accepted stream ID otherwise.
+    willing to process — pass ``0`` to refuse all client streams.
     """
     error_code: int = 0
     last_stream_id: int = 0
+    graceful: ClassVar[bool] = True
 
-
-@dataclass(frozen=True)
-class HalfClose:
-    """Shut down the sending direction only (FIN), keep reading.
-
-    **Not terminal** — later steps still run, which is the whole point.
-    ``Abort`` is not a substitute: it sends RST, discarding what is buffered
-    and leaving nothing to read.
-    """
+    def wire(self) -> bytes:
+        from blackbull.protocol.frame_types import FrameTypes  # noqa: PLC0415
+        return frame_bytes(8, FrameTypes.GOAWAY.value, 0, 0,
+                           int(self.last_stream_id).to_bytes(4, 'big')
+                           + int(self.error_code).to_bytes(4, 'big'))
 
 
 # Discriminated union the H2 executor matches on.
@@ -133,24 +109,23 @@ class ScenarioH2:
     Two control knobs sit outside the step list because they apply to
     the whole connection, not to one step:
 
-    * ``send_preface``: whether the server sends the standard
-      ``SERVER_PREFACE_BYTES`` + initial SETTINGS at handshake time.
-      Most catalogue scenarios want this (real H2 clients require it
-      before proceeding); set ``False`` to exercise client behaviour
-      against a server that skips the handshake.
-    * ``initial_settings``: tuple of ``(setting_id, value)`` pairs the
-      server advertises in its initial SETTINGS frame.  Used by the
-      "exhausted window" and "illegal SETTINGS" catalogue entries to
-      inject a hostile starting state before the first step runs.
+    * ``send_preface``: whether the server sends its initial SETTINGS at
+      handshake time.  Set ``False`` to exercise client behaviour against a
+      server that skips the handshake.
+    * ``initial_settings``: ``(setting_id, value)`` pairs the server
+      advertises in that SETTINGS frame — how the "exhausted window" and
+      "illegal SETTINGS" cases inject a hostile starting state.
     """
     steps: tuple[H2Step, ...]
     send_preface: bool = True
     initial_settings: tuple[tuple[int, int], ...] = ()
-    #: For test parametrisation and for the JSON header line, as
-    #: [`ScenarioH1Server`][blackbull.fault_injection.scenario_h1_server.ScenarioH1Server]
-    #: has.  A scenario that can be reported on by name is one a failing CI
-    #: run can point at.
     name: str = ''
+
+    _v1: ClassVar = (True, {
+        StepOpH2.SEND_FRAME: 'SendFrame', StepOpH2.SEND_RAW: 'SendRawBytes',
+        StepOpH2.WAIT: 'WaitForClientFrame', StepOpH2.EXPECT: 'ExpectClientFrame',
+        StepOpH2.SLEEP: 'Sleep', StepOpH2.ABORT: 'Abort',
+        StepOpH2.GOAWAY_CLOSE: 'CloseGracefully', StepOpH2.HALF_CLOSE: 'HalfClose'})
 
 
 @dataclass
@@ -158,43 +133,26 @@ class ScenarioH2Result:
     """Outcome of one [`ScenarioH2`][] run.
 
     Mirrors [`ScenarioResult`][blackbull.fault_injection.scenario_h1.ScenarioResult]'s
-    shape so callers can write uniform pytest assertions across
-    protocols.
+    shape so callers can write uniform assertions across protocols.
     """
 
-    # 0-based count of steps that ran to completion (excluding the
-    # step that aborted, errored, or fell out of timeout).
+    #: Steps that ran to completion.
     steps_completed: int = 0
-
-    # Total inbound bytes received from the client.
+    #: Total inbound bytes received from the client.
     client_bytes_received: int = 0
-
-    # Total outbound bytes sent to the client.
+    #: Total outbound bytes sent to the client.
     server_bytes_sent: int = 0
-
-    # If a step raised, this is the repr.  The executor never lets a
-    # scenario bubble exceptions to the caller.
+    #: ``repr()`` of whatever a step raised; the executor never raises.
     exception: str | None = None
-
-    # Frames a WaitForClientFrame(match=...) step read and passed over.
-    # Harmless here — HTTP/2 streams are independent — where the same
-    # count on HTTP/1.1 means the connection is desynced.
+    #: Frames a ``WaitForClientFrame(match=...)`` read and passed over.
     wait_skipped: int = 0
-
-    # One (match, matched) pair per ExpectClientFrame step, in order:
-    # what the scenario assumed, and whether it held.
+    #: One ``(match, matched)`` pair per ``ExpectClientFrame``, in order.
     expectations: list = field(default_factory=list)
-
-    # Whether a WaitForClientFrame step timed out before its match
-    # arrived.  When True the step still counts as completed and the
-    # next step runs; this distinguishes a per-step timeout (recorded
-    # here) from a transport-level error (recorded in ``exception``).
+    #: A ``WaitForClientFrame`` or ``ExpectClientFrame`` ran out of time; the
+    #: next step still ran, unlike a transport error in ``exception``.
     wait_timed_out: bool = False
-
-    # True when execution stopped because an Abort or CloseGracefully
-    # step ran.
+    #: An ``Abort`` or ``CloseGracefully`` step ended the scenario.
     terminated: bool = False
-
     elapsed_s: float = 0.0
     #: True on successful write-side half-close; False if absent or unsupported.
     half_closed: bool = False
@@ -304,77 +262,8 @@ def _frame_type_name(frame: Frame) -> str:
 
 
 # ---------------------------------------------------------------------------
-# JSON Lines serialisation
+# The frame record ``SendFrame`` carries in JSON, and its wire bytes
 # ---------------------------------------------------------------------------
-
-def _step_to_dict(step: H2Step) -> dict:
-    if isinstance(step, SendFrame):
-        return {
-            'op': StepOpH2.SEND_FRAME.value,
-            'frame': _frame_to_dict(step.frame),
-            'declared_length': step.declared_length,
-        }
-    if isinstance(step, SendRawBytes):
-        return {
-            'op': StepOpH2.SEND_RAW.value,
-            'data': base64.b64encode(step.data).decode('ascii'),
-            'byte_interval': step.byte_interval,
-        }
-    if isinstance(step, ExpectClientFrame):
-        return {'op': StepOpH2.EXPECT.value, 'match': dict(step.match),
-                'timeout': step.timeout}
-    if isinstance(step, WaitForClientFrame):
-        return {
-            'op': StepOpH2.WAIT.value,
-            'match': dict(step.match),
-            'timeout': step.timeout,
-        }
-    if isinstance(step, Sleep):
-        return {'op': StepOpH2.SLEEP.value, 'duration': step.duration}
-    if isinstance(step, Abort):
-        return {'op': StepOpH2.ABORT.value}
-    if isinstance(step, HalfClose):
-        return {'op': StepOpH2.HALF_CLOSE.value}
-    if isinstance(step, CloseGracefully):
-        return {
-            'op': StepOpH2.GOAWAY_CLOSE.value,
-            'error_code': step.error_code,
-            'last_stream_id': step.last_stream_id,
-        }
-    raise TypeError(f'unknown step type: {type(step).__name__}')
-
-
-def _step_from_dict(d: dict) -> H2Step:
-    op = d.get('op')
-    if op == StepOpH2.SEND_FRAME.value:
-        return SendFrame(frame=_frame_from_dict(d['frame']),
-                         declared_length=d.get('declared_length'))
-    if op == StepOpH2.SEND_RAW.value:
-        return SendRawBytes(
-            data=base64.b64decode(d['data']),
-            byte_interval=float(d.get('byte_interval', 0.0)),
-        )
-    if op == StepOpH2.EXPECT.value:
-        return ExpectClientFrame(match=d.get('match') or {},
-                                 timeout=d.get('timeout', 5.0))
-    if op == StepOpH2.WAIT.value:
-        return WaitForClientFrame(
-            match=dict(d.get('match', {})),
-            timeout=float(d.get('timeout', 5.0)),
-        )
-    if op == StepOpH2.SLEEP.value:
-        return Sleep(duration=float(d['duration']))
-    if op == StepOpH2.ABORT.value:
-        return Abort()
-    if op == StepOpH2.HALF_CLOSE.value:
-        return HalfClose()
-    if op == StepOpH2.GOAWAY_CLOSE.value:
-        return CloseGracefully(
-            error_code=int(d.get('error_code', 0)),
-            last_stream_id=int(d.get('last_stream_id', 0)),
-        )
-    raise ValueError(f'unknown step op: {op!r}')
-
 
 #: The frame classes the record codec understands.  Both directions and the
 #: round-trip test read it, so an arm cannot land on one side alone.
@@ -505,14 +394,11 @@ def _frame_to_dict(frame: Frame) -> dict:
     elif name == 'GoAway':
         base['last_stream_id'] = int(getattr(frame, 'last_stream_id', 0))
         base['error_code'] = int(getattr(frame, 'error_code', 0))
-        base['append_data'] = base64.b64encode(
-            getattr(frame, 'append_data', b'') or b'').decode('ascii')
+        base['append_data'] = bytes(getattr(frame, 'append_data', b'') or b'').hex()
     elif name == 'Ping':
-        base['payload'] = base64.b64encode(
-            getattr(frame, 'payload', b'') or b'').decode('ascii')
+        base['payload'] = bytes(getattr(frame, 'payload', b'') or b'').hex()
     elif name == 'Data':
-        base['data'] = base64.b64encode(
-            getattr(frame, 'payload', b'') or b'').decode('ascii')
+        base['data'] = bytes(getattr(frame, 'payload', b'') or b'').hex()
     else:
         # Reachable only if a name is added to ROUND_TRIP_FRAME_CLASSES
         # without a writer arm here: the declaration and the codec disagree.
@@ -600,14 +486,14 @@ def _frame_from_dict(d: dict) -> Frame:
         payload = _payload_from_record(
             _four_octets_from_record(d, 'last_stream_id').to_bytes(4, 'big')
             + _four_octets_from_record(d, 'error_code').to_bytes(4, 'big')
-            + base64.b64decode(d.get('append_data', '')))
+            + bytes.fromhex(d.get('append_data', '')))
         return frame_types.GoAway(
             length=len(payload), type_=frame_types.FrameTypes.GOAWAY,
             flags=flags, stream_id=stream_id, data=payload)
     if name == 'Ping':
         # ``Ping`` alone among the frame classes built here requires
         # ``data``; omitting it makes a serialised PING unreadable back.
-        payload = _payload_from_record(base64.b64decode(d.get('payload', '')))
+        payload = _payload_from_record(bytes.fromhex(d.get('payload', '')))
         f = frame_types.Ping(length=len(payload),
                              type_=frame_types.FrameTypes.PING,
                              flags=flags, stream_id=stream_id, data=payload)
@@ -619,7 +505,7 @@ def _frame_from_dict(d: dict) -> Frame:
             # body octet for the pad length.
             raise ValueError('a padded DATA frame cannot be read back; '
                              'use SendRawBytes')
-        payload = _payload_from_record(base64.b64decode(d.get('data', '')))
+        payload = _payload_from_record(bytes.fromhex(d.get('data', '')))
         return frame_types.Data(
             length=len(payload), type_=frame_types.FrameTypes.DATA,
             flags=flags, stream_id=stream_id, data=payload)
@@ -628,44 +514,35 @@ def _frame_from_dict(d: dict) -> Frame:
     raise ValueError(f'{name!r} is declared round-trippable but has no reader arm')
 
 
-def scenario_to_json(scenario: ScenarioH2) -> str:
-    """Serialize JSON Lines; the first HEADER carries send_preface and initial_settings.
+def serialize_frame(frame) -> bytes:
+    """Convert a ``FrameBase`` instance to wire bytes.
+
+    Restricted to the classes in `ROUND_TRIP_FRAME_CLASSES`, and to frames
+    [`require_canonical`][] accepts; anything else goes through
+    [`SendRawBytes`][].
     """
-    lines = [json.dumps({
-        'op': 'HEADER',
-        'name': scenario.name,
-        'send_preface': scenario.send_preface,
-        'initial_settings': [list(p) for p in scenario.initial_settings],
-    })]
-    for step in scenario.steps:
-        lines.append(json.dumps(_step_to_dict(step)))
-    return '\n'.join(lines)
+    name = type(frame).__name__
+    if name not in ROUND_TRIP_FRAME_CLASSES:
+        raise TypeError(
+            f'{name} cannot be serialised by H2FaultServer; use SendRawBytes.')
+    require_canonical(frame)
+    payload = _canonical_payload(frame)
+    return frame_bytes(len(payload), type(frame).FRAME_TYPE.value,
+                       int(getattr(frame, 'flags', 0) or 0),
+                       int(getattr(frame, 'stream_id', 0) or 0), payload)
+
+
+SendFrame._codecs = {'frame': (_frame_to_dict, _frame_from_dict)}
+
+
+def scenario_to_json(scenario: ScenarioH2) -> str:
+    """Serialise JSON Lines; the HEADER line carries send_preface and initial_settings."""
+    return _scenario.to_json(scenario)
 
 
 def scenario_from_json(src: str) -> ScenarioH2:
     """Parse JSON Lines back to a [`ScenarioH2`][]."""
-    name = ''
-    send_preface = True
-    initial_settings: tuple[tuple[int, int], ...] = ()
-    steps: list[H2Step] = []
-    for line in src.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        d = json.loads(line)
-        if d.get('op') == 'HEADER':
-            name = d.get('name', '')
-            send_preface = bool(d.get('send_preface', True))
-            initial_settings = tuple(
-                tuple(pair) for pair in d.get('initial_settings', []))
-            continue
-        steps.append(_step_from_dict(d))
-    return ScenarioH2(
-        steps=tuple(steps),
-        send_preface=send_preface,
-        initial_settings=initial_settings,
-        name=name,
-    )
+    return _scenario.from_json(ScenarioH2, src)
 
 
 __all__ = [
@@ -683,6 +560,8 @@ __all__ = [
     'StepOpH2',
     'WaitForClientFrame',
     'frame_matches',
+    'frame_bytes',
     'scenario_from_json',
     'scenario_to_json',
+    'serialize_frame',
 ]

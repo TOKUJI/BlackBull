@@ -366,13 +366,13 @@ async def cell_e_scenarios_as_data() -> None:
     # payload named rather than split across two adjacent literals: inside a
     # list, implicit concatenation and a missing comma look identical.
     half_a_status_line = '485454502f312e31203230'
-    send_raw = (f'{{"op": "SEND_RAW", "data": "{half_a_status_line}", '
+    send_raw = (f'{{"op": "SendRawBytes", "data": "{half_a_status_line}", '
                 f'"byte_interval": 0.0}}')
     handwritten = scenario_h1_server_from_json('\n'.join([
-        '{"op": "HEADER", "name": "half_a_status_line"}',
-        '{"op": "WAIT_FOR_REQUEST", "timeout": 5.0}',
+        '{"op": "HEADER", "format": 2, "name": "half_a_status_line"}',
+        '{"op": "WaitForRequest", "timeout": 5.0}',
         send_raw,
-        '{"op": "CLOSE_GRACEFULLY"}',
+        '{"op": "CloseGracefully"}',
     ]))
     print(f'\n  loaded from hand-written JSON: {handwritten.name}')
     async with H1FaultServer(handwritten) as srv:

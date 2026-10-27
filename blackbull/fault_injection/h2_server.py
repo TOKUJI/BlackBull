@@ -7,34 +7,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import ssl
-import time
 
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import FrameTypes
 
-from ._transport import half_close
-from .scenario_h2 import (
-    ROUND_TRIP_FRAME_CLASSES,
-    HalfClose,
-    ExpectClientFrame,
-    Abort,
-    CloseGracefully,
-    ScenarioH2,
-    ScenarioH2Result,
-    SendFrame,
-    SendRawBytes,
-    Sleep,
-    WaitForClientFrame,
-    frame_matches,
-    require_canonical,
-)
+from ._scenario import _FaultServer, _ServerConnection
+from .scenario_h2 import ScenarioH2Result, frame_bytes, frame_matches, serialize_frame
+from .scenario_h2_client import CLIENT_PREFACE
 
 logger = logging.getLogger(__name__)
-
-
-# RFC 9113 §3.4 — client connection preface bytes.
-CLIENT_PREFACE = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
 
 
 class H2FaultServerError(RuntimeError):
@@ -47,103 +28,70 @@ class H2FaultServerError(RuntimeError):
     """
 
 
-def _refuse_in_production() -> None:
-    """Refuse startup in BLACKBULL_ENV=production or when BB_PRODUCTION is enabled.
-    """
-    from ..env import get_settings, Environment  # noqa: PLC0415
-    cfg = get_settings()
-    if cfg.production or cfg.env == Environment.PRODUCTION:
-        raise H2FaultServerError(
-            "H2FaultServer refuses to run in a production context "
-            "(BLACKBULL_ENV=production or BB_PRODUCTION set).  This is a "
-            "testing-only instrument that deliberately emits wrong HTTP/2 "
-            "responses; running it in a production process would expose your "
-            "service to the same misbehaviour.  Run it only in a test harness."
-        )
+class _H2Connection(_ServerConnection):
+    _matches = staticmethod(frame_matches)
+
+    def __init__(self, server: 'H2FaultServer', *args) -> None:
+        super().__init__(*args)
+        self.scenario = server.scenario
+        self.frames: asyncio.Queue = asyncio.Queue()
+        self.inbound: asyncio.Task | None = None
+
+    async def open(self) -> None:
+        # The client may send its preface before or after our SETTINGS.
+        preface = await self.reader.readexactly(len(CLIENT_PREFACE))
+        self.result.client_bytes_received += len(preface)
+        if preface != CLIENT_PREFACE:
+            raise H2FaultServerError(f"client preface mismatch; got {preface!r}")
+        if self.scenario.send_preface:
+            payload = b''.join(
+                int(setting_id).to_bytes(2, 'big') + int(value).to_bytes(4, 'big')
+                for setting_id, value in self.scenario.initial_settings)
+            await self._write(frame_bytes(len(payload), FrameTypes.SETTINGS.value,
+                                          0, 0, payload), 0.0)
+        self.inbound = asyncio.create_task(self._inbound_frames())
+
+    def release(self) -> None:
+        if self.inbound is not None:
+            self.inbound.cancel()
+
+    def failed(self, exc: Exception) -> None:
+        if not isinstance(exc, (ConnectionResetError, BrokenPipeError)):
+            super().failed(exc)
+            logger.warning('scenario step raised: %r', exc)
+
+    async def _inbound_frames(self) -> None:
+        """Decode inbound frames onto the queue the read steps consume."""
+        factory = FrameFactory()
+        try:
+            while True:
+                header = await self.reader.readexactly(9)
+                self.result.client_bytes_received += 9
+                length = int.from_bytes(header[:3], 'big')
+                payload = await self.reader.readexactly(length) if length else b''
+                self.result.client_bytes_received += length
+                try:
+                    frame = factory.load(header + payload)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug('inbound frame decode failed: %r', exc)
+                    continue
+                await self.frames.put(frame)
+        except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
+            pass
+
+    async def _close(self, *, graceful: bool) -> None:
+        # Not waiting for the close: the result is reported first, and a TLS
+        # peer that never answers close_notify would hold it for 30 s.
+        if graceful:
+            self.writer.close()
+        else:
+            await super()._close(graceful=False)
+
+    async def _read(self, timeout: float):
+        return await asyncio.wait_for(self.frames.get(), timeout=timeout)
 
 
-# ---------------------------------------------------------------------------
-# Frame serialisation — minimal wire encoder for the catalogue's needs
-# ---------------------------------------------------------------------------
-
-
-def _encode_frame_header(length: int, type_byte: bytes, flags: int,
-                         stream_id: int) -> bytes:
-    """RFC 9113 §4.1 — 9-byte fixed header (24-bit length, type, flags, R+stream_id)."""
-    return (
-        length.to_bytes(3, 'big')
-        + type_byte
-        + flags.to_bytes(1, 'big')
-        + (stream_id & 0x7fffffff).to_bytes(4, 'big')
-    )
-
-
-def serialize_frame(frame) -> bytes:
-    """Convert a ``FrameBase`` instance to wire bytes.
-
-    Restricted to the classes in `ROUND_TRIP_FRAME_CLASSES`, and to frames
-    [`require_canonical`][] accepts; anything else goes through
-    [`SendRawBytes`][].
-    """
-    name = type(frame).__name__
-    if name not in ROUND_TRIP_FRAME_CLASSES:
-        raise TypeError(
-            f'{name} cannot be serialised by H2FaultServer; use SendRawBytes.'
-        )
-    require_canonical(frame)
-    flags = int(getattr(frame, 'flags', 0) or 0)
-    stream_id = int(getattr(frame, 'stream_id', 0) or 0)
-
-    if name == 'SettingFrame':
-        # The frame's own payload: an identifier this build does not name
-        # survives only in those octets, and ACK does not blank the body.
-        payload = bytes(getattr(frame, 'payload', b'') or b'')
-        return _encode_frame_header(
-            len(payload), FrameTypes.SETTINGS.value, flags, 0) + payload
-
-    if name == 'WindowUpdate':
-        payload = bytes(getattr(frame, 'payload', b'') or b'')
-        return _encode_frame_header(
-            len(payload), FrameTypes.WINDOW_UPDATE.value, flags, stream_id
-        ) + payload
-
-    if name == 'RstStream':
-        payload = int(getattr(frame, 'error_code', 0)).to_bytes(4, 'big')
-        return _encode_frame_header(
-            len(payload), FrameTypes.RST_STREAM.value, flags, stream_id
-        ) + payload
-
-    if name == 'GoAway':
-        last_stream = int(getattr(frame, 'last_stream_id', 0))
-        err_code = int(getattr(frame, 'error_code', 0))
-        payload = (last_stream.to_bytes(4, 'big')
-                   + err_code.to_bytes(4, 'big')
-                   + bytes(getattr(frame, 'append_data', b'') or b''))
-        return _encode_frame_header(
-            len(payload), FrameTypes.GOAWAY.value, flags, 0) + payload
-
-    if name == 'Ping':
-        payload = bytes(getattr(frame, 'payload', b'') or b'')
-        return _encode_frame_header(
-            len(payload), FrameTypes.PING.value, flags, 0) + payload
-
-    if name == 'Data':
-        payload = bytes(getattr(frame, 'payload', b'') or b'')
-        return _encode_frame_header(
-            len(payload), FrameTypes.DATA.value, flags, stream_id
-        ) + payload
-
-    # Reachable only if a name is added to ROUND_TRIP_FRAME_CLASSES without an
-    # encoder arm here: the declaration and the server disagree.
-    raise TypeError(f'{name!r} is declared serialisable but has no encoder arm')
-
-
-# ---------------------------------------------------------------------------
-# H2FaultServer
-# ---------------------------------------------------------------------------
-
-
-class H2FaultServer:
+class H2FaultServer(_FaultServer):
     """Programmable HTTP/2 server emitting a [`ScenarioH2`][].
 
     Async context manager: enter to bind + start accepting, exit to
@@ -181,276 +129,12 @@ class H2FaultServer:
         connection.  ``None`` before any client has connected.
     """
 
-    def __init__(
-        self,
-        scenario: ScenarioH2,
-        *,
-        host: str = '127.0.0.1',
-        port: int = 0,
-        allow_remote: bool = False,
-        ssl_context: ssl.SSLContext | None = None,
-    ):
-        _refuse_in_production()
-        if not allow_remote and host not in ('127.0.0.1', '::1', 'localhost'):
-            raise H2FaultServerError(
-                f"H2FaultServer refuses to bind to {host!r} without "
-                "allow_remote=True.  Deliberate-misbehaviour mode is "
-                "intended for local-loop tests only."
-            )
-        self.scenario = scenario
-        # Public, and matching ``H1FaultServer``: a caller driving the server
-        # with a raw socket needs the pair, and reaching for ``_host`` to get
-        # it is the kind of private access that makes an API look accidental.
-        self.host = host
-        self.port = port
-        self._ssl_context = ssl_context
-        self._server: asyncio.base_events.Server | None = None
-        self._factory = FrameFactory()
-        self.url: str | None = None
-        self.last_result: ScenarioH2Result | None = None
-        self._connection_done = asyncio.Event()
+    Error = H2FaultServerError
+    _wrong = 'HTTP/2'
 
-    # ----- lifecycle ---------------------------------------------------
-
-    async def __aenter__(self) -> 'H2FaultServer':
-        await self.start()
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        await self.stop()
-
-    async def start(self) -> None:
-        self._server = await asyncio.start_server(
-            self._handle_connection, self.host, self.port,
-            ssl=self._ssl_context,
-        )
-        self.port = self._server.sockets[0].getsockname()[1]
-        scheme = 'https' if self._ssl_context is not None else 'http'
-        self.url = f'{scheme}://{self.host}:{self.port}/'
-        logger.debug('H2FaultServer bound at %s', self.url)
-
-    async def stop(self) -> None:
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
-        logger.debug('H2FaultServer shut down')
-
-    async def wait_for_connection_done(self, timeout: float = 5.0) -> None:
-        """Block until a client has connected and the scenario finished."""
-        await asyncio.wait_for(self._connection_done.wait(), timeout=timeout)
-
-    # ----- per-connection handler --------------------------------------
-
-    async def _handle_connection(
-        self,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-    ) -> None:
-        result = ScenarioH2Result()
-        t0 = time.monotonic()
-        frame_queue: asyncio.Queue = asyncio.Queue()
-        reader_task: asyncio.Task | None = None
-        try:
-            # Wait for the client preface (24 magic bytes).  We tolerate
-            # the client sending its preface before / after our SETTINGS.
-            await self._consume_client_preface(reader, result)
-
-            # Optional handshake — server's initial SETTINGS frame.
-            if self.scenario.send_preface:
-                await self._send_initial_settings(writer, result)
-
-            # Spin a background task that reads frames from the wire
-            # and pushes them into frame_queue.  The main scenario
-            # loop consumes from this queue when it hits a Wait step.
-            reader_task = asyncio.create_task(
-                self._inbound_frame_loop(reader, frame_queue, result))
-
-            # Walk the steps.
-            for step in self.scenario.steps:
-                terminate = await self._run_step(
-                    step, writer, frame_queue, result)
-                result.steps_completed += 1
-                if terminate:
-                    result.terminated = True
-                    break
-        except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
-            pass  # peer disconnect or our own cancellation — the scenario simply ends.
-        except Exception as exc:  # noqa: BLE001
-            result.exception = repr(exc)
-            logger.warning('scenario step raised: %r', exc)
-        finally:
-            if reader_task is not None and not reader_task.done():
-                reader_task.cancel()
-                try:
-                    await reader_task
-                except (asyncio.CancelledError, Exception):
-                    pass  # teardown: reader task was just cancelled; ignore its unwind.
-            result.elapsed_s = time.monotonic() - t0
-            self.last_result = result
-            self._connection_done.set()
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception:  # noqa: BLE001
-                pass
-
-    async def _consume_client_preface(
-        self,
-        reader: asyncio.StreamReader,
-        result: ScenarioH2Result,
-    ) -> None:
-        """Read and verify the 24-byte client connection preface."""
-        preface = await reader.readexactly(len(CLIENT_PREFACE))
-        result.client_bytes_received += len(preface)
-        if preface != CLIENT_PREFACE:
-            raise H2FaultServerError(
-                f"client preface mismatch; got {preface!r}")
-
-    async def _send_initial_settings(
-        self,
-        writer: asyncio.StreamWriter,
-        result: ScenarioH2Result,
-    ) -> None:
-        """Send the server-initiated SETTINGS frame.
-
-        The scenario's ``initial_settings`` parameter pairs feed the
-        payload — empty tuple means an empty SETTINGS frame (still
-        legal; signals "I accept defaults").
-        """
-        payload = b''.join(
-            int(setting_id).to_bytes(2, 'big') + int(value).to_bytes(4, 'big')
-            for setting_id, value in self.scenario.initial_settings
-        )
-        frame = _encode_frame_header(
-            len(payload), FrameTypes.SETTINGS.value, 0, 0) + payload
-        writer.write(frame)
-        await writer.drain()
-        result.server_bytes_sent += len(frame)
-
-    async def _inbound_frame_loop(
-        self,
-        reader: asyncio.StreamReader,
-        queue: asyncio.Queue,
-        result: ScenarioH2Result,
-    ) -> None:
-        """Decode inbound frames and push them onto *queue*."""
-        try:
-            while True:
-                header = await reader.readexactly(9)
-                result.client_bytes_received += 9
-                length = int.from_bytes(header[:3], 'big')
-                payload = await reader.readexactly(length) if length else b''
-                result.client_bytes_received += length
-                try:
-                    frame = self._factory.load(header + payload)
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug('inbound frame decode failed: %r', exc)
-                    continue
-                await queue.put(frame)
-        except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
-            pass
-
-    async def _run_step(
-        self,
-        step,
-        writer: asyncio.StreamWriter,
-        queue: asyncio.Queue,
-        result: ScenarioH2Result,
-    ) -> bool:
-        """Execute one scenario step.  Returns True if the executor
-        should stop walking the scenario after this step (Abort /
-        CloseGracefully terminators)."""
-        if isinstance(step, SendFrame):
-            data = serialize_frame(step.frame)
-            if step.declared_length is not None:
-                # Rewrite the 24-bit length in place, leaving the payload
-                # alone: the fault *is* the disagreement between the two.
-                data = (step.declared_length.to_bytes(3, 'big') + data[3:])
-            writer.write(data)
-            await writer.drain()
-            result.server_bytes_sent += len(data)
-            return False
-
-        if isinstance(step, SendRawBytes):
-            if step.byte_interval > 0:
-                for byte in step.data:
-                    writer.write(bytes([byte]))
-                    await writer.drain()
-                    result.server_bytes_sent += 1
-                    await asyncio.sleep(step.byte_interval)
-            else:
-                writer.write(step.data)
-                await writer.drain()
-                result.server_bytes_sent += len(step.data)
-            return False
-
-        if isinstance(step, WaitForClientFrame):
-            deadline = time.monotonic() + step.timeout
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    result.wait_timed_out = True
-                    return False
-                try:
-                    frame = await asyncio.wait_for(queue.get(), timeout=remaining)
-                except asyncio.TimeoutError:
-                    result.wait_timed_out = True
-                    return False
-                if frame_matches(frame, step.match):
-                    return False
-                # else: frame didn't match — drop it and keep waiting.
-                # Counted, because the HTTP/1.1 half counts the same thing
-                # and there it means the connection is desynced; the two
-                # report it under one name even though only one of them
-                # bleeds from it.
-                result.wait_skipped += 1
-
-        if isinstance(step, ExpectClientFrame):
-            # A guard, not a filter: one frame, nothing skipped, verdict
-            # recorded either way.
-            try:
-                frame = await asyncio.wait_for(queue.get(),
-                                               timeout=step.timeout)
-            except (asyncio.TimeoutError, TimeoutError):
-                result.wait_timed_out = True
-                result.expectations.append((dict(step.match), False))
-                return False
-            result.expectations.append(
-                (dict(step.match), frame_matches(frame, step.match)))
-            return False
-
-        if isinstance(step, Sleep):
-            await asyncio.sleep(step.duration)
-            return False
-
-        if isinstance(step, Abort):
-            transport = writer.transport
-            try:
-                transport.abort()
-            except Exception:  # noqa: BLE001
-                writer.close()
-            return True
-
-        if isinstance(step, CloseGracefully):
-            payload = (int(step.last_stream_id).to_bytes(4, 'big')
-                       + int(step.error_code).to_bytes(4, 'big'))
-            goaway = _encode_frame_header(
-                len(payload), FrameTypes.GOAWAY.value, 0, 0) + payload
-            writer.write(goaway)
-            await writer.drain()
-            result.server_bytes_sent += len(goaway)
-            return True
-
-        if isinstance(step, HalfClose):
-            # FIN without a GOAWAY: the peer is told the stream of frames
-            # has ended without being told why, which is a different case
-            # from CloseGracefully and one clients handle differently.
-            # Not terminal, for the reasons in the HTTP/1.1 twin.
-            result.half_closed = half_close(writer)
-            return False
-
-        raise TypeError(f'unknown step: {type(step).__name__}')
+    def _connection(self, reader, writer) -> _H2Connection:
+        return _H2Connection(self, self.scenario, ScenarioH2Result(),
+                             reader, writer)
 
 
 __all__ = [

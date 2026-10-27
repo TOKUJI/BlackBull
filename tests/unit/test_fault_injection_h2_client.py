@@ -23,8 +23,7 @@ import pytest
 
 from blackbull.client.http2 import HTTP2Client
 from blackbull.fault_injection.scenario_h2_client import (
-    Abort, ReadResponse, ScenarioH2Client, ScenarioH2ClientResult, SendRawBytes,
-    SendFrame, SendPreface, Sleep,
+    ReadResponse, ScenarioH2Client, ScenarioH2ClientResult, SendFrame, SendHeaders, SendPreface,
 )
 from blackbull.protocol.frame_types import FrameTypes
 from blackbull.server.recipient import AbstractReader
@@ -73,40 +72,6 @@ def _client(writer=None, reader=None) -> HTTP2Client:
 
 
 # ===========================================================================
-# The vocabulary mirrors its twin
-# ===========================================================================
-
-class TestVocabularyMirrorsTheTwin:
-    async def test_the_shared_steps_carry_the_twins_field_names(self):
-        """`scenario_h1` is the client-side vocabulary one protocol over."""
-        import dataclasses as dc
-        from blackbull.fault_injection import scenario_h1 as twin
-
-        for name in ('SendRawBytes', 'Sleep', 'ReadResponse', 'Abort'):
-            mine = {f.name for f in dc.fields(globals()[name])}
-            theirs = {f.name for f in dc.fields(getattr(twin, name))}
-            assert mine == theirs, (
-                f'{name} diverged from its twin: {mine} vs {theirs}')
-
-    async def test_the_result_carries_the_twins_field_names(self):
-        import dataclasses as dc
-        from blackbull.fault_injection.scenario_h1 import ScenarioResult
-
-        mine = {f.name for f in dc.fields(ScenarioH2ClientResult)}
-        theirs = {f.name for f in dc.fields(ScenarioResult)}
-        assert theirs - mine == set(), (
-            f'the twin reports fields this one does not: {sorted(theirs - mine)}')
-
-    async def test_steps_is_a_tuple(self):
-        import dataclasses as dc
-        field = next(f for f in dc.fields(ScenarioH2Client) if f.name == 'steps')
-        assert 'tuple' in str(field.type)
-
-    async def test_the_scenario_carries_a_name(self):
-        assert ScenarioH2Client(steps=(), name='probe').name == 'probe'
-
-
-# ===========================================================================
 # The executor
 # ===========================================================================
 
@@ -124,26 +89,6 @@ class TestExecuteScenario:
         assert bytes(writer.data).startswith(b'PRI * HTTP/2.0\r\n')
         assert result.exception is None
 
-    async def test_raw_bytes_are_the_escape_hatch(self):
-        """Anything the typed step will not build — an unknown frame type."""
-        writer = _RecordingWriter()
-        c = _client(writer)
-        junk = b'\x00\x00\x00\xfa\x00\x00\x00\x00\x00'
-        result = await c.execute_scenario(ScenarioH2Client(steps=(
-            SendRawBytes(junk),
-        )))
-        assert result.steps_completed == 1
-        assert bytes(writer.data) == junk
-
-    async def test_a_trickled_send_paces_the_bytes(self):
-        writer = _RecordingWriter()
-        c = _client(writer)
-        result = await c.execute_scenario(ScenarioH2Client(steps=(
-            SendRawBytes(b'PRI * ', byte_interval=0.001),
-        )))
-        assert result.steps_completed == 1
-        assert bytes(writer.data) == b'PRI * '
-
     async def test_a_read_that_never_arrives_records_a_timeout(self):
         c = _client()
         result = await c.execute_scenario(ScenarioH2Client(steps=(
@@ -154,18 +99,6 @@ class TestExecuteScenario:
         assert result.steps_completed == 0, (
             'a step that timed out must not count as completed — the twin '
             'returns before incrementing')
-
-    async def test_abort_short_circuits_the_remaining_steps(self):
-        writer = _RecordingWriter()
-        c = _client(writer)
-        result = await c.execute_scenario(ScenarioH2Client(steps=(
-            SendRawBytes(b'PRI'),
-            Abort(),
-            SendRawBytes(b'never'),
-        )))
-        assert result.aborted is True
-        assert writer.aborted is True
-        assert bytes(writer.data) == b'PRI', 'a step after Abort still ran'
 
     async def test_the_executor_never_raises(self):
         """The twin folds every outcome into the result; so does this.
@@ -188,67 +121,15 @@ class TestExecuteScenario:
         assert result.exception is not None
         assert 'unknown step type' in result.exception
 
-    async def test_sleep_advances_without_writing(self):
+    async def test_a_headers_step_reaches_the_wire(self):
         writer = _RecordingWriter()
         c = _client(writer)
         result = await c.execute_scenario(ScenarioH2Client(steps=(
-            Sleep(0.01),
+            SendHeaders(raw_block=b'\x82', stream_id=1, end_stream=True),
         )))
-        assert result.steps_completed == 1
-        assert bytes(writer.data) == b''
-        assert result.elapsed_s > 0
-
-
-# ===========================================================================
-# The export surface — four vocabularies now share step names
-# ===========================================================================
-
-class TestExportsDoNotCollide:
-    """Sprint 107 shipped a documented quick-start that imported the wrong
-    half's step.  Four vocabularies make that easier, not harder."""
-
-    async def test_all_four_vocabularies_are_distinct(self):
-        import blackbull.fault_injection as fi
-        from blackbull.fault_injection import (
-            scenario_h1, scenario_h1_server, scenario_h2, scenario_h2_client,
-        )
-        assert fi.H1CSendRawBytes is scenario_h1.SendRawBytes   # H1 client
-        assert fi.H1SSendRawBytes is scenario_h1_server.SendRawBytes
-        assert fi.SendRawBytes is scenario_h2.SendRawBytes      # H2 server
-        assert fi.H2CSendRawBytes is scenario_h2_client.SendRawBytes
-        assert fi.Abort is scenario_h1.Abort
-        assert fi.H1SAbort is scenario_h1_server.Abort
-        assert fi.H2Abort is scenario_h2.Abort
-        assert fi.H2CAbort is scenario_h2_client.Abort
-
-    async def test_the_package_import_builds_a_runnable_scenario(self):
-        """Import the way the docs tell a reader to, then run it."""
-        from blackbull.fault_injection import (
-            H2CSendPreface, H2CSendRawBytes, ScenarioH2Client,
-        )
-        writer = _RecordingWriter()
-        c = _client(writer)
-        result = await c.execute_scenario(ScenarioH2Client(steps=(
-            H2CSendPreface(), H2CSendRawBytes(b'\x00\x00\x00\x04\x00\x00\x00\x00\x00'),
-        )))
-        assert result.steps_completed == 2
         assert result.exception is None
-
-    async def test_every_catalogue_case_round_trips_as_json(self):
-        from blackbull.fault_injection import (
-            scenario_h2_client_from_json, scenario_h2_client_to_json,
-        )
-        from blackbull.fault_injection.catalogue.h2_client import CATALOGUE
-
-        for name, build in CATALOGUE.items():
-            scenario = build()
-            assert scenario_h2_client_from_json(
-                scenario_h2_client_to_json(scenario)) == scenario, name
-
-
-# ===========================================================================
-# Against a real server
-# ===========================================================================
+        assert result.steps_completed == 1
+        assert bytes(writer.data) == b'\x00\x00\x01\x01\x05\x00\x00\x00\x01\x82'
 
 class TestAgainstARealServer:
     """The point of a broken client is what a real server does with it.

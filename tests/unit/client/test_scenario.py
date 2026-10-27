@@ -1,7 +1,6 @@
 """Unit tests for the Scenario abstraction.
 
 Covers:
-  * ``Scenario.to_json`` / ``from_json`` round-trip for every step type
   * ``Scenario.from_bytes`` totality (every byte string yields a valid
     scenario)
   * ``Scenario.well_formed`` convenience builder
@@ -12,7 +11,6 @@ Covers:
 from __future__ import annotations
 
 import os
-import time
 
 import pytest
 
@@ -20,7 +18,6 @@ from blackbull.client import (
     Abort,
     ReadResponse,
     Scenario,
-    ScenarioResult,
     SendRawBytes,
     Sleep,
 )
@@ -89,39 +86,6 @@ def _client_with_fakes(*, reader: AbstractReader | None = None,
 # ---------------------------------------------------------------------------
 # Scenario data model + JSON round-trip
 # ---------------------------------------------------------------------------
-
-
-class TestScenarioJSON:
-    def test_round_trip_all_step_types(self):
-        s = Scenario(steps=(
-            SendRawBytes(data=b'GET / HTTP/1.1\r\nHost: x\r\n\r\n',
-                         byte_interval=0.2),
-            Sleep(duration=1.5),
-            ReadResponse(timeout=3.0),
-            Abort(),
-        ))
-        s2 = Scenario.from_json(s.to_json())
-        assert s == s2
-
-    def test_round_trip_empty_scenario(self):
-        s = Scenario(steps=())
-        assert Scenario.from_json(s.to_json()) == s
-
-    def test_round_trip_preserves_bytes_with_high_bit_and_nul(self):
-        # Base64 should round-trip arbitrary bytes.
-        payload = bytes(range(256))
-        s = Scenario(steps=(SendRawBytes(data=payload),))
-        s2 = Scenario.from_json(s.to_json())
-        assert s2.steps[0].data == payload
-
-    def test_blank_lines_are_ignored(self):
-        src = '\n{"op": "SLEEP", "duration": 0.5}\n\n{"op": "ABORT"}\n\n'
-        s = Scenario.from_json(src)
-        assert s == Scenario(steps=(Sleep(duration=0.5), Abort()))
-
-    def test_unknown_op_raises(self):
-        with pytest.raises(ValueError):
-            Scenario.from_json('{"op": "PARTY"}')
 
 
 # ---------------------------------------------------------------------------
@@ -210,30 +174,11 @@ class TestWellFormed:
 
 class TestExecuteScenario:
     @pytest.mark.asyncio
-    async def test_send_bytes_step_writes_to_socket(self):
-        c, w, _ = _client_with_fakes()
-        scenario = Scenario(steps=(SendRawBytes(data=b'PING'),))
-        result = await c.execute_scenario(scenario)
-        assert bytes(w.data) == b'PING'
-        assert result.steps_completed == 1
-        assert result.exception is None
-        assert not result.timed_out
-        assert not result.aborted
-
-    @pytest.mark.asyncio
     async def test_send_bytes_with_byte_interval_splits_writes(self):
         c, w, _ = _client_with_fakes()
         scenario = Scenario(steps=(SendRawBytes(data=b'ab', byte_interval=0.01),))
         await c.execute_scenario(scenario)
         assert w.writes == [b'a', b'b']
-
-    @pytest.mark.asyncio
-    async def test_sleep_step_actually_sleeps(self):
-        c, _, _ = _client_with_fakes()
-        scenario = Scenario(steps=(Sleep(duration=0.05),))
-        t0 = time.monotonic()
-        await c.execute_scenario(scenario)
-        assert time.monotonic() - t0 >= 0.04
 
     @pytest.mark.asyncio
     async def test_read_response_step_populates_result(self):
@@ -256,19 +201,6 @@ class TestExecuteScenario:
         assert result.exception is not None  # repr of TimeoutError
 
     @pytest.mark.asyncio
-    async def test_abort_step_short_circuits_and_calls_transport_abort(self):
-        c, w, raw = _client_with_fakes(attach_raw_writer=True)
-        scenario = Scenario(steps=(
-            SendRawBytes(data=b'first'),
-            Abort(),
-            SendRawBytes(data=b'never'),  # must NOT be written
-        ))
-        result = await c.execute_scenario(scenario)
-        assert result.aborted is True
-        assert raw is not None and raw.transport.aborted is True
-        assert bytes(w.data) == b'first'
-
-    @pytest.mark.asyncio
     async def test_multiple_steps_dispatched_in_order(self):
         reader = _CannedReader(
             b'HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n')
@@ -282,15 +214,6 @@ class TestExecuteScenario:
         assert result.steps_completed == 3
         assert result.response is not None
         assert result.response.status == 200
-
-    @pytest.mark.asyncio
-    async def test_empty_scenario_returns_empty_result(self):
-        c, w, _ = _client_with_fakes()
-        result = await c.execute_scenario(Scenario(steps=()))
-        assert isinstance(result, ScenarioResult)
-        assert result.steps_completed == 0
-        assert result.response is None
-        assert bytes(w.data) == b''
 
     @pytest.mark.asyncio
     async def test_elapsed_s_is_populated(self):

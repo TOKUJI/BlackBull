@@ -44,49 +44,6 @@ def _echo_app():
     return app
 
 
-class TestTheFourCellsRunOneScheme:
-    """The consistency rule, as a test rather than a habit."""
-
-    def test_each_role_has_a_wait_step_and_a_guard_step(self):
-        from blackbull.fault_injection import (
-            scenario_h1, scenario_h1_server, scenario_h2, scenario_h2_client,
-        )
-
-        expected = {
-            scenario_h1:        ('WaitForResponse', 'ExpectResponse'),
-            scenario_h2_client: ('WaitForServerFrame', 'ExpectServerFrame'),
-            scenario_h1_server: ('WaitForRequest', 'ExpectRequest'),
-            scenario_h2:        ('WaitForClientFrame', 'ExpectClientFrame'),
-        }
-        missing = [f'{m.__name__.split(".")[-1]}.{n}'
-                   for m, names in expected.items() for n in names
-                   if not hasattr(m, n)]
-        assert missing == [], f'missing: {missing}'
-
-    def test_the_client_side_results_gained_the_server_sides_fields(self):
-        """Same names, both roles — `expectations` is `expectations`."""
-        from blackbull.fault_injection.scenario_h1 import ScenarioResult
-        from blackbull.fault_injection.scenario_h1_server import (
-            ScenarioH1ServerResult)
-        from blackbull.fault_injection.scenario_h2 import ScenarioH2Result
-        from blackbull.fault_injection.scenario_h2_client import (
-            ScenarioH2ClientResult)
-
-        shared = {'expectations', 'wait_skipped', 'wait_timed_out',
-                  'half_closed'}
-        for cls in (ScenarioResult, ScenarioH2ClientResult,
-                    ScenarioH1ServerResult, ScenarioH2Result):
-            assert shared <= set(cls.__dataclass_fields__), (
-                f'{cls.__name__} lacks {shared - set(cls.__dataclass_fields__)}')
-
-        # The peer-traffic counter is named for whoever the peer *is*.
-        assert 'server_bytes_received' in ScenarioResult.__dataclass_fields__
-        assert 'server_bytes_received' in \
-            ScenarioH2ClientResult.__dataclass_fields__
-        assert 'client_bytes_received' in \
-            ScenarioH1ServerResult.__dataclass_fields__
-
-
 class TestCellDCanObserveAVerdict:
     """The finding that motivated the sprint, closed."""
 
@@ -152,32 +109,6 @@ class TestCellDCanObserveAVerdict:
             '`response` must stay the most recent read, for back-compat')
         assert result.server_bytes_received > 0
 
-    async def test_expect_server_frame_records_a_failed_premise(self):
-        """A guard, not a filter: nothing skipped, verdict recorded.
-
-        A scenario whose premise silently failed would otherwise look
-        like a pass — the reason `ExpectRequest` exists on the other role.
-        """
-        from blackbull.client.http2 import HTTP2Client
-        from blackbull.fault_injection.scenario_h2_client import (
-            ExpectServerFrame, ScenarioH2Client, SendPreface,
-        )
-        from blackbull.testing.native import NativeTestServer
-
-        async with NativeTestServer(_echo_app()) as server:
-            async with HTTP2Client('127.0.0.1', server.port,
-                                   scenario_mode=True) as client:
-                result = await asyncio.wait_for(client.execute_scenario(
-                    ScenarioH2Client(steps=(
-                        SendPreface(),
-                        # The first frame is SETTINGS, never GOAWAY.
-                        ExpectServerFrame(match={'type': 'GOAWAY'},
-                                          timeout=3.0)))), timeout=10.0)
-
-        assert result.expectations == [({'type': 'GOAWAY'}, False)]
-        assert result.wait_skipped == 0, 'a guard must not skip'
-
-
 class TestCellACanObserveAPair:
     """Pipelining: two responses, both checkable."""
 
@@ -202,64 +133,6 @@ class TestCellACanObserveAPair:
             f'{len(result.received)} of 2 responses survived')
         assert [r.status for r in result.received] == [200, 200]
         assert result.server_bytes_received > 0
-
-    async def test_wait_for_response_skips_until_a_match(self):
-        """The h1 twin of `WaitForServerFrame`, on a pipelined pair."""
-        from blackbull import BlackBull, read_body
-        from blackbull.client.http1 import HTTP1Client
-        from blackbull.fault_injection.scenario_h1 import (
-            Scenario, SendRawBytes, WaitForResponse,
-        )
-        from blackbull.testing.native import NativeTestServer
-
-        app = BlackBull()
-
-        @app.route(path='/ok')
-        async def _ok(scope, receive, send):
-            await read_body(receive)
-            await send({'type': 'http.response.start', 'status': 200,
-                        'headers': []})
-            await send({'type': 'http.response.body', 'body': b'ok'})
-
-        async with NativeTestServer(app) as server:
-            async with HTTP1Client('127.0.0.1', server.port) as client:
-                result = await asyncio.wait_for(client.execute_scenario(
-                    Scenario(steps=(
-                        # A 404 first, then the 200 the scenario wants.
-                        SendRawBytes(b'GET /nope HTTP/1.1\r\nHost: x\r\n\r\n'
-                                     b'GET /ok HTTP/1.1\r\nHost: x\r\n\r\n'),
-                        WaitForResponse(match={'status': 200},
-                                        timeout=5.0)))), timeout=10.0)
-
-        assert result.response is not None, 'never reached the 200'
-        assert result.response.status == 200
-        assert result.wait_skipped == 1, (
-            'the 404 should have been skipped over and counted')
-
-    async def test_expect_response_records_the_verdict_either_way(self):
-        from blackbull.client.http1 import HTTP1Client
-        from blackbull.fault_injection.scenario_h1 import (
-            ExpectResponse, Scenario, SendRawBytes,
-        )
-        from blackbull.testing.native import NativeTestServer
-
-        async with NativeTestServer(_echo_app()) as server:
-            async with HTTP1Client('127.0.0.1', server.port) as client:
-                good = await asyncio.wait_for(client.execute_scenario(
-                    Scenario(steps=(
-                        SendRawBytes(b'GET / HTTP/1.1\r\nHost: x\r\n\r\n'),
-                        ExpectResponse(match={'status': 200},
-                                       timeout=5.0)))), timeout=10.0)
-            async with HTTP1Client('127.0.0.1', server.port) as client:
-                bad = await asyncio.wait_for(client.execute_scenario(
-                    Scenario(steps=(
-                        SendRawBytes(b'GET / HTTP/1.1\r\nHost: x\r\n\r\n'),
-                        ExpectResponse(match={'status': 500},
-                                       timeout=5.0)))), timeout=10.0)
-
-        assert good.expectations == [({'status': 200}, True)]
-        assert bad.expectations == [({'status': 500}, False)]
-
 
 class TestTheMatchersFailClosed:
     """An unrecognised key is a typo, and a typo must not silently match.

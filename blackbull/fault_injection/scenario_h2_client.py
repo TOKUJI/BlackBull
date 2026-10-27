@@ -6,17 +6,21 @@ transport steps do not make the two wire roles interchangeable.
 from __future__ import annotations
 
 import enum
-import json
+from dataclasses import dataclass, field
+from typing import ClassVar
 
 from blackbull.protocol.frame_types import FrameTypes
-from dataclasses import dataclass, field
+
+from . import _scenario
+from ._scenario import Abort, HalfClose, ReadResponse, SendRawBytes, Sleep
+from .scenario_h2 import frame_bytes
 
 #: RFC 9113 §3.4 — the client connection preface.
 CLIENT_PREFACE = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
 
 
 class StepOpH2Client(str, enum.Enum):
-    """Tag used by the JSON serialiser."""
+    """The v1 JSON tags, still read until v1 reading is removed."""
     PREFACE = 'PREFACE'
     SEND_FRAME = 'SEND_FRAME'
     SEND = 'SEND'
@@ -36,6 +40,9 @@ class SendPreface:
     has: delaying or splitting the preface is the fault, and a flag cannot
     say "after 30 seconds".
     """
+
+    def wire(self) -> bytes:
+        return CLIENT_PREFACE
 
 
 @dataclass(frozen=True)
@@ -72,6 +79,9 @@ class SendFrame:
         elif not isinstance(ft, bytes):
             object.__setattr__(self, 'frame_type', bytes(ft))
 
+    def wire(self) -> bytes:
+        return encode_frame(self)
+
 
 @dataclass(frozen=True)
 class SendHeaders:
@@ -95,67 +105,17 @@ class SendHeaders:
     raw_block: bytes | None = None
     declared_length: int | None = None
 
-
-@dataclass(frozen=True)
-class SendRawBytes:
-    """Push arbitrary bytes at the server.
-
-    The escape hatch, and the same name and fields the HTTP/1.1 client-side
-    vocabulary uses.  ``byte_interval > 0`` transmits one byte at a time
-    with that delay.
-    """
-    data: bytes
-    byte_interval: float = 0.0
+    def wire(self) -> bytes:
+        return encode_headers(self)
 
 
-@dataclass(frozen=True)
-class Sleep:
-    """Idle for ``duration`` seconds without reading or writing."""
-    duration: float
+class WaitForServerFrame(_scenario._WaitFor):
+    """Filter frames until one matches — how a verdict behind the server's
+    handshake SETTINGS is reached."""
 
 
-@dataclass(frozen=True)
-class ReadResponse:
-    """Read one frame from the server, or record a timeout."""
-    timeout: float = 5.0
-
-
-@dataclass(frozen=True)
-class Abort:
-    """Hard-close the connection (``transport.abort`` → RST on Linux).
-
-    Terminal: later steps short-circuit, exactly as on the HTTP/1.1 side.
-    """
-
-
-@dataclass(frozen=True)
-class WaitForServerFrame:
-    """Filter frames until match or timeout; count and consume nonmatches in wait_skipped.
-    """
-    match: dict = field(default_factory=dict)
-    timeout: float = 5.0
-
-
-@dataclass(frozen=True)
-class ExpectServerFrame:
-    """Read one frame and record whether it matched.
-
-    A **guard**, not a filter: nothing is skipped and the executor moves
-    on either way.  Twin of
-    [`ExpectClientFrame`][blackbull.fault_injection.scenario_h2.ExpectClientFrame].
-    """
-    match: dict = field(default_factory=dict)
-    timeout: float = 5.0
-
-
-@dataclass(frozen=True)
-class HalfClose:
-    """Shut down the sending direction only (FIN), keep reading.
-
-    **Not terminal** — later steps still run, which is the whole point.
-    ``Abort`` is not a substitute: it sends RST, discarding what is buffered
-    and leaving nothing to read.
-    """
+class ExpectServerFrame(_scenario._Expect):
+    """Read one frame and record whether it matched."""
 
 
 Step = (SendPreface | SendFrame | SendHeaders | SendRawBytes | Sleep
@@ -168,6 +128,14 @@ class ScenarioH2Client:
     """An ordered sequence of steps, plus a name for parametrisation."""
     steps: tuple[Step, ...] = ()
     name: str = ''
+
+    _v1: ClassVar = (False, {
+        StepOpH2Client.PREFACE: 'SendPreface',
+        StepOpH2Client.SEND_FRAME: 'SendFrame', StepOpH2Client.SEND: 'SendRawBytes',
+        StepOpH2Client.SLEEP: 'Sleep', StepOpH2Client.READ: 'ReadResponse',
+        StepOpH2Client.ABORT: 'Abort', StepOpH2Client.HALF_CLOSE: 'HalfClose',
+        StepOpH2Client.WAIT_FOR_SERVER_FRAME: 'WaitForServerFrame',
+        StepOpH2Client.EXPECT_SERVER_FRAME: 'ExpectServerFrame'})
 
 
 @dataclass
@@ -210,97 +178,14 @@ class ScenarioH2ClientResult:
     wait_timed_out: bool = False
 
 
-# ---------------------------------------------------------------------------
-# JSON Lines serialisation — the shape both other scenario modules use
-# ---------------------------------------------------------------------------
-
-
-def _step_to_dict(step) -> dict:
-    if isinstance(step, SendPreface):
-        return {'op': StepOpH2Client.PREFACE}
-    if isinstance(step, SendFrame):
-        return {'op': StepOpH2Client.SEND_FRAME,
-                'frame_type': step.frame_type[0],
-                'flags': step.flags,
-                'stream_id': step.stream_id,
-                'data': step.data.hex(),
-                'declared_length': step.declared_length}
-    if isinstance(step, SendRawBytes):
-        return {'op': StepOpH2Client.SEND, 'data': step.data.hex(),
-                'byte_interval': step.byte_interval}
-    if isinstance(step, Sleep):
-        return {'op': StepOpH2Client.SLEEP, 'duration': step.duration}
-    if isinstance(step, ReadResponse):
-        return {'op': StepOpH2Client.READ, 'timeout': step.timeout}
-    if isinstance(step, Abort):
-        return {'op': StepOpH2Client.ABORT}
-    if isinstance(step, HalfClose):
-        return {'op': StepOpH2Client.HALF_CLOSE}
-    if isinstance(step, WaitForServerFrame):
-        return {'op': StepOpH2Client.WAIT_FOR_SERVER_FRAME,
-                'timeout': step.timeout, 'match': dict(step.match)}
-    if isinstance(step, ExpectServerFrame):
-        return {'op': StepOpH2Client.EXPECT_SERVER_FRAME,
-                'timeout': step.timeout, 'match': dict(step.match)}
-    raise ValueError(f'cannot serialise step: {step!r}')
-
-
-def _step_from_dict(d: dict):
-    op = d['op']
-    if op == StepOpH2Client.PREFACE:
-        return SendPreface()
-    if op == StepOpH2Client.SEND_FRAME:
-        # Restored as a one-byte ``bytes``, not an ``int``: ``FrameTypes``
-        # *is* a bytes enum, so ``bytes([6]) == FrameTypes.PING`` while
-        # ``6 == FrameTypes.PING`` is False — normalising to bytes is what
-        # makes a round-trip compare equal to the scenario it came from.
-        return SendFrame(frame_type=bytes([d['frame_type']]),
-                         flags=d.get('flags', 0),
-                         stream_id=d.get('stream_id', 0),
-                         data=bytes.fromhex(d.get('data', '')),
-                         declared_length=d.get('declared_length'))
-    if op == StepOpH2Client.SEND:
-        return SendRawBytes(data=bytes.fromhex(d['data']),
-                         byte_interval=d.get('byte_interval', 0.0))
-    if op == StepOpH2Client.SLEEP:
-        return Sleep(duration=d['duration'])
-    if op == StepOpH2Client.READ:
-        return ReadResponse(timeout=d.get('timeout', 5.0))
-    if op == StepOpH2Client.ABORT:
-        return Abort()
-    if op == StepOpH2Client.HALF_CLOSE:
-        return HalfClose()
-    if op == StepOpH2Client.WAIT_FOR_SERVER_FRAME:
-        return WaitForServerFrame(timeout=d.get('timeout', 5.0),
-                                  match=dict(d.get('match') or {}))
-    if op == StepOpH2Client.EXPECT_SERVER_FRAME:
-        return ExpectServerFrame(timeout=d.get('timeout', 5.0),
-                                 match=dict(d.get('match') or {}))
-    raise ValueError(f'unknown step op: {op!r}')
-
-
 def scenario_to_json(scenario: ScenarioH2Client) -> str:
     """Serialise to JSON Lines, name on the first ``HEADER`` line."""
-    lines = [json.dumps({'op': 'HEADER', 'name': scenario.name})]
-    for step in scenario.steps:
-        lines.append(json.dumps(_step_to_dict(step)))
-    return '\n'.join(lines)
+    return _scenario.to_json(scenario)
 
 
 def scenario_from_json(src: str) -> ScenarioH2Client:
     """Parse JSON Lines back to a [`ScenarioH2Client`][]."""
-    name = ''
-    steps: list = []
-    for line in src.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        d = json.loads(line)
-        if d.get('op') == 'HEADER':
-            name = d.get('name', '')
-            continue
-        steps.append(_step_from_dict(d))
-    return ScenarioH2Client(steps=tuple(steps), name=name)
+    return _scenario.from_json(ScenarioH2Client, src)
 
 
 def encode_headers(step: SendHeaders) -> bytes:
@@ -328,16 +213,8 @@ def encode_frame(step: SendFrame) -> bytes:
     ``declared_length`` possible: a serialiser that computed the length
     could not state one that disagrees with the payload.
     """
-    length = step.declared_length
-    if length is None:
-        length = len(step.data)
-    return (
-        length.to_bytes(3, 'big')
-        + bytes(step.frame_type)
-        + int(step.flags).to_bytes(1, 'big')
-        + (int(step.stream_id) & 0x7fffffff).to_bytes(4, 'big')
-        + step.data
-    )
+    length = len(step.data) if step.declared_length is None else step.declared_length
+    return frame_bytes(length, step.frame_type, step.flags, step.stream_id, step.data)
 
 # ``SendRawBytes`` is the canonical spelling in all four scenario
 # vocabularies; ``SendBytes`` is the deprecated client-side one.

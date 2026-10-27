@@ -3,16 +3,16 @@
 JSON Lines preserves typed steps. from_bytes is a total decoder for fuzz
 inputs: malformed input must still map to a scenario rather than crash parsing.
 """
-import base64
 import enum
-import json
 from dataclasses import dataclass, field
-from typing import Union
+from typing import ClassVar, Union
+
+from . import _scenario
+from ._scenario import Abort, HalfClose, ReadResponse, SendRawBytes, Sleep
 
 
 class StepOp(str, enum.Enum):
-    """Tag for serialising / decoding a step.  ``str`` mixin so values
-    drop straight into JSON without a custom encoder."""
+    """The v1 JSON tags, still read until v1 reading is removed."""
     SEND = 'SEND'
     SLEEP = 'SLEEP'
     READ = 'READ'
@@ -22,97 +22,17 @@ class StepOp(str, enum.Enum):
     EXPECT_RESPONSE = 'EXPECT_RESPONSE'
 
 
-@dataclass(frozen=True)
-class SendRawBytes:
-    """Push raw bytes onto the connection.
-
-    ``byte_interval > 0`` transmits one byte at a time with that delay
-    between bytes — the primitive slowloris-style stall that lets
-    scenarios express trickled headers or trickled bodies without
-    dropping to a raw asyncio socket.
-    """
-    data: bytes
-    byte_interval: float = 0.0
-
-
-@dataclass(frozen=True)
-class Sleep:
-    """Idle for ``duration`` seconds without sending or reading.
-
-    Useful for post-headers idle, mid-keep-alive idle, and pre-response
-    stall scenarios where the server is expected to time out and close.
-    """
-    duration: float
-
-
-@dataclass(frozen=True)
-class ReadResponse:
-    """Read one HTTP/1.1 response from the connection.
-
-    ``timeout`` bounds the entire status-line + headers + body read.
-    On timeout the executor records the outcome on the
-    [`ScenarioResult`][] and does *not* raise — the caller decides
-    whether to treat that as a transport-fail or normal outcome.
-    """
-    timeout: float = 5.0
-
-
-@dataclass(frozen=True)
-class Abort:
-    """Hard-close the connection (transport.abort → RST on Linux).
-
-    Distinct from the graceful ``writer.close()`` / ``wait_closed()``
-    in ``HTTP1Client.__aexit__``.  Subsequent steps short-circuit; the
-    executor stops walking the scenario after an Abort.
-    """
-
-
-# Step is the discriminated union the executor switches on.  Listed
-# as a Union (not StrEnum) because the dispatcher matches by isinstance,
-# and frozen dataclasses are hashable / comparable / safe to share.
-@dataclass(frozen=True)
-class WaitForResponse:
+class WaitForResponse(_scenario._WaitFor):
     """Read responses until one satisfies ``match``, or the timeout wins.
-
-    A **filter**: non-matching responses are read, counted in
-    ``wait_skipped``, and passed over.  The role-axis twin of
-    [`WaitForRequest`][blackbull.fault_injection.scenario_h1_server.WaitForRequest],
-    and it exists for the same reason — a scenario that has to know
-    exactly how many messages precede the interesting one is a scenario
-    written against a particular peer.
 
     On HTTP/1.1 a non-zero ``wait_skipped`` is worth reading: responses
     arrive in request order, so skipping one means the scenario is a
     response further along than it thinks.
     """
-    match: dict = field(default_factory=dict)
-    timeout: float = 5.0
 
 
-@dataclass(frozen=True)
-class ExpectResponse:
-    """Read one response and record whether it matched.
-
-    A **guard**, not a filter: nothing is skipped and the executor moves
-    on either way.  It answers *is the peer behaving as this scenario
-    assumes?* — and a scenario whose premise silently failed would
-    otherwise look like a pass.
-
-    Twin of
-    [`ExpectRequest`][blackbull.fault_injection.scenario_h1_server.ExpectRequest].
-    """
-    match: dict = field(default_factory=dict)
-    timeout: float = 5.0
-
-
-@dataclass(frozen=True)
-class HalfClose:
-    """Shut down the sending direction only (FIN), keep reading.
-
-    **Not terminal** — later steps still run, which is the whole point.
-    ``Abort`` is not a substitute: it sends RST, discarding what is buffered
-    and leaving nothing to read.
-    """
+class ExpectResponse(_scenario._Expect):
+    """Read one response and record whether it matched."""
 
 
 Step = Union[SendRawBytes, Sleep, ReadResponse, Abort, HalfClose,
@@ -143,40 +63,21 @@ class Scenario:
         return cls(steps=(SendRawBytes(data=raw_request),
                           ReadResponse(timeout=response_timeout)))
 
-    # ------------------------------------------------------------------
-    # JSON Lines serialisation — one step per line
-    # ------------------------------------------------------------------
+    _v1: ClassVar = (True, {
+        StepOp.SEND: 'SendRawBytes', StepOp.SLEEP: 'Sleep',
+        StepOp.READ: 'ReadResponse', StepOp.ABORT: 'Abort',
+        StepOp.HALF_CLOSE: 'HalfClose',
+        StepOp.WAIT_FOR_RESPONSE: 'WaitForResponse',
+        StepOp.EXPECT_RESPONSE: 'ExpectResponse'})
 
     def to_json(self) -> str:
-        """Serialize JSON Lines with base64 byte payloads and a first HEADER carrying name.
-        """
-        lines = [json.dumps({'op': 'HEADER', 'name': self.name})]
-        for step in self.steps:
-            lines.append(json.dumps(_step_to_dict(step)))
-        return '\n'.join(lines)
+        """Serialise to JSON Lines (see ``docs/guide/fault_injection.md``)."""
+        return _scenario.to_json(self)
 
     @classmethod
     def from_json(cls, src: str) -> 'Scenario':
-        """Parse JSON Lines back to a [`Scenario`][].
-
-        Skips blank lines so files that end with a trailing newline
-        (the conventional git-friendly shape) parse cleanly.
-
-        A ``HEADER`` line carries the name and is optional on the way in:
-        a file without one parses to an unnamed scenario.
-        """
-        name = ''
-        steps: list[Step] = []
-        for line in src.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            d = json.loads(line)
-            if d.get('op') == 'HEADER':
-                name = d.get('name', '')
-                continue
-            steps.append(_step_from_dict(d))
-        return cls(steps=tuple(steps), name=name)
+        """Parse what [`to_json`][Scenario.to_json] wrote."""
+        return _scenario.from_json(cls, src)
 
     # ------------------------------------------------------------------
     # Bytes ↔ scenario — total decoder for atheris
@@ -290,73 +191,6 @@ class ScenarioResult:
     #: step still counts as completed and the next step runs; this is what
     #: distinguishes a per-step miss from a transport error in ``exception``.
     wait_timed_out: bool = False
-
-
-# ----------------------------------------------------------------------
-# JSON helpers — kept module-private so the public surface is the
-# Scenario classmethods.
-# ----------------------------------------------------------------------
-
-
-def _step_to_dict(step: Step) -> dict:
-    if isinstance(step, SendRawBytes):
-        return {
-            'op': StepOp.SEND.value,
-            'data': base64.b64encode(step.data).decode('ascii'),
-            'byte_interval': step.byte_interval,
-        }
-    if isinstance(step, Sleep):
-        return {'op': StepOp.SLEEP.value, 'duration': step.duration}
-    if isinstance(step, ReadResponse):
-        return {'op': StepOp.READ.value, 'timeout': step.timeout}
-    if isinstance(step, Abort):
-        return {'op': StepOp.ABORT.value}
-    if isinstance(step, HalfClose):
-        return {'op': StepOp.HALF_CLOSE.value}
-    if isinstance(step, WaitForResponse):
-        return {'op': StepOp.WAIT_FOR_RESPONSE.value,
-                'timeout': step.timeout, 'match': dict(step.match)}
-    if isinstance(step, ExpectResponse):
-        return {'op': StepOp.EXPECT_RESPONSE.value,
-                'timeout': step.timeout, 'match': dict(step.match)}
-    raise TypeError(f'unknown step type: {type(step).__name__}')
-
-
-def _normalise_match(match: dict | None) -> dict:
-    """JSON has no tuples, so ``header``'s pair comes back as a list.
-
-    Normalised on the way in rather than compared loosely on the way out:
-    a scenario that round-trips must equal the one it came from, and
-    ``('x', 'y') != ['x', 'y']``.  The HTTP/1.1 server half does the same.
-    """
-    match = dict(match or {})
-    if 'header' in match and isinstance(match['header'], list):
-        match['header'] = tuple(match['header'])
-    return match
-
-
-def _step_from_dict(d: dict) -> Step:
-    op = d.get('op')
-    if op == StepOp.SEND.value:
-        return SendRawBytes(
-            data=base64.b64decode(d['data']),
-            byte_interval=float(d.get('byte_interval', 0.0)),
-        )
-    if op == StepOp.SLEEP.value:
-        return Sleep(duration=float(d['duration']))
-    if op == StepOp.READ.value:
-        return ReadResponse(timeout=float(d.get('timeout', 5.0)))
-    if op == StepOp.ABORT.value:
-        return Abort()
-    if op == StepOp.HALF_CLOSE.value:
-        return HalfClose()
-    if op == StepOp.WAIT_FOR_RESPONSE.value:
-        return WaitForResponse(timeout=float(d.get('timeout', 5.0)),
-                               match=_normalise_match(d.get('match')))
-    if op == StepOp.EXPECT_RESPONSE.value:
-        return ExpectResponse(timeout=float(d.get('timeout', 5.0)),
-                              match=_normalise_match(d.get('match')))
-    raise ValueError(f'unknown step op: {op!r}')
 
 
 def response_matches(response, match: dict) -> bool:

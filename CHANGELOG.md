@@ -28,6 +28,10 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Deprecated
 
+- Fault-injection scenario JSON in the v1 per-vocabulary format (no
+  `format` on the `HEADER` line) still reads, with a `DeprecationWarning`;
+  reading it is removed no earlier than v0.84.0 (and not before
+  2026-11-28).  Rewrite a file with `to_json(from_json(text))`.
 - The `BLACKBULL_*` environment variables (`BLACKBULL_ENV`, `BLACKBULL_PORT`,
   `BLACKBULL_CERT`, `BLACKBULL_KEY`, `BLACKBULL_UNIX_PATH`,
   `BLACKBULL_RELOAD`) will be renamed to the `BB_` prefix in a release no
@@ -35,6 +39,10 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- `HTTP2Client.execute_scenario` executes `SendHeaders` (it recorded a
+  `TypeError`), and `SendHeaders` and the HTTP/1.1 fault server's typed steps
+  (`SendStatusLine`, `SendHeader`, `EndHeaders`, `SendChunk`,
+  `EndChunkedBody`) serialise to JSON.
 - HTTP/1.1 persistence follows RFC 9112 §9.3 on both roles: `close` ends the
   connection even beside `keep-alive` (an HTTP/1.0 request with both was kept
   open), a higher HTTP/1 minor version persists by default, and a `Connection`
@@ -49,6 +57,17 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Changed
 
+- Fault injection: the four scenario vocabularies share one model.
+  `SendRawBytes`, `Sleep`, `Abort`, `HalfClose` and `ReadResponse` are one
+  class under every vocabulary's name, and every vocabulary writes one JSON
+  Lines format — `"format": 2` on the `HEADER` line, steps named by class,
+  bytes as hex.
+- `H2FaultServer.stop()` cancels connections still mid-scenario, as
+  `H1FaultServer` did; `H1FaultServer` records any exception a step raises on
+  `last_result.exception`, not only a connection reset.
+- `HTTP2Client.execute_scenario`: an `ExpectServerFrame` that meets end of
+  stream sets `wait_timed_out`, as in the other three cells, and a
+  `ReadResponse` that meets it records no frame.
 - A simplified handler binds its path and query parameters before reading the
   request body, so a request with a bad query is answered `400` without
   waiting for its body.
