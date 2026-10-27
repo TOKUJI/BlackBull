@@ -205,7 +205,12 @@ async def test_reflection_describes_health_service(grpc_server):
     file_name, methods = await asyncio.to_thread(
         _describe_service, port, 'grpc.health.v1.Health')
     assert file_name.endswith('health.proto')
-    assert methods == ['Check', 'Watch']
+    # The method set is an upstream artifact: this test process's grpc_health
+    # gencode registers the default-pool copy that reflection serves first,
+    # and upstream health.proto gains methods over time (List, since 1.85.0).
+    # Assert a faithful mirror of the registered copy, not a name snapshot.
+    assert methods == sorted(
+        health_pb2.DESCRIPTOR.services_by_name['Health'].methods_by_name)
 
 
 # ---------------------------------------------------------------------------
