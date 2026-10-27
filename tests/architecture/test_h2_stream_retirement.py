@@ -24,7 +24,8 @@ from blackbull.protocol.frame_types import (
 )
 from blackbull.protocol.stream import StreamState
 import blackbull.server.http2_actor as http2_actor
-from blackbull.server.http2_actor import HTTP2Actor, _CLOSED_STREAMS_CAP
+from blackbull.server.http2_actor import HTTP2Actor
+from blackbull.server.http2_connection import _CLOSED_STREAMS_CAP
 from blackbull.server.http2_ws import HTTP2StreamReader
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter

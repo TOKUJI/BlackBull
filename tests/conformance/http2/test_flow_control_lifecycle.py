@@ -9,7 +9,8 @@ from blackbull.protocol.frame_types import (
     Data, DataFrameFlags, ErrorCodes, FrameTypes, HeaderFrameFlags,
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
-from blackbull.server.http2_actor import HTTP2Actor, _CLOSED_STREAMS_CAP
+from blackbull.server.http2_actor import HTTP2Actor
+from blackbull.server.http2_connection import _CLOSED_STREAMS_CAP
 from blackbull.server.recipient import HTTP2Recipient
 from blackbull.server.sender import (
     AsyncioWriter, ConnectionWindow, HTTP2Sender,
