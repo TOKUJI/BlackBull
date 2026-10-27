@@ -15,7 +15,6 @@ import queue
 import threading
 import sys
 from typing import Any
-from urllib.parse import unquote
 from weakref import WeakSet
 
 from ..asgi import ASGIReceiveEvent
@@ -269,45 +268,16 @@ class WebSocketTestSession:
             cookies: Sent as a single ``Cookie`` header.
             timeout: Seconds any one receive will wait before giving up.
         """
+        from .native import _connection  # noqa: PLC0415 — native imports this module
         self.app = app
         self.timeout = timeout
-        if '?' in path:
-            raw_path, query = path.split('?', 1)
-        else:
-            raw_path, query = path, ''
-        encoded_headers: list[tuple[bytes, bytes]] = []
-        for k, v in (headers or []):
-            encoded_headers.append((k.lower().encode('latin-1'), v.encode('latin-1')))
+        pairs = [(k.lower().encode('latin-1'), v.encode('latin-1')) for k, v in (headers or [])]
         if cookies:
-            cookie_str = '; '.join(f'{k}={v}' for k, v in cookies.items())
-            encoded_headers.append((b'cookie', cookie_str.encode('latin-1')))
+            pairs.append((b'cookie', '; '.join(f'{k}={v}' for k, v in cookies.items()).encode('latin-1')))
         # Connection.subprotocols derives from the request header.
         if subprotocols:
-            encoded_headers.append(
-                (b'sec-websocket-protocol',
-                 ', '.join(subprotocols).encode('latin-1')))
-        from ..connection import Connection  # noqa: PLC0415
-        from ..headers import Headers  # noqa: PLC0415
-        self._conn = Connection(
-            method='GET',
-            # Parity with the real server: ``conn.path`` is the
-            # percent-decoded path component; ``raw_path`` is the undecoded
-            # bytes (UTF-8, not latin-1, so a caller-supplied non-ASCII path
-            # round-trips as the server would have received it).
-            path=(unquote(raw_path, encoding='utf-8', errors='replace')
-                  if '%' in raw_path else raw_path),
-            raw_path=raw_path.encode('utf-8'),
-            headers=Headers(encoded_headers),
-            # UTF-8 for parity with raw_path above and the real server —
-            # latin-1 would raise UnicodeEncodeError on a non-ASCII query
-            # (e.g. '/x?q=café') that the utf-8 path accepts.
-            query_string=query.encode('utf-8'),
-            http_version='1.1',
-            scheme='ws',
-            type='websocket',
-            client=('testclient', 50000),
-            server=('testserver', 80),
-        )
+            pairs.append((b'sec-websocket-protocol', ', '.join(subprotocols).encode('latin-1')))
+        self._conn = _connection('websocket', 'GET', path, pairs, scheme='ws')
         self._owns_loop = _loop_thread is None
         self._loop_thread = _loop_thread or _LoopThread()
         self._client_to_server: asyncio.Queue = asyncio.Queue()
@@ -500,18 +470,88 @@ def _shutdown_on_exit(lifespan, exc_info) -> None:
         logger.exception('Lifespan shutdown failed')
 
 
-class TestClient:
+class _InProcess:
+    """The core of the synchronous in-process clients: one background loop for
+    the session, with the application's ASGI lifespan run around it."""
+
+    __test__ = False        # not a pytest container despite the name shape
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+        self._loop_thread: _LoopThread | None = None
+        self._lifespan: _LifespanManager | None = None
+
+    def __enter__(self):
+        """Start the background loop and run the application's lifespan startup."""
+        if self._loop_thread is not None:
+            raise RuntimeError(f'{type(self).__name__} is already entered')
+        self._loop_thread = _LoopThread()
+        try:
+            self._loop_thread.start()
+            self._opened()
+            self._lifespan = _LifespanManager(self.app, self._loop_thread)
+            self._lifespan.startup()
+        except BaseException:
+            with _cleanup(sys.exception()):
+                self._close()
+            raise
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        with _cleanup(exc_info[1]):
+            try:
+                self._closing()
+                _shutdown_on_exit(self._lifespan, exc_info)
+            except BaseException:
+                with _cleanup(sys.exception()):
+                    self._close()
+                raise
+            else:
+                self._close()
+
+    def _opened(self) -> None:
+        """Hook: the loop runs, the lifespan has not started."""
+
+    def _closing(self) -> None:
+        """Hook: before the lifespan shuts down."""
+
+    def _released(self) -> None:
+        """Hook: release what ``_opened`` acquired; the loop still runs."""
+
+    def _close(self) -> None:
+        try:
+            if self._loop_thread is not None:
+                self._released()
+        finally:
+            self._lifespan = None
+            if self._loop_thread is not None:
+                self._loop_thread.stop()
+                self._loop_thread = None
+
+    def _require_entered(self) -> _LoopThread:
+        if self._loop_thread is None:
+            name = type(self).__name__
+            raise RuntimeError(f'{name} must be used as a context manager: '
+                               f'`with {name}(app) as client: ...`')
+        return self._loop_thread
+
+    def _run(self, coro):
+        """Run *coro* on the session loop; outside ``with``, close it unrun."""
+        try:
+            loop_thread = self._require_entered()
+        except RuntimeError:
+            coro.close()
+            raise
+        return loop_thread.run_coro(coro)
+
+
+class TestClient(_InProcess):
     """Synchronous HTTP/ASGITransport and native BlackBull WebSocket tests.
 
     HTTP methods forward to httpx. WebSocket sessions pass a Connection and do
     not exercise a generic scope-only ASGI app. Use as a context manager to run
     lifespan startup and shutdown.
     """
-
-    # Tell pytest not to collect this class as a test container — the
-    # ``Test*`` prefix triggers pytest's default collection heuristic
-    # but this is a fixture, not a test class.
-    __test__ = False
 
     def __init__(
         self,
@@ -535,67 +575,43 @@ class TestClient:
             headers: Default headers for every request.
             follow_redirects: Follow 3xx responses automatically.
         """
-        self.app = app
+        super().__init__(app)
         self.base_url = base_url
         self._raise_app_exceptions = raise_app_exceptions
         self._root_path = root_path
         self._cookies = cookies
         self._headers = headers
         self._follow_redirects = follow_redirects
-        self._loop_thread: _LoopThread | None = None
-        self._lifespan: _LifespanManager | None = None
         self._async_client: httpx.AsyncClient | None = None
         self._sessions: WeakSet[WebSocketTestSession] = WeakSet()
 
     def __enter__(self) -> 'TestClient':
-        """Start the background loop and run the application's lifespan startup."""
-        if self._async_client is not None:
-            raise RuntimeError('TestClient is already entered')
-        self._loop_thread = _LoopThread()
-        try:
-            self._loop_thread.start()
-            self._async_client = httpx.AsyncClient(
-                transport=httpx.ASGITransport(
-                    app=self.app,
-                    raise_app_exceptions=self._raise_app_exceptions,
-                    root_path=self._root_path,
-                ),
-                base_url=self.base_url,
-                cookies=self._cookies,
-                headers=self._headers,
-                follow_redirects=self._follow_redirects,
-            )
-            self._lifespan = _LifespanManager(self.app, self._loop_thread)
-            self._lifespan.startup()
-        except BaseException:
-            with _cleanup(sys.exception()):
-                self._close()
-            raise
-        return self
+        return super().__enter__()
 
-    def __exit__(self, *exc_info) -> None:
-        with _cleanup(exc_info[1]):
-            try:
-                for session in list(self._sessions):
-                    session.close()
-                _shutdown_on_exit(self._lifespan, exc_info)
-            except BaseException:
-                with _cleanup(sys.exception()):
-                    self._close()
-                raise
-            else:
-                self._close()
+    def _opened(self) -> None:
+        self._async_client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(
+                app=self.app,
+                raise_app_exceptions=self._raise_app_exceptions,
+                root_path=self._root_path,
+            ),
+            base_url=self.base_url,
+            cookies=self._cookies,
+            headers=self._headers,
+            follow_redirects=self._follow_redirects,
+        )
 
-    def _close(self) -> None:
+    def _closing(self) -> None:
+        for session in list(self._sessions):
+            session.close()
+
+    def _released(self) -> None:
         try:
             if self._async_client is not None:
                 self._loop_thread.run_coro(self._async_client.aclose())
         finally:
             self._async_client = None
-            self._lifespan = None
             self._sessions.clear()
-            if self._loop_thread is not None:
-                self._loop_thread.stop()
 
     # ----- HTTP methods -----------------------------------------------------
 
@@ -606,14 +622,8 @@ class TestClient:
         ``RuntimeError`` if the client is used outside its ``with`` block,
         since the loop thread and lifespan are what that block owns.
         """
-        if self._async_client is None:
-            raise RuntimeError(
-                'TestClient must be used as a context manager: '
-                '`with TestClient(app) as client: ...`',
-            )
-        return self._loop_thread.run_coro(
-            self._async_client.request(method, url, **kwargs),
-        )
+        self._require_entered()
+        return self._run(self._async_client.request(method, url, **kwargs))
 
     @property
     def cookies(self):
@@ -622,22 +632,14 @@ class TestClient:
         Same semantics as ``httpx.Client.cookies``: cookies set by
         responses persist across requests on the same client.
         """
-        if self._async_client is None:
-            raise RuntimeError(
-                'TestClient must be used as a context manager before '
-                'accessing cookies.',
-            )
+        self._require_entered()
         return self._async_client.cookies
 
     @property
     def headers(self):
         """Default headers applied to every request, forwarded from the
         underlying ``httpx.AsyncClient``."""
-        if self._async_client is None:
-            raise RuntimeError(
-                'TestClient must be used as a context manager before '
-                'accessing headers.',
-            )
+        self._require_entered()
         return self._async_client.headers
 
     def get(self, url: str, **kwargs: Any) -> httpx.Response:
@@ -684,8 +686,7 @@ class TestClient:
         ``/ws?token=abc``.  Returns a [`WebSocketTestSession`][]
         that should itself be used as a context manager.
         """
-        if self._async_client is None:
-            raise RuntimeError("TestClient must be used as a context manager")
+        loop_thread = self._require_entered()
         session = WebSocketTestSession(
             app=self.app,
             path=url,
@@ -693,7 +694,7 @@ class TestClient:
             headers=headers,
             cookies=cookies,
             timeout=timeout,
-            _loop_thread=self._loop_thread,
+            _loop_thread=loop_thread,
         )
         self._sessions.add(session)
         return session

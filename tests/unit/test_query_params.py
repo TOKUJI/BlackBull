@@ -170,6 +170,20 @@ class TestQueryParam400s:
             await wrapper(_scope(qs), None, AsyncMock())
         assert exc_info.value.status == HTTPStatus.BAD_REQUEST
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('qs,path_params,error', [
+        pytest.param(b'', {'item_id': '5'}, HTTPException, id='missing-query'),
+        pytest.param(b'q=x', {'item_id': 'abc'}, TypeError, id='bad-path'),
+    ])
+    async def test_a_bind_failure_never_reads_the_body(self, qs, path_params, error):
+        async def fn(item_id: int, body, q: str): pass
+        wrapper = _adapt_handler(fn, '/items/{item_id}')
+        scope = _scope(qs)
+        scope['path_params'] = path_params
+        unreadable = object()
+        with pytest.raises(error):
+            await wrapper(scope, unreadable, AsyncMock())
+
 
 class TestQueryParamRegistration:
     def test_unsupported_annotation_raises_at_registration(self):

@@ -84,16 +84,16 @@ def _query_parameters(handler, param_specs: dict[str, str]) -> list[dict]:
     resolves; ``Depends`` params are not request inputs and carry no entry.
     Full-ASGI handlers (and anything the classifier rejects) emit nothing.
     """
-    from .router import _handler_param_plan, _is_simplified_handler, _ParamKind
+    from .router import _is_simplified_handler, _param_plan, _ParamKind
 
     if not _is_simplified_handler(handler):
         return []
     try:
-        _, _, categories = _handler_param_plan(handler, set(param_specs))
+        plan = _param_plan(handler, set(param_specs))
     except (TypeError, ValueError):
         return []
     out = []
-    for name, (kind, payload) in categories.items():
+    for name, kind, payload in plan:
         if kind is not _ParamKind.QUERY:
             continue
         out.append({

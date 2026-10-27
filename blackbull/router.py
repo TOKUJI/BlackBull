@@ -620,11 +620,9 @@ async def _send_converted(value, conn, receive, send) -> None:
         f'bytes, str, dict, list, dataclass, or None; got {type(value).__name__!r}')
 
 
-async def _finish_result(result, conn, receive, send, converters, fn_name: str) -> None:
-    """Send supported return shapes, then try converters; raise TypeError when neither matches.
-    """
-    if await _send_native(result, conn, receive, send):
-        return
+async def _send_unsupported(result, conn, receive, send, converters, fn_name: str) -> None:
+    """Send what a registered converter makes of a result [`_send_native`][]
+    refused; raise TypeError when no converter matches."""
     if converters and (conv := _lookup_mro(converters, type(result))) is not None:
         await _send_converted(conv(result), conn, receive, send)
         return
@@ -690,111 +688,6 @@ class _QuerySpec(NamedTuple):
 _QUERY_MISSING = object()
 
 
-class _ParamKind(Enum):
-    """Registration-time handler parameter classification.
-    """
-    PATH = 'path'
-    CONN = 'conn'
-    BODY = 'body'
-    REQUEST = 'request'
-    DATACLASS = 'dataclass'
-    DEPENDS = 'depends'
-    QUERY = 'query'
-    WS = 'ws'
-
-
-def _handler_param_plan(fn, path_param_names: set) -> tuple:
-    """Classify parameters once at registration; reject unresolvable forms with TypeError.
-
-    Recognized annotation/name bindings take precedence over the query fallback.
-    See docs/getting-started/first-app.md for supported signatures.
-    """
-    from .connection import Connection as _Conn  # ``Request`` is an alias of it
-
-    params = inspect.signature(fn).parameters
-    annotations = {n: p.annotation for n, p in params.items()}
-
-    # Resolve PEP 563 / string-form annotations once, here, so the wrappers
-    # below can rely on real types in their isinstance / get_origin calls.
-    try:
-        resolved_hints = typing.get_type_hints(fn)
-        for n in annotations:
-            if n in resolved_hints:
-                annotations[n] = resolved_hints[n]
-    except Exception:
-        pass  # unresolved forward refs / bad annotations → keep the raw annotations.
-
-    categories: dict[str, tuple] = {}
-    for name, p in params.items():
-        ann = annotations.get(name, inspect.Parameter.empty)
-        default = p.default
-        is_dep = isinstance(default, Depends)
-
-        if name in path_param_names:
-            if is_dep:
-                raise TypeError(
-                    f"Simplified handler {fn.__name__!r}: parameter {name!r} "
-                    f"is a path param of {sorted(path_param_names)!r} and "
-                    f"cannot carry a Depends default.")
-            categories[name] = (_ParamKind.PATH, None)
-        elif name == 'scope':
-            # This branch must precede the query-param fallback: without it an
-            # unannotated ``scope`` resolves as a *query parameter* named
-            # "scope", silently rebinding the argument instead of failing.
-            raise TypeError(
-                f"Simplified handler {fn.__name__!r}: parameter 'scope' is not "
-                f"supported — BlackBull threads a Connection, not an ASGI scope "
-                f"dict, so the name misdescribes what would be injected. Rename "
-                f"it to 'conn' and use the typed attributes (conn.headers, "
-                f"conn.query_string, conn.cookies, conn.state, conn.extensions). "
-                f"Full-form handlers (conn, receive, send) are unaffected — "
-                f"their parameters are positional.")
-        elif name in ('body', 'conn', 'connection'):
-            if is_dep:
-                raise TypeError(
-                    f"Simplified handler {fn.__name__!r}: parameter {name!r} "
-                    f"is reserved for the request {name} and cannot carry a "
-                    f"Depends default — rename the parameter.")
-            categories[name] = (_ParamKind.BODY if name == 'body' else _ParamKind.CONN, None)
-        elif is_dep:
-            categories[name] = (_ParamKind.DEPENDS, default)
-        elif ann is _Conn or (name == 'request' and ann is inspect.Parameter.empty):
-            # ``Request`` is an alias of ``Connection``, so ``request: Request``
-            # and ``conn: Connection`` reach this branch as the same annotation.
-            categories[name] = (_ParamKind.REQUEST, None)
-        elif _is_body_dataclass_annotation(ann):
-            categories[name] = (_ParamKind.DATACLASS, None)
-        else:
-            target = str if ann is inspect.Parameter.empty else _unwrap_optional(ann)
-            coercer = _QUERY_COERCERS.get(target) if isinstance(target, type) else None
-            if coercer is None:
-                raise TypeError(
-                    f"Simplified handler {fn.__name__!r}: cannot resolve "
-                    f"parameter {name!r}. Expected a path param of "
-                    f"{sorted(path_param_names)!r}, 'body', 'conn', a "
-                    f"parameter annotated with Connection (or named 'request'), "
-                    f"a dataclass body param, a Depends(...) default, or a "
-                    f"query param annotated str/int/float/bool "
-                    f"(optionally `| None`)."
-                )
-            required = default is inspect.Parameter.empty
-            categories[name] = (_ParamKind.QUERY, _QuerySpec(
-                name=name, type=target, coercer=coercer, required=required,
-                default=None if required else default))
-
-    # Allow at most one body-bound parameter; Connection injection does not count.
-    body_param_count = sum(
-        1 for kind, _ in categories.values() if kind in (_ParamKind.BODY, _ParamKind.DATACLASS))
-    if body_param_count > 1:
-        raise TypeError(
-            f"Simplified handler {fn.__name__!r}: more than one parameter would "
-            f"consume the request body.  Pick one of 'body' or a dataclass-typed "
-            f"parameter, not both."
-        )
-
-    return params, annotations, categories
-
-
 def _conn_of(target, receive):
     """Reuse a Connection or recover/build one from an ASGI scope.
 
@@ -839,10 +732,6 @@ def _set_path_params(target, receive, params: dict) -> None:
     _conn_of(target, receive).path_params.update(params)
 
 
-#: Recognised only on an *un*annotated parameter; ``ws: WebSocket`` works
-#: under any name.
-_WS_PARAM_NAMES = frozenset({'ws', 'websocket'})
-
 #: RFC 6455 §7.4.1 close code 1008 — "policy violation".
 _WS_POLICY_VIOLATION = 1008
 
@@ -879,76 +768,226 @@ def _is_websocket_route(scheme) -> bool:
     return bool(schemes) and all(s == Scheme.websocket for s in schemes)
 
 
-def _websocket_param_plan(fn, path_param_names: set = frozenset()) -> tuple[tuple, ...]:
-    """Classify object WebSocket parameters at registration; annotations win over names.
+class _ParamKind(Enum):
+    """Registration-time handler parameter classification.
+    """
+    PATH = 'path'
+    CONN = 'conn'
+    BODY = 'body'
+    DATACLASS = 'dataclass'
+    DEPENDS = 'depends'
+    QUERY = 'query'
+    WS = 'ws'
 
-    Query parameters require annotations; body injection is unsupported.
+
+_QUERY, _CONN, _PATH, _BODY, _DATACLASS, _WS = (
+    _ParamKind.QUERY, _ParamKind.CONN, _ParamKind.PATH, _ParamKind.BODY,
+    _ParamKind.DATACLASS, _ParamKind.WS)
+
+#: Recognised only on an *un*annotated parameter; ``ws: WebSocket`` works
+#: under any name.
+_WS_PARAM_NAMES = frozenset({'ws', 'websocket'})
+
+
+def _param_plan(fn, path_param_names: set = frozenset(), *,
+                websocket: bool = False) -> tuple[tuple, ...]:
+    """Classify parameters once at registration as ``(name, kind, payload)``;
+    reject unresolvable forms with TypeError.
+
+    HTTP: path placeholders win, then ``body``/``conn``/``connection``, then
+    ``Connection`` (or a bare ``request``), dataclass bodies and query params,
+    bare ones as ``str``.  WebSocket: ``WebSocket`` and ``Connection``
+    annotations (or their bare names) win, query params must be annotated and
+    there is no body.  See docs/getting-started/first-app.md.
     """
     from .connection import Connection as _Conn  # noqa: PLC0415 — cycle-safe
     from .websocket import WebSocket as _WS      # noqa: PLC0415 — cycle-safe
 
+    what = 'WebSocket handler' if websocket else 'Simplified handler'
     params = inspect.signature(fn).parameters
     annotations = {n: p.annotation for n, p in params.items()}
+    # Resolve PEP 563 / string-form annotations once, so the binder can rely
+    # on real types in its isinstance calls.
     try:
         resolved_hints = typing.get_type_hints(fn)
         for n in annotations:
             if n in resolved_hints:
                 annotations[n] = resolved_hints[n]
     except Exception:
-        pass  # unresolved forward refs → fall back to the raw annotations.
+        pass  # unresolved forward refs / bad annotations → keep the raw annotations.
 
     plan: list[tuple] = []
     for name, p in params.items():
-        ann = annotations.get(name, inspect.Parameter.empty)
+        ann = annotations[name]
         default = p.default
         is_dep = isinstance(default, Depends)
         bare = ann is inspect.Parameter.empty
-
-        if ann is _WS or (bare and name in _WS_PARAM_NAMES):
-            if is_dep:
-                raise TypeError(
-                    f"WebSocket handler {fn.__name__!r}: parameter {name!r} is "
-                    f"reserved for the WebSocket object and cannot carry a "
-                    f"Depends default — rename the parameter.")
-            plan.append((name, _ParamKind.WS, None))
-        elif ann is _Conn or (bare and name in ('conn', 'connection')):
-            if is_dep:
-                raise TypeError(
-                    f"WebSocket handler {fn.__name__!r}: parameter {name!r} is "
-                    f"reserved for the Connection and cannot carry a Depends "
-                    f"default — rename the parameter.")
-            plan.append((name, _ParamKind.CONN, None))
+        if websocket:
+            if ann is _WS or (bare and name in _WS_PARAM_NAMES):
+                reserved = (_ParamKind.WS, 'the WebSocket object')
+            elif ann is _Conn or (bare and name in ('conn', 'connection')):
+                reserved = (_ParamKind.CONN, 'the Connection')
+            elif name in path_param_names:
+                reserved = (_ParamKind.PATH, None)
+            else:
+                reserved = None
         elif name in path_param_names:
+            reserved = (_ParamKind.PATH, None)
+        elif name == 'scope':
+            # Must precede the query fallback: an unannotated ``scope`` would
+            # otherwise bind the query key "scope" instead of failing.
+            raise TypeError(
+                f"Simplified handler {fn.__name__!r}: parameter 'scope' is not "
+                f"supported — BlackBull threads a Connection, not an ASGI scope "
+                f"dict, so the name misdescribes what would be injected. Rename "
+                f"it to 'conn' and use the typed attributes (conn.headers, "
+                f"conn.query_string, conn.cookies, conn.state, conn.extensions). "
+                f"Full-form handlers (conn, receive, send) are unaffected — "
+                f"their parameters are positional.")
+        elif name in ('body', 'conn', 'connection'):
+            reserved = (_ParamKind.BODY if name == 'body' else _ParamKind.CONN,
+                        f'the request {name}')
+        else:
+            reserved = None
+        if reserved is not None:
+            kind, owner = reserved
             if is_dep:
+                if kind is _ParamKind.PATH:
+                    raise TypeError(
+                        f"{what} {fn.__name__!r}: parameter {name!r} is a path "
+                        f"param of {sorted(path_param_names)!r} and cannot carry "
+                        f"a Depends default.")
                 raise TypeError(
-                    f"WebSocket handler {fn.__name__!r}: parameter {name!r} is "
-                    f"a path param of {sorted(path_param_names)!r} and cannot "
-                    f"carry a Depends default.")
-            plan.append((name, _ParamKind.PATH, None if bare else ann))
+                    f"{what} {fn.__name__!r}: parameter {name!r} is reserved for "
+                    f"{owner} and cannot carry a Depends default — rename the "
+                    f"parameter.")
+            plan.append((name, kind, None if bare else ann))
         elif is_dep:
             plan.append((name, _ParamKind.DEPENDS, default))
+        elif not websocket and (ann is _Conn or (name == 'request' and bare)):
+            # ``Request`` is an alias of ``Connection``.
+            plan.append((name, _ParamKind.CONN, None))
+        elif not websocket and _is_body_dataclass_annotation(ann):
+            plan.append((name, _ParamKind.DATACLASS, ann))
         else:
-            # ``None`` for a bare name finds no coercer, and so raises below.
-            target = None if bare else _unwrap_optional(ann)
+            target = (None if websocket else str) if bare else _unwrap_optional(ann)
             coercer = _QUERY_COERCERS.get(target) if isinstance(target, type) else None
             if coercer is None:
-                got = 'no annotation' if bare else getattr(ann, '__name__', repr(ann))
+                if websocket:
+                    got = 'no annotation' if bare else getattr(ann, '__name__', repr(ann))
+                    raise TypeError(
+                        f"WebSocket handler {fn.__name__!r}: cannot resolve parameter "
+                        f"{name!r} ({got}).  Expected 'ws: WebSocket' (or the bare "
+                        f"name 'ws'/'websocket'), 'conn: Connection', a path param of "
+                        f"{sorted(path_param_names)!r}, a Depends(...) default, or a "
+                        f"query param annotated str/int/float/bool (optionally "
+                        f"`| None`) — a WebSocket query param must carry its "
+                        f"annotation, it is not inferred.  A WebSocket has no request "
+                        f"body, so body and dataclass params have no WebSocket form.  "
+                        f"For full control, declare the raw '(conn, receive, send)' "
+                        f"signature instead.")
                 raise TypeError(
-                    f"WebSocket handler {fn.__name__!r}: cannot resolve parameter "
-                    f"{name!r} ({got}).  Expected 'ws: WebSocket' (or the bare "
-                    f"name 'ws'/'websocket'), 'conn: Connection', a path param of "
-                    f"{sorted(path_param_names)!r}, a Depends(...) default, or a "
-                    f"query param annotated str/int/float/bool (optionally "
-                    f"`| None`) — a WebSocket query param must carry its "
-                    f"annotation, it is not inferred.  A WebSocket has no request "
-                    f"body, so body and dataclass params have no WebSocket form.  "
-                    f"For full control, declare the raw '(conn, receive, send)' "
-                    f"signature instead.")
+                    f"Simplified handler {fn.__name__!r}: cannot resolve "
+                    f"parameter {name!r}. Expected a path param of "
+                    f"{sorted(path_param_names)!r}, 'body', 'conn', a "
+                    f"parameter annotated with Connection (or named 'request'), "
+                    f"a dataclass body param, a Depends(...) default, or a "
+                    f"query param annotated str/int/float/bool "
+                    f"(optionally `| None`).")
             required = default is inspect.Parameter.empty
             plan.append((name, _ParamKind.QUERY, _QuerySpec(
                 name=name, type=target, coercer=coercer, required=required,
                 default=None if required else default)))
+
+    if sum(1 for _, kind, _ in plan if kind in (_ParamKind.BODY, _ParamKind.DATACLASS)) > 1:
+        raise TypeError(
+            f"Simplified handler {fn.__name__!r}: more than one parameter would "
+            f"consume the request body.  Pick one of 'body' or a dataclass-typed "
+            f"parameter, not both.")
     return tuple(plan)
+
+
+class _Unbound(Exception):
+    """A request value could not be bound to a handler parameter.
+
+    ``http`` is what an HTTP handler answers with; a WebSocket handshake is
+    refused with the message instead.
+    """
+
+    def __init__(self, detail: str, http: Exception) -> None:
+        super().__init__(detail)
+        self.http = http
+
+
+def _binder(plan: tuple, has_query: bool, fn_name: str):
+    """``bind(conn, ws)``: the handler's keyword arguments for *plan*, which
+    holds neither the body nor Depends."""
+    def bind(conn, ws) -> dict:
+        kwargs: dict = {}
+        if has_query:
+            raw_qs = conn.query_string or b''
+            query = (dict(parse_qsl(raw_qs.decode('latin-1'), keep_blank_values=True))
+                     if raw_qs else {}).get
+        for name, kind, payload in plan:
+            if kind is _CONN:
+                kwargs[name] = conn
+            elif kind is _QUERY:
+                raw = query(name, _QUERY_MISSING)
+                if raw is _QUERY_MISSING:
+                    if payload.required:
+                        detail = f'missing required query parameter {name!r} for handler {fn_name!r}'
+                        raise _Unbound(detail, HTTPException(HTTPStatus.BAD_REQUEST, detail))
+                    kwargs[name] = payload.default
+                else:
+                    try:
+                        kwargs[name] = payload.coercer(raw)
+                    except (ValueError, TypeError) as exc:
+                        detail = (f'query parameter {name!r}: cannot coerce {raw!r} '
+                                  f'to {payload.type.__name__}')
+                        raise _Unbound(detail, HTTPException(HTTPStatus.BAD_REQUEST, detail)) from exc
+            elif kind is _PATH:
+                raw = conn.path_params.get(name, '')
+                if isinstance(payload, type) and not isinstance(raw, payload):
+                    try:
+                        kwargs[name] = payload(raw)
+                    except (ValueError, TypeError) as exc:
+                        detail = f'path param {name!r}: cannot coerce {raw!r} to {payload.__name__}'
+                        raise _Unbound(detail, TypeError(
+                            f"Path param {name!r}: cannot coerce {raw!r} to {payload.__name__}"
+                        )) from exc
+                else:
+                    kwargs[name] = raw
+            elif kind is _WS:
+                kwargs[name] = ws
+            else:  # unreachable: callers pass a plan without DEPENDS
+                raise AssertionError(f'unexpected param kind {kind!r} for {name!r}')
+        return kwargs
+    return bind
+
+
+async def _resolved(depends_plan: tuple, kwargs: dict, stack: AsyncExitStack) -> dict:
+    cache: dict = {}
+    for name, dep in depends_plan:
+        kwargs[name] = await _resolve_depends(dep, stack, cache)
+    return kwargs
+
+
+def _split_plan(plan: tuple) -> tuple[tuple, tuple, bool, tuple | None]:
+    """``(bind plan, depends plan, has query, body entry)``.  The body entry
+    binds last, so a bad path or query param is refused unread."""
+    body = next((entry for entry in plan if entry[1] is _BODY or entry[1] is _DATACLASS), None)
+    return (tuple(entry for entry in plan
+                  if entry[1] is not _ParamKind.DEPENDS and entry is not body),
+            tuple((n, payload) for n, kind, payload in plan if kind is _ParamKind.DEPENDS),
+            any(kind is _QUERY for _, kind, _ in plan),
+            body)
+
+
+def _body_value(entry: tuple, raw: bytes, fn_name: str):
+    _name, kind, ann = entry
+    if kind is _DATACLASS or _is_body_dataclass_annotation(ann):
+        return _decode_json_body(ann, raw, fn_name)
+    return raw
 
 
 def _adapt_websocket_handler(fn, path: str = ''):
@@ -958,89 +997,36 @@ def _adapt_websocket_handler(fn, path: str = ''):
     """
     from .websocket import WebSocket as _WS  # noqa: PLC0415 — cycle-safe
 
-    plan = _websocket_param_plan(fn, _path_param_names(path))
+    bind_plan, depends_plan, has_query, _ = _split_plan(
+        _param_plan(fn, _path_param_names(path), websocket=True))
 
     # The overwhelmingly common shape — a lone ``ws`` — gets a wrapper with no
     # per-connection argument assembly at all.
-    if len(plan) == 1 and plan[0][1] is _ParamKind.WS:
+    if not depends_plan and len(bind_plan) == 1 and bind_plan[0][1] is _ParamKind.WS:
         @wraps(fn)
         async def _ws_wrapper(conn, receive, send):
             await fn(_WS(conn, receive, send))
         return _ws_wrapper
 
-    depends_plan = tuple((n, payload) for n, kind, payload in plan if kind is _ParamKind.DEPENDS)
-    bind_plan = tuple((n, kind, payload) for n, kind, payload in plan if kind is not _ParamKind.DEPENDS)
-    has_query = any(kind is _ParamKind.QUERY for _, kind, _ in bind_plan)
-    fn_name = fn.__name__
+    bind = _binder(bind_plan, has_query, fn.__name__)
 
     @wraps(fn)
     async def _ws_plan_wrapper(conn, receive, send):
-        ws = None
-        kwargs: dict = {}
-        if has_query:
-            raw_qs = conn.query_string or b''
-            query_values = (
-                dict(parse_qsl(raw_qs.decode('latin-1'), keep_blank_values=True))
-                if raw_qs else {})
-
-        # Bind everything that cannot fail on a resource *before* resolving any
-        # Depends: a connection we are about to reject should never acquire one.
-        for name, kind, payload in bind_plan:
-            match kind:
-                case _ParamKind.WS:
-                    if ws is None:
-                        ws = _WS(conn, receive, send)
-                    kwargs[name] = ws
-                case _ParamKind.CONN:
-                    kwargs[name] = conn
-                case _ParamKind.PATH:
-                    raw = conn.path_params.get(name, '')
-                    if (payload is not None and isinstance(payload, type)
-                            and not isinstance(raw, payload)):
-                        try:
-                            kwargs[name] = payload(raw)
-                        except (ValueError, TypeError):
-                            await _ws_reject(
-                                _WS(conn, receive, send) if ws is None else ws,
-                                f'path param {name!r}: cannot coerce {raw!r} to '
-                                f'{payload.__name__}')
-                            return
-                    else:
-                        kwargs[name] = raw
-                case _ParamKind.QUERY:
-                    raw = query_values.get(name, _QUERY_MISSING)
-                    if raw is _QUERY_MISSING:
-                        if payload.required:
-                            await _ws_reject(
-                                _WS(conn, receive, send) if ws is None else ws,
-                                f'missing required query parameter {name!r} for '
-                                f'handler {fn_name!r}')
-                            return
-                        kwargs[name] = payload.default
-                    else:
-                        try:
-                            kwargs[name] = payload.coercer(raw)
-                        except (ValueError, TypeError):
-                            await _ws_reject(
-                                _WS(conn, receive, send) if ws is None else ws,
-                                f'query parameter {name!r}: cannot coerce {raw!r} '
-                                f'to {payload.type.__name__}')
-                            return
-                case _:  # unreachable: bind_plan excludes DEPENDS
-                    raise AssertionError(f'unexpected param kind {kind!r} for {name!r}')
-
+        ws = _WS(conn, receive, send)
+        # Bind what cannot fail on a resource *before* any Depends: a
+        # connection about to be refused never acquires one.
+        try:
+            kwargs = bind(conn, ws)
+        except _Unbound as exc:
+            await _ws_reject(ws, str(exc))
+            return
         if not depends_plan:
             await fn(**kwargs)
             return
-
-        # Bound to the `async with` rather than to a close event, so teardown
-        # runs on an exception propagating out of the handler exactly as it
-        # does on a clean return.
+        # Teardown is bound to the ``async with``, so it runs on an exception
+        # out of the handler exactly as on a clean return.
         async with AsyncExitStack() as stack:
-            cache: dict = {}
-            for name, dep in depends_plan:
-                kwargs[name] = await _resolve_depends(dep, stack, cache)
-            await fn(**kwargs)
+            await fn(**await _resolved(depends_plan, kwargs, stack))
 
     return _ws_plan_wrapper
 
@@ -1055,101 +1041,18 @@ async def _ws_reject(ws, detail: str) -> None:
     await ws.close(code=_WS_POLICY_VIOLATION, reason=_truncate_close_reason(detail))
 
 
-def _make_extended_wrapper(fn, annotations: dict, plan: tuple, depends_plan: tuple,
-                           converters: dict | None):
-    has_query = any(kind is _ParamKind.QUERY for _, kind, _ in plan)
-    fn_name = fn.__name__
-    is_async = inspect.iscoroutinefunction(fn)
-
-    @wraps(fn)
-    async def _extended_wrapper(conn, receive, send):
-        try:
-            conn = _conn_of(conn, receive)
-        except FieldError:
-            return await refuse_scope(conn, send)
-        kwargs: dict = {}
-        if has_query:
-            raw_qs = conn.query_string or b''
-            query_values = (
-                dict(parse_qsl(raw_qs.decode('latin-1'), keep_blank_values=True))
-                if raw_qs else {})
-        for name, kind, payload in plan:
-            match kind:
-                case _ParamKind.QUERY:
-                    raw = query_values.get(name, _QUERY_MISSING)
-                    if raw is _QUERY_MISSING:
-                        if payload.required:
-                            raise HTTPException(
-                                HTTPStatus.BAD_REQUEST,
-                                f'missing required query parameter {name!r} '
-                                f'for handler {fn_name!r}')
-                        kwargs[name] = payload.default
-                    else:
-                        try:
-                            kwargs[name] = payload.coercer(raw)
-                        except (ValueError, TypeError) as exc:
-                            raise HTTPException(
-                                HTTPStatus.BAD_REQUEST,
-                                f'query parameter {name!r}: cannot coerce {raw!r} '
-                                f'to {payload.type.__name__}',
-                            ) from exc
-                case _ParamKind.CONN | _ParamKind.REQUEST:
-                    kwargs[name] = conn
-                case _ParamKind.BODY:
-                    raw = await conn.body()
-                    ann = annotations.get(name, inspect.Parameter.empty)
-                    if _is_body_dataclass_annotation(ann):
-                        kwargs[name] = _decode_json_body(ann, raw, fn_name)
-                    else:
-                        kwargs[name] = raw
-                case _ParamKind.DATACLASS:
-                    raw = await conn.body()
-                    kwargs[name] = _decode_json_body(annotations[name], raw, fn_name)
-                case _ParamKind.PATH:
-                    raw = conn.path_params.get(name, '')
-                    ann = annotations.get(name, inspect.Parameter.empty)
-                    if (ann is not inspect.Parameter.empty and isinstance(ann, type)
-                            and not isinstance(raw, ann)):
-                        try:
-                            kwargs[name] = ann(raw)
-                        except (ValueError, TypeError) as exc:
-                            raise TypeError(
-                                f"Path param {name!r}: cannot coerce {raw!r} to {ann.__name__}"
-                            ) from exc
-                    else:
-                        kwargs[name] = raw
-                case _:  # unreachable: plan excludes DEPENDS; only the 6 kinds above occur
-                    raise AssertionError(f'unexpected param kind {kind!r} for {name!r}')
-
-        if not depends_plan:
-            result = (await fn(**kwargs)) if is_async else fn(**kwargs)
-            await _finish_result(result, conn, receive, send, converters, fn_name)
-            return None
-
-        async with AsyncExitStack() as stack:
-            cache: dict = {}
-            for name, dep in depends_plan:
-                kwargs[name] = await _resolve_depends(dep, stack, cache)
-            result = (await fn(**kwargs)) if is_async else fn(**kwargs)
-            # Send inside the stack's scope so provider teardown runs after
-            # the client has the response (LIFO on the stack).
-            await _finish_result(result, conn, receive, send, converters, fn_name)
-        return None
-
-    return _extended_wrapper
-
-
 def _adapt_handler(fn, path: str, converters: dict | None = None):
-    from .connection import Connection as _Conn
-
+    """Adapt a simplified HTTP handler.  Without ``Depends`` it gets the plain
+    wrapper, which holds no dependency machinery and binds nothing for a
+    handler without parameters."""
     path_param_names: set[str] = _path_param_names(path)
-    params, annotations, categories = _handler_param_plan(fn, path_param_names)
+    plan = _param_plan(fn, path_param_names)
 
     # A default on a path param is the one registration-time signal that the
     # author may have meant a query param, so say so now rather than let the
     # shadowing surprise them at request time.
-    for name, p in params.items():
-        if categories[name][0] is _ParamKind.PATH and p.default is not inspect.Parameter.empty:
+    for name, p in inspect.signature(fn).parameters.items():
+        if name in path_param_names and p.default is not inspect.Parameter.empty:
             warnings.warn(
                 f"Simplified handler {fn.__name__!r}: parameter {name!r} matches "
                 f"a path placeholder in {path!r}; its default is never used and "
@@ -1157,69 +1060,58 @@ def _adapt_handler(fn, path: str, converters: dict | None = None):
                 f"parameter (or the placeholder) if you meant a query param.",
                 UserWarning, stacklevel=3)
 
+    bind_plan, depends_plan, has_query, body = _split_plan(plan)
+    bind = _binder(bind_plan, has_query, fn.__name__) if bind_plan or body else None
     is_async = inspect.iscoroutinefunction(fn)
+    fn_name = fn.__name__
+
+    if not depends_plan:
+        @wraps(fn)
+        async def _wrapper(conn, receive, send):
+            try:
+                conn = _conn_of(conn, receive)
+            except FieldError:
+                return await refuse_scope(conn, send)
+            if bind is not None:
+                try:
+                    kwargs = bind(conn, None)
+                except _Unbound as exc:
+                    raise exc.http from exc.__cause__
+                if body is not None:
+                    kwargs[body[0]] = _body_value(body, await conn.body(), fn_name)
+                result = (await fn(**kwargs)) if is_async else fn(**kwargs)
+            else:
+                result = (await fn()) if is_async else fn()
+            if not await _send_native(result, conn, receive, send):
+                await _send_unsupported(result, conn, receive, send, converters, fn_name)
+            return None
+        return _wrapper
 
     @wraps(fn)
-    async def _wrapper(conn, receive, send):
+    async def _depends_wrapper(conn, receive, send):
         try:
             conn = _conn_of(conn, receive)
         except FieldError:
             return await refuse_scope(conn, send)
-        kwargs: dict = {}
-        for name in params:
-            ann = annotations.get(name, inspect.Parameter.empty)
-            kind = categories[name][0]
-            match kind:
-                case _ParamKind.CONN | _ParamKind.REQUEST:
-                    kwargs[name] = conn
-                case _ParamKind.BODY:
-                    raw = await conn.body()
-                    if _is_body_dataclass_annotation(ann):
-                        kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
-                    else:
-                        kwargs[name] = raw
-                case _ParamKind.DATACLASS:
-                    raw = await conn.body()
-                    kwargs[name] = _decode_json_body(ann, raw, fn.__name__)
-                case _ParamKind.PATH:
-                    raw = conn.path_params.get(name, '')
-                    if (ann is not inspect.Parameter.empty and isinstance(ann, type)
-                            and not isinstance(raw, ann)):
-                        try:
-                            kwargs[name] = ann(raw)
-                        except (ValueError, TypeError) as exc:
-                            raise TypeError(
-                                f"Path param {name!r}: cannot coerce {raw!r} to {ann.__name__}"
-                            ) from exc
-                    else:
-                        kwargs[name] = raw
-                case _:  # unreachable in _wrapper: no query/depends reach the plain pin
-                    raise AssertionError(f'unexpected param kind {kind!r} for {name!r}')
+        if bind is None:
+            kwargs = {}
+        else:
+            try:
+                kwargs = bind(conn, None)
+            except _Unbound as exc:
+                raise exc.http from exc.__cause__
+            if body is not None:
+                kwargs[body[0]] = _body_value(body, await conn.body(), fn_name)
+        async with AsyncExitStack() as stack:
+            kwargs = await _resolved(depends_plan, kwargs, stack)
+            result = (await fn(**kwargs)) if is_async else fn(**kwargs)
+            # Send inside the stack's scope so provider teardown runs after
+            # the client has the response (LIFO on the stack).
+            if not await _send_native(result, conn, receive, send):
+                await _send_unsupported(result, conn, receive, send, converters, fn_name)
+        return None
 
-        result = (await fn(**kwargs)) if is_async else fn(**kwargs)
-
-        if await _send_native(result, conn, receive, send):
-            return None
-        if converters and (conv := _lookup_mro(converters, type(result))) is not None:
-            await _send_converted(conv(result), conn, receive, send)
-            return None
-        raise TypeError(
-            f"Simplified handler {fn.__name__!r} returned unsupported type "
-            f"{type(result).__name__!r}.  Return a Response, str, bytes, "
-            f"dict, list, or None, or register a converter with "
-            f"app.register_converter({type(result).__name__}, ...)."
-        )
-
-    has_query = any(kind is _ParamKind.QUERY for kind, _ in categories.values())
-    depends_plan = tuple(
-        (n, payload) for n, (kind, payload) in categories.items() if kind is _ParamKind.DEPENDS)
-
-    if not has_query and not depends_plan:
-        return _wrapper  # zero-overhead pin: neither category is in play
-
-    plan = tuple((n, kind, payload) for n, (kind, payload) in categories.items()
-                 if kind is not _ParamKind.DEPENDS)
-    return _make_extended_wrapper(fn, annotations, plan, depends_plan, converters)
+    return _depends_wrapper
 
 
 QUERY: str = 'QUERY'
@@ -1602,11 +1494,7 @@ class Router:
             logger.debug(f'Router.route_fn.register() is called. {fn}')
 
             original = fn
-            if _is_simplified_handler(fn):
-                if _is_websocket_route(scheme):
-                    fn = _adapt_websocket_handler(fn, path)
-                else:
-                    fn = _adapt_handler(fn, path, self._converters)
+            fn = self._adapt(fn, path, scheme)
 
             if hooks is not None:
                 fn._bb_response_headers, fn._bb_request_guard = hooks
@@ -1619,6 +1507,15 @@ class Router:
             return fn
 
         return register
+
+    def _adapt(self, fn, path, scheme):
+        """*fn* adapted to ``(conn, receive, send)`` when it is a simplified
+        handler: as a WebSocket handler on a WebSocket-only route."""
+        if not _is_simplified_handler(fn):
+            return fn
+        if _is_websocket_route(scheme):
+            return _adapt_websocket_handler(fn, path)
+        return _adapt_handler(fn, path, self._converters)
 
     def _register_chain(self, functions, path, methods, scheme,
                         name: str | None = None, original_handler=None,
@@ -1821,10 +1718,7 @@ class Router:
         if functions:
             fns = list(functions)
             original = fns[-1]
-            if _is_simplified_handler(fns[-1]):
-                fns[-1] = (_adapt_websocket_handler(fns[-1], path)
-                           if _is_websocket_route(scheme)
-                           else _adapt_handler(fns[-1], path, self._converters))
+            fns[-1] = self._adapt(fns[-1], path, scheme)
             self._register_chain(fns, path, methods, scheme,
                                  name=name, original_handler=original,
                                  accept_query=accept_query)
@@ -1832,13 +1726,8 @@ class Router:
 
         if middlewares:
             def decorator(fn):
-                if not _is_simplified_handler(fn):
-                    adapted = fn
-                elif _is_websocket_route(scheme):
-                    adapted = _adapt_websocket_handler(fn, path)
-                else:
-                    adapted = _adapt_handler(fn, path, self._converters)
-                self._register_chain(list(middlewares) + [adapted], path, methods, scheme,
+                self._register_chain(list(middlewares) + [self._adapt(fn, path, scheme)],
+                                     path, methods, scheme,
                                      name=name, original_handler=fn,
                                      accept_query=accept_query)
                 return fn

@@ -19,7 +19,7 @@ import pytest
 from blackbull import (BlackBull, Connection, Headers, WebSocket,
                        WebSocketDisconnect)
 from blackbull.router import (_ParamKind, _adapt_websocket_handler,
-                              _websocket_param_plan)
+                              _param_plan)
 from blackbull.utils import Scheme
 from blackbull.native import NativeWSMessage
 
@@ -480,7 +480,7 @@ def _kinds(plan) -> tuple[_ParamKind, ...]:
 
 @pytest.mark.parametrize('name', ['ws', 'websocket'])
 def test_bare_parameter_names_get_the_object(name):
-    plan = _websocket_param_plan(eval(f'lambda {name}: None'))
+    plan = _param_plan(eval(f'lambda {name}: None'), websocket=True)
     assert _kinds(plan) == (_ParamKind.WS,)
 
 
@@ -499,14 +499,14 @@ async def _ws_param_sock(sock: WebSocket):
 def test_annotation_wins_over_name(handler, expected):
     """``ws: Connection`` means the Connection, however the parameter is spelt;
     annotation beats naming convention."""
-    assert _kinds(_websocket_param_plan(handler)) == expected
+    assert _kinds(_param_plan(handler, websocket=True)) == expected
 
 
 def test_object_and_connection_together():
     async def handler(ws: WebSocket, conn: Connection):
         pass
 
-    assert _kinds(_websocket_param_plan(handler)) == (_ParamKind.WS, _ParamKind.CONN)
+    assert _kinds(_param_plan(handler, websocket=True)) == (_ParamKind.WS, _ParamKind.CONN)
 
 
 def test_unresolvable_parameter_fails_at_registration_not_at_connect_time():
@@ -531,7 +531,7 @@ def test_http_route_is_unaffected_by_the_websocket_branch():
     async def handler(conn):
         return 'ok'
 
-    # Would raise from _websocket_param_plan if the WS branch had claimed it.
+    # Would raise from _param_plan if the WS branch had claimed it.
     assert app._router[('/http', http.HTTPMethod.GET, Scheme.http)] is not None
 
 

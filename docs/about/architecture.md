@@ -14,6 +14,11 @@ All protocols share one runtime. Attach non-HTTP protocols through
 [listeners](../guide/listeners.md). Protocol dispatch belongs to bindings,
 not application routing or a second server runtime.
 
+The server is part of the core: `import blackbull` loads it, because the
+public listener types (`Listener`, `Tcp`, `Unix`, `InheritedFd`) and raw
+bindings are server objects. An app handed to an external ASGI host pays
+that import once, never per request.
+
 ## Actor model
 
 Mutable protocol state has one owner. Coordinate concurrent work through

@@ -19,7 +19,7 @@ import httpx
 from ..connection import Connection, bind_receive_channel
 from ..headers import Headers
 from ..native import NativeResponse as _NativeResponse
-from . import _shutdown_on_exit
+from . import _InProcess, _LoopThread
 
 __all__ = [
     'NativeTestResponse', 'NativeResponse', 'NativeClient', 'NativeTestServer',
@@ -97,20 +97,30 @@ def build_connection(
     Supply missing Host and Content-Length; an explicit Content-Length wins so
     tests can synthesize inconsistent framing.
     """
-    raw_path, _, query = path.partition('?')
     pairs = _header_pairs(headers)
     names = {name for name, _ in pairs}
     if b'host' not in names:
         pairs.append((b'host', _TEST_SERVER_ADDR[0].encode('latin-1')))
     if body and b'content-length' not in names:
         pairs.append((b'content-length', str(len(_encode_body(body))).encode('ascii')))
+    return _connection('http', method.upper(), path, pairs, scheme=scheme,
+                       http_version=http_version, root_path=root_path,
+                       client=client, server=server)
+
+
+def _connection(type_: str, method: str, path: str, pairs: list[tuple[bytes, bytes]], *,
+                scheme: str, http_version: str = '1.1', root_path: str = '',
+                client: tuple[str, int | None] | None = _TEST_CLIENT_ADDR,
+                server: tuple[str, int | None] | None = _TEST_SERVER_ADDR) -> Connection:
+    """A Connection for *path* as the parser would build it: the query split
+    off, ``raw_path`` undecoded and ``path`` percent-decoded, both UTF-8 so a
+    non-ASCII path such as '/café' round-trips."""
+    raw_path, _, query = path.partition('?')
     return Connection(
-        type='http',
+        type=type_,
         http_version=http_version,
-        method=method.upper(),
+        method=method,
         scheme=scheme,
-        # UTF-8 (not latin-1) for parity with the parser: a non-ASCII path
-        # such as '/café' must round-trip as the server would have received it.
         path=(unquote(raw_path, encoding='utf-8', errors='replace')
               if '%' in raw_path else raw_path),
         raw_path=raw_path.encode('utf-8'),
@@ -274,7 +284,7 @@ async def delete(app: Any, path: str, **kwargs: Any) -> NativeTestResponse:
 # Synchronous façade over Tier 1
 # ---------------------------------------------------------------------------
 
-class NativeClient:
+class NativeClient(_InProcess):
     """Synchronous Tier 1 client, for tests written as plain ``def``.
 
     Owns one background event loop for the whole session — not one per
@@ -289,79 +299,40 @@ class NativeClient:
     the app on the test's own loop with no thread hand-off at all.
     """
 
-    __test__ = False        # not a pytest container despite the name shape
-
-    def __init__(self, app: Any) -> None:
-        """Prepare a client for *app*; the loop thread starts on ``__enter__``."""
-        self.app = app
-        # Imported here rather than at module scope: ``blackbull.testing``
-        # imports this module, so a top-level import would be circular.
-        from . import _LifespanManager, _LoopThread  # noqa: PLC0415
-        self._loop_thread = _LoopThread()
-        self._lifespan_cls = _LifespanManager
-        self._lifespan: Any = None
-        self._entered = False
-
     def __enter__(self) -> 'NativeClient':
-        """Start the background loop and run the application's lifespan startup."""
-        self._loop_thread.start()
-        self._lifespan = self._lifespan_cls(self.app, self._loop_thread)
-        try:
-            self._lifespan.startup()
-        except Exception:
-            self._loop_thread.stop()
-            raise
-        self._entered = True
-        return self
-
-    def __exit__(self, *exc_info) -> None:
-        self._entered = False
-        try:
-            _shutdown_on_exit(self._lifespan, exc_info)
-        finally:
-            self._loop_thread.stop()
-
-    def _run(self, fn, *args: Any, **kwargs: Any) -> NativeTestResponse:
-        # The guard runs *before* the coroutine is constructed: building one
-        # and then raising leaves a "coroutine was never awaited" warning
-        # attached to the caller's test, pointing at the wrong problem.
-        if not self._entered:
-            raise RuntimeError(
-                'NativeClient must be used as a context manager: '
-                '`with NativeClient(app) as client: ...`')
-        return self._loop_thread.run_coro(fn(self.app, *args, **kwargs))
+        return super().__enter__()
 
     def request(self, conn: Connection, *, body: bytes | str = b'') -> NativeTestResponse:
         """Full-control form — see [`request`][]."""
-        return self._run(request, conn, body=body)
+        return self._run(request(self.app, conn, body=body))
 
     def get(self, path: str, **kwargs: Any) -> NativeTestResponse:
         """``GET`` *path* on the app's own dispatch, no socket involved."""
-        return self._run(get, path, **kwargs)
+        return self._run(get(self.app, path, **kwargs))
 
     def head(self, path: str, **kwargs: Any) -> NativeTestResponse:
         """``HEAD`` *path* on the app's own dispatch, no socket involved."""
-        return self._run(head, path, **kwargs)
+        return self._run(head(self.app, path, **kwargs))
 
     def options(self, path: str, **kwargs: Any) -> NativeTestResponse:
         """``OPTIONS`` *path* on the app's own dispatch, no socket involved."""
-        return self._run(options, path, **kwargs)
+        return self._run(options(self.app, path, **kwargs))
 
     def post(self, path: str, **kwargs: Any) -> NativeTestResponse:
         """``POST`` *path* on the app's own dispatch, no socket involved."""
-        return self._run(post, path, **kwargs)
+        return self._run(post(self.app, path, **kwargs))
 
     def put(self, path: str, **kwargs: Any) -> NativeTestResponse:
         """``PUT`` *path* on the app's own dispatch, no socket involved."""
-        return self._run(put, path, **kwargs)
+        return self._run(put(self.app, path, **kwargs))
 
     def patch(self, path: str, **kwargs: Any) -> NativeTestResponse:
         """``PATCH`` *path* on the app's own dispatch, no socket involved."""
-        return self._run(patch, path, **kwargs)
+        return self._run(patch(self.app, path, **kwargs))
 
     def delete(self, path: str, **kwargs: Any) -> NativeTestResponse:
         """``DELETE`` *path* on the app's own dispatch, no socket involved."""
-        return self._run(delete, path, **kwargs)
+        return self._run(delete(self.app, path, **kwargs))
 
 
 # ---------------------------------------------------------------------------
@@ -486,7 +457,6 @@ class NativeTestServer:
     # -- sync form ----------------------------------------------------------
 
     def __enter__(self) -> 'NativeTestServer':
-        from . import _LoopThread  # noqa: PLC0415
         self._loop_thread = _LoopThread()
         self._loop_thread.start()
         try:

@@ -49,8 +49,6 @@ class EventDispatcher:
         self._interceptors: defaultdict[str, list[EventHandler]] = defaultdict(list)
         self._pending_tasks: set[asyncio.Task] = set()
         self._shutdown_timeout = shutdown_timeout
-        # Invalidate derived listener caches on every registration.
-        self.generation: int = 0
         self._registered: set[str] = set()
 
     def on(self, event_name: str, handler: EventHandler,
@@ -68,13 +66,11 @@ class EventDispatcher:
         else:
             self._observers[event_name].append(handler)
         self._registered.add(event_name)
-        self.generation += 1
 
     def intercept(self, event_name: str, handler: EventHandler) -> None:
         """Register an interception handler for ``event_name``."""
         self._interceptors[event_name].append(handler)
         self._registered.add(event_name)
-        self.generation += 1
 
     def has_listeners(self, event_name: str) -> bool:
         return event_name in self._registered
