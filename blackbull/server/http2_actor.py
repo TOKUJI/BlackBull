@@ -10,8 +10,6 @@ from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from typing import Protocol, runtime_checkable
 
-from hpack import HPACKError
-
 from ..actor import Actor, Message
 from ..env import get_settings
 from ..event_aggregator import EventAggregator
@@ -20,7 +18,7 @@ from ..protocol.frame import FrameFactory
 from ..protocol.field_grammar import PROHIBITED_TRAILER_FIELDS
 from ..protocol.framing import method_is, parse_content_length
 from ..protocol.frame_types import (
-    ErrorCodes, FrameBase, FrameFormatError, FrameTypes,
+    ErrorCodes, FrameBase, FrameTypes,
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
 )
 from ..protocol.stream import Stream, StreamState
@@ -69,8 +67,6 @@ def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
 
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
-
-_CLOSED_STREAMS_CAP = 1024
 
 
 def _build_h2_extensions(

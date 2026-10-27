@@ -10,14 +10,13 @@ from enum import Enum
 from http import HTTPMethod
 from time import monotonic as _monotonic
 
-from hpack import HPACKError, OversizedHeaderListError
+from hpack import OversizedHeaderListError
 
 from ..env import get_settings
 from ..protocol.frame import FrameFactory, _UnknownFrame
 from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, ErrorCodes,
-                                    FrameBase, FrameFormatError, FrameTypes,
-                                    HeaderFrameFlags, PseudoHeaders,
-                                    SettingFrameFlags)
+                                    FrameBase, FrameTypes,
+                                    HeaderFrameFlags, PseudoHeaders)
 from ..headers import Headers
 from ..protocol.framing import (is_informational, parse_content_length,
                                 parse_status, response_has_content)
