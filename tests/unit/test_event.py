@@ -321,16 +321,3 @@ def test_has_listeners_does_not_create_empty_entries():
     assert 'never-registered' not in d._blocking_observers
 
 
-def test_registration_bumps_generation_so_cached_guards_invalidate():
-    """EventAggregator caches derived booleans against this counter."""
-    d = EventDispatcher()
-
-    async def handler(event):
-        pass
-
-    before = d.generation
-    d.on('e', handler)
-    assert d.generation > before
-    mid = d.generation
-    d.intercept('e', handler)
-    assert d.generation > mid

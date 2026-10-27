@@ -1,14 +1,12 @@
 """The zero-overhead pin for ``_adapt_handler``.
 
-The anti-FastAPI design point: query params and ``Depends`` are resolved at
-registration time, so a handler using *neither* feature compiles to exactly
-the plain wrapper — the same (shared) code object,
-with no reference to the DI or query machinery.  FastAPI, by contrast, runs
-``solve_dependencies()`` + two ``AsyncExitStack``s per request even with no
-dependencies declared.
+The anti-FastAPI design point: parameters and ``Depends`` are resolved at
+registration time.  A handler without ``Depends`` compiles to the one plain
+wrapper, with no dependency machinery, and one without parameters binds
+nothing at all.  FastAPI, by contrast, runs ``solve_dependencies()`` + two
+``AsyncExitStack``s per request even with no dependencies declared.
 """
 from dataclasses import dataclass
-
 from blackbull import Depends, Connection as Request  # deprecated alias
 from blackbull.router import _adapt_handler
 
@@ -27,31 +25,31 @@ def _provider(): return 'db'
 async def _with_depends(db=Depends(_provider)): pass
 
 
-def test_handlers_without_new_features_share_one_wrapper_code_object():
-    # Every closure the basic path emits shares the same code object —
+def test_handlers_without_depends_share_one_wrapper_code_object():
+    # Every closure the plain path emits shares the same code object —
     # the strongest form of "byte-identical adapted functions".
-    basics = [
+    plain = [
         _adapt_handler(_plain, '/'),
         _adapt_handler(_path_only, '/items/{item_id}'),
         _adapt_handler(_full_legacy, '/items/{item_id}'),
         _adapt_handler(_dataclass_body, '/items'),
+        _adapt_handler(_with_query, '/search'),
     ]
-    codes = {w.__code__ for w in basics}
-    assert len(codes) == 1
+    assert len({w.__code__ for w in plain}) == 1
 
 
-def test_query_and_depends_handlers_use_a_different_wrapper():
-    basic = _adapt_handler(_plain, '/')
-    query = _adapt_handler(_with_query, '/search')
-    depends = _adapt_handler(_with_depends, '/')
-    assert query.__code__ is not basic.__code__
-    assert depends.__code__ is not basic.__code__
+def test_a_depends_handler_uses_a_different_wrapper():
+    assert _adapt_handler(_with_depends, '/').__code__ is not _adapt_handler(_plain, '/').__code__
 
 
-def test_basic_wrapper_never_references_di_or_query_machinery():
-    basic = _adapt_handler(_full_legacy, '/items/{item_id}')
-    names = set(basic.__code__.co_names) | set(basic.__code__.co_freevars)
+def test_the_plain_wrapper_never_references_dependency_machinery():
+    plain = _adapt_handler(_full_legacy, '/items/{item_id}')
+    names = set(plain.__code__.co_names) | set(plain.__code__.co_freevars)
     assert 'AsyncExitStack' not in names
-    for symbol in names:
-        assert 'depends' not in symbol.lower()
-        assert 'query' not in symbol.lower()
+    assert not [n for n in names if 'depend' in n.lower() or 'resolve' in n.lower()]
+
+
+def test_a_handler_without_parameters_binds_nothing():
+    plain = _adapt_handler(_plain, '/')
+    cells = dict(zip(plain.__code__.co_freevars, plain.__closure__))
+    assert cells['bind'].cell_contents is None

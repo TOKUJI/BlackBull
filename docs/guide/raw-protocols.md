@@ -86,7 +86,7 @@ Raw protocols emit the protocol-agnostic Level B events (subscribe with
 | `connection_closed` | the connection closes | `peername`, `protocol`, `duration_ms` |
 | `message_received` | the handler reports an inbound message | `protocol`, `message_type`, `payload_size` |
 | `message_sent` | the handler reports an outbound message | `protocol`, `message_type`, `payload_size` |
-| `error` | the handler raises | `scope`, `exception` |
+| `error` | the handler raises | `conn`, `exception` |
 
 `message_received` / `message_sent` are emitted by the handler itself when it has
 parsed an application-level message, via the aggregator on `ctx`:

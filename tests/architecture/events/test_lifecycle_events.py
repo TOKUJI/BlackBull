@@ -290,6 +290,10 @@ async def test_a_session_fires_only_the_websocket_events_once():
     d = seen['websocket_connected'][0].detail
     assert d['path'] == '/ws' and d['subprotocol'] is None and isinstance(d['client_ip'], str)
     assert isinstance(d['connection_id'], str) and d['connection_id'] and 'conn' in d
+    gone = seen['websocket_disconnected'][0].detail
+    assert set(gone) == {'conn', 'connection_id', 'client_ip', 'path', 'code'}
+    assert gone['connection_id'] == d['connection_id'] and gone['path'] == '/ws'
+    assert isinstance(gone['code'], int)
 
 
 async def test_the_accepted_subprotocol_is_reported():
@@ -313,6 +317,72 @@ async def test_a_message_names_the_connection_its_session_was_given():
         await asyncio.sleep(SETTLE)
     [connected] = seen['websocket_connected']
     assert message_ids == [connected.detail['connection_id']]
+
+
+# Fires when the server reads a message, whether or not the handler consumes it.
+WS_MESSAGES = [
+    ('text', ['hello'], True, [('hello', None)]),
+    ('binary', [b'\x00\x01\x02'], True, [(None, b'\x00\x01\x02')]),
+    ('fragmented', [['hel', 'lo']], True, [('hello', None)]),
+    ('fragmented-empty-final', [['hel', 'lo', '']], True, [('hello', None)]),
+    ('several', ['first', 'second', 'third'], True,
+     [('first', None), ('second', None), ('third', None)]),
+    ('unread', ['m0', 'm1', 'm2'], False, [('m0', None), ('m1', None), ('m2', None)]),
+]
+
+
+@pytest.mark.parametrize('sent,reads,expected', [row[1:] for row in WS_MESSAGES],
+                         ids=[row[0] for row in WS_MESSAGES])
+async def test_each_websocket_message_is_one_event(sent, reads, expected):
+    app = BlackBull()
+    details: list[dict] = []
+    done = asyncio.Event()
+
+    @app.on('websocket_message')
+    async def on_message(event: Event):
+        details.append(event.detail)
+        if len(details) == len(expected):
+            done.set()
+
+    @app.route(path='/ws', scheme=Scheme.websocket)
+    async def ws(conn, receive, send):
+        await receive()
+        await send({'type': 'websocket.accept'})
+        if reads:
+            for _ in sent:
+                await receive()
+            await send({'type': 'websocket.close'})
+        else:
+            await asyncio.sleep(1.5)        # never consumes; bounded
+
+    async with served(app) as s:
+        async with connect(f'ws://127.0.0.1:{s.server.port}/ws') as client:
+            for message in sent:
+                await client.send(message)
+            await asyncio.wait_for(done.wait(), 3.0)
+    assert [(d['text'], d['bytes']) for d in details] == expected
+    assert all(set(d) == {'conn', 'text', 'bytes'} for d in details)
+
+
+async def test_a_listener_registered_mid_session_is_told():
+    """The listener check runs per message, not once per connection."""
+    app = BlackBull()
+    fired = asyncio.Event()
+
+    @app.route(path='/ws', scheme=Scheme.websocket)
+    async def ws(conn, receive, send):
+        await receive()
+        await send({'type': 'websocket.accept'})
+        await receive()
+        await send({'type': 'websocket.close'})
+
+    async with served(app) as s:
+        async with connect(f'ws://127.0.0.1:{s.server.port}/ws') as client:
+            @app.on('websocket_message')
+            async def on_message(event: Event):
+                fired.set()
+            await client.send('late')
+            await asyncio.wait_for(fired.wait(), 3.0)
 
 
 async def test_a_raising_websocket_handler_is_an_error_event():

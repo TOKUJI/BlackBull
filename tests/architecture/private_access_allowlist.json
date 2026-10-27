@@ -1,7 +1,5 @@
 {
  "architecture/_accept_admission_server.py": 3,
- "architecture/events/test_websocket_disconnected_event.py": 16,
- "architecture/events/test_websocket_message_event.py": 3,
  "architecture/test_BlackBull.py": 3,
  "architecture/test_accept_admission.py": 6,
  "architecture/test_accept_on_every_loop.py": 23,

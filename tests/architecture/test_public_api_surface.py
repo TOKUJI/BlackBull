@@ -111,3 +111,15 @@ def test_star_import_delivers_exactly_all():
     exec('from blackbull import *', ns)       # noqa: S102
     delivered = {n for n in ns if not n.startswith('_')}
     assert delivered == set(blackbull.__all__)
+
+
+def test_importing_the_package_loads_the_server():
+    """The server is part of the core (docs/about/architecture.md); measured in
+    a fresh interpreter so this suite's own imports cannot stand in for it."""
+    import subprocess
+    import sys
+    probe = 'import sys, blackbull; print("blackbull.server.server" in sys.modules)'
+    out = subprocess.run([sys.executable, '-c', probe], capture_output=True, text=True,
+                         timeout=60, check=True).stdout
+    assert out.strip() == 'True'
+

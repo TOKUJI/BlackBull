@@ -15,7 +15,7 @@ import pytest
 from blackbull import (BlackBull, Connection, Depends, Headers, WebSocket,
                        WebSocketDisconnect)
 from blackbull.router import (_ParamKind, _adapt_websocket_handler,
-                              _websocket_param_plan)
+                              _param_plan)
 from blackbull.utils import Scheme
 from blackbull.native import NativeWSMessage
 
@@ -72,14 +72,14 @@ def test_path_param_is_classified_by_name():
     async def handler(ws: WebSocket, room: str):
         pass
 
-    assert _kinds(_websocket_param_plan(handler, {'room'})) == (_ParamKind.WS, _ParamKind.PATH)
+    assert _kinds(_param_plan(handler, {'room'}, websocket=True)) == (_ParamKind.WS, _ParamKind.PATH)
 
 
 def test_annotated_leftover_is_a_query_param():
     async def handler(ws: WebSocket, since: int):
         pass
 
-    assert _kinds(_websocket_param_plan(handler, set())) == (_ParamKind.WS, _ParamKind.QUERY)
+    assert _kinds(_param_plan(handler, set(), websocket=True)) == (_ParamKind.WS, _ParamKind.QUERY)
 
 
 def test_query_param_must_be_annotated():
@@ -94,7 +94,7 @@ def test_query_param_must_be_annotated():
         pass
 
     with pytest.raises(TypeError, match='must carry its annotation'):
-        _websocket_param_plan(handler, set())
+        _param_plan(handler, set(), websocket=True)
 
 
 def test_depends_default_is_classified():
@@ -104,7 +104,7 @@ def test_depends_default_is_classified():
     async def handler(ws: WebSocket, db=Depends(provider)):
         pass
 
-    assert _kinds(_websocket_param_plan(handler, set())) == (_ParamKind.WS, _ParamKind.DEPENDS)
+    assert _kinds(_param_plan(handler, set(), websocket=True)) == (_ParamKind.WS, _ParamKind.DEPENDS)
 
 
 @pytest.mark.parametrize('name', ['ws', 'websocket', 'conn', 'connection'])
@@ -116,7 +116,7 @@ def test_depends_on_a_reserved_name_is_rejected(name):
     fn = eval(f'lambda {name}=Depends(provider): None', {'Depends': Depends,
                                                          'provider': provider})
     with pytest.raises(TypeError, match='reserved'):
-        _websocket_param_plan(fn, set())
+        _param_plan(fn, set(), websocket=True)
 
 
 def test_depends_on_a_path_param_is_rejected():
@@ -127,7 +127,7 @@ def test_depends_on_a_path_param_is_rejected():
         pass
 
     with pytest.raises(TypeError, match='path param'):
-        _websocket_param_plan(handler, {'room'})
+        _param_plan(handler, {'room'}, websocket=True)
 
 
 def test_body_shaped_annotation_is_rejected_with_a_websocket_specific_reason():
@@ -137,7 +137,7 @@ def test_body_shaped_annotation_is_rejected_with_a_websocket_specific_reason():
         pass
 
     with pytest.raises(TypeError, match='no request body'):
-        _websocket_param_plan(handler, set())
+        _param_plan(handler, set(), websocket=True)
 
 
 def test_unresolvable_parameter_still_fails_at_registration_through_the_router():

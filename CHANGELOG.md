@@ -49,6 +49,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Changed
 
+- A simplified handler binds its path and query parameters before reading the
+  request body, so a request with a bad query is answered `400` without
+  waiting for its body.
+- `NativeClient` reports "already entered" on a nested `with`, and a second
+  `__exit__` is a no-op.
+
 - The HTTP/1.1 client reads responses by the server's grammar, through the one
   codec `blackbull.protocol.http1`. It now raises `ProtocolError` for
   whitespace before a field's colon, obs-fold, a field name outside tchar, a
