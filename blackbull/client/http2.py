@@ -573,8 +573,9 @@ class HTTP2Client(HTTP2Connection):
         """Run HTTP/2 fault steps and collect peer/transport outcomes in the result.
 
         Peer and transport failures land on the result; a step outside the
-        vocabulary raises ``TypeError``, and an exited client or a scenario
-        the connection cannot run raises ``RuntimeError``, before any byte.
+        vocabulary raises ``TypeError``, an exited client ``ConnectionError``
+        and a scenario the connection cannot run ``RuntimeError``, all before
+        any byte.
         Abort stops further steps.
         """
         assert self._writer is not None, 'connect via __aenter__ first'
