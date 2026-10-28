@@ -6124,8 +6124,9 @@ wrapper. Catch the leaves when the recovery differs: raising a budget for
 <code>ProtocolError</code>.</p>
 <p>WebSocket <code>session.receive()</code> on HTTP/1.1 and HTTP/2 raises client
 <code>ProtocolError</code> for frame/message limit breaches and malformed frames, including
-invalid UTF-8 and fragmented control frames. Catch <code>ClientError</code> to handle these;
-the original reader exception and its <code>close_code</code> remain in <code>__cause__</code>.</p>
+invalid UTF-8, fragmented control frames and masked server frames.
+Catch <code>ClientError</code> to handle these; the original reader exception and its
+<code>close_code</code> remain in <code>__cause__</code>.</p>
 <h2 id="what-the-client-waits-for">What the client waits for<a class="headerlink" href="#what-the-client-waits-for" title="Permanent link">&para;</a></h2>
 <p>The client's timeout design is one idea applied at two layers, and reading it
 as one rule is how people end up surprised by it.</p>

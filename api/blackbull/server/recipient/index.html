@@ -7538,7 +7538,8 @@ UTF-8 violations use 1007.</p>
 
 
         <p>Receive complete WebSocket messages, after an initial connect event.</p>
-<p>ws_queue_depth=0 reads inline when the app calls receive(); a positive depth
+<p>require_masked=True receives client frames; False receives server frames.
+ws_queue_depth=0 reads inline when the app calls receive(); a positive depth
 uses a bounded read-ahead queue. Both deliver the same events, but inline
 PING/CLOSE servicing waits for a read or the control watchdog. Registering
 a websocket_message observer uses the deferred-reader path described in
@@ -7679,12 +7680,8 @@ call entirely on the common empty-buffer path.</p>
     <div class="doc doc-contents ">
 
         <p>True when a control frame leads the inbound buffer.</p>
-<p>Synchronous, O(1) gate for send-time servicing: with only data
-frames buffered (a flood), the servicing coroutine's flag churn and
-<code>_frame_bytes_needed</code> scan would run per message for nothing — a
-data frame is owned by the app/reader, not the servicer.  Also marks
-the connection as having observed a control frame, which activates
-the per-message watchdog work.</p>
+<p>Data frames belong to the app/reader, so skip the servicing coroutine.
+Observing a control frame also activates the watchdog work.</p>
 
 
     </div>
@@ -7762,12 +7759,12 @@ to ~one scanner tick, which is the documented contract.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Non-blocking servicing of fully-buffered inbound control frames.</p>
+        <p>Non-blocking control-frame processing from buffered bytes.</p>
 <p>Answers PINGs and echoes CLOSE that arrived while the handler was
 doing something other than <code>receive()</code> (send-time servicing) or
-after it went quiet (the idle watchdog).  Reads only frames already
-fully buffered, so it never blocks and never steals the wire from an
-inline <code>receive()</code> (guarded by <code>_reading</code> / <code>_servicing</code>).  A
+after it went quiet (the idle watchdog).  Reads only complete frames
+or headers sufficient to reject them. It never blocks or steals the wire
+from an inline <code>receive()</code> (guarded by <code>_reading</code> / <code>_servicing</code>). A
 data frame stops the loop without being consumed — the app or a
 reader owns it.  Returns True if any frame was serviced.</p>
 

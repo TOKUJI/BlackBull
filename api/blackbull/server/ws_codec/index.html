@@ -6172,11 +6172,8 @@ meaning, so a peer setting either is a protocol error.</p>
 
 
         <p>Decoded fields from the two-byte WebSocket frame header (RFC 6455 §5.2).</p>
-<p>Note on masking (RFC 6455 §5.1):
-- Client → server frames MUST be masked;
-  <code>WebSocketRecipient</code> raises <code>ValueError</code> on an unmasked client frame.
-- Server → client frames MUST NOT be masked; <code>WebSocketSender</code> never sets
-  the mask bit.</p>
+<p>The raw codec accepts either mask bit; <code>WebSocketRecipient</code> enforces
+endpoint roles (RFC 6455 §5.1).</p>
 
 
 
