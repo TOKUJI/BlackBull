@@ -348,12 +348,10 @@ class _Driver:
         deadline = time.monotonic() + step.timeout
         while True:
             remaining = deadline - time.monotonic()
-            message = None
-            if remaining > 0:
-                try:
-                    message = await self._read(remaining)
-                except TimeoutError:
-                    pass
+            try:
+                message = await self._read(remaining) if remaining > 0 else None
+            except TimeoutError:
+                message = None
             if message is None:
                 result.wait_timed_out = True
                 return
