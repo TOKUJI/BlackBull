@@ -35,7 +35,7 @@ from .exceptions import (ConnectionError, ProtocolError, ResponseTooLarge,
 # types: the annotation on ``execute_scenario`` has to be resolvable from
 # this module, and a TYPE_CHECKING import is not (beartype looks in the
 # module namespace at call time, where the name would not exist).
-from ..fault_injection._scenario import _ClientDriver
+from ..fault_injection._scenario import _ClientDriver, _Expect, _WaitFor
 from ..fault_injection.scenario_h2 import frame_matches as _sc_frame_matches
 from ..fault_injection.scenario_h2_client import (
     ReadResponse as _ScReadResponse,
@@ -578,7 +578,7 @@ class HTTP2Client(HTTP2Connection):
         assert self._writer is not None, 'connect via __aenter__ first'
         self._refuse_if_closed()
         self._check_scenario_ownership(scenario)
-        return await _H2ScenarioDriver(self, scenario, ScenarioH2ClientResult()).execute(scenario.steps)
+        return await _H2ScenarioDriver(self, scenario, ScenarioH2ClientResult()).execute(scenario)
 
     def _check_scenario_ownership(self, scenario: ScenarioH2Client) -> None:
         """Reject a scenario the connection cannot actually express.
@@ -601,12 +601,13 @@ class HTTP2Client(HTTP2Connection):
                 'sent the preface and SETTINGS when it connected, so the '
                 "scenario's preface would be the second one on the wire. "
                 'Construct the client with scenario_mode=True.')
-        if any(isinstance(s, _ScReadResponse) for s in scenario.steps) \
-                and self._receive_task is not None:
+        read = next((s for s in scenario.steps if isinstance(
+            s, (_ScReadResponse, _WaitFor, _Expect))), None)
+        if read is not None and self._receive_task is not None:
             raise RuntimeError(
-                'ReadResponse races the receive loop: both would read the '
-                'same socket, so which one sees a frame is a coin toss. '
-                'Construct the client with scenario_mode=True.')
+                f'{type(read).__name__} races the receive loop: both would '
+                'read the same socket, so which one sees a frame is a coin '
+                'toss. Construct the client with scenario_mode=True.')
 
     async def _write_paced(self, data: bytes, byte_interval: float) -> None:
         """Write *data*, optionally one byte at a time.

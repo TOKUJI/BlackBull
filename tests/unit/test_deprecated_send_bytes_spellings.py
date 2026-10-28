@@ -2,9 +2,7 @@
 
 Each deprecated spelling still yields the class it always did, and warns at
 the caller's own line naming the replacement *a caller of that module* should
-use.  In ``blackbull.fault_injection`` that is ``H1CSendRawBytes``: a bare
-``SendRawBytes`` there is the HTTP/2 *server* step, which an HTTP/1.1 client
-scenario rejects as an unknown step type without raising.
+use.  In ``blackbull.fault_injection`` that is ``H1CSendRawBytes``.
 
 Not naming a deprecated spelling stays silent — importing a package, ``import
 *`` and the replacements themselves — so none of them is listed in the

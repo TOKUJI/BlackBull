@@ -45,6 +45,16 @@ metadata; reinstall an editable checkout after changing that version.
   `TypeError`), and `SendHeaders` and the HTTP/1.1 fault server's typed steps
   (`SendStatusLine`, `SendHeader`, `EndHeaders`, `SendChunk`,
   `EndChunkedBody`) serialise to JSON.
+- Fault injection:
+  - a step outside the scenario's vocabulary is refused before the first
+    byte: `execute_scenario` raises `TypeError`, and a fault server refuses
+    the scenario when built;
+  - an HTTP/2 client `WaitForServerFrame` or `ExpectServerFrame` is refused
+    while the receive loop runs, as `ReadResponse` was;
+  - a `match` holding bytes (an HTTP/1.1 response's `body_contains` or header
+    value) survives JSON;
+  - a fault server's `stop()` stops accepting before it cancels connections;
+    `start()` clears `last_result`.
 - An HTTP/2 client scenario's `Abort` closes the connection; it did nothing,
   so the peer saw the close only when the client exited.
 - HTTP/1.1 persistence follows RFC 9112 §9.3 on both roles: `close` ends the

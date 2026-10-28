@@ -176,7 +176,9 @@ that require ALPN, such as httpx, supply the TLS context.
 After each connection, `fault_server.last_result` is a
 `ScenarioH2Result` carrying step-completion count, byte counters,
 whether a `WaitForClientFrame` step timed out, and the
-elapsed wall time.
+elapsed wall time.  Both fault servers keep only the most recent result
+since `start()`; `stop()` stops accepting, then cancels and waits for every
+connection still mid-scenario.
 
 ## The four spec-grade catalogue categories
 
@@ -432,7 +434,8 @@ the fault they stage; what ends those is your server's own deadline.
 
 Every vocabulary writes the same format: a `HEADER` line carrying the
 format version and the scenario's own fields, then one line per step named
-by its class, with bytes as hex.
+by its class, with bytes as hex.  A byte value inside a `match` is written
+as `{"hex": "..."}`.
 
 ```text
 {"op": "HEADER", "format": 2, "name": "half_a_status_line"}
