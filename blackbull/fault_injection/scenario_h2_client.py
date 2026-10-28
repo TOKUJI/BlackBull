@@ -80,7 +80,8 @@ class SendFrame:
             object.__setattr__(self, 'frame_type', bytes(ft))
 
     def wire(self) -> bytes:
-        return encode_frame(self)
+        length = len(self.data) if self.declared_length is None else self.declared_length
+        return frame_bytes(length, self.frame_type, self.flags, self.stream_id, self.data)
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,14 @@ class SendHeaders:
     declared_length: int | None = None
 
     def wire(self) -> bytes:
-        return encode_headers(self)
+        if self.raw_block is not None:
+            block = self.raw_block
+        else:
+            from hpack import Encoder  # noqa: PLC0415
+            block = Encoder().encode(list(self.pseudo) + list(self.headers))
+        flags = (0x01 if self.end_stream else 0) | (0x04 if self.end_headers else 0)
+        length = len(block) if self.declared_length is None else self.declared_length
+        return frame_bytes(length, FrameTypes.HEADERS.value, flags, self.stream_id, block)
 
 
 class WaitForServerFrame(_scenario._WaitFor):
@@ -187,34 +195,6 @@ def scenario_from_json(src: str) -> ScenarioH2Client:
     """Parse JSON Lines back to a [`ScenarioH2Client`][]."""
     return _scenario.from_json(ScenarioH2Client, src)
 
-
-def encode_headers(step: SendHeaders) -> bytes:
-    """Build HEADERS using HPACK; raw_block permits arbitrary encoded bytes.
-    """
-    if step.raw_block is not None:
-        block = step.raw_block
-    else:
-        from hpack import Encoder  # noqa: PLC0415
-        block = Encoder().encode(list(step.pseudo) + list(step.headers))
-    flags = 0
-    if step.end_stream:
-        flags |= 0x01
-    if step.end_headers:
-        flags |= 0x04
-    return encode_frame(SendFrame(
-        frame_type=FrameTypes.HEADERS, flags=flags, stream_id=step.stream_id,
-        data=block, declared_length=step.declared_length))
-
-
-def encode_frame(step: SendFrame) -> bytes:
-    """Assemble one frame's wire bytes from *step*.
-
-    Here and not in ``FrameBase.save()``, which is what makes
-    ``declared_length`` possible: a serialiser that computed the length
-    could not state one that disagrees with the payload.
-    """
-    length = len(step.data) if step.declared_length is None else step.declared_length
-    return frame_bytes(length, step.frame_type, step.flags, step.stream_id, step.data)
 
 # ``SendRawBytes`` is the canonical spelling in all four scenario
 # vocabularies; ``SendBytes`` is the deprecated client-side one.

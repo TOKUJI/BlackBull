@@ -36,9 +36,8 @@ def frame_bytes(length: int, type_byte: bytes, flags: int, stream_id: int,
     """RFC 9113 §4.1 — the 9-byte frame header, then *payload*.
 
     *length* is written as given, so it may disagree with the payload."""
-    return (length.to_bytes(3, 'big') + bytes(type_byte)
-            + int(flags).to_bytes(1, 'big')
-            + (int(stream_id) & 0x7fffffff).to_bytes(4, 'big') + payload)
+    return (length.to_bytes(3, 'big') + type_byte + flags.to_bytes(1, 'big')
+            + (stream_id & 0x7fffffff).to_bytes(4, 'big') + payload)
 
 
 @dataclass(frozen=True)

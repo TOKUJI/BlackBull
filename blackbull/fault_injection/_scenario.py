@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import json
 import logging
 import ssl
@@ -20,19 +21,11 @@ from dataclasses import dataclass, field, fields
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# The steps every vocabulary shares
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class SendRawBytes:
-    """Push arbitrary bytes at the peer — the escape hatch for anything a
-    typed step will not build.
+    """Send arbitrary bytes, for anything a typed step will not build.
 
-    ``byte_interval > 0`` sends one byte at a time with that delay: when the
-    bytes are legal and the *pacing* is the fault (slowloris, a trickled
-    status line), this is the only way to say so.
+    ``byte_interval > 0`` sends one byte at a time with that delay.
     """
     data: bytes
     byte_interval: float = 0.0
@@ -67,12 +60,10 @@ class Abort:
 
 @dataclass(frozen=True)
 class HalfClose:
-    """Shut down the sending direction only (FIN), keep reading.
+    """Shut down the sending direction only (FIN) and keep reading.
 
-    **Not terminal** — later steps still run, which is the whole point.
-    ``Abort`` is not a substitute: it sends RST, discarding what is buffered
-    and leaving nothing to read.  ``result.half_closed`` says whether the
-    transport accepted it; TLS cannot.
+    Not terminal.  ``result.half_closed`` says whether the transport
+    accepted it; TLS cannot.
     """
 
 
@@ -93,8 +84,7 @@ class _WaitFor(_Matching):
 class _Expect(_Matching):
     """Read exactly one message and record ``(match, matched)``; a **guard**.
 
-    Nothing is skipped and the scenario moves on either way, so a scenario
-    whose premise silently failed does not look like a pass.
+    Nothing is skipped, and the scenario moves on either way.
     """
 
 
@@ -113,29 +103,20 @@ def half_close(writer) -> bool:
     return True
 
 
-# ---------------------------------------------------------------------------
-# JSON Lines — one format for every vocabulary
-# ---------------------------------------------------------------------------
-
 #: Written on the ``HEADER`` line.  A file without it is the v1 format.
 FORMAT = 2
 
 
 def to_json(scenario) -> str:
     """One ``HEADER`` line carrying the scenario's fields, then one line per
-    step named by its class.  Bytes are hex: fault payloads are rarely
-    UTF-8 and are read against a packet capture by eye."""
-    head = {'op': 'HEADER', 'format': FORMAT}
-    head.update((f.name, _out(getattr(scenario, f.name)))
-                for f in fields(scenario) if f.name != 'steps')
+    step named by its class.  Bytes are hex."""
+    head = {'op': 'HEADER', 'format': FORMAT, **vars(scenario)}
+    del head['steps']
     lines = [json.dumps(head)]
     for step in scenario.steps:
-        codecs = getattr(type(step), '_codecs', {})
-        record = {'op': type(step).__name__}
-        for f in fields(step):
-            value = getattr(step, f.name)
-            record[f.name] = (codecs[f.name][0](value) if f.name in codecs
-                              else _out(value))
+        record = {'op': type(step).__name__, **vars(step)}
+        for name, encode in _codec(type(step))[0]:
+            record[name] = encode(record[name])
         lines.append(json.dumps(record))
     return '\n'.join(lines)
 
@@ -146,11 +127,16 @@ def from_json(cls, src: str):
     The v1 format each vocabulary wrote before this one still reads, with a
     ``DeprecationWarning``.
     """
-    records = [json.loads(line) for line in src.splitlines() if line.strip()]
-    heads = [r for r in records if r.get('op') == 'HEADER']
-    records = [r for r in records if r.get('op') != 'HEADER']
-    head = heads[-1] if heads else {}
-    version = head.get('format', 1)
+    head, records = {}, []
+    for line in src.splitlines():
+        if line.strip():
+            record = json.loads(line)
+            if record.get('op') == 'HEADER':
+                head = record
+            else:
+                records.append(record)
+    head.pop('op', None)
+    version = head.pop('format', 1)
     if version == 1:
         warnings.warn(
             f'{cls.__name__} JSON in the v1 format is deprecated; rewrite it '
@@ -160,9 +146,7 @@ def from_json(cls, src: str):
         records = [_from_v1(r, *cls._v1) for r in records]
     elif version != FORMAT:
         raise ValueError(f'scenario format {version} is not one this version reads')
-    hints = typing.get_type_hints(cls)
-    kinds = {k.__name__: k for k in
-             typing.get_args(typing.get_args(hints['steps'])[0])}
+    kinds = _kinds(cls)
     steps = []
     for record in records:
         op = record.pop('op')
@@ -170,8 +154,6 @@ def from_json(cls, src: str):
         if kind is None:
             raise ValueError(f'unknown step op for {cls.__name__}: {op!r}')
         steps.append(_build(kind, record))
-    head.pop('op', None)
-    head.pop('format', None)
     return _build(cls, head, steps=tuple(steps))
 
 
@@ -183,35 +165,87 @@ def _out(value):
     return value
 
 
-def _build(cls, record: dict, **given):
+@functools.cache
+def _vocabulary(scenario_cls) -> tuple:
+    hints = typing.get_type_hints(scenario_cls)
+    return typing.get_args(typing.get_args(hints['steps'])[0])
+
+
+@functools.cache
+def _kinds(scenario_cls) -> dict:
+    return {k.__name__: k for k in _vocabulary(scenario_cls)}
+
+
+@functools.cache
+def _codec(cls) -> tuple:
+    """``(encoders, decoders)``: ``(field, fn)`` pairs for the fields JSON
+    cannot carry as they are, a class's ``_codecs`` overriding."""
     hints = typing.get_type_hints(cls)
-    codecs = getattr(cls, '_codecs', {})
-    for name, value in record.items():
-        given[name] = (codecs[name][1](value) if name in codecs
-                       else _in(value, hints[name]))
-    return cls(**given)
+    overrides = getattr(cls, '_codecs', {})
+    encoders, decoders = [], []
+    for f in fields(cls):
+        encode, decode = overrides.get(f.name) or (
+            _encoder(hints[f.name]), _decoder(hints[f.name]))
+        if encode is not None:
+            encoders.append((f.name, encode))
+        if decode is not None:
+            decoders.append((f.name, decode))
+    return tuple(encoders), tuple(decoders)
 
 
-def _in(value, hint):
-    if hint is dict:
-        # JSON has no tuples, and ``header``'s pair must compare equal to
-        # the scenario it came from.
-        value = dict(value or {})
-        if isinstance(value.get('header'), list):
-            value['header'] = tuple(value['header'])
-        return value
-    if value is None:
-        return None
-    if hint is float:
-        return float(value)
+def _has_bytes(hint) -> bool:
+    return hint is bytes or any(_has_bytes(a) for a in typing.get_args(hint))
+
+
+def _encoder(hint):
     if hint is bytes or bytes in typing.get_args(hint):
-        return bytes.fromhex(value)
-    if typing.get_origin(hint) is tuple:
+        return _hex
+    return _out if _has_bytes(hint) else None
+
+
+def _hex(value):
+    return None if value is None else value.hex()
+
+
+def _build(cls, record: dict, **given):
+    for name, decode in _codec(cls)[1]:
+        if name in record:
+            record[name] = decode(record[name])
+    return cls(**record, **given)
+
+
+def _match_in(value) -> dict:
+    # JSON has no tuples, and ``header``'s pair must compare equal to the
+    # scenario it came from.
+    value = dict(value or {})
+    if isinstance(value.get('header'), list):
+        value['header'] = tuple(value['header'])
+    return value
+
+
+def _same(value):
+    return value
+
+
+def _decoder(hint):
+    if hint is dict:
+        return _match_in
+    if hint is float:
+        decode = float
+    elif hint is bytes or bytes in typing.get_args(hint):
+        decode = bytes.fromhex
+    elif typing.get_origin(hint) is tuple:
         args = typing.get_args(hint)
         if len(args) == 2 and args[1] is Ellipsis:
-            return tuple(_in(v, args[0]) for v in value)
-        return tuple(_in(v, a) for v, a in zip(value, args))
-    return value
+            item = _decoder(args[0])
+            decode = tuple if item is None else (
+                lambda value: tuple(map(item, value)))
+        else:
+            items = [_decoder(a) or _same for a in args]
+            decode = lambda value: tuple(d(v) for d, v in zip(items, value))  # noqa: E731
+    else:
+        return None
+    return lambda value: None if value is None else decode(value)
 
 
 def _from_v1(record: dict, base64_payloads: bool, ops: dict) -> dict:
@@ -236,35 +270,48 @@ def _from_v1(record: dict, base64_payloads: bool, ops: dict) -> dict:
     return {'op': ops[op], **record}
 
 
-# ---------------------------------------------------------------------------
-# The driver — one step walk for all four cells
-# ---------------------------------------------------------------------------
+_WRITE, _END = 'write', 'end'
+
+
+@functools.cache
+def _action(scenario_cls, step_cls):
+    """What the driver does with a *step_cls* step: ``None`` for one outside
+    the vocabulary, else the step base naming it, ``_END`` or ``_WRITE``."""
+    if not issubclass(step_cls, _vocabulary(scenario_cls)):
+        return None
+    for base in (Sleep, HalfClose, ReadResponse, _WaitFor, _Expect):
+        if issubclass(step_cls, base):
+            return base
+    if issubclass(step_cls, Abort) or getattr(step_cls, 'graceful', False):
+        return _END
+    return _WRITE
 
 
 class _Driver:
     """Walk a scenario over one connection, folding outcomes into ``result``.
 
-    A subclass supplies the transport: ``_write``, ``_read`` (a message, or
-    ``None`` at end of stream; raises ``TimeoutError``), ``_matches``,
-    ``_close``, ``_half_close``, and the result bookkeeping ``_seen``,
-    ``_completed`` and ``_ended``.
+    Subclasses supply ``_write``, ``_read`` (a message, or ``None`` at end of
+    stream; raises ``TimeoutError``), ``_matches``, ``_close``,
+    ``_half_close``, ``_seen``, ``_completed`` and ``_ended``.
     """
 
     def __init__(self, scenario, result) -> None:
-        self.vocabulary = typing.get_args(typing.get_args(
-            typing.get_type_hints(type(scenario))['steps'])[0])
+        self.scenario_cls = type(scenario)
         self.result = result
 
     async def run(self, steps) -> None:
         result = self.result
         for step in steps:
-            if not isinstance(step, self.vocabulary):
+            action = _action(self.scenario_cls, type(step))
+            if action is _WRITE:
+                await self._write(step.wire(), getattr(step, 'byte_interval', 0.0))
+            elif action is None:
                 raise TypeError(f'unknown step type: {type(step).__name__}')
-            if isinstance(step, Sleep):
+            elif action is Sleep:
                 await asyncio.sleep(step.duration)
-            elif isinstance(step, HalfClose):
+            elif action is HalfClose:
                 result.half_closed = self._half_close()
-            elif isinstance(step, ReadResponse):
+            elif action is ReadResponse:
                 try:
                     message = await self._read(step.timeout)
                 except TimeoutError as exc:
@@ -273,15 +320,13 @@ class _Driver:
                     return
                 if message is not None:
                     self._seen(message, kept=True)
-            elif isinstance(step, _WaitFor):
+            elif action is _WaitFor:
                 await self._wait(step)
-            elif isinstance(step, _Expect):
+            elif action is _Expect:
                 await self._expect(step)
-            elif isinstance(step, Abort) or getattr(step, 'graceful', False):
+            else:
                 await self._ended(step)
                 return
-            else:
-                await self._write(step.wire(), getattr(step, 'byte_interval', 0.0))
             self._completed(step)
 
     async def _wait(self, step: _WaitFor) -> None:
@@ -328,6 +373,18 @@ class _Driver:
 class _ClientDriver(_Driver):
     """The broken-client half: a step that ends the walk is not counted."""
 
+    def __init__(self, client, scenario, result) -> None:
+        super().__init__(scenario, result)
+        self.client = client
+
+    def _half_close(self) -> bool:
+        return half_close(self.client._raw_writer)
+
+    async def _close(self, *, graceful: bool) -> None:
+        transport = getattr(self.client._raw_writer, 'transport', None)
+        if transport is not None:
+            transport.abort()
+
     async def execute(self, steps):
         t0 = time.monotonic()
         try:
@@ -370,17 +427,18 @@ class _ServerConnection(_Driver):
         self.result.terminated = True
 
     async def _write(self, data: bytes, byte_interval: float) -> None:
-        # Each paced byte is drained before the pause, or the peer sees one
-        # burst after the total delay and the scenario tests nothing.
+        # Each paced byte must reach the wire before the pause.
         writer, result = self.writer, self.result
-        chunks = ([data[i:i + 1] for i in range(len(data))]
-                  if byte_interval > 0 else [data])
-        for chunk in chunks:
-            writer.write(chunk)
+        if byte_interval <= 0:
+            writer.write(data)
             await writer.drain()
-            result.server_bytes_sent += len(chunk)
-            if byte_interval > 0:
-                await asyncio.sleep(byte_interval)
+            result.server_bytes_sent += len(data)
+            return
+        for i in range(len(data)):
+            writer.write(data[i:i + 1])
+            await writer.drain()
+            result.server_bytes_sent += 1
+            await asyncio.sleep(byte_interval)
 
     async def _close(self, *, graceful: bool) -> None:
         try:
@@ -400,9 +458,7 @@ class _FaultServer:
     """Serve one scenario to every client that connects.
 
     Refuses a production context and a non-loopback bind without
-    ``allow_remote=True``.  ``stop()`` cancels connections still mid-scenario:
-    a scenario ending in a long ``Sleep`` is how "the server never answers"
-    is spelled, and teardown must not wait it out.
+    ``allow_remote=True``.  ``stop()`` cancels connections still mid-scenario.
     """
 
     #: Raised when the server refuses to run.
@@ -485,8 +541,7 @@ class _FaultServer:
             await conn.open()
             await conn.run(self.scenario.steps)
             if not result.terminated:
-                # Out of steps: close cleanly, so a client waiting on a body
-                # it will never get sees EOF instead of hanging.
+                # Out of steps: the client must see EOF, not a hang.
                 await conn._close(graceful=True)
         except Exception as exc:  # noqa: BLE001 — recorded on the result
             conn.failed(exc)

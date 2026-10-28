@@ -61,7 +61,8 @@ metadata; reinstall an editable checkout after changing that version.
   `SendRawBytes`, `Sleep`, `Abort`, `HalfClose` and `ReadResponse` are one
   class under every vocabulary's name, and every vocabulary writes one JSON
   Lines format — `"format": 2` on the `HEADER` line, steps named by class,
-  bytes as hex.
+  bytes as hex.  A send step's bytes are its `wire()`; the `encode_*`
+  helpers of `scenario_h1_server` and `scenario_h2_client` are removed.
 - `H2FaultServer.stop()` cancels connections still mid-scenario, as
   `H1FaultServer` did; `H1FaultServer` records any exception a step raises on
   `last_result.exception`, not only a connection reset.

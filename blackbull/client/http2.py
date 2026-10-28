@@ -35,7 +35,7 @@ from .exceptions import (ConnectionError, ProtocolError, ResponseTooLarge,
 # types: the annotation on ``execute_scenario`` has to be resolvable from
 # this module, and a TYPE_CHECKING import is not (beartype looks in the
 # module namespace at call time, where the name would not exist).
-from ..fault_injection._scenario import _ClientDriver, half_close
+from ..fault_injection._scenario import _ClientDriver
 from ..fault_injection.scenario_h2 import frame_matches as _sc_frame_matches
 from ..fault_injection.scenario_h2_client import (
     ReadResponse as _ScReadResponse,
@@ -578,7 +578,7 @@ class HTTP2Client(HTTP2Connection):
         assert self._writer is not None, 'connect via __aenter__ first'
         self._refuse_if_closed()
         self._check_scenario_ownership(scenario)
-        return await _H2ScenarioDriver(self, scenario).execute(scenario.steps)
+        return await _H2ScenarioDriver(self, scenario, ScenarioH2ClientResult()).execute(scenario.steps)
 
     def _check_scenario_ownership(self, scenario: ScenarioH2Client) -> None:
         """Reject a scenario the connection cannot actually express.
@@ -1540,10 +1540,6 @@ def _to_bytes(value: str | bytes) -> bytes:
 class _H2ScenarioDriver(_ClientDriver):
     _matches = staticmethod(_sc_frame_matches)
 
-    def __init__(self, client: HTTP2Client, scenario: ScenarioH2Client) -> None:
-        super().__init__(scenario, ScenarioH2ClientResult())
-        self.client = client
-
     async def _write(self, data: bytes, byte_interval: float) -> None:
         await self.client._write_paced(data, byte_interval)
 
@@ -1552,11 +1548,3 @@ class _H2ScenarioDriver(_ClientDriver):
 
     def _seen(self, frame, *, kept: bool) -> None:
         _record_frame(self.result, frame)
-
-    def _half_close(self) -> bool:
-        return half_close(self.client._raw_writer)
-
-    async def _close(self, *, graceful: bool) -> None:
-        transport = getattr(self.client._writer, 'transport', None)
-        if transport is not None:
-            transport.abort()

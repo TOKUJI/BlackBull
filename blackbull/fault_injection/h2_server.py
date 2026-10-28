@@ -80,8 +80,7 @@ class _H2Connection(_ServerConnection):
             pass
 
     async def _close(self, *, graceful: bool) -> None:
-        # Not waiting for the close: the result is reported first, and a TLS
-        # peer that never answers close_notify would hold it for 30 s.
+        # Not awaited: a TLS peer may never answer close_notify.
         if graceful:
             self.writer.close()
         else:

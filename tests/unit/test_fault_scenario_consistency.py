@@ -45,21 +45,21 @@ class TestQ2Http2FaultsAreExpressible:
     async def test_header_faults_no_longer_need_hand_built_hex(self):
         """Three sweep rows moved from raw-bytes-only to typed."""
         from blackbull.fault_injection.scenario_h2_client import (
-            SendHeaders, encode_headers,
+            SendHeaders,
         )
 
         # A pseudo-header after a regular one — RFC 9113 §8.3 forbids it.
         out_of_order = SendHeaders(headers=(('x-a', '1'),),
                                    pseudo=((':path', '/'),))
-        assert len(encode_headers(out_of_order)) > 9
+        assert len(out_of_order.wire()) > 9
 
         # A block HPACK itself would never produce.
         broken = SendHeaders(raw_block=b'\x82\xff\xff')
-        assert encode_headers(broken).endswith(b'\x82\xff\xff')
+        assert broken.wire().endswith(b'\x82\xff\xff')
 
         # And a header block whose length lies.
         lying = SendHeaders(declared_length=999)
-        assert encode_headers(lying)[:3] == (999).to_bytes(3, 'big')
+        assert lying.wire()[:3] == (999).to_bytes(3, 'big')
 
 
 class TestQ3Http1FaultsAreExpressible:

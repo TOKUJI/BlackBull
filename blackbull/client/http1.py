@@ -25,7 +25,7 @@ from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
                        open_connection as _open_connection)
 from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
 from .http2 import ClientResponse  # shared dataclass
-from blackbull.fault_injection._scenario import _ClientDriver, half_close
+from blackbull.fault_injection._scenario import _ClientDriver
 from blackbull.fault_injection.scenario_h1 import (
     Scenario,
     ScenarioResult,
@@ -1093,15 +1093,11 @@ class HTTP1Client:
         further steps.  The vocabulary is ``docs/guide/fault_injection.md``.
         """
         assert self._writer is not None, 'connect via __aenter__ first'
-        return await _H1ScenarioDriver(self, scenario).execute(scenario.steps)
+        return await _H1ScenarioDriver(self, scenario, ScenarioResult()).execute(scenario.steps)
 
 
 class _H1ScenarioDriver(_ClientDriver):
     _matches = staticmethod(response_matches)
-
-    def __init__(self, client: HTTP1Client, scenario: Scenario) -> None:
-        super().__init__(scenario, ScenarioResult())
-        self.client = client
 
     async def _write(self, data: bytes, byte_interval: float) -> None:
         await self.client.send_raw(data, byte_interval=byte_interval)
@@ -1111,13 +1107,6 @@ class _H1ScenarioDriver(_ClientDriver):
 
     def _seen(self, response, *, kept: bool) -> None:
         _record_response(self.result, response)
-
-    def _half_close(self) -> bool:
-        return half_close(self.client._raw_writer)
-
-    async def _close(self, *, graceful: bool) -> None:
-        if self.client._raw_writer is not None:
-            self.client._raw_writer.transport.abort()
 
 
 # Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.
