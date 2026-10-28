@@ -49,6 +49,8 @@ metadata; reinstall an editable checkout after changing that version.
   - a step outside the scenario's vocabulary is refused before the first
     byte: `execute_scenario` raises `TypeError`, and a fault server refuses
     the scenario when built;
+  - an exited HTTP/1.1 client's `execute_scenario` raises `ConnectionError`
+    before any byte, as HTTP/2's does, instead of reporting it on the result;
   - an HTTP/2 client `WaitForServerFrame` or `ExpectServerFrame` is refused
     while the receive loop runs, as `ReadResponse` was;
   - a `match` holding bytes (an HTTP/1.1 response's `body_contains` or header

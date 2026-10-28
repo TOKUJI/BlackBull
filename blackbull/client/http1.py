@@ -1090,10 +1090,13 @@ class HTTP1Client:
         """Run connected-socket scenario steps and collect outcomes in ScenarioResult.
 
         Peer and transport failures land on the result; a step outside the
-        vocabulary raises ``TypeError`` before any byte.  Abort stops further
+        vocabulary raises ``TypeError`` and an exited client
+        ``ConnectionError``, both before any byte.  Abort stops further
         steps.  The vocabulary is ``docs/guide/fault_injection.md``.
         """
         assert self._writer is not None, 'connect via __aenter__ first'
+        if self._state is _State.CLOSED:
+            raise ConnectionError('HTTP1Client context is closed')
         return await _H1ScenarioDriver(self, scenario, ScenarioResult()).execute(scenario)
 
 

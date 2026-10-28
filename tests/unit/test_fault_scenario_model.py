@@ -567,6 +567,24 @@ async def test_a_client_refuses_a_foreign_step_before_any_byte(cell):
     assert got == b''
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cell', ['h1c', 'h2c'])
+async def test_an_exited_client_refuses_a_scenario(cell):
+    from blackbull.client import ConnectionError as ClientConnectionError
+    vocabulary = {'h1c': (h1c.Scenario, HTTP1Client, {}),
+                  'h2c': (h2c.ScenarioH2Client, HTTP2Client, {'scenario_mode': True})}
+    scenario_cls, client_cls, kwargs = vocabulary[cell]
+
+    async def run(port, closed):
+        async with client_cls('127.0.0.1', port, **kwargs) as client:
+            pass
+        with pytest.raises(ClientConnectionError, match='context is closed'):
+            await client.execute_scenario(
+                scenario_cls(steps=(h1c.SendRawBytes(b'late'),)))
+
+    await _against_a_raw_server(run, [])
+
+
 @pytest.mark.parametrize('server_cls,scenario_cls', _SERVERS)
 def test_a_fault_server_refuses_a_foreign_step_when_built(server_cls, scenario_cls):
     scenario = _smuggle(scenario_cls(steps=()), h2c.SendPreface())
