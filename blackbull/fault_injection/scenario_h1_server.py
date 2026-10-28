@@ -257,3 +257,10 @@ def scenario_to_json(scenario: ScenarioH1Server) -> str:
 def scenario_from_json(src: str) -> ScenarioH1Server:
     """Parse JSON Lines back to a [`ScenarioH1Server`][]."""
     return _scenario.from_json(ScenarioH1Server, src)
+
+
+def __getattr__(name):
+    if name in ('encode_status_line', 'encode_header', 'encode_chunk',
+                'encode_chunked_terminator'):
+        return _scenario._deprecated_encoder(__name__, name)
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

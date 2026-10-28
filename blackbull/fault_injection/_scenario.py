@@ -248,6 +248,19 @@ def _decoder(hint):
     return lambda value: None if value is None else decode(value)
 
 
+def _deprecated_encoder(module: str, name: str):
+    """The ``encode_*`` helpers each step's ``wire()`` replaced."""
+    warnings.warn(
+        f'{module}.{name} is deprecated; use the step\'s wire().  Removal no '
+        f'earlier than v0.84.0 (and not before 2026-11-28).',
+        DeprecationWarning, stacklevel=3)
+    return _wire
+
+
+def _wire(step) -> bytes:
+    return step.wire()
+
+
 def _from_v1(record: dict, base64_payloads: bool, ops: dict) -> dict:
     """Rewrite one v1 step record as the current format."""
     record = dict(record)

@@ -211,4 +211,6 @@ def __getattr__(name):
             "earlier than 2027-08-19.",
             DeprecationWarning, stacklevel=2)
         return SendRawBytes
+    if name in ('encode_frame', 'encode_headers'):
+        return _scenario._deprecated_encoder(__name__, name)
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

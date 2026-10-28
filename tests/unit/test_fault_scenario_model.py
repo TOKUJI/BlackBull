@@ -308,17 +308,19 @@ async def _against_a_fault_server(server_cls, scenario, prelude, peer):
 async def _against_a_raw_server(run, peer):
     """A raw server sends *peer*; returns the client's result and what it got."""
     received = bytearray()
+    closed = asyncio.Event()
 
     async def serve(reader, writer):
         writer.write(b''.join(peer))
         await writer.drain()
         received.extend(await _read_to_eof(reader))
+        closed.set()
         writer.close()
 
     server = await asyncio.start_server(serve, '127.0.0.1', 0)
     port = server.sockets[0].getsockname()[1]
     try:
-        result = await asyncio.wait_for(run(port), timeout=10.0)
+        result = await asyncio.wait_for(run(port, closed), timeout=10.0)
     finally:
         server.close()
         await server.wait_closed()
@@ -326,16 +328,24 @@ async def _against_a_raw_server(run, peer):
 
 
 async def _h1c(steps, peer):
-    async def run(port):
+    async def run(port, closed):
         async with HTTP1Client('127.0.0.1', port) as client:
-            return await client.execute_scenario(h1c.Scenario(steps=steps))
+            result = await client.execute_scenario(h1c.Scenario(steps=steps))
+            if result.aborted:
+                # An abort closes the connection itself, not the client's exit.
+                await asyncio.wait_for(closed.wait(), timeout=2.0)
+            return result
     return await _against_a_raw_server(run, peer)
 
 
 async def _h2c(steps, peer):
-    async def run(port):
+    async def run(port, closed):
         async with HTTP2Client('127.0.0.1', port, scenario_mode=True) as client:
-            return await client.execute_scenario(h2c.ScenarioH2Client(steps=steps))
+            result = await client.execute_scenario(h2c.ScenarioH2Client(steps=steps))
+            if result.aborted:
+                # An abort closes the connection itself, not the client's exit.
+                await asyncio.wait_for(closed.wait(), timeout=2.0)
+            return result
     return await _against_a_raw_server(run, peer)
 
 
@@ -506,3 +516,17 @@ async def test_a_graceful_close_after_the_client_reset_still_ends_the_scenario()
         result = srv.last_result
     assert result.terminated is True
     assert result.steps_completed[-1] == 'CloseGracefully'
+
+
+@pytest.mark.parametrize('module, name, step', [
+    (h1s, 'encode_status_line', h1s.SendStatusLine(code=200)),
+    (h1s, 'encode_header', h1s.SendHeader('x-a', 'b')),
+    (h1s, 'encode_chunk', h1s.SendChunk(b'abc')),
+    (h1s, 'encode_chunked_terminator', h1s.EndChunkedBody()),
+    (h2c, 'encode_frame', h2c.SendFrame(FrameTypes.PING, data=b'\x00' * 8)),
+    (h2c, 'encode_headers', h2c.SendHeaders(raw_block=b'\x82')),
+])
+def test_the_encode_helpers_are_deprecated_spellings_of_wire(module, name, step):
+    with pytest.warns(DeprecationWarning, match=r'wire\(\)'):
+        encode = getattr(module, name)
+    assert encode(step) == step.wire()
