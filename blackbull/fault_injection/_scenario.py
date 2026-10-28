@@ -235,7 +235,7 @@ def _tagged(value):
 
 def _match_in(value) -> dict:
     value = {key: _untagged(v) for key, v in (value or {}).items()}
-    # A ``header`` pair saved before tuples were tagged.
+    # Older files store ``header`` as a list.
     if isinstance(value.get('header'), list):
         value['header'] = tuple(value['header'])
     return value

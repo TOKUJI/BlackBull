@@ -572,8 +572,10 @@ class HTTP2Client(HTTP2Connection):
     ) -> ScenarioH2ClientResult:
         """Run HTTP/2 fault steps and collect peer/transport outcomes in the result.
 
-        Unsupported step vocabularies and an exited client raise instead of being
-        classified as peer failures. Abort stops further steps.
+        Peer and transport failures land on the result; a step outside the
+        vocabulary raises ``TypeError``, and an exited client or a scenario
+        the connection cannot run raises ``RuntimeError``, before any byte.
+        Abort stops further steps.
         """
         assert self._writer is not None, 'connect via __aenter__ first'
         self._refuse_if_closed()
@@ -581,18 +583,8 @@ class HTTP2Client(HTTP2Connection):
         return await _H2ScenarioDriver(self, scenario, ScenarioH2ClientResult()).execute(scenario)
 
     def _check_scenario_ownership(self, scenario: ScenarioH2Client) -> None:
-        """Reject a scenario the connection cannot actually express.
-
-        Raised up front, before any byte reaches the wire, so a scenario
-        either runs whole or not at all.
-
-        Both checks catch the same class of defect: HTTP/2, unlike
-        HTTP/1.1, has a connect-time preamble, so a client that has already
-        handshaked is *not* a blank wire.  Sending a second preface down it
-        does not test a peer's preface handling — it corrupts the frame
-        stream ahead of every later step, and a lenient peer skipping the
-        junk makes the scenario look like it passed.
-        """
+        """Without ``scenario_mode``, refuse a second preface and any read
+        step, which would race the receive loop."""
         if self._scenario_mode:
             return
         if any(isinstance(s, _ScSendPreface) for s in scenario.steps):

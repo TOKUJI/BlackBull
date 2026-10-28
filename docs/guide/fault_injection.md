@@ -393,7 +393,7 @@ async def test_my_server_meters_rapid_reset():
     async with HTTP2Client('127.0.0.1', my_port,
                            scenario_mode=True) as client:
         result = await client.execute_scenario(rapid_reset_burst())
-    # The scenario never raises; everything lands on the result.
+    # Peer and transport failures land on the result, not as exceptions.
     assert result.exception is None
 ```
 
