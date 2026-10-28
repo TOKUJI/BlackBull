@@ -1154,10 +1154,10 @@ def _grpc_request(probe: Probe, path: str, body: bytes,
     pseudo = ((':method', 'POST'), (':path', path),
               (':scheme', probe.target.scheme), (':authority', authority))
     headers = (('content-type', 'application/grpc'), ('te', 'trailers'))
-    head = h2s.encode_headers(h2s.SendHeaders(
-        pseudo=pseudo, headers=headers, stream_id=stream_id, end_stream=False))
-    data = h2s.encode_frame(h2s.SendFrame(
-        FrameTypes.DATA, flags=0x01, stream_id=stream_id, data=body))
+    head = h2s.SendHeaders(
+        pseudo=pseudo, headers=headers, stream_id=stream_id, end_stream=False).wire()
+    data = h2s.SendFrame(
+        FrameTypes.DATA, flags=0x01, stream_id=stream_id, data=body).wire()
     return [h2s.SendRawBytes(head), h2s.SendRawBytes(data)]
 
 
@@ -1883,8 +1883,8 @@ def _h2_request(probe: Probe, stream_id: int = 1, path: str = '/',
     fields = pseudo or ((':method', 'GET'), (':path', path),
                         (':scheme', probe.target.scheme),
                         (':authority', authority))
-    return h2s.SendRawBytes(h2s.encode_headers(h2s.SendHeaders(
-        pseudo=fields, headers=headers, stream_id=stream_id, end_stream=True)))
+    return h2s.SendRawBytes(h2s.SendHeaders(
+        pseudo=fields, headers=headers, stream_id=stream_id, end_stream=True).wire())
 
 
 def _h2_raw_headers(fields: Sequence[tuple[str, str]], stream_id: int = 1,
@@ -1892,17 +1892,17 @@ def _h2_raw_headers(fields: Sequence[tuple[str, str]], stream_id: int = 1,
     """HEADERS (+ CONTINUATIONs) carrying *fields* in exactly that order."""
     block = hpack.Encoder().encode(list(fields))
     if fragment is None:
-        return [h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
-            FrameTypes.HEADERS, flags=0x05, stream_id=stream_id, data=block)))]
+        return [h2s.SendRawBytes(h2s.SendFrame(
+            FrameTypes.HEADERS, flags=0x05, stream_id=stream_id, data=block).wire())]
     steps = []
     first, rest = block[:fragment], block[fragment:]
-    steps.append(h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
-        FrameTypes.HEADERS, flags=0x01, stream_id=stream_id, data=first))))
+    steps.append(h2s.SendRawBytes(h2s.SendFrame(
+        FrameTypes.HEADERS, flags=0x01, stream_id=stream_id, data=first).wire()))
     while rest:
         chunk, rest = rest[:fragment], rest[fragment:]
         flags = 0x04 if not rest else 0x00
-        steps.append(h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
-            FrameTypes.CONTINUATION, flags=flags, stream_id=stream_id, data=chunk))))
+        steps.append(h2s.SendRawBytes(h2s.SendFrame(
+            FrameTypes.CONTINUATION, flags=flags, stream_id=stream_id, data=chunk).wire()))
     return steps
 
 
@@ -2701,15 +2701,15 @@ def _h2_continuation_steps(probe: Probe, stream_id: int,
     k, m = divmod(len(block), parts)
     frags = [block[i * k + min(i, m):(i + 1) * k + min(i + 1, m)]
              for i in range(parts)]
-    steps = [h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
-        FrameTypes.HEADERS, flags=0x01, stream_id=stream_id, data=frags[0])))]
+    steps = [h2s.SendRawBytes(h2s.SendFrame(
+        FrameTypes.HEADERS, flags=0x01, stream_id=stream_id, data=frags[0]).wire())]
     for frag in frags[1:-1]:
-        steps.append(h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
+        steps.append(h2s.SendRawBytes(h2s.SendFrame(
             FrameTypes.CONTINUATION, flags=0x00, stream_id=stream_id,
-            data=frag))))
-    steps.append(h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
+            data=frag).wire()))
+    steps.append(h2s.SendRawBytes(h2s.SendFrame(
         FrameTypes.CONTINUATION, flags=0x04, stream_id=stream_id,
-        data=frags[-1]))))
+        data=frags[-1]).wire()))
     return steps
 
 
@@ -2749,10 +2749,10 @@ def _h2_robust_008(probe: Probe) -> Verdict:
     seed = enc.encode(list(fields) + [(_H2_BOMB_NAME, _H2_BOMB_VALUE)])
     bomb = enc.encode(list(fields)
                       + [(_H2_BOMB_NAME, _H2_BOMB_VALUE)] * _H2_BOMB_REFS)
-    steps = [h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
-                 FrameTypes.HEADERS, flags=0x05, stream_id=1, data=seed))),
-             h2s.SendRawBytes(h2s.encode_frame(h2s.SendFrame(
-                 FrameTypes.HEADERS, flags=0x05, stream_id=3, data=bomb)))]
+    steps = [h2s.SendRawBytes(h2s.SendFrame(
+                 FrameTypes.HEADERS, flags=0x05, stream_id=1, data=seed).wire()),
+             h2s.SendRawBytes(h2s.SendFrame(
+                 FrameTypes.HEADERS, flags=0x05, stream_id=3, data=bomb).wire())]
     infos = _h2_wait_exchange(probe, 'h2-robust-008', steps, 3)
     verdict = h2_recover_verdict(
         infos, 3, accept_codes=_H2_BOMB_CODES,

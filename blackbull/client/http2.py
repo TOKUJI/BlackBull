@@ -35,22 +35,13 @@ from .exceptions import (ConnectionError, ProtocolError, ResponseTooLarge,
 # types: the annotation on ``execute_scenario`` has to be resolvable from
 # this module, and a TYPE_CHECKING import is not (beartype looks in the
 # module namespace at call time, where the name would not exist).
-from ..fault_injection._transport import half_close as _sc_half_close
+from ..fault_injection._scenario import _ClientDriver
 from ..fault_injection.scenario_h2 import frame_matches as _sc_frame_matches
 from ..fault_injection.scenario_h2_client import (
-    Abort as _ScAbort,
-    CLIENT_PREFACE as _SC_PREFACE,
     ReadResponse as _ScReadResponse,
     ScenarioH2Client,
     ScenarioH2ClientResult,
-    SendRawBytes as _ScSendBytes,
-    SendFrame as _ScSendFrame,
-    ExpectServerFrame as _ScExpectServerFrame,
-    HalfClose as _ScHalfClose,
-    WaitForServerFrame as _ScWaitForServerFrame,
     SendPreface as _ScSendPreface,
-    Sleep as _ScSleep,
-    encode_frame as _sc_encode_frame,
 )
 from ..protocol.stream import StreamState
 from ..server.http2_connection import SKIP, HTTP2Connection
@@ -584,91 +575,10 @@ class HTTP2Client(HTTP2Connection):
         Unsupported step vocabularies and an exited client raise instead of being
         classified as peer failures. Abort stops further steps.
         """
-        import time as _time  # noqa: PLC0415
-
         assert self._writer is not None, 'connect via __aenter__ first'
         self._refuse_if_closed()
         self._check_scenario_ownership(scenario)
-        result = ScenarioH2ClientResult()
-        t0 = _time.monotonic()
-        try:
-            for step in scenario.steps:
-                if isinstance(step, _ScSendPreface):
-                    await self._writer.write(_SC_PREFACE)
-                elif isinstance(step, _ScSendFrame):
-                    await self._writer.write(_sc_encode_frame(step))
-                elif isinstance(step, _ScSendBytes):
-                    await self._write_paced(step.data, step.byte_interval)
-                elif isinstance(step, _ScSleep):
-                    await asyncio.sleep(step.duration)
-                elif isinstance(step, _ScReadResponse):
-                    try:
-                        _record_frame(result, await asyncio.wait_for(
-                            self._receive_frame(), timeout=step.timeout))
-                    except (asyncio.TimeoutError, TimeoutError) as exc:
-                        result.timed_out = True
-                        result.exception = repr(exc)
-                        return result
-                elif isinstance(step, _ScWaitForServerFrame):
-                    # The step that lets a scenario observe a *verdict*.
-                    # One read cannot: the first frame a correct server
-                    # sends is its handshake SETTINGS, so a GOAWAY is
-                    # always further down a stream whose depth varies by
-                    # peer.  Skipping is safe here in a way it is not on
-                    # HTTP/1.1 — HTTP/2 streams are independent.
-                    deadline = _time.monotonic() + step.timeout
-                    while True:
-                        remaining = deadline - _time.monotonic()
-                        if remaining <= 0:
-                            result.wait_timed_out = True
-                            break
-                        try:
-                            frame = await asyncio.wait_for(
-                                self._receive_frame(), timeout=remaining)
-                        except (asyncio.TimeoutError, TimeoutError):
-                            result.wait_timed_out = True
-                            break
-                        if frame is None:
-                            result.wait_timed_out = True
-                            break
-                        _record_frame(result, frame)
-                        if _sc_frame_matches(frame, step.match):
-                            break
-                        result.wait_skipped += 1
-                elif isinstance(step, _ScExpectServerFrame):
-                    try:
-                        frame = await asyncio.wait_for(
-                            self._receive_frame(), timeout=step.timeout)
-                    except (asyncio.TimeoutError, TimeoutError):
-                        result.wait_timed_out = True
-                        result.expectations.append((dict(step.match), False))
-                    else:
-                        if frame is None:
-                            result.expectations.append(
-                                (dict(step.match), False))
-                        else:
-                            _record_frame(result, frame)
-                            result.expectations.append(
-                                (dict(step.match),
-                                 _sc_frame_matches(frame, step.match)))
-                elif isinstance(step, _ScHalfClose):
-                    result.half_closed = _sc_half_close(self._raw_writer)
-                elif isinstance(step, _ScAbort):
-                    # Hard-close: RST rather than FIN.  Subsequent socket
-                    # I/O would raise, so short-circuit like the twin does.
-                    transport = getattr(self._writer, 'transport', None)
-                    if transport is not None:
-                        transport.abort()
-                    result.aborted = True
-                    return result
-                else:
-                    raise TypeError(f'unknown step type: {type(step).__name__}')
-                result.steps_completed += 1
-        except Exception as exc:  # noqa: BLE001
-            result.exception = repr(exc)
-        finally:
-            result.elapsed_s = _time.monotonic() - t0
-        return result
+        return await _H2ScenarioDriver(self, scenario, ScenarioH2ClientResult()).execute(scenario.steps)
 
     def _check_scenario_ownership(self, scenario: ScenarioH2Client) -> None:
         """Reject a scenario the connection cannot actually express.
@@ -1625,3 +1535,16 @@ def _to_str(value: str | bytes) -> str:
 
 def _to_bytes(value: str | bytes) -> bytes:
     return value.encode('ascii') if isinstance(value, str) else bytes(value)
+
+
+class _H2ScenarioDriver(_ClientDriver):
+    _matches = staticmethod(_sc_frame_matches)
+
+    async def _write(self, data: bytes, byte_interval: float) -> None:
+        await self.client._write_paced(data, byte_interval)
+
+    async def _read(self, timeout: float):
+        return await asyncio.wait_for(self.client._receive_frame(), timeout=timeout)
+
+    def _seen(self, frame, *, kept: bool) -> None:
+        _record_frame(self.result, frame)

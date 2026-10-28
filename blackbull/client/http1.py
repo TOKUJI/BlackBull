@@ -25,18 +25,12 @@ from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
                        open_connection as _open_connection)
 from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
 from .http2 import ClientResponse  # shared dataclass
-from blackbull.fault_injection._transport import half_close as _sc_half_close
+from blackbull.fault_injection._scenario import _ClientDriver
 from blackbull.fault_injection.scenario_h1 import (
-    Abort,
-    ExpectResponse,
-    HalfClose,
-    ReadResponse,
-    WaitForResponse,
-    response_matches,
     Scenario,
     ScenarioResult,
     SendRawBytes,
-    Sleep,
+    response_matches,
 )
 
 logger = logging.getLogger(__name__)
@@ -1090,99 +1084,29 @@ class HTTP1Client:
             self._finish_response(
                 recipient, complete=complete, abandon_incomplete=False)
 
-    # ---- Scenario executor -----------------------------------------------
-    #
-    # Glue over the primitives above: walk a [`Scenario`][]'s steps, dispatch
-    # each, fold the outcome into a [`ScenarioResult`][] without raising.
-    # The vocabulary is ``docs/guide/fault_injection.md``.
-
     async def execute_scenario(
         self, scenario: Scenario,
     ) -> ScenarioResult:
         """Run connected-socket scenario steps and collect outcomes in ScenarioResult.
 
-        Record peer responses, timeouts and transport failures; Abort stops further steps.
+        Record peer responses, timeouts and transport failures; Abort stops
+        further steps.  The vocabulary is ``docs/guide/fault_injection.md``.
         """
-        import time as _time  # noqa: PLC0415
-
-        # Per-step primitives assert on their own preconditions
-        # (send_raw needs _writer, read_response needs _reader), so we
-        # don't gate the executor on _reader here — scenarios that
-        # never read shouldn't have to wire a reader.
         assert self._writer is not None, 'connect via __aenter__ first'
-        result = ScenarioResult()
-        t0 = _time.monotonic()
-        try:
-            for step in scenario.steps:
-                if isinstance(step, SendRawBytes):
-                    await self.send_raw(step.data, byte_interval=step.byte_interval)
-                elif isinstance(step, Sleep):
-                    await asyncio.sleep(step.duration)
-                elif isinstance(step, ReadResponse):
-                    try:
-                        _record_response(
-                            result,
-                            await self.read_response(timeout=step.timeout))
-                    except asyncio.TimeoutError as exc:
-                        result.timed_out = True
-                        result.exception = repr(exc)
-                        return result
-                elif isinstance(step, WaitForResponse):
-                    # A filter: read past what does not match, counting it.
-                    # On HTTP/1.1 a non-zero count is worth reading — replies
-                    # come back in request order, so a skip means the
-                    # scenario is further along the pipeline than it thinks.
-                    deadline = _time.monotonic() + step.timeout
-                    while True:
-                        remaining = deadline - _time.monotonic()
-                        if remaining <= 0:
-                            result.wait_timed_out = True
-                            break
-                        try:
-                            got = await self.read_response(timeout=remaining)
-                        except asyncio.TimeoutError:
-                            result.wait_timed_out = True
-                            break
-                        _record_response(result, got)
-                        if response_matches(got, step.match):
-                            break
-                        result.wait_skipped += 1
-                elif isinstance(step, ExpectResponse):
-                    # A guard: one response, nothing skipped, and the
-                    # verdict recorded either way — a scenario whose
-                    # premise silently failed would look like a pass.
-                    try:
-                        got = await self.read_response(timeout=step.timeout)
-                    except asyncio.TimeoutError:
-                        result.wait_timed_out = True
-                        result.expectations.append((dict(step.match), False))
-                    else:
-                        _record_response(result, got)
-                        result.expectations.append(
-                            (dict(step.match),
-                             response_matches(got, step.match)))
-                elif isinstance(step, HalfClose):
-                    # FIN, not RST, and deliberately not terminal: a
-                    # half-closed client is still reading, which is the
-                    # only reason to script one.
-                    result.half_closed = _sc_half_close(self._raw_writer)
-                elif isinstance(step, Abort):
-                    # Hard-close: send RST rather than FIN.  abort() is
-                    # synchronous on asyncio's transport layer.  After
-                    # this, subsequent socket I/O would raise; short-
-                    # circuit by returning.
-                    if self._raw_writer is not None:
-                        self._raw_writer.transport.abort()
-                    result.aborted = True
-                    return result
-                else:  # noqa: PLR5501
-                    raise TypeError(f'unknown step type: {type(step).__name__}')
-                result.steps_completed += 1
-        except Exception as exc:  # noqa: BLE001
-            result.exception = repr(exc)
-        finally:
-            result.elapsed_s = _time.monotonic() - t0
-        return result
+        return await _H1ScenarioDriver(self, scenario, ScenarioResult()).execute(scenario.steps)
+
+
+class _H1ScenarioDriver(_ClientDriver):
+    _matches = staticmethod(response_matches)
+
+    async def _write(self, data: bytes, byte_interval: float) -> None:
+        await self.client.send_raw(data, byte_interval=byte_interval)
+
+    async def _read(self, timeout: float):
+        return await self.client.read_response(timeout=timeout)
+
+    def _seen(self, response, *, kept: bool) -> None:
+        _record_response(self.result, response)
 
 
 # Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.

@@ -164,8 +164,6 @@ def test_send_bytes_yields_the_http1_client_step_everywhere():
     assert _quietly(lambda: blackbull.client.SendBytes) is h1_step
     assert _quietly(lambda: blackbull.client.http1.SendBytes) is h1_step
     assert _quietly(lambda: blackbull.fault_injection.SendBytes) is h1_step
-    assert (_quietly(lambda: blackbull.fault_injection.SendBytes)
-            is not blackbull.fault_injection.SendRawBytes)
     assert _quietly(lambda: scenario_h1.SendBytes) is scenario_h1.SendRawBytes
     assert (_quietly(lambda: scenario_h2_client.SendBytes)
             is scenario_h2_client.SendRawBytes)
@@ -174,7 +172,6 @@ def test_send_bytes_yields_the_http1_client_step_everywhere():
 def test_h2c_send_bytes_yields_the_http2_client_step():
     h2c = _quietly(lambda: blackbull.fault_injection.H2CSendBytes)
     assert h2c is scenario_h2_client.SendRawBytes
-    assert h2c is not blackbull.fault_injection.SendRawBytes
 
 
 # ---------------------------------------------------------------------------

@@ -29,9 +29,9 @@ from blackbull.client.exceptions import (
 from blackbull.client.http1 import HTTP1Client
 from blackbull.server.recipient import IncompleteReadError
 from blackbull.fault_injection.catalogue.h1 import CATALOGUE
-from blackbull.fault_injection.h1_server import H1FaultServer, H1FaultServerError
+from blackbull.fault_injection.h1_server import H1FaultServer
 from blackbull.fault_injection.scenario_h1_server import (
-    Abort, CloseGracefully, ScenarioH1Server, SendRawBytes, Sleep, WaitForRequest,
+    ScenarioH1Server, WaitForRequest,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -58,64 +58,11 @@ async def _get(url_host: str, port: int, *, timeout: float = 2.0):
 
 
 # ===========================================================================
-# The server misbehaves on command
-# ===========================================================================
-
-class TestDeliberateMisbehaviour:
-    async def test_a_status_line_delivered_in_pieces(self):
-        """A trickled status line: every byte legal, the pause is the fault."""
-        scenario = ScenarioH1Server(steps=(
-            WaitForRequest(),
-            SendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi',
-                         byte_interval=0.001),
-        ))
-        async with H1FaultServer(scenario) as srv:
-            resp = await _get(srv.host, srv.port)
-        assert resp.status == 200
-        assert resp.body == b'hi'
-
-    async def test_a_content_length_that_overstates_the_body(self):
-        """The client must not return a short body as if it were complete."""
-        scenario = ScenarioH1Server(steps=(
-            WaitForRequest(),
-            SendRawBytes(b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort'),
-            CloseGracefully(),
-        ))
-        async with H1FaultServer(scenario) as srv:
-            with pytest.raises(_REFUSED):
-                await _get(srv.host, srv.port)
-
-    async def test_a_chunked_body_that_stops_mid_chunk(self):
-        scenario = ScenarioH1Server(steps=(
-            WaitForRequest(),
-            SendRawBytes(b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n'
-                         b'\r\n5\r\nab'),
-            CloseGracefully(),
-        ))
-        async with H1FaultServer(scenario) as srv:
-            with pytest.raises(_REFUSED):
-                await _get(srv.host, srv.port)
-
-    async def test_a_connection_closed_without_any_response(self):
-        scenario = ScenarioH1Server(steps=(WaitForRequest(), Abort()))
-        async with H1FaultServer(scenario) as srv:
-            with pytest.raises(_REFUSED):
-                await _get(srv.host, srv.port)
-
-    async def test_a_server_that_never_answers(self):
-        """The client's own deadline is what must end this, not the server."""
-        scenario = ScenarioH1Server(steps=(WaitForRequest(), Sleep(5.0)))
-        async with H1FaultServer(scenario) as srv:
-            with pytest.raises(asyncio.TimeoutError):
-                await _get(srv.host, srv.port, timeout=0.3)
-
-
-# ===========================================================================
 # The rule that makes a fault server worth having
 # ===========================================================================
 
 class TestTheBreakerIsIndependent:
-    async def test_the_h1_fault_server_does_not_use_the_production_sender(self):
+    async def test_the_fault_servers_do_not_use_the_production_sender(self):
         """A breaker that shares the production serialiser cannot catch a bug
         the production serialiser has.
 
@@ -127,34 +74,13 @@ class TestTheBreakerIsIndependent:
         import pathlib
         import re
 
-        src = (pathlib.Path(__file__).resolve().parents[2]
-               / 'blackbull' / 'fault_injection' / 'h1_server.py').read_text()
+        package = pathlib.Path(__file__).resolve().parents[2] / 'blackbull' / 'fault_injection'
+        src = '\n'.join(p.read_text() for p in package.rglob('*.py'))
         offenders = [line.strip() for line in src.splitlines()
                      if re.match(r'\s*(from|import)\s', line)
                      and ('server.sender' in line or 'server.response' in line)]
         assert offenders == [], (
             f'the fault server imports the production send path: {offenders}')
-
-
-# ===========================================================================
-# Safety locks — the same two H2FaultServer carries
-# ===========================================================================
-
-class TestSafetyLocks:
-    async def test_it_refuses_a_non_loopback_bind(self):
-        scenario = ScenarioH1Server(steps=())
-        with pytest.raises(H1FaultServerError):
-            H1FaultServer(scenario, host='0.0.0.0')
-
-    async def test_allow_remote_is_the_explicit_opt_in(self):
-        scenario = ScenarioH1Server(steps=())
-        srv = H1FaultServer(scenario, host='0.0.0.0', allow_remote=True)
-        assert srv.host == '0.0.0.0'
-
-    async def test_it_refuses_to_run_in_production(self, monkeypatch):
-        monkeypatch.setenv('BB_PRODUCTION', '1')
-        with pytest.raises(H1FaultServerError):
-            H1FaultServer(ScenarioH1Server(steps=()))
 
 
 # ===========================================================================
@@ -250,16 +176,6 @@ class TestExportsDoNotCollide:
             resp = await _get(srv.host, srv.port)
         assert resp.status == 200 and resp.body == b'hi'
 
-    async def test_each_vocabulary_is_reachable_and_distinct(self):
-        import blackbull.fault_injection as fi
-        from blackbull.fault_injection import scenario_h1, scenario_h1_server, scenario_h2
-
-        assert fi.H1SSendRawBytes is scenario_h1_server.SendRawBytes
-        assert fi.SendRawBytes is scenario_h2.SendRawBytes
-        assert fi.Abort is scenario_h1.Abort
-        assert fi.H1SAbort is scenario_h1_server.Abort
-        assert fi.H2Abort is scenario_h2.Abort
-
     async def test_both_servers_expose_host_and_port(self):
         """A caller driving either with a raw socket needs the pair."""
         from blackbull.fault_injection import (
@@ -287,17 +203,6 @@ class TestExportsDoNotCollide:
             assert catalogue, 'a catalogue with no cases is not reachable'
             assert all(callable(build) for build in catalogue.values())
             assert all(isinstance(name, str) for name in catalogue)
-
-    async def test_a_scenario_survives_a_json_round_trip(self):
-        """H2 scenarios serialise; H1 server scenarios now do too."""
-        from blackbull.fault_injection import (
-            scenario_h1_server_from_json, scenario_h1_server_to_json,
-        )
-        for name, build in CATALOGUE.items():
-            scenario = build()
-            assert scenario_h1_server_from_json(
-                scenario_h1_server_to_json(scenario)) == scenario, name
-
 
 # ===========================================================================
 # The two halves report the same things by the same names

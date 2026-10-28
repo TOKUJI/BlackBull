@@ -10,8 +10,6 @@ to the codec without a row here fails instead of passing by default.
 """
 from __future__ import annotations
 
-import base64
-
 import pytest
 
 from blackbull.fault_injection.h2_server import serialize_frame
@@ -34,8 +32,8 @@ from blackbull.protocol.frame_types import (
 )
 
 
-def _b64(data: bytes) -> str:
-    return base64.b64encode(data).decode('ascii')
+def _hex(data: bytes) -> str:
+    return data.hex()
 
 
 def _wire(type_byte: bytes, flags: int, stream_id: int, payload: bytes = b'') -> bytes:
@@ -83,12 +81,12 @@ ARMS: dict[str, tuple[dict, bytes]] = {
     ),
     'Ping': (
         {'class': 'Ping', 'stream_id': 0, 'flags': 0,
-         'payload': _b64(_PING_PAYLOAD)},
+         'payload': _hex(_PING_PAYLOAD)},
         _wire(FrameTypes.PING.value, 0, 0, _PING_PAYLOAD),
     ),
     'Data': (
         {'class': 'Data', 'stream_id': 1, 'flags': 0,
-         'data': _b64(_DATA_PAYLOAD)},
+         'data': _hex(_DATA_PAYLOAD)},
         _wire(FrameTypes.DATA.value, 0, 1, _DATA_PAYLOAD),
     ),
 }
@@ -177,7 +175,7 @@ def test_a_padded_data_frame_is_refused_in_every_direction():
         serialize_frame(parsed)
     with pytest.raises(ValueError):
         _frame_from_dict({'class': 'Data', 'stream_id': 1, 'flags': padded,
-                          'data': _b64(_DATA_PAYLOAD)})
+                          'data': _hex(_DATA_PAYLOAD)})
 
 
 @pytest.mark.parametrize('ftype,data', [
@@ -231,7 +229,7 @@ def test_a_goaway_with_trailing_octets_round_trips():
     assert parsed.append_data == b'debug'
 
     record = _frame_to_dict(parsed)
-    assert record['append_data'] == _b64(b'debug')
+    assert record['append_data'] == _hex(b'debug')
     rebuilt = _frame_from_dict(record)
     assert rebuilt.save() == parsed.save()
     assert serialize_frame(rebuilt) == serialize_frame(parsed)
@@ -281,7 +279,7 @@ def test_a_reserved_stream_bit_is_refused_by_both_directions():
         serialize_frame(reserved)
     with pytest.raises(ValueError):
         _frame_from_dict({'class': 'Data', 'stream_id': 0x80000001, 'flags': 0,
-                          'data': _b64(_DATA_PAYLOAD)})
+                          'data': _hex(_DATA_PAYLOAD)})
 
 
 def test_a_frame_carrying_the_wrong_type_byte_is_refused():
@@ -320,7 +318,7 @@ def test_a_payload_over_the_frame_length_field_is_refused():
         serialize_frame(over_long)
     with pytest.raises(ValueError):
         _frame_from_dict({'class': 'Data', 'stream_id': 1, 'flags': 0,
-                          'data': _b64(b'x' * 0x1000000)})
+                          'data': _hex(b'x' * 0x1000000)})
 
 
 def test_an_unknown_class_is_refused_by_name():

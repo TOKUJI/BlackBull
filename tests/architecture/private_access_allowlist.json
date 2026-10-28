@@ -109,7 +109,7 @@
  "unit/test_event_drain_seam.py": 1,
  "unit/test_extension.py": 2,
  "unit/test_extensions.py": 7,
- "unit/test_fault_injection_h2.py": 2,
+ "unit/test_fault_injection_h2.py": 1,
  "unit/test_fault_injection_h2_client.py": 16,
  "unit/test_fault_scenario_h2_json.py": 2,
  "unit/test_frame_hotpath_logging.py": 1,

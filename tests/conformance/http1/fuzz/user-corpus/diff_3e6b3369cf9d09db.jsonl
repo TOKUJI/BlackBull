@@ -1,0 +1,3 @@
+{"op": "HEADER", "format": 2, "name": ""}
+{"op": "SendRawBytes", "data": "505554202f6563686f20485454502f312e310d0a686f73743a20302f300d0a757365722d6167656e743a200d0a636f6e74656e742d6c656e6774683a20300d0a0d0a", "byte_interval": 0.0}
+{"op": "ReadResponse", "timeout": 5.0}
