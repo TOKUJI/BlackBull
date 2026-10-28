@@ -527,6 +527,7 @@ async def test_a_graceful_close_after_the_client_reset_still_ends_the_scenario()
     (h2c, 'encode_headers', h2c.SendHeaders(raw_block=b'\x82')),
 ])
 def test_the_encode_helpers_are_deprecated_spellings_of_wire(module, name, step):
-    with pytest.warns(DeprecationWarning, match=r'wire\(\)'):
+    with pytest.warns(DeprecationWarning, match=r'wire\(\)') as caught:
         encode = getattr(module, name)
+    assert caught[0].filename == __file__
     assert encode(step) == step.wire()

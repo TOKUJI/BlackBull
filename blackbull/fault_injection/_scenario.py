@@ -248,7 +248,8 @@ def _decoder(hint):
     return lambda value: None if value is None else decode(value)
 
 
-def _deprecated_encoder(module: str, name: str):
+# Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.
+def _deprecated_encoder(module, name):
     """The ``encode_*`` helpers each step's ``wire()`` replaced."""
     warnings.warn(
         f'{module}.{name} is deprecated; use the step\'s wire().  Removal no '
