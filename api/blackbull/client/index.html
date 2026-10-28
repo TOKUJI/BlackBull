@@ -7349,10 +7349,8 @@ docs/guide/client.md. Scenario exports alias blackbull.fault_injection.</p>
 
 
 
-        <p>Hard-close the connection (transport.abort → RST on Linux).</p>
-<p>Distinct from the graceful <code>writer.close()</code> / <code>wait_closed()</code>
-in <code>HTTP1Client.__aexit__</code>.  Subsequent steps short-circuit; the
-executor stops walking the scenario after an Abort.</p>
+        <p>Hard-close the connection (<code>transport.abort</code> → RST on Linux).</p>
+<p>Terminal: later steps do not run.</p>
 
 
 
@@ -7785,7 +7783,8 @@ returned <a class="autorefs autorefs-internal" href="http1/#blackbull.client.htt
     <div class="doc doc-contents ">
 
         <p>Run connected-socket scenario steps and collect outcomes in ScenarioResult.</p>
-<p>Record peer responses, timeouts and transport failures; Abort stops further steps.</p>
+<p>Record peer responses, timeouts and transport failures; Abort stops
+further steps.  The vocabulary is <code>docs/guide/fault_injection.md</code>.</p>
 
 
     </div>
@@ -8676,16 +8675,9 @@ on the stream is ignored as after our own reset (§5.1).</p>
 
 
 
-        <p>Read one HTTP/1.1 response from the connection.</p>
-<p><code>timeout</code> bounds the entire status-line + headers + body read.
-On timeout the executor records the outcome on the
-<a class="autorefs autorefs-internal" title="ScenarioResult
-
-
-  
-      dataclass
-  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a> and does <em>not</em> raise — the caller decides
-whether to treat that as a transport-fail or normal outcome.</p>
+        <p>Read one message: an HTTP/1.1 response, or one HTTP/2 frame.</p>
+<p>On <code>timeout</code> the scenario ends with <code>timed_out</code> set and the step
+uncounted; the executor never raises.</p>
 
 
 
@@ -8847,16 +8839,7 @@ SEND payload lengths are uint16. This decoder must not raise on arbitrary input.
 
     <div class="doc doc-contents ">
 
-        <p>Parse JSON Lines back to a <a class="autorefs autorefs-internal" title="Scenario
-
-
-  
-      dataclass
-  " href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Scenario"><code>Scenario</code></a>.</p>
-<p>Skips blank lines so files that end with a trailing newline
-(the conventional git-friendly shape) parse cleanly.</p>
-<p>A <code>HEADER</code> line carries the name and is optional on the way in:
-a file without one parses to an unnamed scenario.</p>
+        <p>Parse what <a class="autorefs autorefs-internal" title="to_json()" href="../fault_injection/scenario_h1/#blackbull.fault_injection.scenario_h1.Scenario.to_json"><code>to_json</code></a> wrote.</p>
 
 
     </div>
@@ -8874,7 +8857,7 @@ a file without one parses to an unnamed scenario.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serialize JSON Lines with base64 byte payloads and a first HEADER carrying name.</p>
+        <p>Serialise to JSON Lines (see <code>docs/guide/fault_injection.md</code>).</p>
 
 
     </div>
@@ -8984,11 +8967,8 @@ HTTP/1.1 differential suite.</p>
 
 
 
-        <p>Push raw bytes onto the connection.</p>
-<p><code>byte_interval &gt; 0</code> transmits one byte at a time with that delay
-between bytes — the primitive slowloris-style stall that lets
-scenarios express trickled headers or trickled bodies without
-dropping to a raw asyncio socket.</p>
+        <p>Send arbitrary bytes, for anything a typed step will not build.</p>
+<p><code>byte_interval &gt; 0</code> sends one byte at a time with that delay.</p>
 
 
 
@@ -9038,9 +9018,7 @@ dropping to a raw asyncio socket.</p>
 
 
 
-        <p>Idle for <code>duration</code> seconds without sending or reading.</p>
-<p>Useful for post-headers idle, mid-keep-alive idle, and pre-response
-stall scenarios where the server is expected to time out and close.</p>
+        <p>Idle for <code>duration</code> seconds without reading or writing.</p>
 
 
 

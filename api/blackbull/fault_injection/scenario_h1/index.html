@@ -2759,17 +2759,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.scenario_h1.SendRawBytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SendRawBytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h1.Sleep" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5937,17 +5926,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.scenario_h1.SendRawBytes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SendRawBytes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h1.Sleep" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6095,10 +6073,8 @@ inputs: malformed input must still map to a scenario rather than crash parsing.<
 
 
 
-        <p>Hard-close the connection (transport.abort → RST on Linux).</p>
-<p>Distinct from the graceful <code>writer.close()</code> / <code>wait_closed()</code>
-in <code>HTTP1Client.__aexit__</code>.  Subsequent steps short-circuit; the
-executor stops walking the scenario after an Abort.</p>
+        <p>Hard-close the connection (<code>transport.abort</code> → RST on Linux).</p>
+<p>Terminal: later steps do not run.</p>
 
 
 
@@ -6145,21 +6121,12 @@ executor stops walking the scenario after an Abort.</p>
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="blackbull.fault_injection._scenario._Expect">_Expect</span></code></p>
 
 
 
         <p>Read one response and record whether it matched.</p>
-<p>A <strong>guard</strong>, not a filter: nothing is skipped and the executor moves
-on either way.  It answers <em>is the peer behaving as this scenario
-assumes?</em> — and a scenario whose premise silently failed would
-otherwise look like a pass.</p>
-<p>Twin of
-<a class="autorefs autorefs-internal" title="ExpectRequest
-
-
-  
-      dataclass
-  " href="../scenario_h1_server/#blackbull.fault_injection.scenario_h1_server.ExpectRequest"><code>ExpectRequest</code></a>.</p>
 
 
 
@@ -6209,10 +6176,9 @@ otherwise look like a pass.</p>
 
 
 
-        <p>Shut down the sending direction only (FIN), keep reading.</p>
-<p><strong>Not terminal</strong> — later steps still run, which is the whole point.
-<code>Abort</code> is not a substitute: it sends RST, discarding what is buffered
-and leaving nothing to read.</p>
+        <p>Shut down the sending direction only (FIN) and keep reading.</p>
+<p>Not terminal.  <code>result.half_closed</code> says whether the transport
+accepted it; TLS cannot.</p>
 
 
 
@@ -6262,16 +6228,9 @@ and leaving nothing to read.</p>
 
 
 
-        <p>Read one HTTP/1.1 response from the connection.</p>
-<p><code>timeout</code> bounds the entire status-line + headers + body read.
-On timeout the executor records the outcome on the
-<a class="autorefs autorefs-internal" title="ScenarioResult
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a> and does <em>not</em> raise — the caller decides
-whether to treat that as a transport-fail or normal outcome.</p>
+        <p>Read one message: an HTTP/1.1 response, or one HTTP/2 frame.</p>
+<p>On <code>timeout</code> the scenario ends with <code>timed_out</code> set and the step
+uncounted; the executor never raises.</p>
 
 
 
@@ -6383,16 +6342,7 @@ SEND payload lengths are uint16. This decoder must not raise on arbitrary input.
 
     <div class="doc doc-contents ">
 
-        <p>Parse JSON Lines back to a <a class="autorefs autorefs-internal" title="Scenario
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h1.Scenario"><code>Scenario</code></a>.</p>
-<p>Skips blank lines so files that end with a trailing newline
-(the conventional git-friendly shape) parse cleanly.</p>
-<p>A <code>HEADER</code> line carries the name and is optional on the way in:
-a file without one parses to an unnamed scenario.</p>
+        <p>Parse what <a class="autorefs autorefs-internal" title="to_json()" href="#blackbull.fault_injection.scenario_h1.Scenario.to_json"><code>to_json</code></a> wrote.</p>
 
 
     </div>
@@ -6410,7 +6360,7 @@ a file without one parses to an unnamed scenario.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Serialize JSON Lines with base64 byte payloads and a first HEADER carrying name.</p>
+        <p>Serialise to JSON Lines (see <code>docs/guide/fault_injection.md</code>).</p>
 
 
     </div>
@@ -6505,60 +6455,6 @@ HTTP/1.1 differential suite.</p>
 
 
 
-<h3 id="blackbull.fault_injection.scenario_h1.SendRawBytes" class="doc doc-heading">
-            <code>SendRawBytes</code>
-
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
-  </span>
-
-<a href="#blackbull.fault_injection.scenario_h1.SendRawBytes" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Push raw bytes onto the connection.</p>
-<p><code>byte_interval &gt; 0</code> transmits one byte at a time with that delay
-between bytes — the primitive slowloris-style stall that lets
-scenarios express trickled headers or trickled bodies without
-dropping to a raw asyncio socket.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-
-
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
 <h3 id="blackbull.fault_injection.scenario_h1.Sleep" class="doc doc-heading">
             <code>Sleep</code>
 
@@ -6574,9 +6470,7 @@ dropping to a raw asyncio socket.</p>
 
 
 
-        <p>Idle for <code>duration</code> seconds without sending or reading.</p>
-<p>Useful for post-headers idle, mid-keep-alive idle, and pre-response
-stall scenarios where the server is expected to time out and close.</p>
+        <p>Idle for <code>duration</code> seconds without reading or writing.</p>
 
 
 
@@ -6624,8 +6518,7 @@ stall scenarios where the server is expected to time out and close.</p>
 
 
 
-        <p>Tag for serialising / decoding a step.  <code>str</code> mixin so values
-drop straight into JSON without a custom encoder.</p>
+        <p>The v1 JSON tags, still read until v1 reading is removed.</p>
 
 
 
@@ -6672,21 +6565,12 @@ drop straight into JSON without a custom encoder.</p>
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="blackbull.fault_injection._scenario._WaitFor">_WaitFor</span></code></p>
 
 
 
         <p>Read responses until one satisfies <code>match</code>, or the timeout wins.</p>
-<p>A <strong>filter</strong>: non-matching responses are read, counted in
-<code>wait_skipped</code>, and passed over.  The role-axis twin of
-<a class="autorefs autorefs-internal" title="WaitForRequest
-
-
-  
-      dataclass
-  " href="../scenario_h1_server/#blackbull.fault_injection.scenario_h1_server.WaitForRequest"><code>WaitForRequest</code></a>,
-and it exists for the same reason — a scenario that has to know
-exactly how many messages precede the interesting one is a scenario
-written against a particular peer.</p>
 <p>On HTTP/1.1 a non-zero <code>wait_skipped</code> is worth reading: responses
 arrive in request order, so skipping one means the scenario is a
 response further along than it thinks.</p>

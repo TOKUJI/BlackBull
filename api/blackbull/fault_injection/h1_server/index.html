@@ -2567,34 +2567,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="H1FaultServer">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.h1_server.H1FaultServer.stop" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        stop
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.h1_server.H1FaultServer.wait_for_connection_done" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        wait_for_connection_done
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
         
           <li class="md-nav__item">
@@ -5686,34 +5658,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="H1FaultServer">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.h1_server.H1FaultServer.stop" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        stop
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.h1_server.H1FaultServer.wait_for_connection_done" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        wait_for_connection_done
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
         
           <li class="md-nav__item">
@@ -5802,6 +5746,8 @@ refused; non-loopback binds require allow_remote=True.</p>
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="blackbull.fault_injection._scenario._FaultServer">_FaultServer</span></code></p>
 
 
 
@@ -5832,54 +5778,6 @@ refused; non-loopback binds require allow_remote=True.</p>
 
 
 
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.fault_injection.h1_server.H1FaultServer.stop" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">stop</span><span class="p">()</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.fault_injection.h1_server.H1FaultServer.stop" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Stop accepting and cancel anything still mid-scenario.</p>
-<p>The cancellation is the part that matters: a scenario whose last
-step is a long <code>Sleep</code> is the <em>normal</em> shape here — that is how
-"the server never answers" is expressed — so a teardown that waited
-for handlers would wait out the sleep on every such case.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.fault_injection.h1_server.H1FaultServer.wait_for_connection_done" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">wait_for_connection_done</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.fault_injection.h1_server.H1FaultServer.wait_for_connection_done" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Block until a client has connected and the scenario finished.</p>
-
-
-    </div>
-
-</div>
 
 
 

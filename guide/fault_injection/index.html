@@ -1346,6 +1346,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#saving-scenarios-as-json-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving scenarios as JSON Lines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#safety-locks" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5903,6 +5914,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#saving-scenarios-as-json-lines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving scenarios as JSON Lines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#safety-locks" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6286,13 +6308,13 @@ or both rejected.</p>
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Why the <code>H1S</code> prefix</p>
-<p>Three scenario vocabularies live in this package — HTTP/1.1 client-side,
-HTTP/1.1 server-side, HTTP/2 server-side — and they share step names
-because they describe the same shapes of misbehaviour.  The package
-exports them role-qualified so an import cannot silently hand one half's
-step to the other half's executor: <code>H1S…</code> is HTTP/1.1 server-side, <code>H2…</code>
-is HTTP/2, and the unprefixed <code>Abort</code> / <code>Sleep</code> are the HTTP/1.1 <em>client</em>
-vocabulary that had the names first.</p>
+<p>Four scenario vocabularies live in this package, one per cell, and they
+share step names because they describe the same shapes of misbehaviour.
+The transport steps — <code>SendRawBytes</code>, <code>Sleep</code>, <code>Abort</code>, <code>HalfClose</code> — are
+one class under every name.  The package exports the role-specific names
+role-qualified: <code>H1S…</code> is HTTP/1.1 server-side, <code>H2…</code> is HTTP/2, and the
+unprefixed <code>Abort</code> / <code>Sleep</code> are the HTTP/1.1 <em>client</em> vocabulary that
+had the names first.</p>
 <p>Importing from the submodule directly (<code>from
 blackbull.fault_injection.scenario_h1_server import SendRawBytes</code>) gives
 you the unprefixed names if you prefer them.</p>
@@ -6366,9 +6388,8 @@ on the POST:</p>
 <p><strong>Skipping desyncs the connection, and the result says so.</strong>  HTTP/1.1
 responses are positional, so a head the step passed over is a request the
 scenario can no longer answer — everything after it is off by one.  The count
-is on <code>ScenarioH1ServerResult.requests_skipped</code>.  (On HTTP/2 the same skip is
-harmless, because streams are independent; that is why the two halves cannot
-simply share an implementation.)</p>
+is on <code>ScenarioH1ServerResult.wait_skipped</code>.  (On HTTP/2 the same skip is
+harmless, because streams are independent.)</p>
 <p><strong><code>ExpectRequest(match=...)</code> — is the client behaving as I assumed?</strong>  Reads
 one head, skips nothing, and records the verdict:</p>
 <div class="highlight"><pre><span></span><code><span class="n">ScenarioH1Server</span><span class="p">(</span><span class="n">steps</span><span class="o">=</span><span class="p">(</span>
@@ -6449,6 +6470,20 @@ names line up with the defences that answer them: <code>rapid_reset_burst</code>
 <code>preface_trickled</code>, <code>abort_mid_header_block</code>.</p>
 <p>Three of them end with a long <code>Sleep</code> because <em>holding</em> the connection is
 the fault they stage; what ends those is your server's own deadline.</p>
+<h2 id="saving-scenarios-as-json-lines">Saving scenarios as JSON Lines<a class="headerlink" href="#saving-scenarios-as-json-lines" title="Permanent link">&para;</a></h2>
+<p>Every vocabulary writes the same format: a <code>HEADER</code> line carrying the
+format version and the scenario's own fields, then one line per step named
+by its class, with bytes as hex.</p>
+<div class="highlight"><pre><span></span><code>{"op": "HEADER", "format": 2, "name": "half_a_status_line"}
+{"op": "WaitForRequest", "match": {}, "timeout": 5.0}
+{"op": "SendRawBytes", "data": "485454502f312e31203230", "byte_interval": 0.0}
+{"op": "CloseGracefully"}
+</code></pre></div>
+<p>Use <code>Scenario.to_json</code> / <code>from_json</code> on the HTTP/1.1 client side and the
+<code>scenario_*_to_json</code> / <code>scenario_*_from_json</code> pairs for the other three.
+Files in the earlier per-vocabulary format (no <code>format</code> key) still read,
+with a <code>DeprecationWarning</code>, until v0.84.0 at the earliest; rewrite one
+with <code>to_json(from_json(text))</code>.</p>
 <h2 id="safety-locks">Safety locks<a class="headerlink" href="#safety-locks" title="Permanent link">&para;</a></h2>
 <p>Two locks ensure the deliberate-misbehaviour code path is unreachable
 from a production process:</p>

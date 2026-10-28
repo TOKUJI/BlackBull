@@ -2820,6 +2820,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2.frame_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        frame_bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2.frame_matches" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2857,6 +2868,17 @@
     <span class="md-ellipsis">
       
         scenario_to_json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2.serialize_frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serialize_frame
       
     </span>
   </a>
@@ -5914,6 +5936,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2.frame_bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        frame_bytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.scenario_h2.frame_matches" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5951,6 +5984,17 @@
     <span class="md-ellipsis">
       
         scenario_to_json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.scenario_h2.serialize_frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        serialize_frame
       
     </span>
   </a>
@@ -6040,7 +6084,8 @@ SendFrame; use SendRawBytes for other or malformed frame encodings.</p>
 
 
 
-        <p>Hard-close the connection (transport.abort → RST on Linux).</p>
+        <p>Hard-close the connection (<code>transport.abort</code> → RST on Linux).</p>
+<p>Terminal: later steps do not run.</p>
 
 
 
@@ -6090,18 +6135,16 @@ SendFrame; use SendRawBytes for other or malformed frame encodings.</p>
 
 
 
-        <p>Send a GOAWAY then close cleanly.</p>
-<p>Subsequent scenario steps short-circuit (this is a terminator
-just like <a class="autorefs autorefs-internal" title="Abort
+        <p>Send a GOAWAY then close cleanly.  Terminal, like <a class="autorefs autorefs-internal" title="Abort
 
 
   
       dataclass
-  " href="#blackbull.fault_injection.scenario_h2.Abort"><code>Abort</code></a>).  <code>error_code</code> is one of the
+  " href="#blackbull.fault_injection.scenario_h2.Abort"><code>Abort</code></a>.</p>
+<p><code>error_code</code> is one of the
 <a class="autorefs autorefs-internal" href="../../protocol/frame_types/#blackbull.protocol.frame_types.ErrorCodes"><code>ErrorCodes</code></a> values;
 <code>last_stream_id</code> advertises the last stream the server is
-willing to process — pass <code>0</code> to refuse all client streams,
-or the highest accepted stream ID otherwise.</p>
+willing to process — pass <code>0</code> to refuse all client streams.</p>
 
 
 
@@ -6148,6 +6191,8 @@ or the highest accepted stream ID otherwise.</p>
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="blackbull.fault_injection._scenario._Expect">_Expect</span></code></p>
 
 
 
@@ -6201,10 +6246,9 @@ or the highest accepted stream ID otherwise.</p>
 
 
 
-        <p>Shut down the sending direction only (FIN), keep reading.</p>
-<p><strong>Not terminal</strong> — later steps still run, which is the whole point.
-<code>Abort</code> is not a substitute: it sends RST, discarding what is buffered
-and leaving nothing to read.</p>
+        <p>Shut down the sending direction only (FIN) and keep reading.</p>
+<p>Not terminal.  <code>result.half_closed</code> says whether the transport
+accepted it; TLS cannot.</p>
 
 
 
@@ -6258,15 +6302,12 @@ and leaving nothing to read.</p>
 <p>Two control knobs sit outside the step list because they apply to
 the whole connection, not to one step:</p>
 <ul>
-<li><code>send_preface</code>: whether the server sends the standard
-  <code>SERVER_PREFACE_BYTES</code> + initial SETTINGS at handshake time.
-  Most catalogue scenarios want this (real H2 clients require it
-  before proceeding); set <code>False</code> to exercise client behaviour
-  against a server that skips the handshake.</li>
-<li><code>initial_settings</code>: tuple of <code>(setting_id, value)</code> pairs the
-  server advertises in its initial SETTINGS frame.  Used by the
-  "exhausted window" and "illegal SETTINGS" catalogue entries to
-  inject a hostile starting state before the first step runs.</li>
+<li><code>send_preface</code>: whether the server sends its initial SETTINGS at
+  handshake time.  Set <code>False</code> to exercise client behaviour against a
+  server that skips the handshake.</li>
+<li><code>initial_settings</code>: <code>(setting_id, value)</code> pairs the server
+  advertises in that SETTINGS frame — how the "exhausted window" and
+  "illegal SETTINGS" cases inject a hostile starting state.</li>
 </ul>
 
 
@@ -6329,8 +6370,7 @@ the whole connection, not to one step:</p>
   
       dataclass
   " href="../scenario_h1/#blackbull.fault_injection.scenario_h1.ScenarioResult"><code>ScenarioResult</code></a>'s
-shape so callers can write uniform pytest assertions across
-protocols.</p>
+shape so callers can write uniform assertions across protocols.</p>
 
 
 
@@ -6431,18 +6471,8 @@ protocols.</p>
 
 
 
-        <p>Push arbitrary bytes onto the connection.</p>
-<p>Escape hatch for malformed frames (illegal type byte, length
-exceeding <code>SETTINGS_MAX_FRAME_SIZE</code>, etc.) that the typed
-<a class="autorefs autorefs-internal" title="SendFrame
-
-
-  
-      dataclass
-  " href="#blackbull.fault_injection.scenario_h2.SendFrame"><code>SendFrame</code></a> path will not produce.</p>
-<p><code>byte_interval &gt; 0</code> transmits one byte at a time with that
-delay — useful for stalled-handshake patterns where the client
-is expected to enforce a preface-completion timeout.</p>
+        <p>Send arbitrary bytes, for anything a typed step will not build.</p>
+<p><code>byte_interval &gt; 0</code> sends one byte at a time with that delay.</p>
 
 
 
@@ -6540,7 +6570,7 @@ is expected to enforce a preface-completion timeout.</p>
 
 
 
-        <p>Tag used by the JSON serialiser.</p>
+        <p>The v1 JSON tags, still read until v1 reading is removed.</p>
 
 
 
@@ -6587,11 +6617,13 @@ is expected to enforce a preface-completion timeout.</p>
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="blackbull.fault_injection._scenario._WaitFor">_WaitFor</span></code></p>
 
 
 
-        <p>Consume until a frame matches, skipping nonmatches.</p>
-<p>Timeout records a miss and proceeds to the next step.</p>
+        <p>Consume until a frame matches, skipping nonmatches — harmless on
+HTTP/2, where streams are independent.</p>
 
 
 
@@ -6622,6 +6654,25 @@ is expected to enforce a preface-completion timeout.</p>
 
 </div>
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.fault_injection.scenario_h2.frame_bytes" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">frame_bytes</span><span class="p">(</span><span class="n">length</span><span class="p">,</span> <span class="n">type_byte</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">,</span> <span class="n">payload</span><span class="o">=</span><span class="sa">b</span><span class="s1">''</span><span class="p">)</span></code>
+
+<a href="#blackbull.fault_injection.scenario_h2.frame_bytes" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>RFC 9113 §4.1 — the 9-byte frame header, then <em>payload</em>.</p>
+<p><em>length</em> is written as given, so it may disagree with the payload.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
@@ -6710,7 +6761,33 @@ through <a class="autorefs autorefs-internal" title="SendRawBytes
 
     <div class="doc doc-contents ">
 
-        <p>Serialize JSON Lines; the first HEADER carries send_preface and initial_settings.</p>
+        <p>Serialise JSON Lines; the HEADER line carries send_preface and initial_settings.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.fault_injection.scenario_h2.serialize_frame" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">serialize_frame</span><span class="p">(</span><span class="n">frame</span><span class="p">)</span></code>
+
+<a href="#blackbull.fault_injection.scenario_h2.serialize_frame" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Convert a <code>FrameBase</code> instance to wire bytes.</p>
+<p>Restricted to the classes in <code>ROUND_TRIP_FRAME_CLASSES</code>, and to frames
+<a class="autorefs autorefs-internal" title="require_canonical(frame)" href="#blackbull.fault_injection.scenario_h2.require_canonical"><code>require_canonical</code></a> accepts; anything else goes through
+<a class="autorefs autorefs-internal" title="SendRawBytes
+
+
+  
+      dataclass
+  " href="#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a>.</p>
 
 
     </div>

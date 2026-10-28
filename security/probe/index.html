@@ -6712,8 +6712,8 @@ lanes, and no in-process coupling:</p>
   <code>SendRawBytes</code>, <code>ReadResponse</code>) executed by <code>HTTP2Client.execute_scenario</code>
   in <code>scenario_mode=True</code>, so the scenario owns the wire from byte zero and
   no receive loop races its reads. <code>SendFrame</code>'s raw frame type is exactly
-  what H2-ROBUST-003 needs (an unregistered type); <code>encode_headers</code>/
-  <code>encode_frame</code> build HEADERS frames for the ordered-field-block faults
+  what H2-ROBUST-003 needs (an unregistered type); <code>SendHeaders</code>/
+  <code>SendFrame</code> <code>wire()</code> build HEADERS frames for the ordered-field-block faults
   (H2-ROBUST-001) and the CONTINUATION fragmentation of H2-ROBUST-004, with
   <code>hpack</code> — already a runtime dependency — encoding fields <strong>in the given
   order</strong> so pseudo-header order violations are expressible. The catalogued

@@ -2620,17 +2620,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.h2_server.H2FaultServer.wait_for_connection_done" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        wait_for_connection_done
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5733,17 +5722,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.fault_injection.h2_server.H2FaultServer.wait_for_connection_done" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        wait_for_connection_done
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5846,6 +5824,8 @@ Use raw-byte steps when normal frame encoding cannot express a fault.</p>
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="blackbull.fault_injection._scenario._FaultServer">_FaultServer</span></code></p>
 
 
 
@@ -5916,28 +5896,6 @@ last_result:
 
 
 
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.fault_injection.h2_server.H2FaultServer.wait_for_connection_done" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">wait_for_connection_done</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.fault_injection.h2_server.H2FaultServer.wait_for_connection_done" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Block until a client has connected and the scenario finished.</p>
-
-
-    </div>
-
-</div>
-
 
 
   </div>
@@ -5996,12 +5954,12 @@ production signal (<code>BLACKBULL_ENV=production</code>) — or the explicit
         <p>Convert a <code>FrameBase</code> instance to wire bytes.</p>
 <p>Restricted to the classes in <code>ROUND_TRIP_FRAME_CLASSES</code>, and to frames
 <a class="autorefs autorefs-internal" title="require_canonical(frame)" href="../scenario_h2/#blackbull.fault_injection.scenario_h2.require_canonical"><code>require_canonical</code></a> accepts; anything else goes through
-<a class="autorefs autorefs-internal" title="SendRawBytes
+<a class="autorefs autorefs-internal" title="H1CSendRawBytes
 
 
   
       dataclass
-  " href="../scenario_h2/#blackbull.fault_injection.scenario_h2.SendRawBytes"><code>SendRawBytes</code></a>.</p>
+  " href="../#blackbull.fault_injection.H1CSendRawBytes"><code>SendRawBytes</code></a>.</p>
 
 
     </div>
