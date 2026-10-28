@@ -321,6 +321,8 @@ async def _against_a_raw_server(run, peer):
     port = server.sockets[0].getsockname()[1]
     try:
         result = await asyncio.wait_for(run(port, closed), timeout=10.0)
+        # Before 3.12, Server.wait_closed() does not wait for the handler.
+        await asyncio.wait_for(closed.wait(), timeout=5.0)
     finally:
         server.close()
         await server.wait_closed()
