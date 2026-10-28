@@ -44,11 +44,8 @@ class WSFrameBits(IntEnum):
 class WSFrameHeader(NamedTuple):
     """Decoded fields from the two-byte WebSocket frame header (RFC 6455 §5.2).
 
-    Note on masking (RFC 6455 §5.1):
-    - Client → server frames MUST be masked;
-      ``WebSocketRecipient`` raises ``ValueError`` on an unmasked client frame.
-    - Server → client frames MUST NOT be masked; ``WebSocketSender`` never sets
-      the mask bit.
+    The raw codec accepts either mask bit; ``WebSocketRecipient`` enforces
+    endpoint roles (RFC 6455 §5.1).
     """
     opcode: int
     masked: bool
