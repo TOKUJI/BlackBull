@@ -212,7 +212,10 @@ def _hex(value):
 def _build(cls, record: dict, **given):
     for name, decode in _codec(cls)[1]:
         if name in record:
-            record[name] = decode(record[name])
+            try:
+                record[name] = decode(record[name])
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise ValueError(f'{cls.__name__}.{name}: {exc}') from exc
     return cls(**record, **given)
 
 
@@ -223,15 +226,16 @@ def _match_out(match: dict) -> dict:
 def _tagged(value):
     if isinstance(value, bytes):
         return {'hex': value.hex()}
-    if isinstance(value, (tuple, list)):
+    if isinstance(value, tuple):
+        return {'tuple': [_tagged(v) for v in value]}
+    if isinstance(value, list):
         return [_tagged(v) for v in value]
     return value
 
 
 def _match_in(value) -> dict:
-    # JSON has no tuples, and ``header``'s pair must compare equal to the
-    # scenario it came from.
     value = {key: _untagged(v) for key, v in (value or {}).items()}
+    # A ``header`` pair saved before tuples were tagged.
     if isinstance(value.get('header'), list):
         value['header'] = tuple(value['header'])
     return value
@@ -240,6 +244,8 @@ def _match_in(value) -> dict:
 def _untagged(value):
     if isinstance(value, dict) and value.keys() == {'hex'}:
         return bytes.fromhex(value['hex'])
+    if isinstance(value, dict) and value.keys() == {'tuple'}:
+        return tuple(_untagged(v) for v in value['tuple'])
     if isinstance(value, list):
         return [_untagged(v) for v in value]
     return value
@@ -497,6 +503,27 @@ class _ServerConnection(_Driver):
         return half_close(self.writer)
 
 
+class _Accepted(asyncio.StreamReaderProtocol):
+    """A connection accepted while its fault server stops is closed at once."""
+
+    def __init__(self, server: _FaultServer, loop) -> None:
+        super().__init__(asyncio.StreamReader(limit=2 ** 16, loop=loop),
+                         server._handle_connection, loop=loop)
+        self._owner = server
+        self._served = False
+
+    def connection_made(self, transport) -> None:
+        if self._owner._stopping:
+            transport.abort()
+            return
+        self._served = True
+        super().connection_made(transport)
+
+    def connection_lost(self, exc) -> None:
+        if self._served:
+            super().connection_lost(exc)
+
+
 class _FaultServer:
     """Serve one scenario to every client that connects.
 
@@ -550,11 +577,13 @@ class _FaultServer:
         await self.stop()
 
     async def start(self) -> None:
+        _check_vocabulary(self.scenario)
         self._stopping = False
         self.last_result = None
         self._connection_done.clear()
-        self._server = await asyncio.start_server(
-            self._handle_connection, self.host, self.port,
+        loop = asyncio.get_running_loop()
+        self._server = await loop.create_server(
+            lambda: _Accepted(self, loop), self.host, self.port,
             ssl=self._ssl_context)
         self.port = self._server.sockets[0].getsockname()[1]
         scheme = 'https' if self._ssl_context is not None else 'http'
@@ -565,7 +594,16 @@ class _FaultServer:
         """Stop accepting, then cancel and wait for every connection."""
         self._stopping = True
         if self._server is not None:
+            loop = asyncio.get_running_loop()
+            for sock in self._server.sockets:
+                loop.remove_reader(sock.fileno())
+            # A connection already taken off the listener gets its transport
+            # within two loop turns; Server.close() before then leaks it.
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
             self._server.close()
+            if hasattr(self._server, 'abort_clients'):  # 3.13+
+                self._server.abort_clients()
         while self._handlers:
             handlers = list(self._handlers)
             for task in handlers:

@@ -52,9 +52,12 @@ metadata; reinstall an editable checkout after changing that version.
   - an HTTP/2 client `WaitForServerFrame` or `ExpectServerFrame` is refused
     while the receive loop runs, as `ReadResponse` was;
   - a `match` holding bytes (an HTTP/1.1 response's `body_contains` or header
-    value) survives JSON;
-  - a fault server's `stop()` stops accepting before it cancels connections;
-    `start()` clears `last_result`.
+    value) or tuples survives JSON, and a malformed field is refused naming
+    the step and field;
+  - an HTTP/2 client `SendHeaders` block uses only the static table and never
+    indexes, so it decodes the same whatever table size the peer advertised;
+  - a fault server's `stop()` closes every accepted connection, including one
+    accepted while it stops; `start()` clears `last_result`.
 - An HTTP/2 client scenario's `Abort` closes the connection; it did nothing,
   so the peer saw the close only when the client exited.
 - HTTP/1.1 persistence follows RFC 9112 §9.3 on both roles: `close` ends the

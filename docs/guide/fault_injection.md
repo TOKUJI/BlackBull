@@ -434,8 +434,8 @@ the fault they stage; what ends those is your server's own deadline.
 
 Every vocabulary writes the same format: a `HEADER` line carrying the
 format version and the scenario's own fields, then one line per step named
-by its class, with bytes as hex.  A byte value inside a `match` is written
-as `{"hex": "..."}`.
+by its class, with bytes as hex.  Inside a `match`, bytes are written as
+`{"hex": "..."}` and a tuple as `{"tuple": [...]}`.
 
 ```text
 {"op": "HEADER", "format": 2, "name": "half_a_status_line"}

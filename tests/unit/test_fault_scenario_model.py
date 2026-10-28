@@ -686,7 +686,7 @@ async def test_a_restarted_fault_server_reports_only_its_own_connections(
     hello = _H2_HELLO if server_cls is H2FaultServer else b''
     srv = server_cls(scenario_cls(steps=()))
     await srv.start()
-    await _connect(srv, hello)
+    peers = await _connect(srv, hello)
     await srv.wait_for_connection_done(timeout=2.0)
     first = srv.last_result
     await srv.stop()
@@ -695,7 +695,70 @@ async def test_a_restarted_fault_server_reports_only_its_own_connections(
     assert srv.last_result is None
     with pytest.raises(TimeoutError):
         await srv.wait_for_connection_done(timeout=0.2)
-    await _connect(srv, hello)
+    peers += await _connect(srv, hello)
     await srv.wait_for_connection_done(timeout=2.0)
     assert srv.last_result is not None and srv.last_result is not first
     await srv.stop()
+    for _, writer in peers:
+        writer.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('server_cls,scenario_cls', _SERVERS)
+async def test_no_accepted_connection_outlives_stop(server_cls, scenario_cls):
+    import gc
+    for yields in range(8):
+        srv = server_cls(scenario_cls(steps=(h1c.Sleep(30.0),)))
+        await srv.start()
+        port = srv.port
+        connects = [asyncio.ensure_future(asyncio.open_connection('127.0.0.1', port))
+                    for _ in range(10)]
+        for _ in range(yields):
+            await asyncio.sleep(0)
+        await srv.stop()
+        peers = [c for c in await asyncio.gather(*connects, return_exceptions=True)
+                 if not isinstance(c, OSError)]  # refused once the listener closed
+        await asyncio.sleep(0.1)
+        open_server_side = [
+            t for t in gc.get_objects()
+            if isinstance(t, asyncio.Transport) and not t.is_closing()
+            and (t.get_extra_info('sockname') or ('', 0))[1] == port]
+        for _, writer in peers:
+            writer.close()
+        assert open_server_side == [], f'after {yields} yields'
+
+
+def test_a_headers_block_needs_nothing_from_the_peers_table():
+    import hpack
+    step = h2c.SendHeaders(pseudo=((':method', 'GET'), (':scheme', 'http'),
+                                   (':path', '/'), (':authority', 'a.example'),
+                                   (':authority', 'a.example')))
+    block = step.wire()[9:]
+    for size in (0, 64, 4096):
+        peer = hpack.Decoder()
+        peer.header_table_size = size
+        assert [n for n, _ in peer.decode(block)].count(':authority') == 2
+        assert len(peer.header_table.dynamic_entries) == 0
+
+
+def test_a_match_keeps_its_tuples_and_lists_through_json():
+    scenario = h2s.ScenarioH2(steps=(
+        h2s.WaitForClientFrame(match={'flags_set': ('ACK',)}),
+        h2s.ExpectClientFrame(match={'flags_unset': ['END_STREAM']})))
+    assert h2s.scenario_from_json(h2s.scenario_to_json(scenario)) == scenario
+
+
+@pytest.mark.parametrize('match', ['{"x": {"hex": "zz"}}', '[1, 2]', '{"x": {"hex": 5}}'])
+def test_a_malformed_field_is_refused_by_name(match):
+    with pytest.raises(ValueError, match='ExpectResponse.match'):
+        h1c.Scenario.from_json('{"op": "HEADER", "format": 2, "name": ""}\n'
+                               f'{{"op": "ExpectResponse", "match": {match}}}')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('server_cls,scenario_cls', _SERVERS)
+async def test_a_fault_server_refuses_a_foreign_step_when_started(server_cls, scenario_cls):
+    srv = server_cls(scenario_cls(steps=()))
+    srv.scenario = _smuggle(scenario_cls(steps=()), h2c.SendPreface())
+    with pytest.raises(TypeError, match='SendPreface'):
+        await srv.start()
