@@ -46,8 +46,9 @@ Accumulated CONTINUATION bytes are bounded by `BB_HEADER_MAX_TOTAL`
 (client: `BB_CLIENT_HEAD_MAX_TOTAL`) and an unfinished block by
 `BB_HEADER_TIMEOUT` (client: `BB_CLIENT_HEAD_TIMEOUT`); both send GOAWAY
 `ENHANCE_YOUR_CALM`. Only one block can be open per connection. The shared
-decoder separately bounds decompressed fields; decode failures, including
-that limit, end the connection with `COMPRESSION_ERROR`. Otherwise valid
+decoder separately bounds decompressed fields: server excess logs
+`header_max_total` and sends `ENHANCE_YOUR_CALM`; client excess retains
+`COMPRESSION_ERROR`. Invalid HPACK also sends `COMPRESSION_ERROR`. Otherwise valid
 client pushes are connection errors (`PROTOCOL_ERROR`), never stream-only
 refusals.
 

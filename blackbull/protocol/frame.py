@@ -56,9 +56,8 @@ class FrameFactory:
         passes the same number here, so advice and defence cannot disagree.
         """
         super().__init__()
-        self.decoder = Decoder()
-        if max_header_list_size is not None:
-            self.decoder.max_header_list_size = max_header_list_size
+        self.decoder = (Decoder() if max_header_list_size is None
+                        else Decoder(max_header_list_size=max_header_list_size))
         self.encoder = Encoder()
         self.peer_max_frame_size = DEFAULT_MAX_FRAME_SIZE
         self._encoder_table_limit = self.encoder.header_table_size

@@ -118,7 +118,7 @@ async def test_decode_limit_is_connection_fatal(split, door):
             raw = section(block, split=split)
         await wire.send(raw)
         # A client push is forbidden before its incomplete block is decoded.
-        expected = ErrorCodes.PROTOCOL_ERROR if door == 'push' and split else ErrorCodes.COMPRESSION_ERROR
+        expected = ErrorCodes.PROTOCOL_ERROR if door == 'push' and split else ErrorCodes.ENHANCE_YOUR_CALM
         assert await terminal(wire, 1, Decoder()) == (7, expected)
         assert await wire.closed()
 
@@ -127,19 +127,22 @@ async def test_decode_limit_is_connection_fatal(split, door):
 @pytest.mark.parametrize('complete', [False, True])
 @pytest.mark.parametrize('trailer', [False, True])
 async def test_encoded_accumulation_limit_closes_without_reading_more(
-        monkeypatch, complete, trailer):
-    monkeypatch.setenv('BB_HEADER_MAX_TOTAL', '64')
+        monkeypatch, caplog, complete, trailer):
+    monkeypatch.setenv('BB_HEADER_MAX_TOTAL', '256')
     peer = Encoder()
     async with serve(echo) as server:
         wire = await connect(server)
         if trailer:
             await wire.send(section(peer.encode(FIELDS), end_stream=False))
-        block = peer.encode(([] if trailer else FIELDS) + [(b'x-large', b'~' * 100)])
-        assert len(block) > 64
+        block = peer.encode(([] if trailer else FIELDS) + [(b'x-large', b'~' * 400)])
+        assert len(block) > 256
         await wire.send(frame(FrameTypes.HEADERS, 1, 1, block[:1])
                         + frame(FrameTypes.CONTINUATION, 4 if complete else 0, 1, block[1:]))
         assert await terminal(wire, 1, Decoder()) == (7, ErrorCodes.ENHANCE_YOUR_CALM)
         assert await wire.closed()
+    records = [r for r in caplog.records if getattr(r, 'cap', None) == 'header_max_total']
+    assert len(records) == 1
+    assert records[0].limit == 256 and records[0].requested == len(block)
 
 
 @pytest.mark.asyncio

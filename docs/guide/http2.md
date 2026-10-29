@@ -26,6 +26,16 @@ the protocol detector sniff the connection preface:
 app.run(port=8080)   # serves both HTTP/1.1 and h2c on the same socket
 ```
 
+## Header limits
+
+`BB_HEADER_MAX_TOTAL` bounds both encoded field blocks and decoded field
+sections. The decoded total includes pseudoheaders and counts name bytes +
+value bytes + 32 per field. The server advertises that bound as
+`SETTINGS_MAX_HEADER_LIST_SIZE`; excess sends GOAWAY `ENHANCE_YOUR_CALM` and
+logs `header_max_total`. Values above 2^32-1 use that maximum for decoding;
+`0` omits the advertisement and uses 2^32-1, the decoder's practical unlimited
+value.
+
 ## Priority hints
 
 HTTP/2 lets a client tell the server which of its outstanding

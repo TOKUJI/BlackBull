@@ -167,7 +167,7 @@ class Settings:
         doc='Maximum bytes in an HTTP/1.1 request-line or field line. Oversized request lines receive 400; oversized header fields receive 431.')
     header_max_total: int = setting(
         'BB_HEADER_MAX_TOTAL', 65536, minimum=0, config=('limits', 'header_max_total'), section=_section,
-        doc='Maximum bytes in the HTTP/1.1 request-line and header block. A request-line budget breach yields `400`; header-field overflow yields `431`. Also caps an HTTP/2 encoded field block (GOAWAY ENHANCE_YOUR_CALM).')
+        doc='Maximum bytes in the HTTP/1.1 request-line and header block (400/431). Also bounds HTTP/2 encoded blocks and decoded field sections (name + value + 32 per field, including pseudoheaders); excess sends GOAWAY ENHANCE_YOUR_CALM. The decoded bound is advertised as SETTINGS_MAX_HEADER_LIST_SIZE, capped at 2^32-1. `0` disables advertisement and opens that decoder bound to 2^32-1.')
     body_chunk_size: int = setting(
         'BB_BODY_CHUNK_SIZE', 65536, minimum=1, section=_section,
         doc='Maximum read slice in bytes for chunked HTTP/1.1 request bodies, independent of peer-declared chunk size. Must be positive; invalid values use the default. Content-Length bodies use `BB_BODY_CHUNK_MAX` instead.')
