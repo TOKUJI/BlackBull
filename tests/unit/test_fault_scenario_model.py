@@ -540,6 +540,16 @@ async def test_a_peer_that_resets_ends_the_walk(cell, kind):
 
 
 @pytest.mark.asyncio
+async def test_a_spent_wait_times_out_without_reading():
+    close = b'HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'
+    result, _ = await _h1c((h1c.SendRawBytes(b'GET / HTTP/1.1\r\nHost: a\r\n\r\n'),
+                            h1c.ReadResponse(timeout=2.0),
+                            h1c.WaitForResponse(timeout=0.0), Sleep0()), [close])
+    assert (result.wait_timed_out, result.exception) == (True, None)
+    assert _completed(result) == 4
+
+
+@pytest.mark.asyncio
 async def test_an_h2_peer_protocol_violation_lands_on_the_result():
     rst_stream_too_long = b'\x00\x00\x08\x03\x00\x00\x00\x00\x01' + b'\x00' * 8
     result, _ = await _h2c((h2c.SendPreface(), h1c.ReadResponse(timeout=3.0),

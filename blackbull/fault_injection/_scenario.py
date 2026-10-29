@@ -385,6 +385,8 @@ class _Driver:
     async def _guarded_read(self, timeout: float):
         """The next message, or ``None`` once the miss is recorded."""
         try:
+            if timeout <= 0:
+                raise TimeoutError     # spent: a read could fail for its own reasons
             message = await self._read(timeout)
         except TimeoutError:
             self.result.wait_timed_out = True
