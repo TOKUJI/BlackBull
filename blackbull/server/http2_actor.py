@@ -185,9 +185,6 @@ class StreamActor(Actor):
                 self._conn, self._receive, self._send,
                 self._app, self._aggregator, self._force_asgi,
             ).run()
-            if getattr(self._send, '_poisoned', False):
-                # Content broke its length after HEADERS and the app carried on.
-                raise ValueError('response body broke its Content-Length')
         except FlowControlStalled:
             # CANCEL, not INTERNAL_ERROR — see rfc9113-implementation.md §10.5,
             # "Data dribble".
@@ -196,10 +193,11 @@ class StreamActor(Actor):
                     self._stream_id, ErrorCodes.CANCEL)
             )
         except Exception:
-            await self._http2_actor.send_frame(
-                self._http2_actor.factory.rst_stream(
-                    self._stream_id, ErrorCodes.INTERNAL_ERROR)
-            )
+            if not self._send._poisoned:    # the sender already reset it
+                await self._http2_actor.send_frame(
+                    self._http2_actor.factory.rst_stream(
+                        self._stream_id, ErrorCodes.INTERNAL_ERROR)
+                )
         finally:
             # ``None`` on the baseline hot path; ``_close_record`` tolerates it.
             _close_record(self._log_record)

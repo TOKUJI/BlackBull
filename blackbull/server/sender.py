@@ -15,9 +15,10 @@ from typing import NoReturn
 
 from ..protocol import hpack_fastpath
 from ..env import get_settings
-from ..protocol.framing import (_CRLF, NO_CONTENT_GENERATED_STATUSES,
+from ..protocol.framing import (_CRLF, _LENGTHLESS_STATUSES,
+                                NO_CONTENT_GENERATED_STATUSES,
                                 is_informational, stated_response_length)
-from ..protocol.frame_types import (HeaderFrameFlags, DataFrameFlags,
+from ..protocol.frame_types import (HeaderFrameFlags, DataFrameFlags, ErrorCodes,
                                     FrameBase, Headers, PushPromise, serialize_field_block,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
 from .cap_log import log_cap_hit
@@ -971,8 +972,8 @@ class HTTP2Sender(BaseSender):
         self._suppress_body = False
         # Content still owed to the stated length; None when none is stated.
         self._remaining: int | None = None
-        # Set once content broke its length after HEADERS left: the stream
-        # cannot be finished, only reset.
+        # Set once content broke its length after HEADERS left and the
+        # stream was reset for it.
         self._poisoned = False
         self._factory = factory
         self._stream_id = stream_id
@@ -1051,9 +1052,15 @@ class HTTP2Sender(BaseSender):
         if not lengths:
             self._remaining = None
             return head
-        code = int(status)
-        stated = stated_response_length(code, lengths)
-        self._remaining = (None if self._head_mode or code in NO_CONTENT_GENERATED_STATUSES
+        if len(lengths) == 1 and status not in _LENGTHLESS_STATUSES:
+            raw = lengths[0][1]
+            if raw.isdigit() and (raw[0] != 0x30 or len(raw) == 1):
+                # The usual case: one canonical length, kept as written.
+                self._remaining = (None if self._head_mode or status == 304
+                                   else int(raw))
+                return head
+        stated = stated_response_length(status, lengths)
+        self._remaining = (None if self._head_mode or status in NO_CONTENT_GENERATED_STATUSES
                            else stated)
         if stated is not None and len(lengths) == 1 and lengths[0][1] == b'%d' % stated:
             return head
@@ -1063,7 +1070,7 @@ class HTTP2Sender(BaseSender):
             fields.add(b'content-length', b'%d' % stated)
         return fields
 
-    def _refuse_length(self, problem: str) -> NoReturn:
+    async def _refuse_length(self, problem: str) -> NoReturn:
         """End a response whose content broke its stated length."""
         self._remaining = None
         if self._buffered_status is not None:
@@ -1077,7 +1084,10 @@ class HTTP2Sender(BaseSender):
             self._buffered_trailers = None
             self._expect_trailers = False
         else:
+            # HEADERS left: only this stream can end, and only by a reset.
             self._poisoned = True
+            await self._write(self._factory.rst_stream(
+                self._stream_id, ErrorCodes.INTERNAL_ERROR).save())
             self.retire_stream()
         raise ValueError(f'response body {problem} Content-Length')
 
@@ -1355,10 +1365,11 @@ class HTTP2Sender(BaseSender):
         remaining = self._remaining
         if remaining is not None:
             remaining -= len(payload)
-            if remaining < 0:
-                self._refuse_length('exceeds')
-            if end_stream and remaining:
-                self._refuse_length('is shorter than')
+            if remaining:
+                if remaining < 0:
+                    await self._refuse_length('exceeds')
+                if end_stream:
+                    await self._refuse_length('is shorter than')
             self._remaining = remaining
         if self._log_record is not None and payload:
             self._log_record.response_bytes += len(payload)
@@ -1437,7 +1448,7 @@ class HTTP2Sender(BaseSender):
             headers = self._buffered_trailers
             self._buffered_trailers = None
         if self._remaining:
-            self._refuse_length('is shorter than')
+            await self._refuse_length('is shorter than')
 
         if self._suppress_body and self._buffered_status is None:
             # RFC 9112 §6.3 rule 1: no trailer section either. The head
@@ -1589,7 +1600,11 @@ class HTTP2Sender(BaseSender):
                 return
             if body._header is not None:
                 status = HTTPStatus(body.status)
-                head = self._stated_fields(status, body._header)
+                head = body._header
+                if head.content_length:
+                    head = self._stated_fields(status, head)
+                else:
+                    self._remaining = None
                 await self._settle_buffered_head()
                 self._buffered_status = status
                 self._buffered_headers = head
