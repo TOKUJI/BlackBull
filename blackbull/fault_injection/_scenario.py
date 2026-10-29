@@ -382,43 +382,32 @@ class _Driver:
                 return
             self._completed(step)
 
+    async def _guarded_read(self, timeout: float):
+        """The next message, or ``None`` once the miss is recorded."""
+        try:
+            message = await self._read(timeout)
+        except TimeoutError:
+            self.result.wait_timed_out = True
+            return None
+        if message is None:
+            self.result.peer_closed = True
+        return message
+
     async def _wait(self, step: _WaitFor) -> None:
-        result = self.result
         deadline = time.monotonic() + step.timeout
-        while True:
-            remaining = deadline - time.monotonic()
-            try:
-                if remaining <= 0:
-                    raise TimeoutError
-                message = await self._read(remaining)
-            except TimeoutError:
-                result.wait_timed_out = True
-                return
-            if message is None:
-                result.peer_closed = True
-                return
+        while (message := await self._guarded_read(deadline - time.monotonic())) is not None:
             matched = self._matches(message, step.match)
             self._seen(message, kept=matched)
             if matched:
                 return
-            result.wait_skipped += 1
+            self.result.wait_skipped += 1
 
     async def _expect(self, step: _Expect) -> None:
-        result = self.result
-        try:
-            message = await self._read(step.timeout)
-        except TimeoutError:
-            result.wait_timed_out = True
-            message = None
-        else:
-            if message is None:
-                result.peer_closed = True
-        if message is None:
-            result.expectations.append((dict(step.match), False))
-            return
-        self._seen(message, kept=True)
-        result.expectations.append(
-            (dict(step.match), self._matches(message, step.match)))
+        message = await self._guarded_read(step.timeout)
+        matched = message is not None and self._matches(message, step.match)
+        if message is not None:
+            self._seen(message, kept=True)
+        self.result.expectations.append((dict(step.match), matched))
 
     def _seen(self, message, *, kept: bool) -> None:
         """Record a message read; *kept* is False for one a filter passed over."""

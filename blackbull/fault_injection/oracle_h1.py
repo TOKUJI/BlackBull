@@ -31,7 +31,7 @@ class Category(str, enum.Enum):
     NG_TRANSPORT_FAIL = 'NG_TRANSPORT_FAIL'   # nginx errored, BlackBull fine
     BB_TIMEOUT = 'BB_TIMEOUT'          # BlackBull stayed silent, nginx did not
     NG_TIMEOUT = 'NG_TIMEOUT'          # nginx ditto
-    BOTH_REJECTED = 'BOTH_REJECTED'    # same 4xx/5xx status, or both closed before responding
+    BOTH_REJECTED = 'BOTH_REJECTED'    # same final 4xx/5xx, or both closed after the same responses
     INCONCLUSIVE = 'INCONCLUSIVE'      # no verdict: both silent, both unreadable, or a premise did not hold
     HARNESS_ERROR = 'HARNESS_ERROR'    # the harness itself failed on either side
 
@@ -217,7 +217,7 @@ async def run_scenario(host: str, port: int,
     except Exception as exc:  # noqa: BLE001 — no connection, or the harness's own fault
         return SideOutcome(Observed.ERROR, exception=repr(exc),
                            elapsed_s=time.monotonic() - t0), wire
-    responses = tuple(normalize_response(r) for r in result.received)
+    responses = tuple(map(normalize_response, result.received))
     return SideOutcome(
         _observed(result),
         response=responses[-1] if responses else None,
