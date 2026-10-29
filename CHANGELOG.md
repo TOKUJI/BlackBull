@@ -59,7 +59,19 @@ metadata; reinstall an editable checkout after changing that version.
   - an HTTP/2 client `SendHeaders` block uses only the static table and never
     indexes, so it decodes the same whatever table size the peer advertised;
   - a fault server's `stop()` closes every accepted connection, including one
-    accepted while it stops; `start()` clears `last_result`.
+    accepted while it stops; `start()` clears `last_result`;
+  - a read step that finds the connection closed or reset sets the new
+    `peer_closed` on all four results and ends the scenario. The HTTP/1.1
+    client recorded it as an `exception`; the HTTP/2 client and fault server
+    took it for a completed step or a `wait_timed_out`. A client scenario
+    raises an exception that is not a peer or transport failure instead of
+    recording it;
+  - the HTTP/1.1 differential oracle accepts only outcomes both sides
+    confirmed alike. Two timeouts, or two runs that never reached a response
+    for any reason, were `BOTH_REJECTED`; each side is now `Observed`, and
+    silence, an unmet premise and a harness error categorise as
+    `INCONCLUSIVE` or `HARNESS_ERROR`. `SideOutcome` keeps the raw result,
+    and the security catalogue run reports a harness fault as a runner error.
 - An HTTP/2 client scenario's `Abort` closes the connection; it did nothing,
   so the peer saw the close only when the client exited.
 - HTTP/1.1 persistence follows RFC 9112 §9.3 on both roles: `close` ends the

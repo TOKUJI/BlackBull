@@ -41,6 +41,11 @@ from pathlib import Path
 
 import pytest
 
+from blackbull.fault_injection.oracle_h1 import Observed
+
+#: Every outcome of a case that ran against its server.
+_REACHED = frozenset(Observed) - {Observed.ERROR, Observed.NO_READ}
+
 #: One worker runs the module under `-n auto`, so a run starts one nginx, not
 #: one per worker racing the Docker Desktop port relay.
 pytestmark = [pytest.mark.asyncio, pytest.mark.xdist_group('nginx_peer')]
@@ -701,13 +706,13 @@ class TestTheBrokenClientCellsReachARealServer:
         'obs_fold_header', 'negative_content_length', 'chunk_size_not_hex',
         'nul_in_header_value', 'body_shorter_than_declared',
     ])
-    async def test_cell_a_case_is_delivered_and_answered(self, case_name):
-        """Every named HTTP/1.1 client case reaches a server and gets a verdict.
+    async def test_cell_a_case_is_delivered(self, case_name):
+        """Every named HTTP/1.1 client case runs against a real server.
 
         The assertion is about delivery, not about which status: whether a
         given malformation earns 400 is the server author's decision and
-        implementations differ.  What must hold is that the scenario ran
-        and something came back.
+        implementations differ.  Silence is an outcome too — a server may
+        wait out a body that never arrives.
         """
         from blackbull.fault_injection.catalogue.h1_client import CATALOGUE
         from blackbull.fault_injection.oracle_h1 import run_scenario
@@ -717,9 +722,8 @@ class TestTheBrokenClientCellsReachARealServer:
             outcome, _ = await run_scenario('127.0.0.1', server.port,
                                             CATALOGUE[case_name]())
 
-        assert outcome.ok or outcome.exception, (
-            f'{case_name} produced neither a response nor a failure — '
-            f'the scenario did not reach the server')
+        assert outcome.observed in _REACHED, (
+            f'{case_name} did not run against the server: {outcome}')
         if outcome.ok:
             assert isinstance(outcome.response['status'], int)
 
@@ -778,9 +782,8 @@ class TestTheBrokenClientCellsReachARealServer:
         outcome, wire = await run_scenario(host, port, CATALOGUE[case_name]())
 
         assert wire, f'{case_name} put no bytes on the wire'
-        assert outcome.ok or outcome.exception, (
-            f'{case_name} produced neither a response nor a failure from '
-            f'nginx — the scenario did not reach it')
+        assert outcome.observed in _REACHED, (
+            f'{case_name} did not run against nginx: {outcome}')
 
     @pytest.mark.timeout(_NGINX_PEER_BUDGET)
     async def test_cell_d_observes_a_verdict_from_nginx(self, nginx_peer):

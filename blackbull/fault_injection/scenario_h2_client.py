@@ -160,7 +160,8 @@ class ScenarioH2ClientResult:
     """
     #: The frame a ``ReadResponse`` step read, if any.
     response: object | None = None
-    #: ``repr()`` of whatever went wrong, if anything.
+    #: ``repr()`` of a peer or transport failure other than a close; the
+    #: harness's own exceptions propagate.
     exception: str | None = None
     #: A ``ReadResponse`` step expired.
     timed_out: bool = False
@@ -187,6 +188,8 @@ class ScenarioH2ClientResult:
     #: step still counts as completed and the next step runs; this is what
     #: distinguishes a per-step miss from a transport error in ``exception``.
     wait_timed_out: bool = False
+    #: The peer closed or reset the connection, which ended the walk.
+    peer_closed: bool = False
 
 
 def scenario_to_json(scenario: ScenarioH2Client) -> str:

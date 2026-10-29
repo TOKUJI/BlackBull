@@ -150,6 +150,8 @@ class ScenarioH2Result:
     #: A ``WaitForClientFrame`` or ``ExpectClientFrame`` ran out of time; the
     #: next step still ran, unlike a transport error in ``exception``.
     wait_timed_out: bool = False
+    #: The peer closed or reset the connection, which ended the walk.
+    peer_closed: bool = False
     #: An ``Abort`` or ``CloseGracefully`` step ended the scenario.
     terminated: bool = False
     elapsed_s: float = 0.0

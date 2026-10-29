@@ -56,9 +56,8 @@ class _H2Connection(_ServerConnection):
             self.inbound.cancel()
 
     def failed(self, exc: Exception) -> None:
-        if not isinstance(exc, (ConnectionResetError, BrokenPipeError)):
-            super().failed(exc)
-            logger.warning('scenario step raised: %r', exc)
+        super().failed(exc)
+        logger.warning('scenario step raised: %r', exc)
 
     async def _inbound_frames(self) -> None:
         """Decode inbound frames onto the queue the read steps consume."""
@@ -77,7 +76,7 @@ class _H2Connection(_ServerConnection):
                     continue
                 await self.frames.put(frame)
         except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
-            pass
+            await self.frames.put(None)
 
     async def _close(self, *, graceful: bool) -> None:
         # Not awaited: a TLS peer may never answer close_notify.
