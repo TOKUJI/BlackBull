@@ -3877,6 +3877,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.messages.encode_short_ack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        encode_short_ack
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.messages.encode_variable_byte_integer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6365,6 +6376,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.mqtt.messages.encode_short_ack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        encode_short_ack
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.mqtt.messages.encode_variable_byte_integer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7888,6 +7910,26 @@ decodes normally: §1.5.5's minimum-bytes rule is not enforced.</p>
     <div class="doc doc-contents ">
 
         <p>§2.2.2 — Encode a properties dict to <code>Property Length</code> + body.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.mqtt.messages.encode_short_ack" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">encode_short_ack</span><span class="p">(</span><span class="n">message</span><span class="p">)</span></code>
+
+<a href="#blackbull.mqtt.messages.encode_short_ack" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>PUBACK, PUBREC, PUBREL or PUBCOMP without its Property Length, and
+without a Success reason code (§3.4.2.1 and its kin); <code>None</code> for any
+other packet or one with properties.</p>
 
 
     </div>
