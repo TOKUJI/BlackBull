@@ -121,6 +121,20 @@ async def test_pingreq_answered_locally():
     assert any(isinstance(p, MQTTPingresp) for p in pkts)
 
 
+async def test_a_small_maximum_packet_size_gets_the_short_puback_on_the_wire():
+    """§3.4.2.1 — the 4-byte Success form reaches a peer whose limit is 5."""
+    async with _running_broker() as broker:
+        reader = _FakeReader()
+        writer, task = await _serve(broker, reader, _ctx())
+        reader.feed_packet(MQTTConnect(client_id='c1', clean_start=True, keep_alive=60,
+                                       properties={'maximum_packet_size': 5}))
+        reader.feed_packet(MQTTPublish(topic='t', payload=b'', qos=1, packet_id=5))
+        await asyncio.sleep(0.1)
+        wire = bytes(writer.written)
+        await _drain(task)
+    assert wire.endswith(bytes((0x40, 2, 0, 5)))
+
+
 async def test_a_rejected_pubrec_on_the_wire_frees_the_window():
     """§4.9 — a PUBREC carrying an error code stops charging the window,
     so the next message goes out without waiting for a PUBCOMP."""
