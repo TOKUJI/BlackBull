@@ -112,7 +112,11 @@ async def _observe(behaviour, steps):
         except (asyncio.IncompleteReadError, ConnectionError):
             writer.close()
             return
-        await behaviour(writer)
+        try:
+            await behaviour(writer)
+        finally:
+            # Server.wait_closed() waits for every connection on 3.12.
+            writer.close()
 
     server = await asyncio.start_server(serve, '127.0.0.1', 0)
     port = server.sockets[0].getsockname()[1]
