@@ -148,8 +148,7 @@ class TestSlowlorisDefence:
         before our test timeout fires.
 
         Expressed as a one-step scenario: just ``ReadResponse`` against
-        an empty pipe.  The server-initiated close manifests as the
-        read raising ``ConnectionError`` (folded into ``result.exception``).
+        an empty pipe.  The server-initiated close sets ``result.peer_closed``.
         """
         scenario = Scenario(steps=(
             ReadResponse(timeout=_SHORT_HEADER_TIMEOUT + 2.0),
