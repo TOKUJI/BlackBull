@@ -496,10 +496,10 @@ class BrokerActor(Actor):
     def _reply(self, conn, packet) -> Awaitable[None]:
         """Send an acknowledgement within the peer's Maximum Packet Size.
 
-        Full, else its short Success form; one that fits neither cannot be
-        sent (§3.1.2-24) and ends the connection.  Every admitted peer's limit
-        is at least the smallest CONNACK, so DISCONNECT, AUTH and PINGRESP
-        always fit and are sent directly.  Await the result.
+        Full, else its shortest form.  Every admitted peer's limit is at least
+        the smallest CONNACK, which every PUBACK, PUBREC, PUBREL and PUBCOMP,
+        DISCONNECT, AUTH and PINGRESP fit; only a SUBACK or UNSUBACK can fail
+        to (§3.1.2-24), and that ends the connection.  Await the result.
         """
         send = Send(packet=packet)
         limit = self._peer_max_packet_size.get(conn)

@@ -10,9 +10,10 @@ Then the data path (§3.1.2-25): an Application Message whose packet the
 limit excludes is dropped whole at the delivery decision — no Packet
 Identifier booked, no pending entry, nothing to resend — and its flow is
 treated complete, including a queued PUBLISH re-drive that no longer fits
-the current connection.  An acknowledgement falls back to its short Success
-form, and one that fits in neither form ends the connection.  Probe-derived
-bounds keep the tests honest about actual encoded sizes.
+the current connection.  An acknowledgement falls back to its form without
+the Property Length; a SUBACK or UNSUBACK that cannot fit ends the
+connection.  Probe-derived bounds keep the tests honest about actual encoded
+sizes.
 """
 
 from __future__ import annotations
@@ -527,11 +528,12 @@ class TestApplicationMessageDiscard:
 
 
 # §3.1.2-24 binds the acknowledgements as well.  Every admitted peer's limit is
-# at least the 5-byte CONNACK, so DISCONNECT, AUTH and PINGRESP always fit.
+# at least the 5-byte CONNACK, so every acknowledgement fits in its shortest
+# form and DISCONNECT, AUTH and PINGRESP always fit.
 
-async def _drive(*msgs) -> None:
+async def _drive(*msgs, **broker_kw) -> None:
     """Feed *msgs* through a running broker's inbox, then let it settle."""
-    broker = BrokerActor()
+    broker = BrokerActor(**broker_kw)
     task = asyncio.create_task(broker.run())
     try:
         for msg in msgs:
@@ -549,9 +551,9 @@ def _at_floor(conn, client_id='floor'):
         properties={'maximum_packet_size': _named_floor()}), sender=conn)
 
 
-def _publish(conn, qos, topic='t'):
+def _publish(conn, qos, topic='t', payload=b'', **kw):
     return ClientPublish(publish=MQTTPublish(
-        topic=topic, payload=b'', qos=qos, packet_id=7), sender=conn)
+        topic=topic, payload=payload, qos=qos, packet_id=7, **kw), sender=conn)
 
 
 def _sent(conn, cls):
@@ -582,12 +584,37 @@ class TestAcknowledgementsHonourTheLimit:
         assert decode_packet(send.wire_bytes()) == MQTTPubcomp(packet_id=7)
         _assert_within(conn, _named_floor())
 
-    async def test_an_error_ack_that_cannot_fit_ends_the_connection(self):
+    async def test_an_error_ack_that_fits_only_without_properties_is_sent_so(self):
         conn = RecordingConn()
         await _drive(_at_floor(conn), _publish(conn, 1, topic='a/+'))
-        assert _sent(conn, MQTTPuback) == []
-        assert _ended_too_large(conn)
+        [send] = _sent(conn, MQTTPuback)
+        assert decode_packet(send.wire_bytes()) == MQTTPuback(
+            packet_id=7, reason_code=ReasonCode.TOPIC_NAME_INVALID)
         _assert_within(conn, _named_floor())
+        assert not any(isinstance(m, Close) for m in conn.outbox)
+
+    async def test_a_stray_pubrel_is_answered_not_found_within_the_limit(self):
+        conn = RecordingConn()
+        await _drive(_at_floor(conn), ClientPubrel(packet_id=9, sender=conn))
+        [send] = _sent(conn, MQTTPubcomp)
+        assert decode_packet(send.wire_bytes()) == MQTTPubcomp(
+            packet_id=9, reason_code=ReasonCode.PACKET_IDENTIFIER_NOT_FOUND)
+        _assert_within(conn, _named_floor())
+
+    async def test_a_refused_qos2_retain_is_acknowledged_and_routed_once(self):
+        filler, sub, pub = RecordingConn(), RecordingConn(), RecordingConn()
+        await _drive(
+            Attach(connect=_connect(client_id='filler'), sender=filler),
+            _publish(filler, 0, topic='other', payload=b'x', retain=True),
+            Attach(connect=_connect(client_id='sub'), sender=sub),
+            ClientSubscribe(subscribe=MQTTSubscribe(
+                packet_id=1, subscriptions=[('t', 2)]), sender=sub),
+            _at_floor(pub, 'pub'), _publish(pub, 2, retain=True, payload=b'x'),
+            max_retained=1)
+        [send] = _sent(pub, MQTTPubrec)
+        assert decode_packet(send.wire_bytes()).reason_code == ReasonCode.QUOTA_EXCEEDED
+        _assert_within(pub, _named_floor())
+        assert len(_sent(sub, MQTTPublish)) == 1
 
     @pytest.mark.parametrize('kind', ['subscribe', 'unsubscribe'])
     async def test_a_suback_or_unsuback_that_cannot_fit_ends_the_connection(self, kind):

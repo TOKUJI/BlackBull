@@ -1070,12 +1070,16 @@ def encode_packet(message: MQTTMessage) -> bytes:
 
 
 def encode_short_ack(message: _PacketIdAck) -> bytes | None:
-    """PUBACK, PUBREC, PUBREL or PUBCOMP without its reason code and property
-    length (§3.4.2.1 and its kin), or ``None`` when it has something to say."""
-    if message.reason_code or message.properties:
+    """PUBACK, PUBREC, PUBREL or PUBCOMP without its Property Length, and
+    without a Success reason code (§3.4.2.1 and its kin); ``None`` when it
+    carries properties."""
+    if message.properties:
         return None
     _cls, first, flags, _header, _fields, _tail, _omit = _BY_CLASS[type(message)]
-    return bytes((first | flags, 2)) + message.packet_id.to_bytes(2, 'big')
+    head = message.packet_id.to_bytes(2, 'big')
+    if not message.reason_code:
+        return bytes((first | flags, 2)) + head
+    return bytes((first | flags, 3)) + head + bytes((message.reason_code,))
 
 
 def decode_packet(data: bytes) -> MQTTMessage:
