@@ -104,7 +104,10 @@ class HTTP2Connection:
 
     async def _undecodable(self, exc: Exception) -> None:
         """A frame or field block that cannot be read ends the connection (§4.3)."""
-        if isinstance(exc, FrameFormatError):
+        error_code = self._field_block_refused(exc)
+        if error_code is not None:
+            await self._connection_error(error_code, str(exc))
+        elif isinstance(exc, FrameFormatError):
             await self._connection_error(exc.error_code, str(exc))
         else:
             await self._connection_error(
@@ -161,7 +164,6 @@ class HTTP2Connection:
     async def _unloadable(self, exc: Exception) -> None:
         """End the connection over a frame ``factory.load`` raised *exc* for."""
         if isinstance(exc, (HPACKError, FrameFormatError)):
-            self._field_block_refused(exc)
             await self._undecodable(exc)
         else:
             # Our bug, not the peer's: say so rather than blame its encoding.
@@ -358,7 +360,6 @@ class HTTP2Connection:
             open_block.parse_payload()
         except (HPACKError, FrameFormatError) as exc:
             # §4.3: hpack may have applied part of the block already.
-            self._field_block_refused(exc)
             await self._undecodable(exc)
             return None
         return open_block
@@ -409,8 +410,9 @@ class HTTP2Connection:
             await self._connection_error(ErrorCodes.FLOW_CONTROL_ERROR,
                                          f'SETTINGS_INITIAL_WINDOW_SIZE overflow: {window}')
             return
+        settings = frame.settings
         try:
-            max_frame = peer_max_frame_size(frame.settings)
+            max_frame = peer_max_frame_size(settings)
         except FrameFormatError as error:
             await self._connection_error(error.error_code, str(error))
             return
@@ -420,7 +422,7 @@ class HTTP2Connection:
             self._set_peer_initial_window(window)
         if max_frame is not None:
             self.factory.peer_max_frame_size = max_frame
-        self.factory.apply_peer_header_table_size(frame.settings)
+        self.factory.apply_peer_header_table_size(settings)
         await self._send_control(self.factory.settings(ack=True))
 
     def _set_peer_initial_window(self, window: int) -> None:
@@ -499,7 +501,7 @@ class HTTP2Connection:
     def _on_block_opened(self) -> None:
         pass
 
-    def _field_block_refused(self, exc: Exception) -> None:
+    def _field_block_refused(self, exc: Exception) -> ErrorCodes | None:
         pass
 
     async def _return_connection_credit(self, n: int) -> None:

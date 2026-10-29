@@ -10,6 +10,7 @@ pulling in the codec.
 from enum import Enum, IntEnum, StrEnum
 from io import BytesIO
 from itertools import chain
+from struct import iter_unpack
 
 from . import hpack_fastpath, structured_fields
 from .field_grammar import FIELD_VALUE_ALLOWED_OCTETS, LOWERCASE_TCHAR_OCTETS
@@ -240,14 +241,14 @@ class SettingFrame(FrameBase):
     FRAME_TYPE = FrameTypes.SETTINGS
 
     # RFC 9113 §6.5.2: SETTINGS identifier to attribute name.
-    _SETTING_ATTRS: dict[bytes, str] = {
-        b'\x00\x01': 'header_table_size',
-        b'\x00\x02': 'enable_push',
-        b'\x00\x03': 'max_concurrent_streams',
-        b'\x00\x04': 'initial_window_size',
-        b'\x00\x05': 'max_frame_size',
-        b'\x00\x06': 'max_header_list_size',
-        b'\x00\x08': 'enable_connect_protocol',
+    _SETTING_ATTRS: dict[int, str] = {
+        1: 'header_table_size',
+        2: 'enable_push',
+        3: 'max_concurrent_streams',
+        4: 'initial_window_size',
+        5: 'max_frame_size',
+        6: 'max_header_list_size',
+        8: 'enable_connect_protocol',
     }
 
     def __init__(self, length: int, type_, flags: int, stream_id: int, *, data=None, **kwds):
@@ -256,26 +257,18 @@ class SettingFrame(FrameBase):
             logger.debug('SettingFrame is called.')
         self._payload = data or b''
 
-        payload = BytesIO(data or b'')
-        while True:
-            identifier = payload.read(2)
-            if len(identifier) != 2:
-                break
+        for identifier, parsed in self._iter_settings():
+            attr = self._SETTING_ATTRS.get(identifier)
+            if attr is None:
+                logger.error(f'unknown identifier: {identifier.to_bytes(2, "big")}, {parsed}')
+                continue
+            setattr(self, attr, parsed)
+            if _DEBUG:
+                logger.debug('{}: {}'.format(attr, parsed))
 
-            value = payload.read(4)
-            if len(value) != 4:
-                break
-            self._apply_setting(identifier, value)
-
-    def _apply_setting(self, identifier: bytes, value: bytes) -> None:
-        attr = self._SETTING_ATTRS.get(identifier)
-        parsed = int.from_bytes(value, 'big', signed=False)
-        if attr is None:
-            logger.error(f'unknown identifier: {identifier}, {parsed}')
-            return
-        setattr(self, attr, parsed)
-        if _DEBUG:
-            logger.debug('{}: {}'.format(attr, parsed))
+    def _iter_settings(self):
+        payload = self._payload
+        return iter_unpack('!HI', payload[:len(payload) // 6 * 6])
 
     @property
     def payload(self) -> bytes:
@@ -290,12 +283,7 @@ class SettingFrame(FrameBase):
         A payload that does not divide into six-octet entries yields the
         complete entries it holds.
         """
-        payload = self._payload
-        return [
-            (int.from_bytes(payload[index:index + 2], 'big'),
-             int.from_bytes(payload[index + 2:index + 6], 'big'))
-            for index in range(0, len(payload) - 5, 6)
-        ]
+        return list(self._iter_settings())
 
     def save(self):
         self.length = len(self._payload)

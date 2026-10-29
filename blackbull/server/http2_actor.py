@@ -10,6 +10,8 @@ from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from typing import Protocol, runtime_checkable
 
+from hpack import OversizedHeaderListError
+
 from ..actor import Actor, Message
 from ..env import get_settings
 from ..event_aggregator import EventAggregator
@@ -245,8 +247,10 @@ class HTTP2Actor(Actor, HTTP2Connection):
 
         # Read from env at construction so tests can override before run().
         _cfg = get_settings()
-        self._init_connection(FrameFactory(), field_block_max=_cfg.header_max_total,
-                              field_block_cap='header_max_total')
+        header_list_size = min(_cfg.header_max_total, 0xFFFFFFFF) or 0xFFFFFFFF
+        self._init_connection(
+            FrameFactory(max_header_list_size=header_list_size),
+            field_block_max=_cfg.header_max_total, field_block_cap='header_max_total')
         self._control_sender = SenderFactory.http2(writer, self.factory, 0)
         self.max_concurrent_streams: int = _cfg.h2_max_concurrent_streams
         self._request_timeout: float = _cfg.request_timeout
@@ -507,6 +511,15 @@ class HTTP2Actor(Actor, HTTP2Connection):
         # The liveness deadline was chosen before the block opened.
         self._check_liveness()
 
+    def _field_block_refused(self, exc: Exception) -> ErrorCodes | None:
+        if not isinstance(exc, OversizedHeaderListError):
+            return None
+        limit = self.factory.decoder.max_header_list_size
+        # HPACK reports no exact total after aborting; this is a lower bound.
+        log_cap_hit('header_max_total', requested=limit + 1, limit=limit,
+                    protocol='http2')
+        return ErrorCodes.ENHANCE_YOUR_CALM
+
     def _make_done_cb(
         self, stream_id: int, *, is_ws: bool = False,
     ) -> Callable[[asyncio.Task], None]:
@@ -632,6 +645,8 @@ class HTTP2Actor(Actor, HTTP2Connection):
             enable_connect_protocol=cfg.h2_enable_websocket,
             initial_window_size=cfg.h2_initial_window_size,
             max_concurrent_streams=self.max_concurrent_streams,
+            max_header_list_size=(self.factory.decoder.max_header_list_size
+                                  if self._field_block_max else None),
         ))
         self._ws_over_h2_enabled = cfg.h2_enable_websocket
         self._force_asgi = cfg.force_asgi_scope

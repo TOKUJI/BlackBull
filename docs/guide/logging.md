@@ -312,7 +312,7 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_MAX_CONNECTIONS` | accept loop — a refusal (`limit` is the cap) or a pause in accepting (`limit` is slightly above the cap) |
 | `BB_HEADER_TIMEOUT` | slowloris defence — headers didn't arrive in time |
 | `BB_HEADER_MAX_LINE` | per-line header limit exceeded |
-| `BB_HEADER_MAX_TOTAL` | aggregate header block exceeded (H/1.1 + H/2 CONTINUATION) |
+| `BB_HEADER_MAX_TOTAL` | HTTP/1.1 header block or HTTP/2 encoded/decoded field section exceeded; decoded `requested` is a lower bound (`limit + 1`) |
 | `BB_BODY_TIMEOUT` | body bytes didn't arrive in time |
 | `BB_MAX_BODY_SIZE` | request body over the total cap (H/1.1 + H/2; `requested` is the declared length at head time, the running total mid-stream) |
 | `BB_MIN_BODY_RATE` | body delivered below the minimum rate past the grace period — `requested` is the observed rate in bytes/second |
