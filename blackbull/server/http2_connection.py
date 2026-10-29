@@ -443,7 +443,7 @@ class HTTP2Connection:
         if delta:
             for sender in self._senders.values():
                 sender.adjust_initial_window(delta)
-            # A window credited before its stream had a sender moves too.
+            # So does the window a stream keeps once its sender is done.
             for stream in self.root_stream.children.values():
                 if hasattr(stream, 'window_size'):
                     stream.window_size += delta

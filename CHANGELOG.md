@@ -43,8 +43,7 @@ metadata; reinstall an editable checkout after changing that version.
 
 - HTTP/2, both roles: a SETTINGS_INITIAL_WINDOW_SIZE change that would lift
   an open stream's flow-control window above 2^31-1 is a connection
-  `FLOW_CONTROL_ERROR` (RFC 9113 §6.9.2); it was applied. A window credited
-  before its stream had a sender now moves with the change too.
+  `FLOW_CONTROL_ERROR` (RFC 9113 §6.9.2); it was applied.
 - MQTT: every acknowledgement honours the peer's Maximum Packet Size. One
   that fits only without its Property Length is sent that way (a PUBREL
   re-drive was dropped); a SUBACK or UNSUBACK that cannot fit ends the
