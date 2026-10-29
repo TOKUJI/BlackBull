@@ -14,7 +14,7 @@ from .field_grammar import FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS
 __all__ = ('NO_CONTENT_GENERATED_STATUSES', 'NO_CONTENT_STATUSES',
            'TransferCoding', 'is_informational', 'method_is',
            'parse_content_length', 'parse_status', 'response_has_content',
-           'split_transfer_codings')
+           'stated_response_length', 'split_transfer_codings')
 
 
 #: End of an HTTP/1 message head (RFC 9112 §2.1).
@@ -176,6 +176,27 @@ NO_CONTENT_STATUSES: frozenset[int] = frozenset(range(100, 200)) | {204, 304}
 #: What a server may not generate content in. RFC 9110 §15.3.6 adds 205 to
 #: the set above, and only to what it sends.
 NO_CONTENT_GENERATED_STATUSES: frozenset[int] = NO_CONTENT_STATUSES | {205}
+
+
+#: What a server's response states no length in at all (RFC 9110 §8.6,
+#: §15.3.6): no content, and unlike 304 no representation to describe.
+_LENGTHLESS_STATUSES: frozenset[int] = NO_CONTENT_GENERATED_STATUSES - {304}
+
+
+def stated_response_length(status: int,
+                           lengths: list[tuple[bytes, bytes]] | None) -> int | None:
+    """The length a server's response states, from its ``Content-Length`` fields.
+
+    ``None`` when it states none: no field, or a status that cannot carry one
+    (1xx, 204, 205).  For HEAD and 304 it is metadata; otherwise the content
+    must match it.  Raises ``ValueError`` for fields that do not agree on one
+    number.
+    """
+    if not lengths or status in _LENGTHLESS_STATUSES:
+        return None
+    if len(lengths) == 1 and lengths[0][1].isdigit():
+        return int(lengths[0][1])
+    return parse_content_length(lengths)
 
 
 def is_informational(status: int) -> bool:
