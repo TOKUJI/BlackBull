@@ -259,9 +259,10 @@ async with HTTP1Client('127.0.0.1', 8080) as client:
     assert result.response is not None or result.timed_out
 ```
 
-In all four halves, a read step that finds the connection closed or reset
-sets `result.peer_closed` and ends the scenario; `wait_timed_out` means only
-that time ran out.
+In all four halves, a read step that meets end of stream sets
+`result.peer_closed` and later steps still run, since the peer may only have
+half-closed; a reset sets it and ends the scenario.  `wait_timed_out` means
+only that time ran out.
 
 The matching differential oracle
 (`blackbull.fault_injection.run_scenario`) drives the same scenario

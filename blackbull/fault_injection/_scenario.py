@@ -45,7 +45,7 @@ class ReadResponse:
     """Read one message: an HTTP/1.1 response, or one HTTP/2 frame.
 
     On ``timeout`` the scenario ends with ``timed_out`` set and the step
-    uncounted; on a closed connection, likewise with ``peer_closed``.
+    uncounted.  End of stream sets ``peer_closed`` and the scenario goes on.
     """
     timeout: float = 5.0
 
@@ -313,7 +313,7 @@ def _from_v1(record: dict, base64_payloads: bool, ops: dict) -> dict:
 
 
 _WRITE, _END = 'write', 'end'
-#: How a peer ending the connection surfaces when it is not a plain EOF.
+#: The peer is gone, not merely done sending: the walk ends.
 _PEER_GONE = (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError)
 
 
@@ -371,21 +371,18 @@ class _Driver:
                     return
                 if message is None:
                     result.peer_closed = True
-                    return
-                self._seen(message, kept=True)
+                else:
+                    self._seen(message, kept=True)
             elif action is _WaitFor:
-                if not await self._wait(step):
-                    return
+                await self._wait(step)
             elif action is _Expect:
-                if not await self._expect(step):
-                    return
+                await self._expect(step)
             else:
                 await self._ended(step)
                 return
             self._completed(step)
 
-    async def _wait(self, step: _WaitFor) -> bool:
-        """False when the peer closed, which ends the walk."""
+    async def _wait(self, step: _WaitFor) -> None:
         result = self.result
         deadline = time.monotonic() + step.timeout
         while True:
@@ -396,32 +393,32 @@ class _Driver:
                 message = await self._read(remaining)
             except TimeoutError:
                 result.wait_timed_out = True
-                return True
+                return
             if message is None:
                 result.peer_closed = True
-                return False
+                return
             matched = self._matches(message, step.match)
             self._seen(message, kept=matched)
             if matched:
-                return True
+                return
             result.wait_skipped += 1
 
-    async def _expect(self, step: _Expect) -> bool:
-        """False when the peer closed, which ends the walk."""
+    async def _expect(self, step: _Expect) -> None:
         result = self.result
         try:
             message = await self._read(step.timeout)
         except TimeoutError:
             result.wait_timed_out = True
-            result.expectations.append((dict(step.match), False))
-            return True
+            message = None
+        else:
+            if message is None:
+                result.peer_closed = True
         if message is None:
-            result.peer_closed = True
-            return False
+            result.expectations.append((dict(step.match), False))
+            return
         self._seen(message, kept=True)
         result.expectations.append(
             (dict(step.match), self._matches(message, step.match)))
-        return True
 
     def _seen(self, message, *, kept: bool) -> None:
         """Record a message read; *kept* is False for one a filter passed over."""

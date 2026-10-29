@@ -23,13 +23,19 @@ def _response(status: int) -> dict:
     return {'status': status, 'headers': [], 'body': b''}
 
 
+def _side(observed: Observed, *statuses: int, **kwargs) -> SideOutcome:
+    responses = tuple(_response(s) for s in statuses)
+    return SideOutcome(observed, response=responses[-1] if responses else None,
+                       responses=responses, **kwargs)
+
+
 _OUTCOMES = {
-    'ok200': SideOutcome(Observed.RESPONSE, response=_response(200)),
-    'ok404': SideOutcome(Observed.RESPONSE, response=_response(404)),
+    'ok200': _side(Observed.RESPONSE, 200),
+    'ok404': _side(Observed.RESPONSE, 404),
     'closed': SideOutcome(Observed.CLOSED),
     'broken': SideOutcome(Observed.BROKEN, exception="ProtocolError('x')"),
     'timeout': SideOutcome(Observed.TIMEOUT, exception='TimeoutError()'),
-    'unmet': SideOutcome(Observed.UNMET, response=_response(200)),
+    'unmet': _side(Observed.UNMET, 200),
     'no_read': SideOutcome(Observed.NO_READ),
     'error': SideOutcome(Observed.ERROR, exception="LookupError('x')"),
 }
@@ -52,6 +58,7 @@ def test_a_harness_error_on_either_side_is_reported_as_such(other):
 
 @pytest.mark.parametrize('ng,bb', [
     ('timeout', 'timeout'),
+    ('broken', 'broken'),
     *[(u, o) for u in ('unmet', 'no_read') for o in _OUTCOMES if o != 'error'],
     *[(o, u) for u in ('unmet', 'no_read') for o in _OUTCOMES if o != 'error'],
 ])
@@ -64,6 +71,25 @@ def test_silence_against_an_answer_blames_the_silent_side(answer):
     timeout, other = _OUTCOMES['timeout'], _OUTCOMES[answer]
     assert categorize(other, timeout) is Category.BB_TIMEOUT
     assert categorize(timeout, other) is Category.NG_TIMEOUT
+
+
+@pytest.mark.parametrize('partial', [
+    _side(Observed.CLOSED, 200),
+    _side(Observed.TIMEOUT, 200),
+    _side(Observed.BROKEN, 200),
+    _side(Observed.RESPONSE, 200),
+], ids=['closed', 'timeout', 'broken', 'fewer'])
+def test_a_side_that_answered_only_part_of_the_exchange_is_not_accepted(partial):
+    whole = _side(Observed.RESPONSE, 200, 200)
+    assert categorize(whole, partial) not in ACCEPTED_CATEGORIES
+    assert categorize(partial, whole) not in ACCEPTED_CATEGORIES
+
+
+def test_every_response_is_compared_not_only_the_newest():
+    assert categorize(_side(Observed.CLOSED, 200, 400),
+                      _side(Observed.CLOSED, 404, 400)) is Category.STATUS_DIFFER
+    assert categorize(_side(Observed.RESPONSE, 200, 400),
+                      _side(Observed.RESPONSE, 200, 400)) is Category.BOTH_REJECTED
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +178,14 @@ async def test_each_outcome_is_observed_as_what_it_is(name):
     assert outcome.observed is observed, outcome
     assert outcome.result is not None
     assert outcome.elapsed_s > 0
+
+
+@pytest.mark.asyncio
+async def test_a_side_that_closes_after_one_of_two_answers_is_seen_closed():
+    two = h1c.SendRawBytes(b'GET / HTTP/1.1\r\nHost: a\r\n\r\n' * 2)
+    outcome = await _observe(_answers(_reply(200)), (two, _READ, _READ))
+    assert outcome.observed is Observed.CLOSED
+    assert [r['status'] for r in outcome.responses] == [200]
 
 
 @pytest.mark.asyncio

@@ -235,7 +235,7 @@ class ScenarioH1ServerResult:
     exception: BaseException | None = None
     #: True when a ``WaitForRequest`` step expired without a request head.
     wait_timed_out: bool = False
-    #: The peer closed or reset the connection, which ended the walk.
+    #: The peer finished sending (later steps still run) or reset the connection.
     peer_closed: bool = False
     #: True when a terminal step (``Abort`` / ``CloseGracefully``) ran.
     terminated: bool = False

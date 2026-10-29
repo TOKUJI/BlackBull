@@ -191,7 +191,7 @@ class ScenarioResult:
     #: step still counts as completed and the next step runs; this is what
     #: distinguishes a per-step miss from a transport error in ``exception``.
     wait_timed_out: bool = False
-    #: The peer closed or reset the connection, which ended the walk.
+    #: The peer finished sending (later steps still run) or reset the connection.
     peer_closed: bool = False
 
 

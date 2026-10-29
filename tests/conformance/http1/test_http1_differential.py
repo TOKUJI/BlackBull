@@ -567,18 +567,16 @@ def dump(ctx: DiffContext) -> str:
         'scenario': ctx.scenario.to_json().splitlines(),
         'wire_request': _json_default(ctx.wire_request),
         'nginx': {
-            'ok': ctx.nginx.ok,
+            'observed': ctx.nginx.observed.value,
             'elapsed_s': round(ctx.nginx.elapsed_s, 4),
-            'response': ctx.nginx.response,
+            'responses': ctx.nginx.responses,
             'exception': ctx.nginx.exception,
-            'timed_out': ctx.nginx.timed_out,
         },
         'blackbull': {
-            'ok': ctx.blackbull.ok,
+            'observed': ctx.blackbull.observed.value,
             'elapsed_s': round(ctx.blackbull.elapsed_s, 4),
-            'response': ctx.blackbull.response,
+            'responses': ctx.blackbull.responses,
             'exception': ctx.blackbull.exception,
-            'timed_out': ctx.blackbull.timed_out,
         },
         'notes': ctx.notes,
     }
@@ -637,10 +635,14 @@ def _maybe_dump_corpus(ctx: DiffContext) -> None:
         'captured_at_unix': int(_time.time()),
         'wire_request_latin1': ctx.wire_request.decode(
             'latin-1', errors='backslashreplace'),
+        'nginx_observed': ctx.nginx.observed.value,
         'nginx_exception': ctx.nginx.exception,
         'nginx_status': (ctx.nginx.response or {}).get('status'),
+        'nginx_responses': len(ctx.nginx.responses),
+        'blackbull_observed': ctx.blackbull.observed.value,
         'blackbull_exception': ctx.blackbull.exception,
         'blackbull_status': (ctx.blackbull.response or {}).get('status'),
+        'blackbull_responses': len(ctx.blackbull.responses),
     }
     base.with_suffix('.meta.json').write_text(json.dumps(meta, indent=2))
 

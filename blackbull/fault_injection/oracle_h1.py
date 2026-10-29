@@ -32,7 +32,7 @@ class Category(str, enum.Enum):
     BB_TIMEOUT = 'BB_TIMEOUT'          # BlackBull stayed silent, nginx did not
     NG_TIMEOUT = 'NG_TIMEOUT'          # nginx ditto
     BOTH_REJECTED = 'BOTH_REJECTED'    # same 4xx/5xx status, or both closed before responding
-    INCONCLUSIVE = 'INCONCLUSIVE'      # no verdict: both silent, or a scenario premise did not hold
+    INCONCLUSIVE = 'INCONCLUSIVE'      # no verdict: both silent, both unreadable, or a premise did not hold
     HARNESS_ERROR = 'HARNESS_ERROR'    # the harness itself failed on either side
 
 
@@ -46,10 +46,10 @@ ACCEPTED_CATEGORIES: frozenset[Category] = frozenset({
 
 class Observed(str, enum.Enum):
     """What one side's run established about the peer."""
-    RESPONSE = 'RESPONSE'    # a complete response arrived
-    CLOSED = 'CLOSED'        # the peer closed or reset before responding
-    BROKEN = 'BROKEN'        # the peer's reply could not be read as a response
-    TIMEOUT = 'TIMEOUT'      # nothing arrived within the step or runner budget
+    RESPONSE = 'RESPONSE'    # every read got a complete response
+    CLOSED = 'CLOSED'        # the peer closed or reset, after any ``responses``
+    BROKEN = 'BROKEN'        # a reply could not be read as a response
+    TIMEOUT = 'TIMEOUT'      # a read, or the runner, ran out of time
     UNMET = 'UNMET'          # a WaitFor/Expect premise of the scenario did not hold
     NO_READ = 'NO_READ'      # the scenario read nothing, so there is no verdict
     ERROR = 'ERROR'          # the harness failed: no connection, or its own exception
@@ -59,7 +59,9 @@ class Observed(str, enum.Enum):
 class SideOutcome:
     """One side's observation in a differential pair."""
     observed: Observed
-    response: dict | None = None        # normalised {status, headers, body}
+    response: dict | None = None        # the newest of ``responses``
+    #: Every response read, normalised {status, headers, body}, in order.
+    responses: tuple[dict, ...] = ()
     exception: str | None = None        # repr of what ended the run, if anything
     elapsed_s: float = 0.0
     #: The raw scenario result; ``None`` when the run never reached the peer.
@@ -132,37 +134,43 @@ def categorize(ng: SideOutcome, bb: SideOutcome) -> Category:
     kinds = {ng.observed, bb.observed}
     if Observed.ERROR in kinds:
         return Category.HARNESS_ERROR
-    if kinds & _NO_VERDICT or kinds == {Observed.TIMEOUT}:
+    if kinds & _NO_VERDICT or kinds in ({Observed.TIMEOUT}, {Observed.BROKEN}):
         return Category.INCONCLUSIVE
     if bb.observed is Observed.TIMEOUT:
         return Category.BB_TIMEOUT
     if ng.observed is Observed.TIMEOUT:
         return Category.NG_TIMEOUT
-    if kinds == {Observed.CLOSED}:
+    for n, b in zip(ng.responses, bb.responses):
+        differ = _differ(n, b)
+        if differ is not None:
+            return differ
+    if len(bb.responses) < len(ng.responses) or bb.observed is Observed.BROKEN:
+        return Category.BB_TRANSPORT_FAIL
+    if len(ng.responses) < len(bb.responses) or ng.observed is Observed.BROKEN:
+        return Category.NG_TRANSPORT_FAIL
+    if bb.observed is not ng.observed:
+        return (Category.BB_TRANSPORT_FAIL if bb.observed is Observed.CLOSED
+                else Category.NG_TRANSPORT_FAIL)
+    if kinds == {Observed.CLOSED} or _is_error_status(bb.response):
         return Category.BOTH_REJECTED
-    if bb.observed is Observed.BROKEN:
-        return Category.BB_TRANSPORT_FAIL
-    if ng.observed is Observed.BROKEN:
-        return Category.NG_TRANSPORT_FAIL
-    if bb.observed is Observed.CLOSED:
-        return Category.BB_TRANSPORT_FAIL
-    if ng.observed is Observed.CLOSED:
-        return Category.NG_TRANSPORT_FAIL
-
-    # Both responded.  Matching error statuses are one rejection; mismatched
-    # error codes are a real divergence of validation policy.
-    assert ng.response is not None and bb.response is not None
-    if _is_error_status(ng.response) and _is_error_status(bb.response):
-        if ng.response['status'] == bb.response['status']:
-            return Category.BOTH_REJECTED
-
-    if ng.response['status'] != bb.response['status']:
-        return Category.STATUS_DIFFER
-    if ng.response['body'] != bb.response['body']:
-        return Category.BODY_DIFFER
-    if ng.response['headers'] != bb.response['headers']:
-        return Category.HEADER_DIFFER
     return Category.OK
+
+
+def _differ(ng: dict, bb: dict) -> Category | None:
+    """How two responses to the same request differ; ``None`` if alike.
+
+    Matching error statuses are one rejection; mismatched error codes are a
+    real divergence of validation policy.
+    """
+    if ng['status'] != bb['status']:
+        return Category.STATUS_DIFFER
+    if _is_error_status(ng):
+        return None
+    if ng['body'] != bb['body']:
+        return Category.BODY_DIFFER
+    if ng['headers'] != bb['headers']:
+        return Category.HEADER_DIFFER
+    return None
 
 
 # Per-side wall-clock budget, so one pathological example cannot push a
@@ -173,15 +181,13 @@ PER_REQUEST_TIMEOUT_S = 5.0
 def _observed(result: ScenarioResult) -> Observed:
     if any(not held for _, held in result.expectations) or result.wait_timed_out:
         return Observed.UNMET
-    if result.response is not None:
-        return Observed.RESPONSE
     if result.timed_out:
         return Observed.TIMEOUT
     if result.peer_closed:
         return Observed.CLOSED
     if result.exception is not None:
         return Observed.BROKEN
-    return Observed.NO_READ
+    return Observed.RESPONSE if result.received else Observed.NO_READ
 
 
 async def run_scenario(host: str, port: int,
@@ -211,10 +217,11 @@ async def run_scenario(host: str, port: int,
     except Exception as exc:  # noqa: BLE001 — no connection, or the harness's own fault
         return SideOutcome(Observed.ERROR, exception=repr(exc),
                            elapsed_s=time.monotonic() - t0), wire
-    response = result.response
+    responses = tuple(normalize_response(r) for r in result.received)
     return SideOutcome(
         _observed(result),
-        response=None if response is None else normalize_response(response),
+        response=responses[-1] if responses else None,
+        responses=responses,
         exception=result.exception,
         elapsed_s=time.monotonic() - t0,
         result=result,

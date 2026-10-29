@@ -75,8 +75,10 @@ class _H2Connection(_ServerConnection):
                     logger.debug('inbound frame decode failed: %r', exc)
                     continue
                 await self.frames.put(frame)
-        except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
+        except asyncio.IncompleteReadError:
             await self.frames.put(None)
+        except (ConnectionResetError, BrokenPipeError) as exc:
+            await self.frames.put(exc)
 
     async def _close(self, *, graceful: bool) -> None:
         # Not awaited: a TLS peer may never answer close_notify.
@@ -86,7 +88,12 @@ class _H2Connection(_ServerConnection):
             await super()._close(graceful=False)
 
     async def _read(self, timeout: float):
-        return await asyncio.wait_for(self.frames.get(), timeout=timeout)
+        frame = await asyncio.wait_for(self.frames.get(), timeout=timeout)
+        if frame is None or isinstance(frame, Exception):
+            self.frames.put_nowait(frame)   # every later read sees it too
+            if frame is not None:
+                raise frame
+        return frame
 
 
 class H2FaultServer(_FaultServer):

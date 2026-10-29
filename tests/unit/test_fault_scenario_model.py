@@ -304,8 +304,11 @@ async def _read_to_eof(reader) -> bytes:
 
 
 def _end(writer, ending) -> None:
-    """Close as the peer: ``'eof'`` sends FIN, ``'reset'`` sends RST."""
-    if ending == 'reset':
+    """Close as the peer: ``'half'`` stops sending, ``'eof'`` closes,
+    ``'reset'`` sends RST."""
+    if ending == 'half':
+        writer.write_eof()
+    elif ending == 'reset':
         sock = writer.get_extra_info('socket')
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
                         struct.pack('ii', 1, 0))
@@ -323,10 +326,12 @@ async def _against_a_fault_server(server_cls, scenario, prelude, peer, ending=No
         reader, writer = await asyncio.open_connection('127.0.0.1', srv.port)
         writer.write(prelude + b''.join(peer))
         await writer.drain()
-        if ending:
+        if ending and ending != 'half':
             _end(writer, ending)
             await srv.wait_for_connection_done(timeout=5.0)
             return srv.last_result, b''
+        if ending:
+            _end(writer, ending)
         got = await _read_to_eof(reader)
         writer.close()
         await srv.wait_for_connection_done(timeout=5.0)
@@ -344,10 +349,12 @@ async def _against_a_raw_server(run, peer, ending=None):
     async def serve(reader, writer):
         writer.write(b''.join(peer))
         await writer.drain()
-        if ending:
+        if ending and ending != 'half':
             _end(writer, ending)
             closed.set()
             return
+        if ending:
+            _end(writer, ending)
         received.extend(await _read_to_eof(reader))
         closed.set()
         writer.close()
@@ -493,28 +500,52 @@ async def test_raw_bytes_reach_the_peer_paced(cell):
     assert result.exception is None
 
 
+def _read_step(cell, kind):
+    _, wait, expect, _, _, match = CELLS[cell]
+    if kind == 'read':
+        return h1c.ReadResponse(timeout=3.0)
+    return (wait if kind == 'wait' else expect)(match=match, timeout=3.0)
+
+
+_KINDS = pytest.mark.parametrize('kind', ['read', 'wait', 'expect'])
+
+
+def _skip_server_read(cell, kind):
+    if kind == 'read' and cell.endswith('s'):
+        pytest.skip('ReadResponse is client vocabulary')
+
+
 @each_cell
-@pytest.mark.parametrize('ending', ['eof', 'reset'])
-@pytest.mark.parametrize('kind', ['wait', 'expect'])
-async def test_a_peer_that_closes_ends_the_walk_closed_not_timed_out(cell, kind, ending):
-    run, wait, expect, _, _, match = CELLS[cell]
-    read = (wait if kind == 'wait' else expect)(match=match, timeout=3.0)
-    result, _ = await run((read, Sleep0()), [], ending=ending)
+@_KINDS
+async def test_a_peer_that_stops_sending_is_closed_not_timed_out(cell, kind):
+    _skip_server_read(cell, kind)
+    match = CELLS[cell][5]
+    result, got = await CELLS[cell][0](
+        (_read_step(cell, kind), h1c.SendRawBytes(b'late')), [], ending='half')
     assert (result.peer_closed, result.wait_timed_out) == (True, False)
     assert result.exception is None
-    assert result.expectations == []
+    assert result.expectations == ([(match, False)] if kind == 'expect' else [])
+    assert b'late' in got, 'a half-closed peer still hears later steps'
+
+
+@each_cell
+@_KINDS
+async def test_a_peer_that_resets_ends_the_walk(cell, kind):
+    _skip_server_read(cell, kind)
+    result, _ = await CELLS[cell][0]((_read_step(cell, kind), Sleep0()), [],
+                                     ending='reset')
+    assert result.peer_closed is True
+    assert result.exception is None
     assert _completed(result) == 0
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('ending', ['eof', 'reset'])
-@pytest.mark.parametrize('cell', ['h1c', 'h2c'])
-async def test_a_read_that_meets_a_closed_peer_records_the_close(cell, ending):
-    result, _ = await CELLS[cell][0]((h1c.ReadResponse(timeout=3.0), Sleep0()),
-                                     [], ending=ending)
-    assert (result.peer_closed, result.timed_out) == (True, False)
-    assert result.exception is None
-    assert _completed(result) == 0
+async def test_an_h2_peer_protocol_violation_lands_on_the_result():
+    rst_stream_too_long = b'\x00\x00\x08\x03\x00\x00\x00\x00\x01' + b'\x00' * 8
+    result, _ = await _h2c((h2c.SendPreface(), h1c.ReadResponse(timeout=3.0),
+                            h1c.ReadResponse(timeout=3.0)),
+                           [_SETTINGS, rst_stream_too_long])
+    assert result.exception is not None
 
 
 @pytest.mark.asyncio

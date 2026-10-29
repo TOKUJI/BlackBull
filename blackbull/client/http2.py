@@ -1533,7 +1533,7 @@ def _to_bytes(value: str | bytes) -> bytes:
 
 class _H2ScenarioDriver(_ClientDriver):
     _matches = staticmethod(_sc_frame_matches)
-    peer_faults = (ClientError, OSError, EOFError)
+    peer_faults = (ClientError, _ConnectionFailed, OSError, EOFError)
 
     async def _write(self, data: bytes, byte_interval: float) -> None:
         await self.client._write_paced(data, byte_interval)
