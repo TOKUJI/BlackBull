@@ -745,6 +745,13 @@ _OK = (200, b'ok')
 _ECHO = (200, b'Z')
 
 
+def test_a_peer_close_stops_the_exchange_as_closed():
+    from tools.security.probe import _stop_reason
+    stop = _stop_reason(ScenarioResult(peer_closed=True))
+    assert state_verdict(((400, b'bad'),), stop).verdict == PASS
+    assert state_verdict((), stop).verdict == PASS
+
+
 def test_state_verdict_accepts_one_clean_followup():
     assert state_verdict((_ECHO, _OK), 'timeout').verdict == PASS
     assert state_verdict((_OK,), 'timeout').verdict == PASS
@@ -852,7 +859,7 @@ def test_close_verdict_distinguishes_parse_errors():
     verdict = _closed_verdict(result)
     assert verdict.verdict == FAIL and 'not a rejection' in verdict.detail
     # a transport close stays a rejection-by-close
-    closed = ScenarioResult(exception="ConnectionResetError('reset')")
+    closed = ScenarioResult(peer_closed=True)
     assert _closed_verdict(closed).verdict == PASS
     assert _closed_verdict(ScenarioResult(), 'lab').detail \
         == 'lab: rejected by connection close'

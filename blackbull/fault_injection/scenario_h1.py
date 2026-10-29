@@ -158,8 +158,8 @@ class ScenarioResult:
     # it to the real ClientResponse.
     response: object | None = None
 
-    # Set when a step raised.  Stored as the repr to keep the
-    # dataclass picklable for cross-process diagnostics.
+    # repr of a peer or transport failure other than a close; the
+    # harness's own exceptions propagate.
     exception: str | None = None
 
     # True when a ReadResponse step hit its per-step timeout.
@@ -191,6 +191,8 @@ class ScenarioResult:
     #: step still counts as completed and the next step runs; this is what
     #: distinguishes a per-step miss from a transport error in ``exception``.
     wait_timed_out: bool = False
+    #: The peer finished sending (later steps still run) or reset the connection.
+    peer_closed: bool = False
 
 
 def response_matches(response, match: dict) -> bool:

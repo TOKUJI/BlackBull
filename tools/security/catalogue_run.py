@@ -3,9 +3,10 @@
 
 The 14 ``h1_client`` and 11 ``h2_client`` scenarios run UNCHANGED — same
 payloads, same steps, only the target differs.  The G1-2 oracle judges
-each outcome mechanically: an answer (any response) or a close (any
-transport-level error) inside the documented default wait passes;
-silence — the wait expiring with neither — fails.
+each outcome mechanically: an answer (any response) or a close (the peer
+closing, or a transport-level error it caused) inside the documented
+default wait passes; silence — the wait expiring with neither — fails.  A
+harness fault is a runner error, never a close.
 
 Usage::
 
@@ -27,7 +28,7 @@ from blackbull.client.http2 import HTTP2Client
 from tools.security.junit_report import (DEFAULT_JUNIT_PATH, Case,
                                          write_junit)
 from blackbull.fault_injection.catalogue import h1_client, h2_client
-from blackbull.fault_injection.oracle_h1 import run_scenario
+from blackbull.fault_injection.oracle_h1 import Observed, run_scenario
 
 #: The documented inventory (docs/security/probe.md, G1).  Order is stable.
 H1_SCENARIOS = (
@@ -59,6 +60,8 @@ def judge(outcome, elapsed: float) -> tuple[str, str]:
         status = (response.get('status') if isinstance(response, dict)
                   else getattr(response, 'status', None))
         return 'PASS', f'answered (status {status})'
+    if getattr(outcome, 'peer_closed', False):
+        return 'PASS', 'closed by the peer'
     exception = getattr(outcome, 'exception', None)
     if exception:
         return 'PASS', f'closed ({exception})'
@@ -72,7 +75,9 @@ async def run_h1(host: str, port: int, name: str) -> tuple[str, str, float]:
     t0 = time.monotonic()
     outcome, _wire = await run_scenario(host, port, scenario)
     elapsed = time.monotonic() - t0
-    verdict, detail = judge(outcome, elapsed)
+    if outcome.observed is Observed.ERROR:
+        raise RuntimeError(f'runner error: {outcome.exception}')
+    verdict, detail = judge(outcome.result or outcome, elapsed)
     return verdict, detail, elapsed
 
 

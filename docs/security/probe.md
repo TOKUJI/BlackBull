@@ -137,8 +137,9 @@ settings_flood, empty_continuation_flood, header_block_never_finished,
 data_frame_lies_about_length, unknown_frame_type,
 settings_ack_with_payload, abort_mid_header_block).  The G1-2 oracle
 judges every outcome mechanically: **answer-or-close passes, silence
-fails** — a response of any status is an answer, a transport-level error
-is a close, and a wait that expires with neither is a FAIL.  The report
+fails** — a response of any status is an answer, the peer closing or a
+transport-level error it caused is a close, and a wait that expires with
+neither is a FAIL; a harness fault is a runner error, never a close.  The report
 lands in `bench/results/security/catalogue.txt`; a unit test pins the
 14/11 inventory to the module callables.
 

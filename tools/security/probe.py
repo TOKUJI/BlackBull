@@ -730,16 +730,13 @@ _ACCEPT_400 = frozenset({400})
 
 
 def _is_transport_close(exc: str) -> bool:
-    """True for a transport-level end of the connection (the peer closed).
+    """True for a recorded transport-level end of the connection, such as a
+    close mid-body; a plain close or reset is ``result.peer_closed``.
 
     Any other recorded exception is a parse failure on malformed output
     and must never score as a clean rejection.
     """
-    return (exc.startswith('ConnectionError(')
-            or exc.startswith('IncompleteReadError(')
-            or exc.startswith('ConnectionResetError(')
-            or exc.startswith('BrokenPipeError(')
-            or 'not reusable' in exc)
+    return exc.startswith('ConnectionError(') or 'not reusable' in exc
 
 
 def _closed_verdict(result: ScenarioResult, label: str = '') -> Verdict:
@@ -790,7 +787,7 @@ def _stop_reason(result: ScenarioResult) -> str:
     if result.timed_out:
         return _STOP_TIMEOUT
     exc = result.exception or ''
-    if exc and _is_transport_close(exc):
+    if result.peer_closed or exc and _is_transport_close(exc):
         return _STOP_CLOSED
     if not exc:
         return _STOP_DONE

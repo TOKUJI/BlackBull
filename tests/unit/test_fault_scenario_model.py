@@ -283,6 +283,8 @@ def test_the_saved_scenarios_are_in_the_current_format(recwarn):
 # ---------------------------------------------------------------------------
 
 import asyncio  # noqa: E402
+import socket  # noqa: E402
+import struct  # noqa: E402
 
 from blackbull.client.http1 import HTTP1Client  # noqa: E402
 from blackbull.client.http2 import HTTP2Client  # noqa: E402
@@ -301,26 +303,58 @@ async def _read_to_eof(reader) -> bytes:
         return b''
 
 
-async def _against_a_fault_server(server_cls, scenario, prelude, peer):
-    """A raw client sends *peer*; returns the server's result and what it got."""
+def _end(writer, ending) -> None:
+    """Close as the peer: ``'half'`` stops sending, ``'eof'`` closes,
+    ``'reset'`` sends RST."""
+    if ending == 'half':
+        writer.write_eof()
+    elif ending == 'reset':
+        sock = writer.get_extra_info('socket')
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                        struct.pack('ii', 1, 0))
+        writer.transport.abort()
+    else:
+        writer.close()
+
+
+async def _against_a_fault_server(server_cls, scenario, prelude, peer, ending=None):
+    """A raw client sends *peer*; returns the server's result and what it got.
+
+    With *ending*, the client closes right after sending instead of waiting.
+    """
     async with server_cls(scenario) as srv:
         reader, writer = await asyncio.open_connection('127.0.0.1', srv.port)
         writer.write(prelude + b''.join(peer))
         await writer.drain()
+        if ending and ending != 'half':
+            _end(writer, ending)
+            await srv.wait_for_connection_done(timeout=5.0)
+            return srv.last_result, b''
+        if ending:
+            _end(writer, ending)
         got = await _read_to_eof(reader)
         writer.close()
         await srv.wait_for_connection_done(timeout=5.0)
         return srv.last_result, got
 
 
-async def _against_a_raw_server(run, peer):
-    """A raw server sends *peer*; returns the client's result and what it got."""
+async def _against_a_raw_server(run, peer, ending=None):
+    """A raw server sends *peer*; returns the client's result and what it got.
+
+    With *ending*, the server closes right after sending instead of waiting.
+    """
     received = bytearray()
     closed = asyncio.Event()
 
     async def serve(reader, writer):
         writer.write(b''.join(peer))
         await writer.drain()
+        if ending and ending != 'half':
+            _end(writer, ending)
+            closed.set()
+            return
+        if ending:
+            _end(writer, ending)
         received.extend(await _read_to_eof(reader))
         closed.set()
         writer.close()
@@ -337,7 +371,7 @@ async def _against_a_raw_server(run, peer):
     return result, bytes(received)
 
 
-async def _h1c(steps, peer):
+async def _h1c(steps, peer, ending=None):
     async def run(port, closed):
         async with HTTP1Client('127.0.0.1', port) as client:
             result = await client.execute_scenario(h1c.Scenario(steps=steps))
@@ -345,10 +379,10 @@ async def _h1c(steps, peer):
                 # An abort closes the connection itself, not the client's exit.
                 await asyncio.wait_for(closed.wait(), timeout=2.0)
             return result
-    return await _against_a_raw_server(run, peer)
+    return await _against_a_raw_server(run, peer, ending)
 
 
-async def _h2c(steps, peer):
+async def _h2c(steps, peer, ending=None):
     async def run(port, closed):
         async with HTTP2Client('127.0.0.1', port, scenario_mode=True) as client:
             result = await client.execute_scenario(h2c.ScenarioH2Client(steps=steps))
@@ -356,18 +390,18 @@ async def _h2c(steps, peer):
                 # An abort closes the connection itself, not the client's exit.
                 await asyncio.wait_for(closed.wait(), timeout=2.0)
             return result
-    return await _against_a_raw_server(run, peer)
+    return await _against_a_raw_server(run, peer, ending)
 
 
-async def _h1s(steps, peer):
+async def _h1s(steps, peer, ending=None):
     return await _against_a_fault_server(
-        H1FaultServer, h1s.ScenarioH1Server(steps=steps), b'', peer)
+        H1FaultServer, h1s.ScenarioH1Server(steps=steps), b'', peer, ending)
 
 
-async def _h2s(steps, peer):
+async def _h2s(steps, peer, ending=None):
     return await _against_a_fault_server(
         H2FaultServer, h2s.ScenarioH2(steps=steps, send_preface=False),
-        CLIENT_PREFACE, peer)
+        CLIENT_PREFACE, peer, ending)
 
 
 #: cell -> (driver, its wait and expect steps, a message that matches
@@ -464,6 +498,83 @@ async def test_raw_bytes_reach_the_peer_paced(cell):
     result, got = await run((h1c.SendRawBytes(b'xyz', byte_interval=0.01),), [])
     assert b'xyz' in got
     assert result.exception is None
+
+
+def _read_step(cell, kind):
+    _, wait, expect, _, _, match = CELLS[cell]
+    if kind == 'read':
+        return h1c.ReadResponse(timeout=3.0)
+    return (wait if kind == 'wait' else expect)(match=match, timeout=3.0)
+
+
+_KINDS = pytest.mark.parametrize('kind', ['read', 'wait', 'expect'])
+
+
+def _skip_server_read(cell, kind):
+    if kind == 'read' and cell.endswith('s'):
+        pytest.skip('ReadResponse is client vocabulary')
+
+
+@each_cell
+@_KINDS
+async def test_a_peer_that_stops_sending_is_closed_not_timed_out(cell, kind):
+    _skip_server_read(cell, kind)
+    match = CELLS[cell][5]
+    result, got = await CELLS[cell][0](
+        (_read_step(cell, kind), h1c.SendRawBytes(b'late')), [], ending='half')
+    assert (result.peer_closed, result.wait_timed_out) == (True, False)
+    assert result.exception is None
+    assert result.expectations == ([(match, False)] if kind == 'expect' else [])
+    assert b'late' in got, 'a half-closed peer still hears later steps'
+
+
+@each_cell
+@_KINDS
+async def test_a_peer_that_resets_ends_the_walk(cell, kind):
+    _skip_server_read(cell, kind)
+    result, _ = await CELLS[cell][0]((_read_step(cell, kind), Sleep0()), [],
+                                     ending='reset')
+    assert result.peer_closed is True
+    assert result.exception is None
+    assert _completed(result) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_spent_wait_times_out_without_reading():
+    close = b'HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'
+    result, _ = await _h1c((h1c.SendRawBytes(b'GET / HTTP/1.1\r\nHost: a\r\n\r\n'),
+                            h1c.ReadResponse(timeout=2.0),
+                            h1c.WaitForResponse(timeout=0.0), Sleep0()), [close])
+    assert (result.wait_timed_out, result.exception) == (True, None)
+    assert _completed(result) == 4
+
+
+@pytest.mark.asyncio
+async def test_an_h2_peer_protocol_violation_lands_on_the_result():
+    rst_stream_too_long = b'\x00\x00\x08\x03\x00\x00\x00\x00\x01' + b'\x00' * 8
+    result, _ = await _h2c((h2c.SendPreface(), h1c.ReadResponse(timeout=3.0),
+                            h1c.ReadResponse(timeout=3.0)),
+                           [_SETTINGS, rst_stream_too_long])
+    assert result.exception is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cell', ['h1c', 'h2c'])
+async def test_a_harness_fault_is_raised_not_blamed_on_the_peer(cell, monkeypatch):
+    def broken(self):
+        raise LookupError('harness bug')
+    monkeypatch.setattr(h1c.SendRawBytes, 'wire', broken)
+    client_cls, scenario_cls, kwargs = {
+        'h1c': (HTTP1Client, h1c.Scenario, {}),
+        'h2c': (HTTP2Client, h2c.ScenarioH2Client, {'scenario_mode': True})}[cell]
+
+    async def run(port, closed):
+        async with client_cls('127.0.0.1', port, **kwargs) as client:
+            with pytest.raises(LookupError, match='harness bug'):
+                await client.execute_scenario(
+                    scenario_cls(steps=(h1c.SendRawBytes(b'x'),)))
+
+    await _against_a_raw_server(run, [])
 
 
 def Sleep0():

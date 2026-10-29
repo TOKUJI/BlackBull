@@ -29,8 +29,8 @@ from ..server.sender import AbstractWriter, AsyncioWriter, HTTP2Sender
 from ..utils import HTTP2 as _HTTP2_PREFACE
 from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
                        open_connection as _open_connection)
-from .exceptions import (ConnectionError, ProtocolError, ResponseTooLarge,
-                         StreamReset)
+from .exceptions import (ClientError, ConnectionError, ProtocolError,
+                         ResponseTooLarge, StreamReset)
 # Module-level and at runtime, as ``http1.py`` imports its own scenario
 # types: the annotation on ``execute_scenario`` has to be resolvable from
 # this module, and a TYPE_CHECKING import is not (beartype looks in the
@@ -1533,6 +1533,7 @@ def _to_bytes(value: str | bytes) -> bytes:
 
 class _H2ScenarioDriver(_ClientDriver):
     _matches = staticmethod(_sc_frame_matches)
+    peer_faults = (ClientError, _ConnectionFailed, OSError, EOFError)
 
     async def _write(self, data: bytes, byte_interval: float) -> None:
         await self.client._write_paced(data, byte_interval)

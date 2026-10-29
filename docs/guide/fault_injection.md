@@ -259,10 +259,19 @@ async with HTTP1Client('127.0.0.1', 8080) as client:
     assert result.response is not None or result.timed_out
 ```
 
+In all four halves, a read step that meets end of stream sets
+`result.peer_closed` and later steps still run, since the peer may only have
+half-closed; a reset sets it and ends the scenario.  `wait_timed_out` means
+only that time ran out.
+
 The matching differential oracle
 (`blackbull.fault_injection.run_scenario`) drives the same scenario
-against two servers and categorises whether they agree, disagree,
-or both rejected.
+against two servers.  Each side is `Observed` as a response, a close, an
+unreadable reply, a timeout, an unmet `WaitFor…`/`Expect…` premise, no read
+at all, or a harness error, and `categorize` accepts only what both sides
+confirmed alike: equal responses, the same error status, or both closing.
+Silence, an unmet premise and a harness error are never a rejection
+(`INCONCLUSIVE`, `HARNESS_ERROR`).
 
 ## Quick start — HTTP/1.1 server-side
 

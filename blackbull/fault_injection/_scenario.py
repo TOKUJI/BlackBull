@@ -45,7 +45,7 @@ class ReadResponse:
     """Read one message: an HTTP/1.1 response, or one HTTP/2 frame.
 
     On ``timeout`` the scenario ends with ``timed_out`` set and the step
-    uncounted; the executor never raises.
+    uncounted.  End of stream sets ``peer_closed`` and the scenario goes on.
     """
     timeout: float = 5.0
 
@@ -313,6 +313,8 @@ def _from_v1(record: dict, base64_payloads: bool, ops: dict) -> dict:
 
 
 _WRITE, _END = 'write', 'end'
+#: The peer is gone, not merely done sending: the walk ends.
+_PEER_GONE = (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError)
 
 
 def _check_vocabulary(scenario) -> None:
@@ -367,7 +369,9 @@ class _Driver:
                     result.timed_out = True
                     result.exception = repr(exc)
                     return
-                if message is not None:
+                if message is None:
+                    result.peer_closed = True
+                else:
                     self._seen(message, kept=True)
             elif action is _WaitFor:
                 await self._wait(step)
@@ -378,37 +382,34 @@ class _Driver:
                 return
             self._completed(step)
 
+    async def _guarded_read(self, timeout: float):
+        """The next message, or ``None`` once the miss is recorded."""
+        try:
+            if timeout <= 0:
+                raise TimeoutError     # spent: a read could fail for its own reasons
+            message = await self._read(timeout)
+        except TimeoutError:
+            self.result.wait_timed_out = True
+            return None
+        if message is None:
+            self.result.peer_closed = True
+        return message
+
     async def _wait(self, step: _WaitFor) -> None:
-        result = self.result
         deadline = time.monotonic() + step.timeout
-        while True:
-            remaining = deadline - time.monotonic()
-            try:
-                message = await self._read(remaining) if remaining > 0 else None
-            except TimeoutError:
-                message = None
-            if message is None:
-                result.wait_timed_out = True
-                return
+        while (message := await self._guarded_read(deadline - time.monotonic())) is not None:
             matched = self._matches(message, step.match)
             self._seen(message, kept=matched)
             if matched:
                 return
-            result.wait_skipped += 1
+            self.result.wait_skipped += 1
 
     async def _expect(self, step: _Expect) -> None:
-        result = self.result
-        try:
-            message = await self._read(step.timeout)
-        except TimeoutError:
-            message = None
-        if message is None:
-            result.wait_timed_out = True
-            result.expectations.append((dict(step.match), False))
-            return
-        self._seen(message, kept=True)
-        result.expectations.append(
-            (dict(step.match), self._matches(message, step.match)))
+        message = await self._guarded_read(step.timeout)
+        matched = message is not None and self._matches(message, step.match)
+        if message is not None:
+            self._seen(message, kept=True)
+        self.result.expectations.append((dict(step.match), matched))
 
     def _seen(self, message, *, kept: bool) -> None:
         """Record a message read; *kept* is False for one a filter passed over."""
@@ -418,7 +419,13 @@ class _Driver:
 
 
 class _ClientDriver(_Driver):
-    """The broken-client half: a step that ends the walk is not counted."""
+    """The broken-client half: a step that ends the walk is not counted.
+
+    Only ``peer_faults`` land on the result; any other exception is the
+    harness's own and propagates.
+    """
+
+    peer_faults: tuple = (OSError, EOFError)
 
     def __init__(self, client, scenario, result) -> None:
         super().__init__(scenario, result)
@@ -438,7 +445,9 @@ class _ClientDriver(_Driver):
         t0 = time.monotonic()
         try:
             await self.run(steps)
-        except Exception as exc:  # noqa: BLE001 — the executor never raises
+        except _PEER_GONE:
+            self.result.peer_closed = True
+        except self.peer_faults as exc:
             self.result.exception = repr(exc)
         finally:
             self.result.elapsed_s = time.monotonic() - t0
@@ -636,6 +645,8 @@ class _FaultServer:
             if not result.terminated:
                 # Out of steps: the client must see EOF, not a hang.
                 await conn._close(graceful=True)
+        except _PEER_GONE:
+            result.peer_closed = True
         except Exception as exc:  # noqa: BLE001 — recorded on the result
             conn.failed(exc)
         finally:

@@ -23,7 +23,7 @@ from ..protocol.http1 import (CHUNKED, CLOSE_DELIMITED, LENGTH, NO_BODY,
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
                        open_connection as _open_connection)
-from .exceptions import ConnectionError, ProtocolError, ResponseTooLarge
+from .exceptions import ClientError, ConnectionError, ProtocolError, ResponseTooLarge
 from .http2 import ClientResponse  # shared dataclass
 from blackbull.fault_injection._scenario import _ClientDriver
 from blackbull.fault_injection.scenario_h1 import (
@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 # of byte chunks (the streaming case, chunk-framed unless the caller declared a
 # length for it).
 RequestBody = Union[bytes, bytearray, memoryview, AsyncIterable[bytes]]
+
+
+class _ClosedBeforeResponse(ConnectionError):
+    """The peer ended the connection before a response head arrived."""
 
 
 class _PreparedRequest(NamedTuple):
@@ -254,9 +258,9 @@ class HTTP1ResponseHeadReader:
                 f'BB_CLIENT_HEAD_MAX_TOTAL={cfg.client_head_max_total}',
                 exc.seen) from None
         except IncompleteReadError as exc:
-            raise ConnectionError('connection closed before response') from exc
+            raise _ClosedBeforeResponse('connection closed before response') from exc
         if not head:
-            raise ConnectionError('connection closed before response')
+            raise _ClosedBeforeResponse('connection closed before response')
 
         return head
 
@@ -1102,12 +1106,16 @@ class HTTP1Client:
 
 class _H1ScenarioDriver(_ClientDriver):
     _matches = staticmethod(response_matches)
+    peer_faults = (ClientError, OSError, EOFError)
 
     async def _write(self, data: bytes, byte_interval: float) -> None:
         await self.client.send_raw(data, byte_interval=byte_interval)
 
     async def _read(self, timeout: float):
-        return await self.client.read_response(timeout=timeout)
+        try:
+            return await self.client.read_response(timeout=timeout)
+        except _ClosedBeforeResponse:
+            return None
 
     def _seen(self, response, *, kept: bool) -> None:
         _record_response(self.result, response)
