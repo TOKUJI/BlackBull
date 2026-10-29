@@ -76,7 +76,9 @@ pending read has committed to count as consumed, or a WebSocket frame longer
 than the window never completes.
 
 A WINDOW_UPDATE that would raise a window above 2^31-1 is `FLOW_CONTROL_ERROR`
-(§6.9.1): GOAWAY for the connection window, RST_STREAM for a stream's.
+(§6.9.1): GOAWAY for the connection window, RST_STREAM for a stream's. A
+SETTINGS_INITIAL_WINDOW_SIZE change that would lift any stream's window past
+it is a connection `FLOW_CONTROL_ERROR` (§6.9.2).
 
 Use the existing server/client write-timeout owner for credit waits, not
 another timer. Read `HTTP2Sender`, `ConnectionWindow` and `HTTP2Recipient`.
