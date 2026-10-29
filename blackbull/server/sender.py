@@ -846,6 +846,9 @@ class HTTP1Sender(BaseSender):
         size = os.path.getsize(path)
         head = self._buffered_headers
         status = self._buffered_status
+        # Released first, as in ``_handle_body_content``.
+        self._buffered_status = None
+        self._buffered_headers = None
         fields, framing = self._ensure_framing_headers(
             status, head, size, more_body=False)
         self._track_content_length(size, more_body=False)
@@ -854,8 +857,6 @@ class HTTP1Sender(BaseSender):
 
         head = self._render_start(status, fields, framing,
                                   None if head.date else _http_date())
-        self._buffered_status = None
-        self._buffered_headers = None
 
         if self._log_record is not None:
             self._log_record.response_bytes += size

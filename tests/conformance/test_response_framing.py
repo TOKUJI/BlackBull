@@ -25,8 +25,8 @@ from tests.harness import read_h2_frame, served
 pytestmark = pytest.mark.asyncio
 
 TRAILERS = [(b'x-checksum', b'abc')]
-LENGTHS = {'none': None, 'zero': (b'0',), 'five': (b'5',), 'non-canonical': (b'05',),
-           'malformed': (b'abc',), 'conflicting': (b'5', b'6')}
+LENGTHS = {'none': None, 'zero': (b'0',), 'five': (b'5',), 'duplicate': (b'5', b'5'),
+           'non-canonical': (b'05',), 'malformed': (b'abc',), 'conflicting': (b'5', b'6')}
 BODIES = {'none': None, 'empty': (b'',), 'exact': (b'hello',), 'short': (b'hel',),
           'long': (b'hello!',), 'exact-split': (b'he', b'llo'),
           'short-split': (b'he', b'l'), 'long-split': (b'hel', b'lo!')}
@@ -67,16 +67,26 @@ def _expected(method, status, lengths, body, trailers, protocol):
     return 'ok', declared if declared is not None else ..., sent, TRAILERS if trailers else []
 
 
+#: How the response is handed to the sender: one event per part, one
+#: combined native object, or with its trailer section split in two.
+FORMS = ('events', 'native', 'split-trailers')
+
+
 def _rows():
-    for (name, (method, status)), (lname, lengths), (bname, body), trailers in itertools.product(
-            EXCHANGES.items(), LENGTHS.items(), BODIES.items(), (False, True)):
+    for (name, (method, status)), (lname, lengths), (bname, body), trailers, form in (
+            itertools.product(EXCHANGES.items(), LENGTHS.items(), BODIES.items(),
+                              (False, True), FORMS)):
         if body is None and not trailers:
             continue    # nothing would end the response
-        yield pytest.param(method, status, lengths, body, trailers,
-                           id=f'{name}-{lname}-{bname}{"-trailers" if trailers else ""}')
+        if form == 'native' and body is not None and len(body) > 1:
+            continue    # one object carries one body part
+        if form == 'split-trailers' and not trailers:
+            continue
+        yield pytest.param(method, status, lengths, body, trailers, form,
+                           id=f'{name}-{lname}-{bname}{"-trailers" if trailers else ""}-{form}')
 
 
-def _app(status, lengths, body, trailers, refusals):
+def _app(status, lengths, body, trailers, form, refusals):
     headers = [(b'x-head', b'present')]
     headers += [(b'content-length', v) for v in lengths or ()]
     calls = []
@@ -87,11 +97,20 @@ def _app(status, lengths, body, trailers, refusals):
             await send(NativeResponse(header=[], body=b'next'))
             return
         try:
+            if form == 'native':
+                await send(NativeResponse(status=status, header=headers,
+                                          body=body[0] if body else None,
+                                          trailers=TRAILERS if trailers else None,
+                                          expects_trailers=trailers))
+                return
             await send({'type': 'http.response.start', 'status': status,
                         'headers': headers, 'trailers': trailers})
             for i, part in enumerate(body or ()):
                 await send({'type': 'http.response.body', 'body': part,
                             'more_body': i < len(body) - 1})
+            if form == 'split-trailers':
+                await send({'type': 'http.response.trailers', 'headers': TRAILERS[:0],
+                            'more_trailers': True})
             if trailers:
                 await send({'type': 'http.response.trailers', 'headers': TRAILERS})
         except ValueError:
@@ -154,14 +173,14 @@ async def _http2(server, method):
 
 @pytest.mark.parametrize('protocol', ['http1', 'http2'])
 @pytest.mark.parametrize('lane', ['0', '1'], ids=['native', 'compat'])
-@pytest.mark.parametrize('method,status,lengths,body,trailers', _rows())
+@pytest.mark.parametrize('method,status,lengths,body,trailers,form', _rows())
 async def test_a_generated_response_keeps_its_length_rule(
-        monkeypatch, protocol, lane, method, status, lengths, body, trailers):
+        monkeypatch, protocol, lane, method, status, lengths, body, trailers, form):
     monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', lane)
     outcome, length, content, tail = _expected(method, status, lengths, body, trailers,
                                                protocol)
     refusals = []
-    async with served(_app(status, lengths, body, trailers, refusals)) as server:
+    async with served(_app(status, lengths, body, trailers, form, refusals)) as server:
         first, following = await (_http1 if protocol == 'http1' else _http2)(server, method)
 
     if outcome == 'broken':
