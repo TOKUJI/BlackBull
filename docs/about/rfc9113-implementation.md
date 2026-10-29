@@ -121,7 +121,10 @@ decisions; `:authority` becomes the application's host header.
 
 Malformed trailers are malformed field sections, not successful request
 completion. Content-Length counts payload bytes, excluding padding.
-Response heads and trailers leave the send boundary with lowercase names.
+Response heads and trailers leave the send boundary with lowercase names. A
+response states one canonical Content-Length, none on 1xx, 204 or 205; it is
+checked before HEADERS are encoded, and content that breaks it after HEADERS
+resets the stream (`INTERNAL_ERROR`).
 
 Read `blackbull/server/parser.py`, `blackbull/protocol/field_grammar.py`
 and the HTTP/2 response-validation tests under `tests/unit/client/`.

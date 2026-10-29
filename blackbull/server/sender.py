@@ -1052,13 +1052,6 @@ class HTTP2Sender(BaseSender):
         if not lengths:
             self._remaining = None
             return head
-        if len(lengths) == 1 and status not in _LENGTHLESS_STATUSES:
-            raw = lengths[0][1]
-            if raw.isdigit() and (raw[0] != 0x30 or len(raw) == 1):
-                # The usual case: one canonical length, kept as written.
-                self._remaining = (None if self._head_mode or status == 304
-                                   else int(raw))
-                return head
         stated = stated_response_length(status, lengths)
         self._remaining = (None if self._head_mode or status in NO_CONTENT_GENERATED_STATUSES
                            else stated)
@@ -1601,10 +1594,17 @@ class HTTP2Sender(BaseSender):
             if body._header is not None:
                 status = HTTPStatus(body.status)
                 head = body._header
-                if head.content_length:
-                    head = self._stated_fields(status, head)
-                else:
+                lengths = head.content_length
+                if not lengths:
                     self._remaining = None
+                elif (len(lengths) == 1 and status not in _LENGTHLESS_STATUSES
+                        and (raw := lengths[0][1]).isdigit()
+                        and (raw[0] != 0x30 or len(raw) == 1)):
+                    # The usual case: one canonical length, kept as written.
+                    self._remaining = (None if self._head_mode or status == 304
+                                       else int(raw))
+                else:
+                    head = self._stated_fields(status, head)
                 await self._settle_buffered_head()
                 self._buffered_status = status
                 self._buffered_headers = head
