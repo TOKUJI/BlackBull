@@ -6253,8 +6253,8 @@ number, this peer".</p>
 deliberately broken client on the wire — slowloris, a lied-about frame length,
 a rapid-reset burst. <code>scenario_mode</code> is the one place the two clients genuinely
 diverge, and <a href="../fault_injection/#quick-start-http2-client-side">Fault injection</a>
-explains why and shows the vocabulary. Note that a scenario never raises; the
-outcome lands on <code>ScenarioResult</code>.</p>
+explains why and shows the vocabulary. Peer and transport failures land on
+the result; a scenario the client cannot run raises before any byte.</p>
 
 
 

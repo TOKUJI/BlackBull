@@ -6177,7 +6177,9 @@ staging.</p>
 <p><code>pseudo</code> and <code>headers</code> are encoded with HPACK in the order given, so
 a scenario can put <code>:path</code> after a regular field (RFC 9113 §8.3
 forbids it) simply by saying so.  Nothing here validates: the whole
-point is to send what a conforming client would not.</p>
+point is to send what a conforming client would not.  The block uses
+only the static table and never indexes, so it decodes the same on any
+connection and leaves the peer's dynamic table untouched.</p>
 <p><code>raw_block</code> replaces the encoded block outright, for faults HPACK
 itself cannot produce — a truncated block, an invalid table index, a
 Huffman string that does not decode.  When set, <code>pseudo</code> and

@@ -6188,7 +6188,9 @@ that require ALPN, such as httpx, supply the TLS context.</p>
 <p>After each connection, <code>fault_server.last_result</code> is a
 <code>ScenarioH2Result</code> carrying step-completion count, byte counters,
 whether a <code>WaitForClientFrame</code> step timed out, and the
-elapsed wall time.</p>
+elapsed wall time.  Both fault servers keep only the most recent result
+since <code>start()</code>; <code>stop()</code> stops accepting, then cancels and waits for every
+connection still mid-scenario.</p>
 <h2 id="the-four-spec-grade-catalogue-categories">The four spec-grade catalogue categories<a class="headerlink" href="#the-four-spec-grade-catalogue-categories" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -6426,7 +6428,7 @@ produce:</p>
     <span class="k">async</span> <span class="k">with</span> <span class="n">HTTP2Client</span><span class="p">(</span><span class="s1">'127.0.0.1'</span><span class="p">,</span> <span class="n">my_port</span><span class="p">,</span>
                            <span class="n">scenario_mode</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
         <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">execute_scenario</span><span class="p">(</span><span class="n">rapid_reset_burst</span><span class="p">())</span>
-    <span class="c1"># The scenario never raises; everything lands on the result.</span>
+    <span class="c1"># Peer and transport failures land on the result, not as exceptions.</span>
     <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">exception</span> <span class="ow">is</span> <span class="kc">None</span>
 </code></pre></div>
 <p><code>scenario_mode=True</code> is required, and is the one place the two client
@@ -6473,7 +6475,8 @@ the fault they stage; what ends those is your server's own deadline.</p>
 <h2 id="saving-scenarios-as-json-lines">Saving scenarios as JSON Lines<a class="headerlink" href="#saving-scenarios-as-json-lines" title="Permanent link">&para;</a></h2>
 <p>Every vocabulary writes the same format: a <code>HEADER</code> line carrying the
 format version and the scenario's own fields, then one line per step named
-by its class, with bytes as hex.</p>
+by its class, with bytes as hex.  Inside a <code>match</code>, bytes are written as
+<code>{"hex": "..."}</code> and a tuple as <code>{"tuple": [...]}</code>.</p>
 <div class="highlight"><pre><span></span><code>{"op": "HEADER", "format": 2, "name": "half_a_status_line"}
 {"op": "WaitForRequest", "match": {}, "timeout": 5.0}
 {"op": "SendRawBytes", "data": "485454502f312e31203230", "byte_interval": 0.0}
