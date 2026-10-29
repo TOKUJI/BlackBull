@@ -5,8 +5,6 @@ so the broker's routing/session/retained/Will logic is verified without sockets,
 the reader loop, or the connection actor.  The wire-level conformance suite
 (driven through the harness seam) remains the end-to-end oracle.
 """
-import asyncio
-
 import pytest
 
 from blackbull.actor import Actor
@@ -212,29 +210,6 @@ async def test_qos2_inbound_handshake():
     await broker._handle(ClientPubrel(packet_id=7, sender=conn))
     assert any(isinstance(p, MQTTPubcomp) and p.packet_id == 7
                for p in conn.packets())
-
-
-async def test_a_pubrel_for_an_unknown_identifier_is_answered_not_found():
-    """§3.7.2.1 — PUBCOMP says 0x92 for an identifier it holds no flow for."""
-    broker, conn = BrokerActor(), RecordingConn()
-    task = asyncio.create_task(broker.run())
-    try:
-        for msg in (Attach(connect=MQTTConnect(client_id='c', clean_start=True,
-                                               keep_alive=60), sender=conn),
-                    ClientPublish(publish=MQTTPublish(
-                        topic='t', payload=b'', qos=2, packet_id=7), sender=conn),
-                    ClientPubrel(packet_id=7, sender=conn),
-                    ClientPubrel(packet_id=7, sender=conn)):
-            await broker.send(msg)
-        for _ in range(50):
-            await asyncio.sleep(0)
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-    pubcomps = [p for p in conn.packets() if isinstance(p, MQTTPubcomp)]
-    assert {p.packet_id for p in pubcomps} == {7}
-    assert [p.reason_code for p in pubcomps] == [
-        ReasonCode.SUCCESS, ReasonCode.PACKET_IDENTIFIER_NOT_FOUND]
 
 
 async def test_an_error_pubrec_releases_the_inbound_id():

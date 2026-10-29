@@ -24,7 +24,7 @@ from .messages import (
     MQTTUnsubscribe, MQTTUnsuback, MQTTPingresp, MQTTAuth,
     ProtocolLevel, ReasonCode, SESSION_EXPIRY_NEVER,
     split_shared, topic_matches_filter, validate_topic_name, validate_topic_filter, encode_packet,
-    encode_short_ack, _PacketIdAck,
+    encode_short_ack,
 )
 
 logger = logging.getLogger(__name__)
@@ -494,18 +494,17 @@ class BrokerActor(Actor):
         return len(send.wire_bytes()) <= peer_limit
 
     def _reply(self, conn, packet) -> Awaitable[None]:
-        """Send an acknowledgement within the peer's Maximum Packet Size.
+        """Send an acknowledgement within the peer's Maximum Packet Size:
+        full, else its short form, else end the connection (§3.1.2-24).
 
-        Full, else its shortest form.  Every admitted peer's limit is at least
-        the smallest CONNACK, which every PUBACK, PUBREC, PUBREL and PUBCOMP,
-        DISCONNECT, AUTH and PINGRESP fit; only a SUBACK or UNSUBACK can fail
-        to (§3.1.2-24), and that ends the connection.  Await the result.
+        Only a SUBACK or UNSUBACK can reach the last: every admitted limit
+        holds the smallest CONNACK, and with it every short PUBACK–PUBCOMP,
+        DISCONNECT, AUTH and PINGRESP.  Await the result.
         """
         send = Send(packet=packet)
         limit = self._peer_max_packet_size.get(conn)
         if limit is not None and len(send.wire_bytes()) > limit:
-            short = (encode_short_ack(packet)
-                     if isinstance(packet, _PacketIdAck) else None)
+            short = encode_short_ack(packet)
             if short is None or len(short) > limit:
                 return self._disconnect(conn, ReasonCode.PACKET_TOO_LARGE)
             send._encoded = short

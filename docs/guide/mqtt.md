@@ -110,15 +110,12 @@ session.
 
 The limit binds every packet the broker sends. A PUBLISH that exceeds it is
 discarded, and its delivery is treated as complete [MQTT-3.1.2-25]. It is
-never queued or retried. A PUBACK, PUBREC, PUBREL or PUBCOMP goes out in
-its short form, without the Property Length, when only that fits; a SUBACK
-or UNSUBACK that cannot fit ends the connection with `0x95`. The limit
-belongs to the
-connection: queued messages are rechecked against the reconnecting client's
-limit. Retained and Will messages follow the same rule. For a Shared
-Subscription, the message goes to a member that can receive it and is
-dropped only if no member can. Every admitted client's limit is at least the
-smallest CONNACK, so DISCONNECT, AUTH and PINGRESP always fit.
+never queued or retried. An acknowledgement that fits only without its
+Property Length is sent that way; a SUBACK or UNSUBACK that cannot fit ends
+the connection with `0x95`. The limit belongs to the connection: queued
+messages are rechecked against the reconnecting client's limit. Retained and
+Will messages follow the same rule. For a Shared Subscription, the message
+goes to a member that can receive it and is dropped only if no member can.
 
 Broker-initiated protocol-error closure retires admission before processing the
 next command. Client DISCONNECT and transport failures use the FIFO `Detach`

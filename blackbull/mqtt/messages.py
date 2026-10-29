@@ -1069,11 +1069,11 @@ def encode_packet(message: MQTTMessage) -> bytes:
     return bytes((first,)) + encode_variable_byte_integer(n) + body
 
 
-def encode_short_ack(message: _PacketIdAck) -> bytes | None:
+def encode_short_ack(message: MQTTMessage) -> bytes | None:
     """PUBACK, PUBREC, PUBREL or PUBCOMP without its Property Length, and
-    without a Success reason code (§3.4.2.1 and its kin); ``None`` when it
-    carries properties."""
-    if message.properties:
+    without a Success reason code (§3.4.2.1 and its kin); ``None`` for any
+    other packet or one with properties."""
+    if not isinstance(message, _PacketIdAck) or message.properties:
         return None
     _cls, first, flags, _header, _fields, _tail, _omit = _BY_CLASS[type(message)]
     head = message.packet_id.to_bytes(2, 'big')
