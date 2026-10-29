@@ -198,6 +198,8 @@ def _has_bytes(hint) -> bool:
 
 
 def _encoder(hint):
+    if hint is dict:
+        return _match_out
     if hint is bytes or bytes in typing.get_args(hint):
         return _hex
     return _out if _has_bytes(hint) else None
@@ -210,16 +212,42 @@ def _hex(value):
 def _build(cls, record: dict, **given):
     for name, decode in _codec(cls)[1]:
         if name in record:
-            record[name] = decode(record[name])
+            try:
+                record[name] = decode(record[name])
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise ValueError(f'{cls.__name__}.{name}: {exc}') from exc
     return cls(**record, **given)
 
 
+def _match_out(match: dict) -> dict:
+    return {key: _tagged(value) for key, value in match.items()}
+
+
+def _tagged(value):
+    if isinstance(value, bytes):
+        return {'hex': value.hex()}
+    if isinstance(value, tuple):
+        return {'tuple': [_tagged(v) for v in value]}
+    if isinstance(value, list):
+        return [_tagged(v) for v in value]
+    return value
+
+
 def _match_in(value) -> dict:
-    # JSON has no tuples, and ``header``'s pair must compare equal to the
-    # scenario it came from.
-    value = dict(value or {})
+    value = {key: _untagged(v) for key, v in (value or {}).items()}
+    # Older files store ``header`` as a list.
     if isinstance(value.get('header'), list):
         value['header'] = tuple(value['header'])
+    return value
+
+
+def _untagged(value):
+    if isinstance(value, dict) and value.keys() == {'hex'}:
+        return bytes.fromhex(value['hex'])
+    if isinstance(value, dict) and value.keys() == {'tuple'}:
+        return tuple(_untagged(v) for v in value['tuple'])
+    if isinstance(value, list):
+        return [_untagged(v) for v in value]
     return value
 
 
@@ -285,6 +313,13 @@ def _from_v1(record: dict, base64_payloads: bool, ops: dict) -> dict:
 
 
 _WRITE, _END = 'write', 'end'
+
+
+def _check_vocabulary(scenario) -> None:
+    """Refuse, before any byte is written, a step the scenario cannot run."""
+    for step in scenario.steps:
+        if _action(type(scenario), type(step)) is None:
+            raise TypeError(f'unknown step type: {type(step).__name__}')
 
 
 @functools.cache
@@ -397,7 +432,9 @@ class _ClientDriver(_Driver):
         if transport is not None:
             transport.abort()
 
-    async def execute(self, steps):
+    async def execute(self, scenario):
+        _check_vocabulary(scenario)
+        steps = scenario.steps
         t0 = time.monotonic()
         try:
             await self.run(steps)
@@ -466,11 +503,35 @@ class _ServerConnection(_Driver):
         return half_close(self.writer)
 
 
+class _Accepted(asyncio.StreamReaderProtocol):
+    """A connection accepted while its fault server stops is closed at once."""
+
+    def __init__(self, server: _FaultServer, loop) -> None:
+        super().__init__(asyncio.StreamReader(limit=2 ** 16, loop=loop),
+                         server._handle_connection, loop=loop)
+        self._owner = server
+        self._served = False
+
+    def connection_made(self, transport) -> None:
+        if self._owner._stopping:
+            transport.abort()
+            return
+        self._served = True
+        super().connection_made(transport)
+
+    def connection_lost(self, exc) -> None:
+        if self._served:
+            super().connection_lost(exc)
+
+
 class _FaultServer:
     """Serve one scenario to every client that connects.
 
-    Refuses a production context and a non-loopback bind without
-    ``allow_remote=True``.  ``stop()`` cancels connections still mid-scenario.
+    Refuses a production context, a non-loopback bind without
+    ``allow_remote=True`` and a step outside the scenario's vocabulary.
+    ``stop()`` stops accepting, then cancels connections still mid-scenario
+    and waits for them.  ``last_result`` is the most recently finished
+    connection's result since ``start()``.
     """
 
     #: Raised when the server refuses to run.
@@ -497,6 +558,7 @@ class _FaultServer:
                 f'{name} refuses to bind to {host!r} without '
                 'allow_remote=True.  Deliberate-misbehaviour mode is '
                 'intended for local-loop tests only.')
+        _check_vocabulary(scenario)
         self.scenario = scenario
         self.host = host
         self.port = port
@@ -515,8 +577,13 @@ class _FaultServer:
         await self.stop()
 
     async def start(self) -> None:
-        self._server = await asyncio.start_server(
-            self._handle_connection, self.host, self.port,
+        _check_vocabulary(self.scenario)
+        self._stopping = False
+        self.last_result = None
+        self._connection_done.clear()
+        loop = asyncio.get_running_loop()
+        self._server = await loop.create_server(
+            lambda: _Accepted(self, loop), self.host, self.port,
             ssl=self._ssl_context)
         self.port = self._server.sockets[0].getsockname()[1]
         scheme = 'https' if self._ssl_context is not None else 'http'
@@ -524,26 +591,40 @@ class _FaultServer:
         logger.debug('%s bound at %s', type(self).__name__, self.url)
 
     async def stop(self) -> None:
-        """Stop accepting and cancel anything still mid-scenario."""
-        for task in list(self._handlers):
-            task.cancel()
-        if self._handlers:
-            await asyncio.gather(*self._handlers, return_exceptions=True)
-            self._handlers.clear()
+        """Stop accepting, then cancel and wait for every connection."""
+        self._stopping = True
         if self._server is not None:
+            loop = asyncio.get_running_loop()
+            for sock in self._server.sockets:
+                loop.remove_reader(sock.fileno())
+            # A connection already taken off the listener gets its transport
+            # within two loop turns; Server.close() before then leaks it.
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
             self._server.close()
+            if hasattr(self._server, 'abort_clients'):  # 3.13+
+                self._server.abort_clients()
+        while self._handlers:
+            handlers = list(self._handlers)
+            for task in handlers:
+                task.cancel()
+            await asyncio.gather(*handlers, return_exceptions=True)
+        if self._server is not None:
             await self._server.wait_closed()
             self._server = None
         logger.debug('%s shut down', type(self).__name__)
 
     async def wait_for_connection_done(self, timeout: float = 5.0) -> None:
-        """Block until a client has connected and the scenario finished."""
+        """Block until a connection has finished since ``start()``."""
         await asyncio.wait_for(self._connection_done.wait(), timeout=timeout)
 
     def _connection(self, reader, writer) -> _ServerConnection:
         raise NotImplementedError
 
     async def _handle_connection(self, reader, writer) -> None:
+        if self._stopping:
+            writer.close()
+            return
         task = asyncio.current_task()
         self._handlers.add(task)
         conn = self._connection(reader, writer)

@@ -324,5 +324,5 @@ number, this peer".
 deliberately broken client on the wire — slowloris, a lied-about frame length,
 a rapid-reset burst. `scenario_mode` is the one place the two clients genuinely
 diverge, and [Fault injection](fault_injection.md#quick-start-http2-client-side)
-explains why and shows the vocabulary. Note that a scenario never raises; the
-outcome lands on `ScenarioResult`.
+explains why and shows the vocabulary. Peer and transport failures land on
+the result; a scenario the client cannot run raises before any byte.

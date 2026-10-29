@@ -91,7 +91,9 @@ class SendHeaders:
     ``pseudo`` and ``headers`` are encoded with HPACK in the order given, so
     a scenario can put ``:path`` after a regular field (RFC 9113 §8.3
     forbids it) simply by saying so.  Nothing here validates: the whole
-    point is to send what a conforming client would not.
+    point is to send what a conforming client would not.  The block uses
+    only the static table and never indexes, so it decodes the same on any
+    connection and leaves the peer's dynamic table untouched.
 
     ``raw_block`` replaces the encoded block outright, for faults HPACK
     itself cannot produce — a truncated block, an invalid table index, a
@@ -110,8 +112,9 @@ class SendHeaders:
         if self.raw_block is not None:
             block = self.raw_block
         else:
-            from hpack import Encoder  # noqa: PLC0415
-            block = Encoder().encode(list(self.pseudo) + list(self.headers))
+            from hpack import Encoder, NeverIndexedHeaderTuple  # noqa: PLC0415
+            block = Encoder().encode([NeverIndexedHeaderTuple(n, v)
+                                      for n, v in self.pseudo + self.headers])
         flags = (0x01 if self.end_stream else 0) | (0x04 if self.end_headers else 0)
         length = len(block) if self.declared_length is None else self.declared_length
         return frame_bytes(length, FrameTypes.HEADERS.value, flags, self.stream_id, block)

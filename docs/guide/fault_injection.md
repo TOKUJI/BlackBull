@@ -176,7 +176,9 @@ that require ALPN, such as httpx, supply the TLS context.
 After each connection, `fault_server.last_result` is a
 `ScenarioH2Result` carrying step-completion count, byte counters,
 whether a `WaitForClientFrame` step timed out, and the
-elapsed wall time.
+elapsed wall time.  Both fault servers keep only the most recent result
+since `start()`; `stop()` stops accepting, then cancels and waits for every
+connection still mid-scenario.
 
 ## The four spec-grade catalogue categories
 
@@ -391,7 +393,7 @@ async def test_my_server_meters_rapid_reset():
     async with HTTP2Client('127.0.0.1', my_port,
                            scenario_mode=True) as client:
         result = await client.execute_scenario(rapid_reset_burst())
-    # The scenario never raises; everything lands on the result.
+    # Peer and transport failures land on the result, not as exceptions.
     assert result.exception is None
 ```
 
@@ -432,7 +434,8 @@ the fault they stage; what ends those is your server's own deadline.
 
 Every vocabulary writes the same format: a `HEADER` line carrying the
 format version and the scenario's own fields, then one line per step named
-by its class, with bytes as hex.
+by its class, with bytes as hex.  Inside a `match`, bytes are written as
+`{"hex": "..."}` and a tuple as `{"tuple": [...]}`.
 
 ```text
 {"op": "HEADER", "format": 2, "name": "half_a_status_line"}

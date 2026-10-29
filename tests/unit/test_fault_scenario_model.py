@@ -44,9 +44,9 @@ EVERY_STEP = {
         name='h1c', steps=(
             h1c.SendRawBytes(b'GET / HTTP/1.1\r\n\r\n', byte_interval=0.05),
             h1c.Sleep(0.25), h1c.ReadResponse(timeout=2.0), h1c.HalfClose(),
-            h1c.WaitForResponse(match={'status': 200, 'header': ('x', 'y')},
+            h1c.WaitForResponse(match={'status': 200, 'header': (b'x', b'y')},
                                 timeout=1.5),
-            h1c.ExpectResponse(match={'body_contains': 'ok'}, timeout=1.0),
+            h1c.ExpectResponse(match={'body_contains': b'\xffok'}, timeout=1.0),
             h1c.Abort()))),
     'h1s': (h1s.scenario_to_json, h1s.scenario_from_json, h1s.ScenarioH1Server(
         name='h1s', steps=(
@@ -117,6 +117,14 @@ def test_every_catalogue_case_survives_a_json_round_trip(cell, role):
     for name, build in CATALOGUES[role].items():
         text = to_json(build())
         assert to_json(from_json(text)) == text, name
+
+
+def test_a_match_keeps_its_bytes_through_json():
+    # A response is matched over bytes, so a saved match must keep them.
+    scenario = h1c.Scenario(steps=(h1c.ExpectResponse(
+        match={'body_contains': b'\xff ok', 'header': (b'x-a', b'1'),
+               'header_absent': b'x-b'}),))
+    assert h1c.Scenario.from_json(scenario.to_json()) == scenario
 
 
 def test_the_format_is_one_shape_for_every_vocabulary():
@@ -533,3 +541,242 @@ def test_the_encode_helpers_are_deprecated_spellings_of_wire(module, name, step)
         encode = getattr(module, name)
     assert caught[0].filename == __file__
     assert encode(step) == step.wire()
+
+
+def _smuggle(scenario, step):
+    # Past the constructor, which beartype guards, to reach the executor's own.
+    object.__setattr__(scenario, 'steps', scenario.steps + (step,))
+    return scenario
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cell', ['h1c', 'h2c'])
+async def test_a_client_refuses_a_foreign_step_before_any_byte(cell):
+    vocabulary = {'h1c': (h1c.Scenario, HTTP1Client, {}),
+                  'h2c': (h2c.ScenarioH2Client, HTTP2Client, {'scenario_mode': True})}
+    scenario_cls, client_cls, kwargs = vocabulary[cell]
+    scenario = _smuggle(scenario_cls(steps=(h1c.SendRawBytes(b'first'),)),
+                        h1s.SendStatusLine(code=200))
+
+    async def run(port, closed):
+        async with client_cls('127.0.0.1', port, **kwargs) as client:
+            with pytest.raises(TypeError, match='SendStatusLine'):
+                await client.execute_scenario(scenario)
+
+    _, got = await _against_a_raw_server(run, [])
+    assert got == b''
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cell', ['h1c', 'h2c'])
+async def test_an_exited_client_refuses_a_scenario(cell):
+    from blackbull.client import ConnectionError as ClientConnectionError
+    vocabulary = {'h1c': (h1c.Scenario, HTTP1Client, {}),
+                  'h2c': (h2c.ScenarioH2Client, HTTP2Client, {'scenario_mode': True})}
+    scenario_cls, client_cls, kwargs = vocabulary[cell]
+
+    async def run(port, closed):
+        async with client_cls('127.0.0.1', port, **kwargs) as client:
+            pass
+        with pytest.raises(ClientConnectionError, match='context is closed'):
+            await client.execute_scenario(
+                scenario_cls(steps=(h1c.SendRawBytes(b'late'),)))
+
+    await _against_a_raw_server(run, [])
+
+
+@pytest.mark.parametrize('server_cls,scenario_cls', _SERVERS)
+def test_a_fault_server_refuses_a_foreign_step_when_built(server_cls, scenario_cls):
+    scenario = _smuggle(scenario_cls(steps=()), h2c.SendPreface())
+    with pytest.raises(TypeError, match='SendPreface'):
+        server_cls(scenario)
+
+
+@pytest.mark.asyncio
+async def test_every_headers_step_reaches_the_peer_as_one_decodable_frame():
+    import hpack
+    fields = ((':method', 'GET'), (':path', '/'), (':scheme', 'http'),
+              (':authority', 'a'))
+    steps = (
+        h2c.SendPreface(),
+        h2c.SendHeaders(pseudo=fields, headers=(('x-a', '1'),), stream_id=1,
+                        end_stream=True),
+        h2c.SendHeaders(pseudo=fields, headers=(('x-a', '1'),), stream_id=3,
+                        end_stream=True),
+        h2c.SendHeaders(stream_id=5),
+        h2c.SendHeaders(raw_block=b'\x82', stream_id=7, end_headers=False),
+        h2c.SendHeaders(raw_block=b'\x82\x86', stream_id=9, declared_length=99),
+    )
+    result, got = await _h2c(steps, [])
+    assert result.exception is None and result.steps_completed == len(steps)
+
+    rest, frames = got[len(CLIENT_PREFACE):], []
+    for _ in steps[1:-1]:
+        length = int.from_bytes(rest[:3], 'big')
+        frames.append((rest[3], rest[4], int.from_bytes(rest[5:9], 'big'),
+                       rest[9:9 + length]))
+        rest = rest[9 + length:]
+    assert [f[:3] for f in frames] == [(1, 0x05, 1), (1, 0x05, 3), (1, 0x04, 5),
+                                       (1, 0x00, 7)]
+    peer = hpack.Decoder()  # one per connection, as on any real peer
+    expected = [(n.encode(), v.encode()) for n, v in fields + (('x-a', '1'),)]
+    assert peer.decode(frames[0][3], raw=True) == expected
+    assert peer.decode(frames[1][3], raw=True) == expected
+    assert peer.decode(frames[2][3]) == []
+    assert frames[3][3] == b'\x82'
+    assert rest[:9] == (99).to_bytes(3, 'big') + b'\x01\x04' + (9).to_bytes(4, 'big')
+    assert rest[9:] == b'\x82\x86'
+
+
+# ---------------------------------------------------------------------------
+# A stopped fault server leaves nothing behind
+# ---------------------------------------------------------------------------
+
+_H2_HELLO = CLIENT_PREFACE + _SETTINGS
+
+#: id -> (server, its scenario, what the client sends): the connection is
+#: parked in that state when the server stops.
+_PARKED = {
+    'h1-reading-the-head': (H1FaultServer, h1s.ScenarioH1Server(
+        steps=(h1s.WaitForRequest(timeout=30.0),)), b''),
+    'h1-sleeping': (H1FaultServer, h1s.ScenarioH1Server(
+        steps=(h1s.Sleep(30.0),)), b''),
+    'h1-mid-paced-write': (H1FaultServer, h1s.ScenarioH1Server(
+        steps=(h1s.SendRawBytes(b'x' * 100, byte_interval=0.5),)), b''),
+    'h1-finished': (H1FaultServer, h1s.ScenarioH1Server(steps=()), b''),
+    'h2-awaiting-the-preface': (H2FaultServer, h2s.ScenarioH2(
+        steps=(h2s.Sleep(30.0),)), b''),
+    'h2-waiting-for-a-frame': (H2FaultServer, h2s.ScenarioH2(
+        steps=(h2s.WaitForClientFrame(match={'type': 'PING'}, timeout=30.0),)),
+        _H2_HELLO),
+    'h2-sleeping': (H2FaultServer, h2s.ScenarioH2(steps=(h2s.Sleep(30.0),)),
+                    _H2_HELLO),
+    'h2-failed': (H2FaultServer, h2s.ScenarioH2(steps=(h2s.Sleep(30.0),)),
+                  b'not a preface' + b'.' * 11),
+}
+
+
+async def _connect(srv, hello: bytes, n: int = 1):
+    peers = [await asyncio.open_connection('127.0.0.1', srv.port) for _ in range(n)]
+    for _, writer in peers:
+        writer.write(hello)
+        await writer.drain()
+    await asyncio.sleep(0.2)  # each handler reaches the parked state
+    return peers
+
+
+async def _stop_and_check(srv, peers, before):
+    t0 = asyncio.get_running_loop().time()
+    await asyncio.wait_for(srv.stop(), timeout=5.0)
+    assert asyncio.get_running_loop().time() - t0 < 2.0
+    assert asyncio.all_tasks() - before == set(), 'a task outlived stop()'
+    for reader, writer in peers:
+        await _read_to_eof(reader)  # the peer is told the connection is over
+        writer.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('parked', sorted(_PARKED))
+async def test_stopping_a_fault_server_leaves_no_task_and_ends_the_connection(parked):
+    server_cls, scenario, hello = _PARKED[parked]
+    before = asyncio.all_tasks()
+    srv = server_cls(scenario)
+    await srv.start()
+    peers = await _connect(srv, hello)
+    await _stop_and_check(srv, peers, before)
+    assert srv.last_result is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('server_cls,scenario_cls', _SERVERS)
+async def test_stopping_ends_every_connection_at_once(server_cls, scenario_cls):
+    before = asyncio.all_tasks()
+    srv = server_cls(scenario_cls(steps=(h1c.Sleep(30.0),)))
+    await srv.start()
+    hello = _H2_HELLO if server_cls is H2FaultServer else b''
+    await _stop_and_check(srv, await _connect(srv, hello, n=3), before)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('server_cls,scenario_cls', _SERVERS)
+async def test_a_restarted_fault_server_reports_only_its_own_connections(
+        server_cls, scenario_cls):
+    hello = _H2_HELLO if server_cls is H2FaultServer else b''
+    srv = server_cls(scenario_cls(steps=()))
+    await srv.start()
+    peers = await _connect(srv, hello)
+    await srv.wait_for_connection_done(timeout=2.0)
+    first = srv.last_result
+    await srv.stop()
+
+    await srv.start()
+    assert srv.last_result is None
+    with pytest.raises(TimeoutError):
+        await srv.wait_for_connection_done(timeout=0.2)
+    peers += await _connect(srv, hello)
+    await srv.wait_for_connection_done(timeout=2.0)
+    assert srv.last_result is not None and srv.last_result is not first
+    await srv.stop()
+    for _, writer in peers:
+        writer.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('server_cls,scenario_cls', _SERVERS)
+async def test_no_accepted_connection_outlives_stop(server_cls, scenario_cls):
+    import gc
+    for yields in range(8):
+        srv = server_cls(scenario_cls(steps=(h1c.Sleep(30.0),)))
+        await srv.start()
+        port = srv.port
+        connects = [asyncio.ensure_future(asyncio.open_connection('127.0.0.1', port))
+                    for _ in range(10)]
+        for _ in range(yields):
+            await asyncio.sleep(0)
+        await srv.stop()
+        peers = [c for c in await asyncio.gather(*connects, return_exceptions=True)
+                 if not isinstance(c, OSError)]  # refused once the listener closed
+        await asyncio.sleep(0.1)
+        open_server_side = [
+            t for t in gc.get_objects()
+            if isinstance(t, asyncio.Transport) and not t.is_closing()
+            and (t.get_extra_info('sockname') or ('', 0))[1] == port]
+        for _, writer in peers:
+            writer.close()
+        assert open_server_side == [], f'after {yields} yields'
+
+
+def test_a_headers_block_needs_nothing_from_the_peers_table():
+    import hpack
+    step = h2c.SendHeaders(pseudo=((':method', 'GET'), (':scheme', 'http'),
+                                   (':path', '/'), (':authority', 'a.example'),
+                                   (':authority', 'a.example')))
+    block = step.wire()[9:]
+    for size in (0, 64, 4096):
+        peer = hpack.Decoder()
+        peer.header_table_size = size
+        assert [n for n, _ in peer.decode(block)].count(':authority') == 2
+        assert len(peer.header_table.dynamic_entries) == 0
+
+
+def test_a_match_keeps_its_tuples_and_lists_through_json():
+    scenario = h2s.ScenarioH2(steps=(
+        h2s.WaitForClientFrame(match={'flags_set': ('ACK',)}),
+        h2s.ExpectClientFrame(match={'flags_unset': ['END_STREAM']})))
+    assert h2s.scenario_from_json(h2s.scenario_to_json(scenario)) == scenario
+
+
+@pytest.mark.parametrize('match', ['{"x": {"hex": "zz"}}', '[1, 2]', '{"x": {"hex": 5}}'])
+def test_a_malformed_field_is_refused_by_name(match):
+    with pytest.raises(ValueError, match='ExpectResponse.match'):
+        h1c.Scenario.from_json('{"op": "HEADER", "format": 2, "name": ""}\n'
+                               f'{{"op": "ExpectResponse", "match": {match}}}')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('server_cls,scenario_cls', _SERVERS)
+async def test_a_fault_server_refuses_a_foreign_step_when_started(server_cls, scenario_cls):
+    srv = server_cls(scenario_cls(steps=()))
+    srv.scenario = _smuggle(scenario_cls(steps=()), h2c.SendPreface())
+    with pytest.raises(TypeError, match='SendPreface'):
+        await srv.start()

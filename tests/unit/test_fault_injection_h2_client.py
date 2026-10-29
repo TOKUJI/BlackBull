@@ -23,7 +23,8 @@ import pytest
 
 from blackbull.client.http2 import HTTP2Client
 from blackbull.fault_injection.scenario_h2_client import (
-    ReadResponse, ScenarioH2Client, ScenarioH2ClientResult, SendFrame, SendHeaders, SendPreface,
+    ExpectServerFrame, ReadResponse, ScenarioH2Client, ScenarioH2ClientResult, SendFrame,
+    SendHeaders, SendPreface, WaitForServerFrame,
 )
 from blackbull.protocol.frame_types import FrameTypes
 from blackbull.server.recipient import AbstractReader
@@ -99,27 +100,6 @@ class TestExecuteScenario:
         assert result.steps_completed == 0, (
             'a step that timed out must not count as completed — the twin '
             'returns before incrementing')
-
-    async def test_the_executor_never_raises(self):
-        """The twin folds every outcome into the result; so does this.
-
-        The bad step is smuggled past the constructor rather than passed to
-        it: under beartype the annotation rejects it at construction, so a
-        scenario built the normal way never reaches the executor's own
-        guard.  It is the guard that is under test here — the promise is
-        that `execute_scenario` never raises, whatever it is handed.
-        """
-        c = _client()
-
-        class _Unknown:
-            pass
-
-        scenario = ScenarioH2Client(steps=())
-        object.__setattr__(scenario, 'steps', (_Unknown(),))
-
-        result = await c.execute_scenario(scenario)
-        assert result.exception is not None
-        assert 'unknown step type' in result.exception
 
     async def test_a_headers_step_reaches_the_wire(self):
         writer = _RecordingWriter()
@@ -241,18 +221,24 @@ class TestScenarioOwnsTheWire:
         assert bytes(writer.data) == b'', (
             'the PING was written before the scenario was rejected')
 
-    async def test_read_response_is_refused_while_the_receive_loop_runs(self):
+    @pytest.mark.parametrize('read', [
+        ReadResponse(timeout=0.1),
+        WaitForServerFrame(match={'type': 'PING'}, timeout=0.1),
+        ExpectServerFrame(match={'type': 'PING'}, timeout=0.1),
+    ], ids=lambda step: type(step).__name__)
+    async def test_a_read_step_is_refused_while_the_receive_loop_runs(self, read):
         """Both would read the same socket; which one wins is a coin toss."""
         c = HTTP2Client('localhost', 1)
-        c._writer = _RecordingWriter()
+        c._writer = writer = _RecordingWriter()
         c._reader = _SilentReader()
         c._receive_task = asyncio.create_task(asyncio.sleep(3600))
         try:
             with pytest.raises(RuntimeError, match='races the receive loop'):
-                await c.execute_scenario(
-                    ScenarioH2Client(steps=(ReadResponse(timeout=0.1),)))
+                await c.execute_scenario(ScenarioH2Client(steps=(
+                    SendFrame(FrameTypes.PING, data=b'\x00' * 8), read)))
         finally:
             c._receive_task.cancel()
+        assert bytes(writer.data) == b''
 
     async def test_the_h1_twin_needs_no_such_mode(self):
         """The asymmetry is real and belongs to HTTP/2 alone.
