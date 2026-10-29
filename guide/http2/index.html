@@ -737,6 +737,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#header-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Header limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#priority-hints" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5814,6 +5825,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#header-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Header limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#priority-hints" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6051,6 +6073,14 @@ a load balancer that terminates TLS), bind a plain port and let
 the protocol detector sniff the connection preface:</p>
 <div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="mi">8080</span><span class="p">)</span>   <span class="c1"># serves both HTTP/1.1 and h2c on the same socket</span>
 </code></pre></div>
+<h2 id="header-limits">Header limits<a class="headerlink" href="#header-limits" title="Permanent link">&para;</a></h2>
+<p><code>BB_HEADER_MAX_TOTAL</code> bounds both encoded field blocks and decoded field
+sections. The decoded total includes pseudoheaders and counts name bytes +
+value bytes + 32 per field. The server advertises that bound as
+<code>SETTINGS_MAX_HEADER_LIST_SIZE</code>; excess sends GOAWAY <code>ENHANCE_YOUR_CALM</code> and
+logs <code>header_max_total</code>. Values above 2^32-1 use that maximum for decoding;
+<code>0</code> omits the advertisement and uses 2^32-1, the decoder's practical unlimited
+value.</p>
 <h2 id="priority-hints">Priority hints<a class="headerlink" href="#priority-hints" title="Permanent link">&para;</a></h2>
 <p>HTTP/2 lets a client tell the server which of its outstanding
 requests is more important.  BlackBull surfaces the hint on the

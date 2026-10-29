@@ -5825,8 +5825,9 @@ connection while a field block is open.</p>
 (client: <code>BB_CLIENT_HEAD_MAX_TOTAL</code>) and an unfinished block by
 <code>BB_HEADER_TIMEOUT</code> (client: <code>BB_CLIENT_HEAD_TIMEOUT</code>); both send GOAWAY
 <code>ENHANCE_YOUR_CALM</code>. Only one block can be open per connection. The shared
-decoder separately bounds decompressed fields; decode failures, including
-that limit, end the connection with <code>COMPRESSION_ERROR</code>. Otherwise valid
+decoder separately bounds decompressed fields: server excess logs
+<code>header_max_total</code> and sends <code>ENHANCE_YOUR_CALM</code>; client excess retains
+<code>COMPRESSION_ERROR</code>. Invalid HPACK also sends <code>COMPRESSION_ERROR</code>. Otherwise valid
 client pushes are connection errors (<code>PROTOCOL_ERROR</code>), never stream-only
 refusals.</p>
 <p>Encode output headers only when their write will happen, after checking

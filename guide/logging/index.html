@@ -6338,7 +6338,7 @@ record on <code>blackbull.caps</code> when it fires.  Coverage:</p>
 </tr>
 <tr>
 <td><code>BB_HEADER_MAX_TOTAL</code></td>
-<td>aggregate header block exceeded (H/1.1 + H/2 CONTINUATION)</td>
+<td>HTTP/1.1 header block or HTTP/2 encoded/decoded field section exceeded; decoded <code>requested</code> is a lower bound (<code>limit + 1</code>)</td>
 </tr>
 <tr>
 <td><code>BB_BODY_TIMEOUT</code></td>
