@@ -849,8 +849,9 @@ async def test_no_accepted_connection_outlives_stop(server_cls, scenario_cls):
                  if not isinstance(c, OSError)]  # refused once the listener closed
         await asyncio.sleep(0.1)
         open_server_side = [
+            # type(), not isinstance(): a dead weakref.proxy raises on the latter.
             t for t in gc.get_objects()
-            if isinstance(t, asyncio.Transport) and not t.is_closing()
+            if issubclass(type(t), asyncio.Transport) and not t.is_closing()
             and (t.get_extra_info('sockname') or ('', 0))[1] == port]
         for _, writer in peers:
             writer.close()
