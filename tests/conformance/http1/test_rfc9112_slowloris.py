@@ -313,13 +313,8 @@ class TestKeepAliveIdle:
             ReadResponse(timeout=2.0),
         ))
         result = await _run(scenario, slow_app.port)
-        # Either the scenario didn't run to completion (executor caught
-        # a transport error mid-step) or the final ReadResponse came
-        # back with no response.
-        all_succeeded = (result.steps_completed == len(scenario.steps)
-                         and result.response is not None
-                         and result.exception is None)
-        assert not all_succeeded, (
+        # The second request is never answered: the server had closed.
+        assert result.peer_closed and len(result.received) <= 1, (
             f'expected server close after idle; result={result!r}'
         )
 
@@ -336,10 +331,7 @@ class TestKeepAliveIdle:
             ReadResponse(timeout=2.0),
         ))
         result = await _run(scenario, slow_app.port)
-        all_succeeded = (result.steps_completed == len(scenario.steps)
-                         and result.response is not None
-                         and result.exception is None)
-        assert not all_succeeded, (
+        assert result.peer_closed and len(result.received) <= 1, (
             f'expected server close after keep-alive idle; result={result!r}'
         )
 
