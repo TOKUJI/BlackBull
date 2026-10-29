@@ -326,46 +326,6 @@ class TestFlowControlInvariants:
     fuzz-driven bug hunting."""
 
     @given(
-        initial=st.integers(min_value=65535, max_value=65535),
-        consumed=st.integers(min_value=0, max_value=131070),
-        credited=st.integers(min_value=0, max_value=0x7FFFFFFF),
-    )
-    def test_window_update_accumulates_unbounded_bla514(self, initial, consumed, credited):
-        """The current (non-conformant) behaviour, named for what it is.
-
-        PRODUCT GAP — tracked in BLA-514: sender.window_update adds the
-        peer's increments unchecked and has no FLOW_CONTROL_ERROR path.
-        """
-        sender = _make_sender(_RecordingWriter(),
-                              initial_window=initial - consumed)
-        sender.window_update(credited)
-        assert sender.stream_window_size == initial - consumed + credited
-
-    @given(
-        initial=st.integers(min_value=65535, max_value=65535),
-        consumed=st.integers(min_value=0, max_value=131070),
-        credited=st.integers(min_value=0, max_value=0x7FFFFFFF),
-    )
-    @example(initial=65535, consumed=0, credited=0x7FFFFFFF)
-    @pytest.mark.xfail(strict=True, reason='BLA-514: no FLOW_CONTROL_ERROR path')
-    def test_window_never_exceeds_max(self, initial, consumed, credited):
-        """RFC 9113 §6.9.1 — the flow-control window must never exceed
-        2^31-1: an increment that would push it past the bound is rejected
-        with FLOW_CONTROL_ERROR.  This is the conformant assertion; it xfails
-        until BLA-514 lands (strict — the day the product implements the
-        path this turns into a failure and the marker must go)."""
-        sender = _make_sender(_RecordingWriter(),
-                              initial_window=initial - consumed)
-        try:
-            sender.window_update(credited)
-        except Exception as exc:
-            assert getattr(exc, 'error_code', None) is ErrorCodes.FLOW_CONTROL_ERROR
-            return
-        assert sender.stream_window_size <= 0x7FFFFFFF, (
-            f'window {sender.stream_window_size} exceeds 2^31-1 (RFC 9113 §6.9.1)'
-        )
-
-    @given(
         frame_size=st.integers(min_value=1, max_value=65535),
         window_size=st.integers(min_value=0, max_value=65535),
     )

@@ -56,6 +56,12 @@ RULES: dict[str, tuple[tuple[bytes, ...], str]] = {
     'settings-enable-push-not-boolean': ((F(SETTINGS, 0, 0, setting(2, 2)),),
                                          'GOAWAY PROTOCOL_ERROR'),
     'settings-window-at-the-maximum': ((F(SETTINGS, 0, 0, setting(4, 2**31 - 1)),), 'ignored'),
+    'settings-delta-reaches-the-maximum': (
+        (F(WU, 0, 1, u32(2**31 - 1 - 65536)), F(SETTINGS, 0, 0, setting(4, 65536))),
+        'ignored'),
+    'settings-delta-overflows-a-stream': (
+        (F(WU, 0, 1, u32(2**31 - 1 - 65535)), F(SETTINGS, 0, 0, setting(4, 65536))),
+        'GOAWAY FLOW_CONTROL_ERROR'),
     'settings-window-too-large': ((F(SETTINGS, 0, 0, setting(4, 2**31)),),
                                   'GOAWAY FLOW_CONTROL_ERROR'),
     'settings-frame-size-too-small': ((F(SETTINGS, 0, 0, setting(5, 16383)),),

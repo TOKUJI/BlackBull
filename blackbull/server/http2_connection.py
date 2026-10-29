@@ -406,7 +406,10 @@ class HTTP2Connection:
                                          f'SETTINGS_ENABLE_PUSH invalid value {enable_push}')
             return
         window = getattr(frame, 'initial_window_size', None)
-        if window is not None and window > _MAX_FLOW_WINDOW:
+        if window is not None and (
+                window > _MAX_FLOW_WINDOW
+                or self._stream_window_overflows(window - self._peer_initial_window_size)):
+            # §6.9.2: also when the change lifts an open stream's window past it.
             await self._connection_error(ErrorCodes.FLOW_CONTROL_ERROR,
                                          f'SETTINGS_INITIAL_WINDOW_SIZE overflow: {window}')
             return
@@ -425,6 +428,14 @@ class HTTP2Connection:
         self.factory.apply_peer_header_table_size(settings)
         await self._send_control(self.factory.settings(ack=True))
 
+    def _stream_window_overflows(self, delta: int) -> bool:
+        if delta <= 0:
+            return False
+        limit = _MAX_FLOW_WINDOW - delta
+        return (any(s.stream_window_size > limit for s in self._senders.values())
+                or any(getattr(s, 'window_size', 0) > limit
+                       for s in self.root_stream.children.values()))
+
     def _set_peer_initial_window(self, window: int) -> None:
         """§6.9.2: open streams move by the delta, possibly below zero."""
         delta = window - self._peer_initial_window_size
@@ -432,6 +443,10 @@ class HTTP2Connection:
         if delta:
             for sender in self._senders.values():
                 sender.adjust_initial_window(delta)
+            # So does the window a stream keeps once its sender is done.
+            for stream in self.root_stream.children.values():
+                if hasattr(stream, 'window_size'):
+                    stream.window_size += delta
 
     async def on_window_update(self, frame) -> None:
         """§6.9: credit the connection or one stream; zero and overflow are
