@@ -6230,7 +6230,7 @@ accepted it; TLS cannot.</p>
 
         <p>Read one message: an HTTP/1.1 response, or one HTTP/2 frame.</p>
 <p>On <code>timeout</code> the scenario ends with <code>timed_out</code> set and the step
-uncounted; the executor never raises.</p>
+uncounted.  End of stream sets <code>peer_closed</code> and the scenario goes on.</p>
 
 
 

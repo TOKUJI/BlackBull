@@ -6284,10 +6284,18 @@ short-circuit.</p>
     <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">execute_scenario</span><span class="p">(</span><span class="n">trickle</span><span class="p">)</span>
     <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">response</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">result</span><span class="o">.</span><span class="n">timed_out</span>
 </code></pre></div>
+<p>In all four halves, a read step that meets end of stream sets
+<code>result.peer_closed</code> and later steps still run, since the peer may only have
+half-closed; a reset sets it and ends the scenario.  <code>wait_timed_out</code> means
+only that time ran out.</p>
 <p>The matching differential oracle
 (<code>blackbull.fault_injection.run_scenario</code>) drives the same scenario
-against two servers and categorises whether they agree, disagree,
-or both rejected.</p>
+against two servers.  Each side is <code>Observed</code> as a response, a close, an
+unreadable reply, a timeout, an unmet <code>WaitFor…</code>/<code>Expect…</code> premise, no read
+at all, or a harness error, and <code>categorize</code> accepts only what both sides
+confirmed alike: equal responses, the same error status, or both closing.
+Silence, an unmet premise and a harness error are never a rejection
+(<code>INCONCLUSIVE</code>, <code>HARNESS_ERROR</code>).</p>
 <h2 id="quick-start-http11-server-side">Quick start — HTTP/1.1 server-side<a class="headerlink" href="#quick-start-http11-server-side" title="Permanent link">&para;</a></h2>
 <p>Point your own HTTP/1.1 client at a server that is wrong on purpose:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>

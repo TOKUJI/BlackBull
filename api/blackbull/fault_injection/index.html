@@ -2837,6 +2837,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.Observed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.ReadResponse" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7076,6 +7087,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.fault_injection.Observed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Observed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.fault_injection.ReadResponse" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -8910,7 +8932,7 @@ accepted it; TLS cannot.</p>
 
         <p>Read one message: an HTTP/1.1 response, or one HTTP/2 frame.</p>
 <p>On <code>timeout</code> the scenario ends with <code>timed_out</code> set and the step
-uncounted; the executor never raises.</p>
+uncounted.  End of stream sets <code>peer_closed</code> and the scenario goes on.</p>
 
 
 
@@ -9861,6 +9883,54 @@ accepted it; TLS cannot.</p>
 
 
 
+<h3 id="blackbull.fault_injection.Observed" class="doc doc-heading">
+            <code>Observed</code>
+
+
+<a href="#blackbull.fault_injection.Observed" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="str">str</span></code>, <code><span title="enum.Enum">Enum</span></code></p>
+
+
+
+        <p>What one side's run established about the peer.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.fault_injection.ReadResponse" class="doc doc-heading">
             <code>ReadResponse</code>
 
@@ -9878,7 +9948,7 @@ accepted it; TLS cannot.</p>
 
         <p>Read one message: an HTTP/1.1 response, or one HTTP/2 frame.</p>
 <p>On <code>timeout</code> the scenario ends with <code>timed_out</code> set and the step
-uncounted; the executor never raises.</p>
+uncounted.  End of stream sets <code>peer_closed</code> and the scenario goes on.</p>
 
 
 
@@ -10558,11 +10628,7 @@ shape so callers can write uniform assertions across protocols.</p>
 
 
 
-        <p>One side's response in a differential pair.</p>
-<p>Exactly one of (response, exception) is populated.  <code>timed_out</code>
-is True if the failure was an <code>asyncio.TimeoutError</code> from
-the per-example wait_for; we record it separately because timeouts
-are semantically distinct from other transport errors.</p>
+        <p>One side's observation in a differential pair.</p>
 
 
 
@@ -11088,9 +11154,8 @@ handshake SETTINGS is reached.</p>
     <div class="doc doc-contents ">
 
         <p>Bucket a differential example into a <a class="autorefs autorefs-internal" href="oracle_h1/#blackbull.fault_injection.oracle_h1.Category"><code>Category</code></a>.</p>
-<p>Order of the checks matters: both-rejected wins over individual
-transport failures so we don't flag inputs that nginx also
-refused.</p>
+<p>Only outcomes both sides confirmed alike are accepted: a timeout, an
+unmet premise or a harness failure is never a rejection.</p>
 
 
     </div>
@@ -11235,10 +11300,6 @@ presence alone.  <code>header_absent</code> takes a name.</p>
     <div class="doc doc-contents ">
 
         <p>Execute <em>scenario</em> against (host, port) and return (outcome, wire_bytes).</p>
-<p>Drives the scenario through <code>HTTP1Client.execute_scenario</code>,
-which itself never raises; this wrapper only adds an outer
-<code>asyncio.wait_for</code> so a runaway scenario (e.g. trickled bytes
-plus a long read timeout) can't blow the per-side budget.</p>
 <p>Returns the captured wire bytes (both servers receive identical
 bytes, so a single capture is enough for failure diagnostics).</p>
 
