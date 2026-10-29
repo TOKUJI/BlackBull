@@ -5848,6 +5848,10 @@ stream ownership. Frame-count limits are still needed for empty DATA.
 WebSocket streams, in both roles, read through <code>HTTP2StreamReader</code>: octets a
 pending read has committed to count as consumed, or a WebSocket frame longer
 than the window never completes.</p>
+<p>A WINDOW_UPDATE that would raise a window above 2^31-1 is <code>FLOW_CONTROL_ERROR</code>
+(§6.9.1): GOAWAY for the connection window, RST_STREAM for a stream's. A
+SETTINGS_INITIAL_WINDOW_SIZE change that would lift any stream's window past
+it is a connection <code>FLOW_CONTROL_ERROR</code> (§6.9.2).</p>
 <p>Use the existing server/client write-timeout owner for credit waits, not
 another timer. Read <code>HTTP2Sender</code>, <code>ConnectionWindow</code> and <code>HTTP2Recipient</code>.</p>
 <h2 id="stream-lifetime-and-error-scope">Stream lifetime and error scope<a class="headerlink" href="#stream-lifetime-and-error-scope" title="Permanent link">&para;</a></h2>
@@ -5862,7 +5866,8 @@ race; do not manufacture a failure for a completed response. Peer GOAWAY
 stops new work while permitting accepted responses to drain. Connection errors
 retire output owners and pending credit work before closing.</p>
 <p>Preserve RFC connection-versus-stream error scope when validating fixed-size
-control frames. A frame whose length or padding breaks its type's layout
+control frames. SETTINGS, PING and GOAWAY on a non-zero stream, and a
+stream-only frame on stream 0, are connection <code>PROTOCOL_ERROR</code>s (§6.1–§6.10). A frame whose length or padding breaks its type's layout
 raises <code>FrameFormatError</code> with the RFC's code, and the frame loop answers it
 with GOAWAY: every such case, HEADERS padding included, is a connection error.
 Unknown frame types are ignored only outside an open field block.</p>
