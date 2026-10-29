@@ -9,27 +9,36 @@ registered.  Every refusal reply honours the limit the same way.
 Then the data path (§3.1.2-25): an Application Message whose packet the
 limit excludes is dropped whole at the delivery decision — no Packet
 Identifier booked, no pending entry, nothing to resend — and its flow is
-treated complete, including a queued PUBLISH or PUBREL re-drive that no
-longer fits the current connection.  Probe-derived bounds keep the tests
-honest about actual encoded sizes.
+treated complete, including a queued PUBLISH re-drive that no longer fits
+the current connection.  An acknowledgement falls back to its short Success
+form, and one that fits in neither form ends the connection.  Probe-derived
+bounds keep the tests honest about actual encoded sizes.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 import pytest
 
 from blackbull.actor import Actor
 from blackbull.mqtt.broker import (
-    BrokerActor, Attach, Detach, Send, Close, ClientPuback,
+    BrokerActor, Attach, Detach, Send, Close, ClientPuback, ClientPublish,
+    ClientPubrel, ClientSubscribe, ClientUnsubscribe,
 )
 
 from blackbull.mqtt.messages import (
     MQTTConnect,
     MQTTConnack,
     MQTTDisconnect,
+    MQTTPuback,
+    MQTTPubcomp,
     MQTTPublish,
+    MQTTPubrec,
     MQTTPubrel,
     MQTTSubscribe,
+    MQTTUnsubscribe,
+    decode_packet,
     ReasonCode,
     encode_packet,
 )
@@ -400,9 +409,9 @@ class TestApplicationMessageDiscard:
         assert set(session['pending_qos2_out']) == {1}
         assert session['pending_qos2_out'][1]['packet'].payload == b'ok'
 
-    async def test_a_pubrel_redrive_the_peer_cannot_receive_completes_the_flow(self):
+    async def test_a_pubrel_redrive_that_fits_only_short_is_sent_short(self):
         # The floor (5) admits the client but rules out the 6-byte PUBREL
-        # re-drive; lower and the CONNECT is refused instead.
+        # re-drive; its 4-byte Success form (§3.6.2.1) still fits.
         broker = BrokerActor()
         conn, session = await _subscriber(broker, subs=(('a', 2),),
                                           session_expiry=30)
@@ -414,8 +423,9 @@ class TestApplicationMessageDiscard:
         await _attach(broker, conn2, client_id='probe-connect',
                       clean_start=False,
                       properties={'maximum_packet_size': _named_floor()})
-        assert _pubrels(conn2) == []
-        assert session['pending_qos2_out'] == {}
+        assert [p.packet_id for p in _pubrels(conn2)] == [pid]
+        _assert_within(conn2, _named_floor())
+        assert pid in session['pending_qos2_out']
 
     async def test_retained_replay_drops_an_oversized_message(self):
         broker = BrokerActor()
@@ -514,3 +524,85 @@ class TestApplicationMessageDiscard:
                       clean_start=False)
         await broker._route(_msg(payload=b'ok', qos=1))
         assert [p.payload for p in _pubs(conn2)] == [b'ok']
+
+
+# §3.1.2-24 binds the acknowledgements as well.  Every admitted peer's limit is
+# at least the 5-byte CONNACK, so DISCONNECT, AUTH and PINGRESP always fit.
+
+async def _drive(*msgs) -> None:
+    """Feed *msgs* through a running broker's inbox, then let it settle."""
+    broker = BrokerActor()
+    task = asyncio.create_task(broker.run())
+    try:
+        for msg in msgs:
+            await broker.send(msg)
+        for _ in range(50):
+            await asyncio.sleep(0)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+def _at_floor(conn, client_id='floor'):
+    return Attach(connect=_connect(
+        client_id=client_id,
+        properties={'maximum_packet_size': _named_floor()}), sender=conn)
+
+
+def _publish(conn, qos, topic='t'):
+    return ClientPublish(publish=MQTTPublish(
+        topic=topic, payload=b'', qos=qos, packet_id=7), sender=conn)
+
+
+def _sent(conn, cls):
+    return [m for m in conn.outbox
+            if isinstance(m, Send) and isinstance(m.packet, cls)]
+
+
+def _ended_too_large(conn):
+    return ([p.reason_code for p in conn.packets()
+             if isinstance(p, MQTTDisconnect)] == [ReasonCode.PACKET_TOO_LARGE]
+            and isinstance(conn.outbox[-1], Close))
+
+
+class TestAcknowledgementsHonourTheLimit:
+    @pytest.mark.parametrize('qos,ack', [(1, MQTTPuback), (2, MQTTPubrec)])
+    async def test_a_success_ack_that_fits_only_short_is_sent_short(self, qos, ack):
+        conn = RecordingConn()
+        await _drive(_at_floor(conn), _publish(conn, qos))
+        [send] = _sent(conn, ack)
+        assert len(send.wire_bytes()) <= _named_floor()
+        assert decode_packet(send.wire_bytes()) == ack(packet_id=7)
+
+    async def test_a_pubcomp_that_fits_only_short_is_sent_short(self):
+        conn = RecordingConn()
+        await _drive(_at_floor(conn), _publish(conn, 2),
+                     ClientPubrel(packet_id=7, sender=conn))
+        [send] = _sent(conn, MQTTPubcomp)
+        assert decode_packet(send.wire_bytes()) == MQTTPubcomp(packet_id=7)
+        _assert_within(conn, _named_floor())
+
+    async def test_an_error_ack_that_cannot_fit_ends_the_connection(self):
+        conn = RecordingConn()
+        await _drive(_at_floor(conn), _publish(conn, 1, topic='a/+'))
+        assert _sent(conn, MQTTPuback) == []
+        assert _ended_too_large(conn)
+        _assert_within(conn, _named_floor())
+
+    @pytest.mark.parametrize('kind', ['subscribe', 'unsubscribe'])
+    async def test_a_suback_or_unsuback_that_cannot_fit_ends_the_connection(self, kind):
+        conn = RecordingConn()
+        await _drive(_at_floor(conn), (
+            ClientUnsubscribe(unsubscribe=MQTTUnsubscribe(packet_id=2, topics=['a']),
+                              sender=conn) if kind == 'unsubscribe' else
+            ClientSubscribe(subscribe=MQTTSubscribe(packet_id=2, subscriptions=[('a', 0)]),
+                            sender=conn)))
+        assert _ended_too_large(conn)
+        _assert_within(conn, _named_floor())
+
+    async def test_a_client_without_the_property_keeps_the_full_form(self):
+        conn = RecordingConn()
+        await _drive(Attach(connect=_connect(client_id='plain'), sender=conn),
+                     _publish(conn, 1))
+        [send] = _sent(conn, MQTTPuback)
+        assert send.wire_bytes() == encode_packet(MQTTPuback(packet_id=7))

@@ -1069,6 +1069,15 @@ def encode_packet(message: MQTTMessage) -> bytes:
     return bytes((first,)) + encode_variable_byte_integer(n) + body
 
 
+def encode_short_ack(message: _PacketIdAck) -> bytes | None:
+    """PUBACK, PUBREC, PUBREL or PUBCOMP without its reason code and property
+    length (§3.4.2.1 and its kin), or ``None`` when it has something to say."""
+    if message.reason_code or message.properties:
+        return None
+    _cls, first, flags, _header, _fields, _tail, _omit = _BY_CLASS[type(message)]
+    return bytes((first | flags, 2)) + message.packet_id.to_bytes(2, 'big')
+
+
 def decode_packet(data: bytes) -> MQTTMessage:
     """Decode the first MQTT control packet in *data*.
 

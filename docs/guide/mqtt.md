@@ -108,14 +108,17 @@ optional), and only when neither fits is the connection refused with `0x95`
 — or closed outright when even that reply cannot fit — before creating a
 session.
 
-The limit also applies to outgoing PUBLISH and PUBREL packets. A packet
-that exceeds it is discarded, and its delivery is treated as complete
-[MQTT-3.1.2-25]. It is never queued or retried. The limit belongs to the
+The limit binds every packet the broker sends. A PUBLISH that exceeds it is
+discarded, and its delivery is treated as complete [MQTT-3.1.2-25]. It is
+never queued or retried. An acknowledgement goes out in its short Success
+form when only that fits; one that fits in neither form (an error
+acknowledgement, SUBACK or UNSUBACK) ends the connection with `0x95`. The
+limit belongs to the
 connection: queued messages are rechecked against the reconnecting client's
 limit. Retained and Will messages follow the same rule. For a Shared
 Subscription, the message goes to a member that can receive it and is
-dropped only if no member can. The takeover (`0x8E`) and duplicate-CONNECT
-(`0x82`) DISCONNECTs are not size-checked.
+dropped only if no member can. Every admitted client's limit is at least the
+smallest CONNACK, so DISCONNECT, AUTH and PINGRESP always fit.
 
 Broker-initiated protocol-error closure retires admission before processing the
 next command. Client DISCONNECT and transport failures use the FIFO `Detach`

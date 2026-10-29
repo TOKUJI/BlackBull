@@ -41,6 +41,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- MQTT: every acknowledgement honours the peer's Maximum Packet Size. One
+  that fits only in its short Success form is sent that way; an error
+  acknowledgement, SUBACK or UNSUBACK that cannot fit ends the connection with
+  `0x95` instead of exceeding the limit, and a PUBREL re-drive that fits only
+  short is sent rather than dropped. A PUBREL for an identifier with no
+  inbound flow is answered with PUBCOMP `0x92` instead of Success.
 - `HTTP2Client.execute_scenario` executes `SendHeaders` (it recorded a
   `TypeError`), and `SendHeaders` and the HTTP/1.1 fault server's typed steps
   (`SendStatusLine`, `SendHeader`, `EndHeaders`, `SendChunk`,
