@@ -6313,8 +6313,10 @@ master's wait, so the drain ends in the worker rather than in a kill.
 Raising it past the master's wait only moves the deadline.</p>
 <p>Nothing in flight is cancelled while that budget lasts. A cancelled handler
 means a client holding a half-written response, which is worse than the wait.
-Whatever has not finished by the deadline <em>is</em> cancelled: a shutdown that must
-complete still completes.</p>
+What is left in the last half second (at most half the budget) <em>is</em> cut: its
+connection is aborted, discarding output the peer has not read, and its handler
+is cancelled. A shutdown that must complete still completes, and leaves no
+connection open.</p>
 <p>Watcher stop, worker joins and forced kills consume one master shutdown
 deadline rather than receiving a fresh timeout each. Listener descriptors are
 closed after the children are reaped; aliases of one descriptor are disarmed
@@ -6328,7 +6330,7 @@ your deploy started.</p>
 draining them rather than by killing them.</p>
 <div class="highlight"><pre><span></span><code>SIGTERM ──▶ close listeners ──▶ drain accepted connections
                                         │
-                        BB_WORKER_DRAIN_TIMEOUT reached ──▶ cancel
+                        BB_WORKER_DRAIN_TIMEOUT reached ──▶ abort, cancel
                                         │
                           master's wait exhausted ──▶ SIGKILL
 </code></pre></div>
