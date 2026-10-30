@@ -373,12 +373,14 @@ package to parse the body manually.
     `http.response.trailers` `more_trailers` is preserved via
     `NativeResponse.more_trailers`.
 
-    HTTP/1.1 framing is owned by the server.  An application-supplied
-    `Transfer-Encoding` is ignored.  A single-body response gets one
-    `Content-Length`; if the application supplied a length, it must match the
-    body before any response bytes are written.  Repeated or comma-joined
-    lengths are accepted only when every numeric value is equal, then emitted
-    as one canonical field.
+    Framing is owned by the server.  An application-supplied
+    `Transfer-Encoding` is ignored, and a single-body HTTP/1.1 response gets
+    one `Content-Length`.  A supplied length must hold on HTTP/1.1 and HTTP/2
+    alike.  A mismatch found before the head is sent raises from that `send`
+    with nothing written, so the application can still answer (for example
+    with 500); found later, HTTP/1.1 closes the connection and HTTP/2 resets
+    the stream.  Repeated or comma-joined lengths are accepted only when every
+    numeric value is equal, then emitted as one canonical field.
 
     Response header names are sent lowercase on both transports, whatever
     case the application wrote: names are case-insensitive (RFC 9110 §5.1),
@@ -517,18 +519,22 @@ async def chunked(conn, receive, send):
 `trailers=True` transfers response-completion ownership from the last body
 event to the last trailer event.  BlackBull selects HTTP/1.1 chunked framing,
 ignores a supplied `Content-Length`, and writes the zero chunk only when the
-trailer section begins.  To split a trailer section across events, set
+trailer section begins; HTTP/2 keeps the length, and the content must match
+it.  A trailer section with no body event before it ends an empty body behind
+the head.  To split a trailer section across events, set
 `more_trailers=True` on every event except the last.  HTTP/2 collects those
 parts into one trailing HEADERS block carrying `END_STREAM`.
 
 HEAD responses never carry content or a trailer section.  The response is
 complete after its header section even if the application declared trailers;
 later trailer events are ignored so they cannot become bytes in the next
-keep-alive response.
+keep-alive response.  A valid `Content-Length` is kept as metadata, as for
+`304`, whatever the body events carry.
 
-Informational responses and status `204` carry neither content nor framing
-fields.  A `205` carries no content and is emitted with `Content-Length: 0` so
-its boundary remains explicit on a persistent connection.  A `304` also
+Informational responses and status `204` carry neither content nor a length
+field.  A `205` carries no content; HTTP/1.1 emits it with
+`Content-Length: 0` so its boundary remains explicit on a persistent
+connection, and HTTP/2 states no length.  A `304` also
 carries no content; an explicit, valid `Content-Length` is retained as
 selected-representation metadata, but one is not generated from an attempted
 response body.  Application body events for these statuses are discarded.
@@ -618,7 +624,8 @@ keep-alive connection.
 
 HTTP/2 uses explicitly sized DATA frames instead of chunk syntax.  Without
 trailers, `END_STREAM` maps to `more_body=False`; with declared trailers it
-belongs to the trailing HEADERS block.
+belongs to the trailing HEADERS block.  A stated `Content-Length` is held the
+same way as on HTTP/1.1, and a break after HEADERS resets only that stream.
 
 ### Writing streaming-safe middleware
 

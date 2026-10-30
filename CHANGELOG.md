@@ -41,6 +41,18 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- Responses follow one length rule on HTTP/1.1 and HTTP/2 (BLA-572):
+  - HTTP/1.1 sends the head before a trailer section that has no body event
+    before it; it wrote the trailer section alone (BLA-469). A 1xx, 204, 205,
+    304 or HEAD response sends no trailer bytes after its head.
+  - HTTP/1.1 keeps a HEAD response's valid `Content-Length` as metadata, and
+    a 304's even when trailers were declared; it refused the HEAD (BLA-562).
+  - HTTP/2 states one canonical `Content-Length`, none on 1xx, 204 or 205,
+    and holds content to it: a mismatch found before HEADERS raises from that
+    send with nothing encoded, one found after resets only that stream. It
+    sent the application's field as written, unchecked.
+  - A mismatch found before the head on either protocol leaves the start
+    unsent, so the application can still answer.
 - HTTP/2, both roles: a SETTINGS_INITIAL_WINDOW_SIZE change that would lift
   an open stream's flow-control window above 2^31-1 is a connection
   `FLOW_CONTROL_ERROR` (RFC 9113 §6.9.2); it was applied.

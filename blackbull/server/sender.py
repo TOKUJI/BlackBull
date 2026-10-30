@@ -15,9 +15,10 @@ from typing import NoReturn
 
 from ..protocol import hpack_fastpath
 from ..env import get_settings
-from ..protocol.framing import (_CRLF, NO_CONTENT_GENERATED_STATUSES,
-                                is_informational, parse_content_length)
-from ..protocol.frame_types import (HeaderFrameFlags, DataFrameFlags,
+from ..protocol.framing import (_CRLF, _LENGTHLESS_STATUSES,
+                                NO_CONTENT_GENERATED_STATUSES,
+                                is_informational, stated_response_length)
+from ..protocol.frame_types import (HeaderFrameFlags, DataFrameFlags, ErrorCodes,
                                     FrameBase, Headers, PushPromise, serialize_field_block,
                                     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE)
 from .cap_log import log_cap_hit
@@ -590,9 +591,11 @@ class HTTP1Sender(BaseSender):
             self._log_record.mark('body_arm_in')
         if self._buffered_status is not None:
             assert self._buffered_headers is not None
-            await self._flush(self._buffered_status, self._buffered_headers, content, more_body)
+            status, head = self._buffered_status, self._buffered_headers
+            # Released first: a refused head leaves the start to be sent again.
             self._buffered_status = None
             self._buffered_headers = None
+            await self._flush(status, head, content, more_body)
         else:
             self._track_content_length(len(content), more_body)
             if self._chunked and not self._suppress_body:
@@ -626,7 +629,10 @@ class HTTP1Sender(BaseSender):
     async def _handle_trailers(self, headers: _MinimalResponseHeaders,
                                more_trailers: bool = False) -> None:
         """Write one part of the trailer section."""
-        if not (self._expect_trailers or self._chunked):
+        if self._buffered_status is not None:
+            # No body event: the content ends empty, behind its head.
+            await self._handle_body_content(b'', False)
+        if self._completed or not (self._expect_trailers or self._chunked):
             return
         if not self._trailers_started:
             await self._write(b'0\r\n')
@@ -676,22 +682,13 @@ class HTTP1Sender(BaseSender):
         self._chunked = False
         self._content_length = None
         self._body_bytes = 0
-        # One classification answers both questions below. A 304 is bodyless
-        # but keeps Content-Length as metadata, where a 205 does not.
-        informational = is_informational(status)
-        contentless = informational or code in (204, 205)
-        self._informational = informational
-        self._suppress_body = (self._head_mode or contentless
-                               or code == 304)
-        keep_length = (not contentless
-                       and not (self._expect_trailers and not self._head_mode))
+        self._informational = is_informational(status)
+        self._suppress_body = suppress = (self._head_mode
+                                          or code in NO_CONTENT_GENERATED_STATUSES)
         lengths = head.content_length
-        if not (keep_length and lengths):
-            app_length = None
-        elif len(lengths) == 1 and lengths[0][1].isdigit():
-            app_length = int(lengths[0][1])
-        else:
-            app_length = parse_content_length(lengths)
+        # Chunked trailers leave no room for a length: it is discarded, not read.
+        stated = (None if self._expect_trailers and not suppress
+                  else stated_response_length(code, lengths))
         if head.transfer_encoding:
             pairs = [
                 (name, value) for name, value in head
@@ -705,32 +702,36 @@ class HTTP1Sender(BaseSender):
             pairs = head
         framing = b''
 
-        if informational or code == 204:
+        if suppress:
+            # No content and no trailer section; HEAD and 304 keep the length
+            # as metadata (RFC 9110 §8.6), and 205 needs it as framing.
             self._expect_trailers = False
-        elif code == 205:
-            self._expect_trailers = False
-            framing = b'content-length: 0\r\n'
-        elif code == 304:
-            self._expect_trailers = False
-            if app_length is not None:
-                framing = _content_length_line(app_length)
-        elif self._expect_trailers and not self._head_mode:
+            if code == 205:
+                framing = b'content-length: 0\r\n'
+            elif stated is not None:
+                framing = _content_length_line(stated)
+            elif code < 200 or code in (204, 304):
+                pass
+            elif more_body:
+                framing = _CHUNKED_LINE
+            else:
+                framing = _content_length_line(body_len)
+        elif self._expect_trailers:
             framing = _CHUNKED_LINE
             self._chunked = True
         elif more_body:
-            if app_length is None:
+            if stated is None:
                 framing = _CHUNKED_LINE
                 self._chunked = True
             else:
-                framing = _content_length_line(app_length)
-                self._content_length = app_length
+                framing = _content_length_line(stated)
+                self._content_length = stated
         else:
-            expected = body_len
-            if app_length is not None and app_length != expected:
+            if stated is not None and stated != body_len:
                 raise ValueError(
                     'Content-Length does not match the response body')
-            framing = _content_length_line(expected)
-            self._content_length = expected
+            framing = _content_length_line(body_len)
+            self._content_length = body_len
 
         return pairs, framing
 
@@ -846,6 +847,9 @@ class HTTP1Sender(BaseSender):
         size = os.path.getsize(path)
         head = self._buffered_headers
         status = self._buffered_status
+        # Released first, as in ``_handle_body_content``.
+        self._buffered_status = None
+        self._buffered_headers = None
         fields, framing = self._ensure_framing_headers(
             status, head, size, more_body=False)
         self._track_content_length(size, more_body=False)
@@ -854,8 +858,6 @@ class HTTP1Sender(BaseSender):
 
         head = self._render_start(status, fields, framing,
                                   None if head.date else _http_date())
-        self._buffered_status = None
-        self._buffered_headers = None
 
         if self._log_record is not None:
             self._log_record.response_bytes += size
@@ -954,7 +956,7 @@ class HTTP2Sender(BaseSender):
         '_flow_control_cap',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
         '_buffered_body', '_buffered_trailers', '_auto_flush_task',
-        '_head_mode', '_suppress_body',
+        '_head_mode', '_suppress_body', '_remaining', '_poisoned',
         '_log_record',
     )
 
@@ -968,6 +970,11 @@ class HTTP2Sender(BaseSender):
         super().__init__(writer)
         self._head_mode = head_mode
         self._suppress_body = False
+        # Content still owed to the stated length; None when none is stated.
+        self._remaining: int | None = None
+        # Set once content broke its length after HEADERS left and the
+        # stream was reset for it.
+        self._poisoned = False
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
@@ -1030,8 +1037,52 @@ class HTTP2Sender(BaseSender):
         self._buffered_body = None
         self._buffered_trailers = None
         self._suppress_body = False
+        self._remaining = None
+        self._poisoned = False
         self._log_record = None
         self._auto_flush_task = None
+
+    def _stated_fields(self, status: HTTPStatus,
+                       head: _MinimalResponseHeaders) -> _MinimalResponseHeaders:
+        """*head* with its length stated once, canonically, or not at all.
+
+        Raises ``ValueError`` before anything is buffered or encoded.
+        """
+        lengths = head.content_length
+        if not lengths:
+            self._remaining = None
+            return head
+        stated = stated_response_length(status, lengths)
+        self._remaining = (None if self._head_mode or status in NO_CONTENT_GENERATED_STATUSES
+                           else stated)
+        if stated is not None and len(lengths) == 1 and lengths[0][1] == b'%d' % stated:
+            return head
+        fields = head.copy()
+        fields.discard(b'content-length')
+        if stated is not None:
+            fields.add(b'content-length', b'%d' % stated)
+        return fields
+
+    async def _refuse_length(self, problem: str) -> NoReturn:
+        """End a response whose content broke its stated length."""
+        self._remaining = None
+        if self._buffered_status is not None:
+            # Nothing has been encoded: the application may still answer.
+            task, self._auto_flush_task = self._auto_flush_task, None
+            if task is not None and not task.done():
+                task.cancel()
+            self._buffered_status = None
+            self._buffered_headers = None
+            self._buffered_body = None
+            self._buffered_trailers = None
+            self._expect_trailers = False
+        else:
+            # HEADERS left: only this stream can end, and only by a reset.
+            self._poisoned = True
+            await self._write(self._factory.rst_stream(
+                self._stream_id, ErrorCodes.INTERNAL_ERROR).save())
+            self.retire_stream()
+        raise ValueError(f'response body {problem} Content-Length')
 
     def retire_stream(self) -> None:
         """Stop this stream's pending and future output without closing its peer.
@@ -1065,8 +1116,7 @@ class HTTP2Sender(BaseSender):
         # END_STREAM rides the DATA frame below, never HEADERS — unless the
         # head was promised no content, when there is no DATA to ride on.
         informational = is_informational(status)
-        forbidden = (self._head_mode or informational
-                     or int(status) in (204, 205, 304))
+        forbidden = self._head_mode or int(status) in NO_CONTENT_GENERATED_STATUSES
         self._suppress_body = forbidden
         h_bytes = build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
@@ -1074,7 +1124,7 @@ class HTTP2Sender(BaseSender):
             max_frame_size=self.max_frame_size)
         if forbidden:
             await self._write(h_bytes)
-            if not is_informational(status):
+            if not informational:
                 self._end_stream_sent = True
             return
 
@@ -1144,12 +1194,10 @@ class HTTP2Sender(BaseSender):
                             headers: list[tuple[bytes, bytes]],
                             ) -> None:
         """Write an interim head now and leave the stream open for its final
-        one.  Both event arms funnel here.  RFC 9112 §6.1 forbids
-        Content-Length and Transfer-Encoding in a contentless message, and
-        transfer-encoding is connection-specific: RFC 9113 §8.2.2 keeps it
-        out of HTTP/2 entirely."""
-        kept = [(hk, hv) for hk, hv in headers
-                if hk not in (b'content-length', b'transfer-encoding')]
+        one.  Both event arms funnel here, its length already dropped by
+        ``_stated_fields``; transfer-encoding is connection-specific, and
+        RFC 9113 §8.2.2 keeps it out of HTTP/2 entirely."""
+        kept = [(hk, hv) for hk, hv in headers if hk != b'transfer-encoding']
         await self.send_response_headers(status, kept)
         self._buffered_status = None
         self._buffered_headers = None
@@ -1307,6 +1355,15 @@ class HTTP2Sender(BaseSender):
         the trailing HEADERS (RFC 9113 §8.1 — frames after END_STREAM are a
         protocol error).
         """
+        remaining = self._remaining
+        if remaining is not None:
+            remaining -= len(payload)
+            if remaining:
+                if remaining < 0:
+                    await self._refuse_length('exceeds')
+                if end_stream:
+                    await self._refuse_length('is shorter than')
+            self._remaining = remaining
         if self._log_record is not None and payload:
             self._log_record.response_bytes += len(payload)
         if self._log_record is not None and end_stream:
@@ -1383,6 +1440,8 @@ class HTTP2Sender(BaseSender):
             self._buffered_trailers.extend(headers)
             headers = self._buffered_trailers
             self._buffered_trailers = None
+        if self._remaining:
+            await self._refuse_length('is shorter than')
 
         if self._suppress_body and self._buffered_status is None:
             # RFC 9112 §6.3 rule 1: no trailer section either. The head
@@ -1481,12 +1540,15 @@ class HTTP2Sender(BaseSender):
                         'the response was complete)',
                         self._stream_id)
                 return
+            headers = self._stated_fields(status, _as_response_fields(headers))
+            if self._remaining is not None and self._remaining != len(body):
+                self._remaining = None
+                raise ValueError('Content-Length does not match the response body')
             if self._log_record is not None:
                 self._log_record.status = int(status)
                 self._log_record.response_bytes += len(body)
             informational = is_informational(status)
-            forbidden = (self._head_mode or informational
-                         or int(status) in (204, 205, 304))
+            forbidden = self._head_mode or int(status) in NO_CONTENT_GENERATED_STATUSES
             self._suppress_body = forbidden
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id, status, headers,
@@ -1530,9 +1592,21 @@ class HTTP2Sender(BaseSender):
                     logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
+                status = HTTPStatus(body.status)
                 head = body._header
+                lengths = head.content_length
+                if not lengths:
+                    self._remaining = None
+                elif (len(lengths) == 1 and status not in _LENGTHLESS_STATUSES
+                        and (raw := lengths[0][1]).isdigit()
+                        and (raw[0] != 0x30 or len(raw) == 1)):
+                    # The usual case: one canonical length, kept as written.
+                    self._remaining = (None if self._head_mode or status == 304
+                                       else int(raw))
+                else:
+                    head = self._stated_fields(status, head)
                 await self._settle_buffered_head()
-                self._buffered_status = HTTPStatus(body.status)
+                self._buffered_status = status
                 self._buffered_headers = head
                 self._expect_trailers = body.expects_trailers
                 if self._log_record is not None:

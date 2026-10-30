@@ -203,6 +203,11 @@ class TestHTTP1SenderPathsend:
             await s({'type': 'http.response.pathsend', 'path': path})
         assert w.data == b''
         assert w.sendfile_calls == []
+        # Nothing was sent, so the refused head does not precede an answer.
+        await s({'type': 'http.response.start', 'status': 500, 'headers': []})
+        await s({'type': 'http.response.body', 'body': b''})
+        assert w.data.startswith(b'HTTP/1.1 500 ')
+        assert w.data.count(b'HTTP/1.1') == 1
 
     @pytest.mark.asyncio
     async def test_rejects_trailers_before_pathsend_writes_headers(self, tmp_path):

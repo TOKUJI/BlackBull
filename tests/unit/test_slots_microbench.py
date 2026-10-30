@@ -114,9 +114,10 @@ def test_print_per_instance_sizes(capsys):
     # `HTTP2Sender` holds `_head_mode` and `_suppress_body`, the two facts
     # the content rules need at write time. `_suppress_body` also tells the
     # drop guard whether the missing content was the sender's own job, so it
-    # cannot be recomputed away.
+    # cannot be recomputed away. `_remaining` and `_poisoned` hold the content
+    # still owed to a stated length and whether it broke after HEADERS.
     for name, size in sizes.items():
-        assert size < 208, (
+        assert size < 224, (
             f'{name} is {size} bytes — far above the slots-equipped '
             f'baseline (~48-96 bytes); check that __slots__ is still in '
             f'effect.'

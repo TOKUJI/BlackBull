@@ -193,10 +193,11 @@ class StreamActor(Actor):
                     self._stream_id, ErrorCodes.CANCEL)
             )
         except Exception:
-            await self._http2_actor.send_frame(
-                self._http2_actor.factory.rst_stream(
-                    self._stream_id, ErrorCodes.INTERNAL_ERROR)
-            )
+            if not self._send._poisoned:    # the sender already reset it
+                await self._http2_actor.send_frame(
+                    self._http2_actor.factory.rst_stream(
+                        self._stream_id, ErrorCodes.INTERNAL_ERROR)
+                )
         finally:
             # ``None`` on the baseline hot path; ``_close_record`` tolerates it.
             _close_record(self._log_record)
