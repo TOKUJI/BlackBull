@@ -665,17 +665,19 @@ class HTTP2Actor(Actor, HTTP2Connection):
         self._last_frame_at = asyncio.get_running_loop().time()
         self._probe_sent_at = None
 
-        async with asyncio.TaskGroup() as tg:
-            self._task_group = tg
-            liveness = self._liveness = Deadline(self._check_liveness)
-            if self._h2_idle_timeout > 0 or self._header_timeout > 0:
-                self._check_liveness()
-            try:
-                await self._frame_loop(tg)
-            finally:
-                liveness.disarm()
-
-        self._task_group = None
+        try:
+            async with asyncio.TaskGroup() as tg:
+                self._task_group = tg
+                liveness = self._liveness = Deadline(self._check_liveness)
+                if self._h2_idle_timeout > 0 or self._header_timeout > 0:
+                    self._check_liveness()
+                try:
+                    await self._frame_loop(tg)
+                finally:
+                    liveness.disarm()
+        finally:
+            # Both refer back to this actor.
+            self._task_group = self._liveness = None
 
     async def _count_emitted_rst(self) -> None:
         """Count a reset *this server* sent, on the inbound Rapid Reset meter.

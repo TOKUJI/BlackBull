@@ -41,6 +41,9 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- A finished connection is freed by reference counting when it ends, on
+  HTTP/1.1 and HTTP/2, instead of being left in reference cycles for the
+  cyclic GC (BLA-574).
 - `Server.stop` leaves no connection once `run()` returns (BLA-519): what is
   left in the drain's last half second (at most half of it) is aborted and
   cancelled. A peer that stopped reading kept its descriptor and its place in

@@ -1587,6 +1587,9 @@ class WebSocketRecipient(BaseRecipient):
                     task.result()
                 except asyncio.CancelledError:
                     pass  # Expected: the task was cancelled intentionally.
+        # Both refer back: the watchdog to this recipient, on_message to its actor.
+        self.disarm_watchdog()
+        self._watchdog = self._on_message = None
 
     def _mark_connect_sent(self) -> None:
         """Claim the handshake read and arm timers once, shared by both channels.
