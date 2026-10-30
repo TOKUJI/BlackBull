@@ -21,6 +21,13 @@ logger = logging.getLogger(__name__)
 _PEER_GONE = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
 
 
+def _peer_gone(exc: Exception) -> bool:
+    """Whether *exc*, or every exception in its group, is in ``_PEER_GONE``."""
+    if isinstance(exc, ExceptionGroup):
+        return exc.split(_PEER_GONE)[1] is None
+    return isinstance(exc, _PEER_GONE)
+
+
 class ConnectionActor(Actor):
     """One per accepted TCP connection.
 
@@ -86,18 +93,15 @@ class ConnectionActor(Actor):
                     self._peername, protocol=self._served_protocol)
             try:
                 await self._dispatch()
-            except _PEER_GONE as exc:
-                # A peer that resets or aborts the transport is a normal end of
-                # a connection (RST-closing clients, load balancers, churn),
-                # not a server fault: no traceback, one DEBUG line.
-                logger.debug('connection from %r ended by peer: %s',
-                             self._peername, exc.__class__.__name__)
-                if self._aggregator is not None:
-                    await self._aggregator.on_error({}, exc)
             except Exception as exc:
                 # One error path for every protocol: a handler or actor that
-                # raises is isolated here.
-                logger.exception('connection from %r failed', self._peername)
+                # raises is isolated here.  A peer that went away is not a
+                # server fault: one DEBUG line, no traceback.
+                if _peer_gone(exc):
+                    logger.debug('connection from %r ended by peer: %r',
+                                 self._peername, exc)
+                else:
+                    logger.exception('connection from %r failed', self._peername)
                 if self._aggregator is not None:
                     await self._aggregator.on_error({}, exc)
             finally:
