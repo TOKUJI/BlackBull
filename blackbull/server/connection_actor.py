@@ -17,6 +17,9 @@ from .sender import AbstractWriter
 
 logger = logging.getLogger(__name__)
 
+#: Transport errors that mean "the peer went away" rather than a bug.
+_PEER_GONE = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+
 
 class ConnectionActor(Actor):
     """One per accepted TCP connection.
@@ -83,6 +86,14 @@ class ConnectionActor(Actor):
                     self._peername, protocol=self._served_protocol)
             try:
                 await self._dispatch()
+            except _PEER_GONE as exc:
+                # A peer that resets or aborts the transport is a normal end of
+                # a connection (RST-closing clients, load balancers, churn),
+                # not a server fault: no traceback, one DEBUG line.
+                logger.debug('connection from %r ended by peer: %s',
+                             self._peername, exc.__class__.__name__)
+                if self._aggregator is not None:
+                    await self._aggregator.on_error({}, exc)
             except Exception as exc:
                 # One error path for every protocol: a handler or actor that
                 # raises is isolated here.
