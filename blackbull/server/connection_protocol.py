@@ -468,6 +468,28 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         finally:
             self.close()
 
+    def release_graph(self) -> None:
+        """Drop the references that make a finished connection a cycle.
+
+        Called once the connection task is done.  Two links keep the whole
+        per-connection object graph (protocol, reader, actors, senders,
+        coroutine frames) alive past its last use, leaving it to the cyclic
+        GC instead of reference counting:
+
+        * the reader's back-reference to this protocol, and
+        * a stored transport error (a peer reset) whose traceback holds the
+          frames of every coroutine it unwound through — each of which
+          references this protocol.
+
+        Nothing reads either after the task ends: the transport is closed, so
+        no further ``get_buffer``/``buffer_updated`` arrives, and a late
+        ``connection_lost`` only records EOF.
+        """
+        exc = self._exc
+        if exc is not None:
+            exc.__traceback__ = None
+        self.reader._proto = None
+
     # -- waiting -----------------------------------------------------------
 
     async def wait_for_arrival(self) -> None:

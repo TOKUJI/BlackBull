@@ -648,7 +648,10 @@ class _ServedConnection(ConnectionProtocol):
         finally:
             # A bare close would RST away the response a peer that is
             # still sending has not read yet.
-            await self.linger_close()
+            try:
+                await self.linger_close()
+            finally:
+                self.release_graph()
 
     def connection_lost(self, exc):
         try:
