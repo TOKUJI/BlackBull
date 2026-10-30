@@ -237,10 +237,18 @@ async def test_an_interim_response_states_no_length(protocol):
             await wire.send(h2_section(encoder.encode(
                 [(b':method', b'GET'), (b':path', b'/'), (b':scheme', b'http'),
                  (b':authority', b'x')])))
+            statuses, content = [], b''
             while True:
-                kind, _, sid, payload = await asyncio.wait_for(read_h2_frame(wire.reader), 5)
-                if kind == 1 and sid == 1:
+                kind, flags, sid, payload = await asyncio.wait_for(read_h2_frame(wire.reader), 5)
+                if sid != 1:
+                    continue
+                if kind == 1:
                     fields = dict(decoder.decode(payload, raw=True))
+                    statuses.append(fields[b':status'])
                     if fields[b':status'] == b'103':
                         assert b'content-length' not in fields
-                        break
+                elif kind == 0:
+                    content += payload
+                if kind in (0, 1) and flags & 1:
+                    break
+            assert (statuses, content) == ([b'103', b'200'], b'final')
