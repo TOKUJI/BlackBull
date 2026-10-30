@@ -41,6 +41,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- `Server.stop` leaves no connection behind once `run()` returns (BLA-519).
+  At the drain deadline, less a reserve of up to half a second, each
+  remaining connection is aborted and its task cancelled. A peer that stopped
+  reading kept its descriptor and its place in the accept count, and on
+  HTTP/2 any connection cut at the deadline made `stop` and `run` raise
+  `TimeoutError`.
 - Responses follow one length rule on HTTP/1.1 and HTTP/2 (BLA-572):
   - HTTP/1.1 sends the head before a trailer section that has no body event
     before it; it wrote the trailer section alone (BLA-469). A 1xx, 204, 205,

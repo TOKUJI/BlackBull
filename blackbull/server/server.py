@@ -50,6 +50,9 @@ def _address_of(sock) -> Tcp | Unix:
     return Tcp(sockname[1])
 
 _CLEANUP_TIMEOUT = 8.0
+#: The end of a drain kept for cutting what is left: cancelled tasks unwind
+#: over several loop iterations.
+_CUT_RESERVE = 0.5
 
 
 class _AsyncCleanupBudget:
@@ -242,16 +245,18 @@ class _Admission:
     ``connection_lost``.  Either may come alone, or both.
     """
 
-    __slots__ = ('_gate',)
+    __slots__ = ('_gate', 'transport')
 
     def __init__(self, gate) -> None:
         self._gate = gate
-        gate._hold()
+        #: The transport the gate made for this descriptor, once it exists.
+        self.transport = None
+        gate._hold(self)
 
     def release(self) -> None:
         gate, self._gate = self._gate, None
         if gate is not None:
-            gate._release()
+            gate._release(self)
 
 
 class _Listening:
@@ -345,7 +350,8 @@ class _AcceptGate:
         #: Accepted descriptors, refusals and TLS handshakes included; the 503
         #: decision counts ``Server._active_connections``, the ones being
         #: served.  Not reset by ``close()``: releases arrive after it.
-        self._descriptors_held = 0
+        self._held: set[_Admission] = set()
+        self._all_released: asyncio.Future | None = None
         self._paused = False
         self._connecting: set[asyncio.Task] = set()
         self._handshake_timeout: float | None = None
@@ -425,7 +431,7 @@ class _AcceptGate:
             started.append(True)
         task = asyncio.current_task()
         try:
-            await loop.connect_accepted_socket(
+            admission.transport, _ = await loop.connect_accepted_socket(
                 lambda: protocol, conn, ssl=ssl_context,
                 ssl_handshake_timeout=(self._handshake_timeout
                                        if ssl_context is not None else None))
@@ -455,15 +461,37 @@ class _AcceptGate:
         finally:
             serving.discard(task)
 
-    def _hold(self) -> None:
-        self._descriptors_held += 1
-        if self._limit and not self._paused and self._descriptors_held >= self._limit:
+    @property
+    def _descriptors_held(self) -> int:
+        return len(self._held)
+
+    def _hold(self, admission: _Admission) -> None:
+        self._held.add(admission)
+        if self._limit and not self._paused and len(self._held) >= self._limit:
             self._pause()
 
-    def _release(self) -> None:
-        self._descriptors_held -= 1
-        if self._paused and self._descriptors_held < self._limit:
+    def _release(self, admission: _Admission) -> None:
+        held = self._held
+        held.discard(admission)
+        if self._paused and len(held) < self._limit:
             self._resume()
+        if not held and self._all_released is not None:
+            self._all_released.set_result(None)
+            self._all_released = None
+
+    async def released(self, timeout: float) -> bool:
+        """Whether every held descriptor is closed within *timeout* seconds."""
+        if self._held:
+            if self._all_released is None:
+                self._all_released = asyncio.get_running_loop().create_future()
+            await asyncio.wait([self._all_released], timeout=timeout)
+        return not self._held
+
+    def abort(self) -> None:
+        """Close every held descriptor now, discarding what it has not sent."""
+        for admission in list(self._held):
+            if admission.transport is not None:
+                admission.transport.abort()
 
     def close(self) -> list[asyncio.Task]:
         """Stop accepting and cancel the connects still in progress.
@@ -1188,10 +1216,12 @@ class Server:
     async def stop(self, drain_timeout: float = 8.0) -> None:
         """Stop accepting, then let the connections already being served finish.
 
-        Nothing in flight is cancelled while *drain_timeout* lasts: a cancelled
-        handler leaves a client holding a half-written response.  Whatever is
-        left at the deadline is cancelled — a shutdown that must complete still
-        completes.  Keep the budget inside
+        Nothing in flight is cancelled while *drain_timeout* lasts, less a
+        reserve of up to half a second: a cancelled handler leaves a client
+        holding a half-written response.  Whatever is left then is cut within
+        the reserve: its connection is aborted, unsent output discarded, and
+        its task cancelled — a shutdown that must complete still completes.
+        Keep the budget inside
         ``MultiWorkerServer.shutdown_timeout`` so the drain ends here and not
         in a SIGKILL.
         """
@@ -1233,34 +1263,36 @@ class Server:
             raise cleanup_error
 
     async def _drain(self, drain_timeout: float) -> None:
-        """Let the connections already being served finish.  Idempotent.
-
-        Called by [`stop`][], and again by [`run`][] on its way out: a
-        drain started from a signal handler is racing its caller's teardown,
-        and returning into ``asyncio.run()`` would cancel both the drain and
-        the request it is protecting.  Whichever arrives second finds nothing
-        left to wait for.
-        """
+        """Let the connections already being served finish, then cut the rest."""
         pending = [t for t in self._connection_tasks if not t.done()]
-        if not pending:
+        gate = self._accept_gate
+        if not pending and not gate._held:
             return
         logger.info('Draining %d connection(s), up to %.1fs',
-                    len(pending), drain_timeout)
-        budget = getattr(self, '_cleanup_budget', None)
-        timeout = (budget.remaining() if budget is not None else drain_timeout)
-        _done, still = await asyncio.wait(pending, timeout=timeout)
-        if still:
-            logger.warning(
-                '%d connection(s) did not finish within %.1fs — cancelling',
-                len(still), drain_timeout)
-            for task in still:
-                task.cancel()
-            if budget is None:
-                await asyncio.gather(*still, return_exceptions=True)
-            else:
-                cleanup_error = await _cancel_tasks(still, budget)
-                if cleanup_error is not None:
-                    raise cleanup_error
+                    gate._descriptors_held, drain_timeout)
+        budget = self._cleanup_budget
+        loop = asyncio.get_running_loop()
+        graceful_end = loop.time() + max(
+            0.0, budget.remaining() - min(_CUT_RESERVE, drain_timeout / 2))
+        still = ()
+        if pending:
+            _done, still = await asyncio.wait(
+                pending, timeout=max(0.0, graceful_end - loop.time()))
+        # A closed transport still owns its descriptor until what it buffered
+        # is sent, which a peer that stopped reading never allows.
+        if not still and await gate.released(max(0.0, graceful_end - loop.time())):
+            return
+        logger.warning(
+            '%d connection(s) did not finish within %.1fs — aborting',
+            gate._descriptors_held, drain_timeout)
+        gate.abort()
+        errors = [await _cancel_tasks(still, budget)]
+        if not await gate.released(budget.remaining()):
+            errors.append(TimeoutError(
+                'aborted connections did not close before the deadline'))
+        cleanup_error = combine_cleanup_errors(*errors)
+        if cleanup_error is not None:
+            raise cleanup_error
 
     async def _cancel_connection_tasks(self, budget) -> Exception | None:
         return await _cancel_tasks(

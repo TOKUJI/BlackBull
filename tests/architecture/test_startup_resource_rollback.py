@@ -475,6 +475,11 @@ async def test_run_waits_for_in_progress_stop_despite_repeated_cancellation(
             transport.close()
 
     class TrackingProtocol(asyncio.Protocol):
+        admission = None
+
+        def connection_lost(self, exc):
+            self.admission.release()
+
         def connection_made(self, transport):
             transports.append(transport)
             task = asyncio.create_task(parked_connection(transport))

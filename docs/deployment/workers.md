@@ -259,8 +259,10 @@ Raising it past the master's wait only moves the deadline.
 
 Nothing in flight is cancelled while that budget lasts. A cancelled handler
 means a client holding a half-written response, which is worse than the wait.
-Whatever has not finished by the deadline *is* cancelled: a shutdown that must
-complete still completes.
+Whatever has not finished shortly before the deadline *is* cut: its connection
+is aborted, discarding a response the peer has not read, and its handler is
+cancelled, within the last half second (at most half the budget). A shutdown
+that must complete still completes, and leaves no connection open.
 
 Watcher stop, worker joins and forced kills consume one master shutdown
 deadline rather than receiving a fresh timeout each. Listener descriptors are
@@ -279,7 +281,7 @@ draining them rather than by killing them.
 ```
 SIGTERM ──▶ close listeners ──▶ drain accepted connections
                                         │
-                        BB_WORKER_DRAIN_TIMEOUT reached ──▶ cancel
+                        BB_WORKER_DRAIN_TIMEOUT reached ──▶ abort, cancel
                                         │
                           master's wait exhausted ──▶ SIGKILL
 ```
