@@ -50,8 +50,7 @@ def _address_of(sock) -> Tcp | Unix:
     return Tcp(sockname[1])
 
 _CLEANUP_TIMEOUT = 8.0
-#: The end of a drain kept for cutting what is left: cancelled tasks unwind
-#: over several loop iterations.
+#: The end of a drain kept for cutting what is left (at most half of it).
 _CUT_RESERVE = 0.5
 
 
@@ -1216,12 +1215,10 @@ class Server:
     async def stop(self, drain_timeout: float = 8.0) -> None:
         """Stop accepting, then let the connections already being served finish.
 
-        Nothing in flight is cancelled while *drain_timeout* lasts, less a
-        reserve of up to half a second: a cancelled handler leaves a client
-        holding a half-written response.  Whatever is left then is cut within
-        the reserve: its connection is aborted, unsent output discarded, and
-        its task cancelled — a shutdown that must complete still completes.
-        Keep the budget inside
+        Nothing in flight is cancelled until *drain_timeout* less
+        ``min(0.5, drain_timeout / 2)``; then every connection left is aborted,
+        its unsent output discarded, and its task cancelled, within the
+        deadline.  Keep the budget inside
         ``MultiWorkerServer.shutdown_timeout`` so the drain ends here and not
         in a SIGKILL.
         """
@@ -1278,8 +1275,7 @@ class Server:
         if pending:
             _done, still = await asyncio.wait(
                 pending, timeout=max(0.0, graceful_end - loop.time()))
-        # A closed transport still owns its descriptor until what it buffered
-        # is sent, which a peer that stopped reading never allows.
+        # A closed transport keeps its descriptor until its buffer is sent.
         if not still and await gate.released(max(0.0, graceful_end - loop.time())):
             return
         logger.warning(
