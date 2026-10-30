@@ -335,6 +335,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             try:
                 self._exc = copy.copy(self._exc)
             except Exception:
+                # An error that cannot be copied stays as it is: its cycle is
+                # left to the GC rather than failing connection_lost.
                 pass
 
     # -- state -------------------------------------------------------------
