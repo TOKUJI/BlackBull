@@ -370,6 +370,9 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         if waiter is not None and not waiter.done():
             if exc is not None:
                 waiter.set_exception(exc)
+                # Retrieved here: a sender may no longer be waiting for it, and
+                # one that is still gets it.
+                waiter.exception()
             else:
                 waiter.set_result(None)
 
