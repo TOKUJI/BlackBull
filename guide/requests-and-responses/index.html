@@ -6589,12 +6589,14 @@ plain ASGI dicts on the wire.  The <code>http.response.start</code> <code>traile
 flag is preserved losslessly via <code>NativeResponse.expects_trailers</code>, and
 <code>http.response.trailers</code> <code>more_trailers</code> is preserved via
 <code>NativeResponse.more_trailers</code>.</p>
-<p>HTTP/1.1 framing is owned by the server.  An application-supplied
-<code>Transfer-Encoding</code> is ignored.  A single-body response gets one
-<code>Content-Length</code>; if the application supplied a length, it must match the
-body before any response bytes are written.  Repeated or comma-joined
-lengths are accepted only when every numeric value is equal, then emitted
-as one canonical field.</p>
+<p>Framing is owned by the server.  An application-supplied
+<code>Transfer-Encoding</code> is ignored, and a single-body HTTP/1.1 response gets
+one <code>Content-Length</code>.  A supplied length must hold on HTTP/1.1 and HTTP/2
+alike.  A mismatch found before the head is sent raises from that <code>send</code>
+with nothing written, so the application can still answer (for example
+with 500); found later, HTTP/1.1 closes the connection and HTTP/2 resets
+the stream.  Repeated or comma-joined lengths are accepted only when every
+numeric value is equal, then emitted as one canonical field.</p>
 <p>Response header names are sent lowercase on both transports, whatever
 case the application wrote: names are case-insensitive (RFC 9110 §5.1),
 and HTTP/2 requires lowercase (RFC 9113 §8.2.2).</p>
@@ -6701,16 +6703,20 @@ body.  Use the <code>http.response.trailers</code> event after the last
 <p><code>trailers=True</code> transfers response-completion ownership from the last body
 event to the last trailer event.  BlackBull selects HTTP/1.1 chunked framing,
 ignores a supplied <code>Content-Length</code>, and writes the zero chunk only when the
-trailer section begins.  To split a trailer section across events, set
+trailer section begins; HTTP/2 keeps the length, and the content must match
+it.  A trailer section with no body event before it ends an empty body behind
+the head.  To split a trailer section across events, set
 <code>more_trailers=True</code> on every event except the last.  HTTP/2 collects those
 parts into one trailing HEADERS block carrying <code>END_STREAM</code>.</p>
 <p>HEAD responses never carry content or a trailer section.  The response is
 complete after its header section even if the application declared trailers;
 later trailer events are ignored so they cannot become bytes in the next
-keep-alive response.</p>
-<p>Informational responses and status <code>204</code> carry neither content nor framing
-fields.  A <code>205</code> carries no content and is emitted with <code>Content-Length: 0</code> so
-its boundary remains explicit on a persistent connection.  A <code>304</code> also
+keep-alive response.  A valid <code>Content-Length</code> is kept as metadata, as for
+<code>304</code>, whatever the body events carry.</p>
+<p>Informational responses and status <code>204</code> carry neither content nor a length
+field.  A <code>205</code> carries no content; HTTP/1.1 emits it with
+<code>Content-Length: 0</code> so its boundary remains explicit on a persistent
+connection, and HTTP/2 states no length.  A <code>304</code> also
 carries no content; an explicit, valid <code>Content-Length</code> is retained as
 selected-representation metadata, but one is not generated from an attempted
 response body.  Application body events for these statuses are discarded.</p>
@@ -6805,7 +6811,8 @@ body event likewise leaves the response incomplete and closes that
 keep-alive connection.</p>
 <p>HTTP/2 uses explicitly sized DATA frames instead of chunk syntax.  Without
 trailers, <code>END_STREAM</code> maps to <code>more_body=False</code>; with declared trailers it
-belongs to the trailing HEADERS block.</p>
+belongs to the trailing HEADERS block.  A stated <code>Content-Length</code> is held the
+same way as on HTTP/1.1, and a break after HEADERS resets only that stream.</p>
 <h3 id="writing-streaming-safe-middleware">Writing streaming-safe middleware<a class="headerlink" href="#writing-streaming-safe-middleware" title="Permanent link">&para;</a></h3>
 <p>Forward streaming heads and chunks as they arrive. A terminal chunk can be
 the end of an earlier stream, so more_body=False alone does not prove the

@@ -5884,7 +5884,10 @@ authority before dispatch. Normalize the scheme before host and ws/wss
 decisions; <code>:authority</code> becomes the application's host header.</p>
 <p>Malformed trailers are malformed field sections, not successful request
 completion. Content-Length counts payload bytes, excluding padding.
-Response heads and trailers leave the send boundary with lowercase names.</p>
+Response heads and trailers leave the send boundary with lowercase names. A
+response states one canonical Content-Length, none on 1xx, 204 or 205; it is
+checked before HEADERS are encoded, and content that breaks it after HEADERS
+resets the stream (<code>INTERNAL_ERROR</code>).</p>
 <p>Read <code>blackbull/server/parser.py</code>, <code>blackbull/protocol/field_grammar.py</code>
 and the HTTP/2 response-validation tests under <code>tests/unit/client/</code>.</p>
 <h2 id="priority-and-push">Priority and push<a class="headerlink" href="#priority-and-push" title="Permanent link">&para;</a></h2>
