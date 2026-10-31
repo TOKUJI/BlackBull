@@ -17,6 +17,7 @@ body succeeds" also passes against a client carrying no deadline at all.
 """
 from __future__ import annotations
 
+import gc
 
 import pytest
 
@@ -70,6 +71,16 @@ _WIRES = pytest.mark.parametrize('wire', [_fixed, _chunked],
 @pytest.fixture(autouse=True)
 def _short_deadline(monkeypatch):
     monkeypatch.setenv('BB_CLIENT_BODY_TIMEOUT', str(_TIMEOUT))
+
+
+@pytest.fixture(autouse=True)
+def _no_gc_pause():
+    """A full collection late in a long run can stall the loop past the margin
+    between a delivery gap and the deadline."""
+    gc.collect()
+    gc.disable()
+    yield
+    gc.enable()
 
 
 async def _streamed(reader) -> bytes:
