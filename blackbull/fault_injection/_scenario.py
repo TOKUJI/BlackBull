@@ -15,8 +15,9 @@ import logging
 import ssl
 import time
 import typing
-import warnings
 from dataclasses import dataclass, field, fields
+
+from ..deprecations import _warn_deprecated
 
 logger = logging.getLogger(__name__)
 
@@ -138,11 +139,8 @@ def from_json(cls, src: str):
     head.pop('op', None)
     version = head.pop('format', 1)
     if version == 1:
-        warnings.warn(
-            f'{cls.__name__} JSON in the v1 format is deprecated; rewrite it '
-            f'with to_json(from_json(text)).  Reading v1 is removed no earlier '
-            f'than v0.84.0 (and not before 2026-11-28).',
-            DeprecationWarning, stacklevel=3)
+        _warn_deprecated('BBD006', f'{cls.__name__} JSON in the v1 format',
+                        stacklevel=3)
         records = [_from_v1(r, *cls._v1) for r in records]
     elif version != FORMAT:
         raise ValueError(f'scenario format {version} is not one this version reads')
@@ -279,10 +277,7 @@ def _decoder(hint):
 # Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.
 def _deprecated_encoder(module, name):
     """The ``encode_*`` helpers each step's ``wire()`` replaced."""
-    warnings.warn(
-        f'{module}.{name} is deprecated; use the step\'s wire().  Removal no '
-        f'earlier than v0.84.0 (and not before 2026-11-28).',
-        DeprecationWarning, stacklevel=3)
+    _warn_deprecated('BBD007', f'{module}.{name}', stacklevel=3)
     return _wire
 
 

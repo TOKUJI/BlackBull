@@ -170,9 +170,9 @@ Resolution order in `run()` is, highest to lowest:
 4. the value declared on the bound `AppConfig`;
 5. `serve()`'s built-in default.
 
-!!! warning "The `BLACKBULL_*` names move to `BB_*` in October 2027"
+!!! warning "The `BLACKBULL_*` names move to `BB_*`"
     These variables, and `BLACKBULL_ENV`, will be renamed to the `BB_` prefix
-    in a release no earlier than October 2027. Until then only the
+    ([BBD008](../reference/deprecations.md)). Until then only the
     `BLACKBULL_` names are read.
 
 ```python

@@ -18,6 +18,7 @@ try:
 except _PackageNotFoundError:
     __version__ = '0.0.0+unknown'
 
+from .deprecations import BlackBullDeprecationWarning, _warn_deprecated
 from .app import BlackBull, serve
 from .di import Depends
 from .router import RouteInfo, HTTPException, UnprocessableQuery, QUERY
@@ -67,23 +68,17 @@ __all__ = [
     'ASGIReceiveCallable', 'ASGISendCallable',
     # bundled middleware
     'CORS', 'as_middleware', 'TrustedProxy',
+    # deprecations
+    'BlackBullDeprecationWarning',
     # the sockets a deployment asks for
     'Listener', 'Tcp', 'Unix', 'InheritedFd',
 ]
 
 
 def __getattr__(name):
-    """Deprecated Request alias for Connection; removal no earlier than 2027-08-01.
+    """Deprecated Request alias for Connection (BBD004).
     """
     if name == 'Request':
-        import warnings
-        warnings.warn(
-            'blackbull.Request is deprecated — use blackbull.Connection instead. '
-            "Replace `request: Request` with `conn: Connection` in handler "
-            'signatures. The API is identical: conn.method, conn.path, '
-            'conn.headers, conn.cookies, conn.query, conn.query_list, '
-            'conn.path_params, conn.body(), conn.json(), conn.text(), '
-            'conn.form(). Request will be removed no earlier than 2027-08-01.',
-            DeprecationWarning, stacklevel=2)
+        _warn_deprecated('BBD004')
         return Connection
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

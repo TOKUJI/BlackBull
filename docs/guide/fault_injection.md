@@ -456,8 +456,9 @@ by its class, with bytes as hex.  Inside a `match`, bytes are written as
 Use `Scenario.to_json` / `from_json` on the HTTP/1.1 client side and the
 `scenario_*_to_json` / `scenario_*_from_json` pairs for the other three.
 Files in the earlier per-vocabulary format (no `format` key) still read,
-with a `DeprecationWarning`, until v0.84.0 at the earliest; rewrite one
-with `to_json(from_json(text))`.
+with a deprecation warning until their removal
+([BBD006](../reference/deprecations.md)); rewrite one with
+`to_json(from_json(text))`.
 
 ## Safety locks
 

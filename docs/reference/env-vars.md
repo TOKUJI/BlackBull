@@ -12,10 +12,10 @@ or is outside a setting's range, falls back to its default.
 These resolve with `run()` precedence: an explicit argument, then the
 variable, then a `.env` entry, then `AppConfig`.
 
-!!! warning "The `BLACKBULL_*` names move to `BB_*` in October 2027"
+!!! warning "The `BLACKBULL_*` names move to `BB_*`"
     `BLACKBULL_ENV` and the variables below will be renamed to the `BB_`
-    prefix in a release no earlier than October 2027, so that every setting
-    shares one namespace. Until then only the `BLACKBULL_` names are read.
+    prefix ([BBD008](deprecations.md)), so that every setting shares one
+    namespace. Until then only the `BLACKBULL_` names are read.
 
 <!-- generated: Deployment -->
 | Variable | Default | Controls |

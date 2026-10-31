@@ -376,26 +376,8 @@ surface BlackBull itself uses.  You don't have to re-declare those.
 
 ### Deprecating an in-tree class you're extracting
 
-If your extension replaces something that previously lived in
-BlackBull, the in-tree form should emit a `DeprecationWarning` on
-construction:
-
-```python
-import warnings
-
-class Session:           # in-tree, deprecated form
-    def __init__(self, ...):
-        warnings.warn(
-            "blackbull.middleware.Session is deprecated; install "
-            "'blackbull-session' and use SessionExtension instead. "
-            "Will be removed no earlier than BlackBull v0.41 "
-            "(and not before 2026-07-14).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        ...
-```
-
-Schedule removal at least three MINOR releases and one calendar month after
-announcing the deprecation, using whichever boundary is later. State both
-gates and the replacement in the warning so users can plan their migration.
+If your extension replaces something that previously lived in BlackBull,
+the in-tree form is deprecated like any other BlackBull feature: it gets an
+entry in `blackbull.deprecations`, warns with that entry's ID, and is listed
+with its replacement and removal date in
+[Deprecations](../reference/deprecations.md).
