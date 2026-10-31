@@ -81,12 +81,11 @@ class GrpcTestServer:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        if self._task is not None:
+        task, self._task, self._server = self._task, None, None
+        if task is not None:
             # What the serve loop raises on its way down must not replace
             # whatever the test was asserting.
-            await cancel_and_wait(self._task)
-            self._task = None
-        self._server = None
+            await cancel_and_wait(task)
 
     async def unary(self, method: str, request: bytes = b'', *,
                     metadata: list[tuple[str, str]] | None = None,

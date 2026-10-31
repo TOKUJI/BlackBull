@@ -406,10 +406,15 @@ class HTTP2Client(HTTP2Connection):
         # Before anything is torn down, so a door opened while this method
         # awaits is refused rather than handed half a connection.
         self._closed = True
-        # Cancel the receive loop first so it doesn't read past close.
-        if self._receive_task is not None and not self._receive_task.done():
-            await cancel_and_wait(self._receive_task)
+        # Cancel the receive loop first so it doesn't read past close.  A
+        # cancellation of our caller during the wait still tears down the rest.
+        try:
+            if self._receive_task is not None and not self._receive_task.done():
+                await cancel_and_wait(self._receive_task)
+        finally:
+            await self._release()
 
+    async def _release(self) -> None:
         for sid in list(self._responses):
             pending = self._drop_pending(sid)
             if pending is not None and not pending.future.done():

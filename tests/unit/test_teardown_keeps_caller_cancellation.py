@@ -6,11 +6,14 @@ Each case holds the teardown inside that wait, cancels the caller, and expects
 which returns normally.
 """
 import asyncio
+import os
 
 import pytest
 
 from blackbull import BlackBull
 from blackbull.client import HTTP2Client
+from blackbull.client.exceptions import ConnectionError
+from blackbull.mqtt import MQTTExtension
 from blackbull.server.recipient import RecipientFactory
 from blackbull.server.sender import AbstractWriter
 from blackbull.testing import NativeTestServer
@@ -43,15 +46,36 @@ def _ping_app():
 
 @pytest.mark.parametrize('cancel', [True, False], ids=['cancelled', 'control'])
 async def test_http2_client_exit(cancel):
-    async with served(_ping_app()) as server:
+    entered, hold = asyncio.Event(), asyncio.Event()
+    app = BlackBull()
+
+    @app.route(path='/')
+    async def root():
+        entered.set()
+        await hold.wait()
+        return b'ok'
+
+    async with served(app) as server:
+        before = len(os.listdir('/dev/fd'))
         client = HTTP2Client('127.0.0.1', server.server.port)
         await client.__aenter__()
-        exit_ = client.__aexit__(None, None, None)
-        if not cancel:
-            await exit_
-            return
-        # One step reaches the wait for the receive loop it just cancelled.
-        assert await _cancelled_inside(exit_, 0) == 'cancelled'
+        in_flight = asyncio.create_task(client.request('GET', '/'))
+        await entered.wait()
+        try:
+            exit_ = client.__aexit__(None, None, None)
+            if cancel:
+                # One step reaches the wait for the receive loop it just cancelled.
+                assert await _cancelled_inside(exit_, 0) == 'cancelled'
+            else:
+                await exit_
+            # Teardown finished either way: the request in flight is failed and
+            # the connection closed, on both ends.
+            with pytest.raises(ConnectionError):
+                await asyncio.wait_for(in_flight, 5)
+        finally:
+            hold.set()
+        await asyncio.sleep(0.3)
+        assert len(os.listdir('/dev/fd')) == before
 
 
 @pytest.mark.parametrize('cancel', [True, False], ids=['cancelled', 'control'])
@@ -129,3 +153,14 @@ async def test_websocket_recipient_shutdown(cancel):
     finally:
         reading.cancel()
         await asyncio.gather(reading, return_exceptions=True)
+
+
+@pytest.mark.parametrize('cancel', [True, False], ids=['cancelled', 'control'])
+async def test_mqtt_extension_shutdown(cancel):
+    extension = MQTTExtension(port=0)
+    await extension.startup(None)
+    if not cancel:
+        await extension.shutdown(None)
+        return
+    # One step reaches the wait for the broker and tap tasks it just cancelled.
+    assert await _cancelled_inside(extension.shutdown(None), 0) == 'cancelled'
