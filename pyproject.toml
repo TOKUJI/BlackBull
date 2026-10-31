@@ -157,6 +157,10 @@ testing = [
     # re-anchors a diagnostic must be an explicit, reviewed change rather
     # than something CI picks up on its own.
     "pyright==1.1.414",
+    # tests/architecture/test_python_support.py reads the CI workflow and
+    # renders the Python-support page as MkDocs does.
+    "pyyaml",
+    "markdown",
 ]
 
 docs = [

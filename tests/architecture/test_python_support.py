@@ -7,11 +7,13 @@ import pathlib
 import re
 import tomllib
 
+import markdown
 import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PYPROJECT = tomllib.loads((ROOT / 'pyproject.toml').read_text())
 PAGE = ROOT / 'docs' / 'reference' / 'python-support.md'
+INSTALLATION = ROOT / 'docs' / 'getting-started' / 'installation.md'
 SUPPORTED = sorted(
     (m.group(1) for c in PYPROJECT['project']['classifiers']
      if (m := re.fullmatch(r'Programming Language :: Python :: (3\.\d+)', c))),
@@ -34,5 +36,11 @@ def test_ci_tests_exactly_the_supported_versions():
 
 
 def test_the_published_table_lists_exactly_the_supported_versions():
-    listed = re.findall(r'^\| (3\.\d+) \|', PAGE.read_text(), flags=re.MULTILINE)
+    # Rendered as MkDocs renders it, so every spelling of a row counts.
+    html = markdown.markdown(PAGE.read_text(), extensions=['tables'])
+    listed = re.findall(r'<tr>\s*<td>(.*?)</td>', html)
     assert listed == SUPPORTED
+
+
+def test_the_installation_page_states_the_floor():
+    assert re.findall(r'Python (3\.\d+)\+', INSTALLATION.read_text()) == [SUPPORTED[0]]
