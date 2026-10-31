@@ -79,14 +79,14 @@ def _request_headers_with_host(frame, *, require_present: bool) -> list | None:
     *require_present* demands one of them (RFC 9113 §8.3.1).  Returns ``None``
     after marking the frame malformed (RST_STREAM PROTOCOL_ERROR).
     """
-    authority = frame.pseudo_headers.get(PseudoHeaders.AUTHORITY)
-    if authority is not None:
-        value = authority.encode('utf-8')
+    value = frame.raw_authority
+    if value is not None:
         if not value:
             frame._mark_malformed('empty :authority')
             return None
         if not authority_is_valid(value):
-            frame._mark_malformed(f'invalid :authority {authority!r}')
+            frame._mark_malformed(
+                f'invalid :authority {frame.pseudo_headers[PseudoHeaders.AUTHORITY]!r}')
             return None
         return ([(k, v) for (k, v) in frame.headers if k != b'host']
                 + [(b'host', value)])
