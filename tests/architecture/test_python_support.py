@@ -35,9 +35,23 @@ def test_ci_tests_exactly_the_supported_versions():
     assert workflow['jobs']['fast']['strategy']['matrix']['python-version'] == SUPPORTED
 
 
+def _render(text: str) -> str:
+    """*text* as the site renders it: MkDocs' own extensions plus mkdocs.yml's."""
+    names, configs = ['tables', 'fenced_code', 'toc'], {}
+    for ext in yaml.safe_load((ROOT / 'mkdocs.yml').read_text())['markdown_extensions']:
+        if isinstance(ext, dict):
+            [(name, options)] = ext.items()
+            configs[name] = options or {}
+        else:
+            name = ext
+        names.append(name)
+    return markdown.markdown(text, extensions=list(dict.fromkeys(names)),
+                             extension_configs=configs)
+
+
 def test_the_published_table_lists_exactly_the_supported_versions():
-    # Rendered as MkDocs renders it, so every spelling of a row counts.
-    html = markdown.markdown(PAGE.read_text(), extensions=['tables'])
+    # Every row the site would show counts, however it is spelled or nested.
+    html = _render(PAGE.read_text())
     listed = re.findall(r'<tr>\s*<td>(.*?)</td>', html)
     assert listed == SUPPORTED
 

@@ -158,9 +158,10 @@ testing = [
     # than something CI picks up on its own.
     "pyright==1.1.414",
     # tests/architecture/test_python_support.py reads the CI workflow and
-    # renders the Python-support page as MkDocs does.
+    # renders the Python-support page with the site's extensions.
     "pyyaml",
     "markdown",
+    "pymdown-extensions",
 ]
 
 docs = [
