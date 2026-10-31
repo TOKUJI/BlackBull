@@ -21,6 +21,14 @@ The lasting lesson (`BLA-12` [private]):
 another version, with different bytecode and specialisation.  Compare counts
 only between runs on the same interpreter.
 
+For wire-client comparisons, keep the peer in a separate process on a different
+physical core and measure client CPU time separately from wall time. Keep the
+peer code/configuration fixed across arms. Run A/A and identical-code copies at
+both source paths before attributing an A/B difference; path effects and peer
+work can exceed the change being tested. Count client instructions separately
+from timing. Record affinities, source hashes, GC mode and trial distributions;
+an unresolved control means the result cannot certify a small regression.
+
 ## The instruments
 
 | script | what it answers |

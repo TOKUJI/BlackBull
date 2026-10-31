@@ -20,7 +20,7 @@ from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ..env import get_settings
 from ..server.ws_codec import WSOpcode, encode_frame
-from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection, _TransportOwner,
+from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection, _TransportClose, _TransportOwner,
                        open_connection as _open_connection)
 from .exceptions import HandshakeError, ProtocolError
 from .http1 import HTTP1RequestSender, HTTP1ResponseHeadReader
@@ -68,7 +68,7 @@ def _validate_negotiation(fields: Iterable[tuple[bytes, bytes]],
     return chosen
 
 
-class WebSocketSession(_TransportOwner):
+class WebSocketSession(_TransportClose):
     """Frame-level WebSocket session over an established connection.
 
     Always masks outgoing frames (RFC 6455 §5.1).  Reads use
@@ -176,12 +176,18 @@ class WebSocketSession(_TransportOwner):
             # error — either way the drain is over; shut the reader down.
             pass
         finally:
-            try:
-                await self._recipient.shutdown()
-            finally:
-                await self._close_transport()
+            await self._release()
 
     # ---- internal --------------------------------------------------------
+
+    async def _release(self) -> None:
+        if self._raw_writer is None:
+            return
+        self._closed = True
+        try:
+            await self._recipient.shutdown()
+        finally:
+            await self._close_transport()
 
     async def _send_frame(self, payload: bytes, opcode: WSOpcode) -> None:
         frame = encode_frame(payload, opcode=opcode, mask=True)
@@ -235,19 +241,15 @@ class WebSocketClient(_TransportOwner):
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        owner = self._session if self._session is not None else self
+        session, self._session = self._session, None
         self._reader = self._writer = None
-        if owner._raw_writer is None:
-            self._session = None
-            return
         try:
-            await owner._close_transport()
+            if session is not None:
+                await session._release()
+            else:
+                await self._close_transport()
         except Exception:
             pass  # best-effort close on context exit; peer may already be gone.
-        finally:
-            if self._session is not None:
-                await self._session._recipient.shutdown()
-                self._session = None
 
     async def connect(self, path: str, *,
                       subprotocols: Iterable[bytes] = (),

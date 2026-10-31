@@ -7,6 +7,29 @@ from tests.harness import Wire, peer
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('api', ['request', 'stream'])
+async def test_invalid_upgrade_offer_does_not_send_or_poison_connection(api):
+    async def handle(reader, writer):
+        wire = Wire(reader, writer)
+        head = await wire.recv_until()
+        assert head.startswith(b'GET /valid HTTP/1.1\r\n')
+        await wire.send(b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok')
+        assert await wire.recv_all() == b''
+
+    async with peer(handle) as port:
+        async with HTTP1Client('127.0.0.1', port) as client:
+            headers = [(b'connection', b'upgrade'), (b'upgrade', b'example/')]
+            with pytest.raises(ProtocolError):
+                if api == 'request':
+                    await client.request('GET', '/invalid', headers=headers)
+                else:
+                    _ = [data async for data in client.stream('GET', '/invalid', headers=headers)]
+            # Without Connection: upgrade this field does not offer a switch.
+            response = await client.request('GET', '/valid', headers=[(b'upgrade', b'example/')])
+            assert response.body == b'ok'
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('api', ['request', 'stream', 'read_response'])
 @pytest.mark.parametrize('status', [200, 204, 299])
 @pytest.mark.parametrize('version,connection', [
@@ -82,7 +105,7 @@ async def test_unnegotiated_upgrade_closes_connection(api, response):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('offered,selected,accepted', [
-    (b'example', b'EXAMPLE', True),
+    (b'EXAMPLE', b'example', True),
     (b'example/V1', b'Example/V1', True),
     (b'example/V1', b'example/v1', False),
     (b'example', b'example/1', False),
@@ -114,7 +137,7 @@ async def test_upgrade_protocol_selection_and_handoff(api, offered, selected, ac
                 await client.send_raw(b'GET / HTTP/1.1\r\nHost: origin\r\n'
                                       + b'Connection: upgrade\r\nUpgrade: '
                                       + offered + b'\r\n\r\n')
-                response = client.read_response(request_method='GET', request_headers=headers)
+                response = client.read_response(request_method='GET', offered_protocols=offered.split(b','))
             if accepted:
                 assert (await response).status == 101
                 session = client.handoff()

@@ -680,7 +680,7 @@ async def test_generic_101_preserves_transport_and_refuses_more_http(api):
     elif api == 'stream':
         assert [chunk async for chunk in client.stream('GET', '/', headers=offered)] == []
     else:
-        response = await client.read_response(request_method='GET', request_headers=offered)
+        response = await client.read_response(request_method='GET', offered_protocols=[b'example'])
         assert response.status == 101
 
     assert reader.peek() == switched

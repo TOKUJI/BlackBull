@@ -3,7 +3,7 @@
 import asyncio
 import enum
 import ssl as _ssl
-from collections.abc import AsyncIterable, AsyncIterator
+from collections.abc import AsyncIterable, AsyncIterator, Iterable, Sequence
 from time import monotonic as _monotonic
 from http import HTTPMethod
 from typing import NamedTuple, Union
@@ -22,7 +22,7 @@ from ..protocol.http1 import (CHUNKED, CLOSE_DELIMITED, LENGTH, NO_BODY,
                               connection_options, content_length, parse_head,
                               persistent, request_framing, response_framing)
 from ..server.sender import AbstractWriter, AsyncioWriter
-from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection, _TransportOwner,
+from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection, _TransportClose, _TransportOwner,
                        open_connection as _open_connection)
 from .exceptions import ClientError, ConnectionError, ProtocolError, ResponseTooLarge
 from .http2 import ClientResponse  # shared dataclass
@@ -221,9 +221,9 @@ class HTTP1ResponseHeadReader:
     _boundary_declared = False
 
     @staticmethod
-    def _upgrade_protocols(headers: Headers) -> list[bytes]:
+    def _upgrade_protocols(value: bytes) -> list[bytes]:
         protocols = []
-        for member in (headers.get_combined(b'upgrade') or b'').split(b','):
+        for member in value.split(b','):
             member = member.strip(b' \t')
             if not member:
                 continue
@@ -235,13 +235,13 @@ class HTTP1ResponseHeadReader:
         return protocols
 
     def validate_upgrade(self, version: bytes, headers: Headers,
-                         offered: list[bytes]) -> list[bytes]:
+                         offered: Sequence[bytes]) -> list[bytes]:
         if version != b'HTTP/1.1':
             raise ProtocolError('101 requires HTTP/1.1')
         if (self._boundary_declared or b'transfer-encoding' in headers
                 or _response_length(headers)):
             raise ProtocolError('Upgrade response declared an HTTP body')
-        selected = self._upgrade_protocols(headers)
+        selected = self._upgrade_protocols(headers.get_combined(b'upgrade') or b'')
         if not selected or any(protocol not in offered for protocol in selected):
             raise ProtocolError('unoffered Upgrade protocol')
         if b'upgrade' not in self._connection_options(headers):
@@ -351,8 +351,7 @@ class HTTP1ResponseRecipient(HTTP1ResponseHeadReader):
     responses don't have to fit in memory — true of all body framings.
     """
 
-    request_headers: Headers | None = None
-    request_options: list[bytes] | None = None
+    offered_protocols: Sequence[bytes] | None = None
 
     def __init__(self, request_method: str | bytes | HTTPMethod | None = None) -> None:
         #: The method that caused this response, when known.  Direct users of
@@ -535,13 +534,8 @@ class HTTP1ResponseRecipient(HTTP1ResponseHeadReader):
         self.http_version = version
         request_method = (method if method is not None
                           else self.request_method)
-        if status == 101 and self.request_headers is not None:
-            options = (self.request_options if self.request_options is not None
-                       else self._connection_options(self.request_headers))
-            offered = (self._upgrade_protocols(self.request_headers)
-                       if b'upgrade' in options
-                       else [])
-            self.validate_upgrade(version, headers, offered)
+        if status == 101 and self.offered_protocols is not None:
+            self.validate_upgrade(version, headers, self.offered_protocols)
             framing = NO_BODY, None, False, True
         else:
             framing = self._body_framing(status, headers, request_method)
@@ -695,7 +689,7 @@ def _record_response(result, response) -> None:
     result.server_bytes_received += len(body)
 
 
-class HTTP1UpgradeSession(_TransportOwner):
+class HTTP1UpgradeSession(_TransportClose):
     """Bidirectional transport after CONNECT or an HTTP 101 switch.
 
     Obtain one with [`HTTP1Client.handoff`][HTTP1Client.handoff].  The handoff is one-shot:
@@ -914,8 +908,8 @@ class HTTP1Client(_TransportOwner):
         options = HTTP1ResponseRecipient._connection_options(h)
         recipient = HTTP1ResponseRecipient(request_method=method)
         recipient.request_close = b'close' in options
-        recipient.request_headers = h
-        recipient.request_options = options
+        recipient.offered_protocols = (recipient._upgrade_protocols(h.get_combined(b'upgrade') or b'')
+                                       if b'upgrade' in options else ())
         self._begin_response(recipient)
         complete = False
         try:
@@ -944,8 +938,8 @@ class HTTP1Client(_TransportOwner):
         options = HTTP1ResponseRecipient._connection_options(h)
         recipient = HTTP1ResponseRecipient(request_method=method)
         recipient.request_close = b'close' in options
-        recipient.request_headers = h
-        recipient.request_options = options
+        recipient.offered_protocols = (recipient._upgrade_protocols(h.get_combined(b'upgrade') or b'')
+                                       if b'upgrade' in options else ())
         self._begin_response(recipient)
         complete = False
         try:
@@ -1078,15 +1072,16 @@ class HTTP1Client(_TransportOwner):
     async def read_response(
             self, *,
             request_method: str | bytes | HTTPMethod | None = None,
-            request_headers: HeaderList | None = None,
+            offered_protocols: Iterable[bytes] | None = None,
             timeout: float | None = None) -> ClientResponse:
         """Read one HTTP/1.1 response from the connection.
 
         Optional ``timeout`` bounds the entire read (status line + headers
         + body).  Raises ``asyncio.TimeoutError`` if the deadline is
         hit; the caller decides whether to treat that as a transport-
-        fail or a normal protocol outcome. Supply ``request_headers`` to
-        validate a 101 for handoff; without them, a 101 is returned but its
+        fail or a normal protocol outcome. Supply the protocols offered with
+        ``Connection: upgrade`` as ``offered_protocols`` to validate a 101
+        for handoff; without them, a 101 is returned but its
         transport is closed."""
         if self._state is _State.CLOSED:
             raise ConnectionError('HTTP1Client context is closed')
@@ -1098,8 +1093,9 @@ class HTTP1Client(_TransportOwner):
                 'a response body is still being consumed on this connection')
         assert self._reader is not None, 'connect via __aenter__ first'
         recipient = HTTP1ResponseRecipient(request_method=request_method)
-        if request_headers is not None:
-            recipient.request_headers = Headers(list(request_headers))
+        if offered_protocols is not None:
+            recipient.offered_protocols = recipient._upgrade_protocols(
+                b', '.join(offered_protocols))
         self._active_response = recipient
         complete = False
         try:
@@ -1111,7 +1107,7 @@ class HTTP1Client(_TransportOwner):
                 response = await coro
             else:
                 response = await asyncio.wait_for(coro, timeout=timeout)
-            if response.status == 101 and request_headers is None:
+            if response.status == 101 and offered_protocols is None:
                 recipient.fate = Fate.RETIRE
             complete = True
             return response
@@ -1122,7 +1118,7 @@ class HTTP1Client(_TransportOwner):
             # HTTP or enter CONNECT tunnel mode.
             self._finish_response(
                 recipient, complete=complete,
-                abandon_incomplete=request_headers is not None)
+                abandon_incomplete=offered_protocols is not None)
 
     async def execute_scenario(
         self, scenario: Scenario,

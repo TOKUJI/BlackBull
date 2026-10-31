@@ -41,6 +41,11 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- HTTP/1.1 client handoff accepts every successful CONNECT, including HTTP/1.0
+  and responses with `Connection: close` (BLA-468). A 101 must select an offered
+  Upgrade protocol; low-level `read_response(offered_protocols=...)` validates
+  it for handoff, while omitting the offers returns the 101 and closes the
+  transport. WebSocket shares validation and ownership transfer (BLA-313).
 - A finished connection is freed by reference counting when it ends, on
   HTTP/1.1 and HTTP/2, instead of being left in reference cycles for the
   cyclic GC (BLA-574).

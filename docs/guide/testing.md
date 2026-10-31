@@ -604,8 +604,9 @@ closes it. `handoff()` cannot be called after the client context has
 exited.  This API exposes raw protocol bytes and performs no TLS wrapping,
 content decoding, or protocol-specific framing.
 
-For low-level `read_response()`, pass the sent `request_headers` to validate
-a 101 before handoff. Without them, the response remains observable but the
+For low-level `read_response()`, pass the protocols sent with `Connection: upgrade`
+as `offered_protocols` (for example, `[b'example/1']`) to validate a 101 before
+handoff. Without them, the response remains observable but the
 connection is closed. CONNECT does not require Upgrade negotiation.
 
 ### Streaming request bodies
