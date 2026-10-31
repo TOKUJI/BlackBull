@@ -18,6 +18,13 @@ from tests.harness import served
 
 pytestmark = pytest.mark.asyncio
 
+
+@pytest.fixture(autouse=True)
+def _native_lane(monkeypatch):
+    # The shared objects are the native Connection's fields; the ASGI lane
+    # hands the application a scope dict instead.
+    monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', '0')
+
 COMMON = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'TRACE',
           'CONNECT', 'QUERY']
 
