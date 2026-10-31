@@ -101,6 +101,11 @@ async def _client_ws_write_stall() -> str:
     return 'ok'
 
 
+async def _h2_request_deadline_during_handler_and_body() -> str:
+    assert await h2(h2_request(1, method=b'GET', path=b'/hold', end_stream=True)) == 'RST_STREAM CANCEL'
+    return await h2(h2_request(1, method=b'POST', path=b'/seen'))
+
+
 ROWS = [
     Row('header_timeout', 'http1', '408', setting='header_timeout',
         env={'BB_HEADER_TIMEOUT': '0.2'},
@@ -123,9 +128,9 @@ ROWS = [
         env={'BB_REQUEST_TIMEOUT': '0.2'},
         provoke=lambda: http1(head(target=b'/hold'))),
     Row('request_timeout', 'http2', 'RST_STREAM CANCEL', setting='request_timeout',
-        documented='RST_STREAM(CANCEL)', env={'BB_REQUEST_TIMEOUT': '0.2'},
-        provoke=lambda: h2(h2_request(1, method=b'GET', path=b'/hold', end_stream=True))),
-    Row('write_timeout', None, 'truncated', setting='write_timeout',
+        documented='RST_STREAM(CANCEL)', env={'BB_REQUEST_TIMEOUT': '0.2', 'BB_BODY_TIMEOUT': '0.05'},
+        provoke=_h2_request_deadline_during_handler_and_body),
+    Row('write_timeout', 'transport', 'truncated', setting='write_timeout',
         documented='socket drain', env={'BB_WRITE_TIMEOUT': '0.2'},
         provoke=_unread_response, under=lambda: http1(head()), under_answer='200'),
     Row('write_timeout', 'http2', 'RST_STREAM INTERNAL_ERROR', setting='write_timeout',

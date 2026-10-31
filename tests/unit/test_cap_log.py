@@ -5,13 +5,14 @@ Covers the helper module in isolation:
 - ``log_cap_hit`` emits one ``WARNING`` record on the
   ``blackbull.caps`` logger with the declared structured fields.
 - Without a counter every call emits.
-- With a counter the first call per ``(counter, cap)`` emits; later
+- With a counter the first call per ``(counter, cap, protocol)`` emits; later
   calls are silent and increment the suppression tally.
-- ``CapHitCounter.flush`` emits one summary per suppressed cap.
+- ``CapHitCounter.flush`` emits one summary per suppressed pair.
 - Records honour ``logger.setLevel`` (ERROR silences fully).
 
 Per-site cap-rejection tests live alongside their owning module.
 """
+import asyncio
 import logging
 
 import pytest
@@ -145,6 +146,46 @@ def test_counter_auto_generates_unique_connection_ids():
     # the old 4-byte urandom form collided at churn scale).
     assert len(a.connection_id) == 20
     assert all(c in '0123456789abcdef' for c in a.connection_id)
+
+
+@pytest.mark.parametrize('threshold', [0, 2])
+def test_summary_keeps_each_refusing_subsystem(cap_log_caplog, threshold):
+    counter = CapHitCounter(flush_threshold=threshold, flush_interval=0)
+    for protocol in ('http1', 'http2'):
+        for _ in range(3):
+            log_cap_hit('header_timeout', 2, 1, counter=counter, protocol=protocol)
+    counter.flush(protocol='tcp')
+    records = [r for r in cap_log_caplog.records if r.name == 'blackbull.caps']
+    assert [(r.protocol, getattr(r, 'suppressed', 0)) for r in records] == (
+        [('http1', 0), ('http2', 0), ('http1', 2), ('http2', 2)] if threshold == 0 else
+        [('http1', 0), ('http1', 2), ('http2', 0), ('http2', 2)])
+
+
+@pytest.mark.asyncio
+async def test_interval_summary_retains_subsystem(cap_log_caplog):
+    counter = CapHitCounter(flush_threshold=0, flush_interval=0.01)
+    try:
+        for protocol in ('http1', 'http2'):
+            for _ in range(2):
+                log_cap_hit('header_timeout', 2, 1, counter=counter, protocol=protocol)
+        await asyncio.sleep(0.05)
+        summaries = [r for r in cap_log_caplog.records if hasattr(r, 'suppressed')]
+        assert [(r.protocol, r.suppressed) for r in summaries] == [('http1', 1), ('http2', 1)]
+    finally:
+        counter.flush()
+
+
+def test_threshold_counts_each_pair_and_resets_all_pairs(cap_log_caplog):
+    counter = CapHitCounter(flush_threshold=2, flush_interval=0)
+    for protocol in ('http1', 'http2', 'http1', 'http2'):
+        log_cap_hit('header_timeout', 2, 1, counter=counter, protocol=protocol)
+    assert not any(hasattr(r, 'suppressed') for r in cap_log_caplog.records)
+    log_cap_hit('header_timeout', 2, 1, counter=counter, protocol='http2')
+    log_cap_hit('header_timeout', 2, 1, counter=counter, protocol='http1')
+    counter.flush()
+    summaries = [r for r in cap_log_caplog.records if hasattr(r, 'suppressed')]
+    assert [(r.protocol, r.suppressed) for r in summaries] == [
+        ('http1', 1), ('http2', 2), ('http1', 1)]
 
 
 def test_counter_accepts_explicit_connection_id():

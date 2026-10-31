@@ -57,6 +57,8 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- Cap refusal records identify socket-level limits as `transport`; suppressed-hit
+  summaries preserve and separately count each refusing subsystem (BLA-323).
 - HTTP/1.1 client handoff accepts every successful CONNECT, including HTTP/1.0
   and responses with `Connection: close` (BLA-468). A 101 must select an offered
   Upgrade protocol; low-level `read_response(offered_protocols=...)` validates

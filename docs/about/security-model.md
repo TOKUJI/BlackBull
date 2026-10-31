@@ -209,8 +209,8 @@ Every claim on this page is backed by a test or an external conformance suite.
 | Protocol conformance | h2spec (HTTP/2 + HPACK), Autobahn (WebSocket), http11probe — see [Conformance](conformance.md) |
 | Client response bounds, and that a peer which stops is abandoned rather than waited on | `tests/unit/client/test_http1_client_head_bounds.py`, `tests/unit/client/test_http1_client_desync_and_deadline.py`, `tests/unit/client/test_http2_client_response_bounds.py` |
 | Client rate floor, including HTTP/2 stream isolation and DATA payload accounting | `tests/unit/client/test_http1_client_rate_floor.py`, `tests/unit/client/test_http2_client_rate_floor.py` |
-| Client-owned transport and WebSocket bounds | `tests/unit/client/test_client_owned_bounds.py`, `tests/unit/test_cap_log_sites.py` |
-| Every client bound names itself on `blackbull.caps`, on every protocol that enforces it | `tests/unit/test_cap_log_sites.py` — the per-cap tests, plus `test_client_caps_are_wired_on_every_protocol_that_enforces_them` and `test_every_client_env_var_has_a_verdict` |
+| Client-owned transport and WebSocket bounds | `tests/unit/client/test_client_owned_bounds.py`, `tests/caps/` |
+| Every bound names its refusing subsystem on `blackbull.caps` | `tests/caps/test_every_cap_has_a_row.py` audits source `(cap, protocol)` pairs; the caps tables provoke each refusal and check its record |
 | A buffered client response body costs about twice the cap | `tests/unit/client/test_client_body_buffer_cost.py` |
 
 ## Non-claims
