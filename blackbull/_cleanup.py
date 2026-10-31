@@ -5,9 +5,9 @@ import asyncio
 async def cancel_and_wait(*tasks: asyncio.Task) -> None:
     """Cancel *tasks* and wait for them to end, dropping what they end with.
 
-    A cancellation aimed at the caller during the wait still propagates: it
-    raises the caller's cancel count, which the tasks' own cancellation does
-    not, and it may reach the awaited task instead, which can absorb it.
+    A cancellation aimed at the caller during the wait still propagates, once
+    the awaited task has ended: it is forwarded to that task, which may absorb
+    it, but it raises the caller's cancel count, which the tasks' own does not.
     """
     caller = asyncio.current_task()
     cancelling = caller.cancelling()

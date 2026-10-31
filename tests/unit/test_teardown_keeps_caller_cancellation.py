@@ -112,7 +112,14 @@ async def _slow_shutdown_app(scope, receive, send):
     assert (await receive())['type'] == 'lifespan.startup'
     await send({'type': 'lifespan.startup.complete'})
     assert (await receive())['type'] == 'lifespan.shutdown'
-    await asyncio.sleep(1.0)
+    # A shutdown that finishes its work even when cancelled, as a drain does.
+    loop = asyncio.get_running_loop()
+    end = loop.time() + 2.0
+    while (left := end - loop.time()) > 0:
+        try:
+            await asyncio.sleep(left)
+        except asyncio.CancelledError:
+            pass
     await send({'type': 'lifespan.shutdown.complete'})
 
 
@@ -123,8 +130,11 @@ async def test_grpc_test_server_exit(cancel):
     if not cancel:
         await server.__aexit__(None, None, None)
         return
-    # The serve task it cancelled is still in the application's shutdown.
+    # The serve task it cancelled is still in the application's shutdown; the
+    # caller leaves at once rather than waiting the shutdown out.
+    started = asyncio.get_running_loop().time()
     assert await _cancelled_inside(server.__aexit__(None, None, None), 0.2) == 'cancelled'
+    assert asyncio.get_running_loop().time() - started < 1.0
 
 
 class _Sink(AbstractWriter):
