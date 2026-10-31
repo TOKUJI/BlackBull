@@ -180,7 +180,7 @@ class AbstractReader(ABC):
         return False
 
     async def readuntil(self, sep: bytes, limit: int = 0) -> bytes:
-        """Read through *sep*; *limit* > 0 bounds it ([`ReadLimitExceeded`][])."""
+        """Read through *sep*; *limit* > 0 bounds it ([`ReadLimitExceeded`][blackbull.protocol.http1.ReadLimitExceeded])."""
         raise NotImplementedError(f'{type(self).__name__} cannot read lines')
 
     async def readexactly(self, n: int) -> bytes:
@@ -205,7 +205,7 @@ class AbstractReader(ABC):
           partial, which is a truncated request and not an idle close.
 
         *limit* bounds the whole head and is what stops an unbounded read; 0
-        disables it, and an overrun raises [`ReadLimitExceeded`][].
+        disables it, and an overrun raises [`ReadLimitExceeded`][blackbull.protocol.http1.ReadLimitExceeded].
 
         The Internals page argues why this is a contract every reader meets
         rather than a capability the caller sniffs for.

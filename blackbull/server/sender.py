@@ -224,7 +224,7 @@ class AsyncioWriter(AbstractWriter):
 
     def __init__(self, stream_writer, write_timeout: float = 0.0,
                  cap_name: str = 'write_timeout',
-                 protocol: str | None = None):
+                 protocol: str | None = 'transport'):
         if not (hasattr(stream_writer, 'write') and hasattr(stream_writer, 'drain')):
             raise TypeError(
                 f"AsyncioWriter requires an object with write() and drain(), "

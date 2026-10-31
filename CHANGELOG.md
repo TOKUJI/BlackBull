@@ -57,6 +57,8 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- Cap refusal records identify socket-level limits as `transport`; suppressed-hit
+  summaries preserve and separately count each refusing subsystem (BLA-323).
 - `HTTP2Client`, `NativeTestServer`, `GrpcTestServer` and the MQTT
   extension's shutdown no longer swallow a cancellation aimed at their caller
   while they tear down: it was taken for the cancellation they had sent their

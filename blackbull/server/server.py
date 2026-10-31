@@ -209,7 +209,7 @@ def _report_full_unix_queue(sock) -> None:
                       'BB_SOCKET_BACKLOG, or Backlog= where the socket is '
                       'created for an adopted fd.')
     log_cap_hit(
-        'socket_backlog', waiting, backlog, scope_path=listener,
+        'socket_backlog', waiting, backlog, scope_path=listener, protocol='transport',
         advice=(f'AF_UNIX listener {listener!r} was full when accepting '
                 f'opened; clients beyond it may have been refused while '
                 f'lifespan startup ran. {raise_what}'))

@@ -202,7 +202,7 @@ ROWS = [
     Row('client_raw_queue_depth', 'http2', 'RST_STREAM ENHANCE_YOUR_CALM',
         setting='client_raw_queue_depth', documented='ENHANCE_YOUR_CALM',
         env={'BB_CLIENT_RAW_QUEUE_DEPTH': '4'}, provoke=_past_raw_queue_depth),
-    Row('socket_backlog', None, '2 refused', provoke=_past_socket_backlog),
+    Row('socket_backlog', 'transport', '2 refused', provoke=_past_socket_backlog),
 ]
 
 

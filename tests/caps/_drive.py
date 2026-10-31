@@ -9,13 +9,12 @@ import hashlib
 from hpack import Decoder
 
 from blackbull import BlackBull
-from blackbull.client import HTTP1Client, HTTP2Client, WebSocketClient
+from blackbull.client import HTTP1Client, HTTP2Client, ProtocolError, WebSocketClient
 from blackbull.mqtt import MQTTExtension
 from blackbull.mqtt.messages import (MQTTConnect, MQTTPuback, MQTTPublish, MQTTSubscribe,
                                      decode_packet, encode_packet)
 from blackbull.protocol.frame_types import ErrorCodes, FrameTypes
 from blackbull.router import Scheme
-from blackbull.server.recipient import ProtocolError
 from blackbull.server.ws_codec import WSOpcode, encode_frame
 from tests.conformance.http2._harness import _make_h2_frame, _make_headers_frame, h2_connect
 from tests.harness import peer, read_h2_frame, served

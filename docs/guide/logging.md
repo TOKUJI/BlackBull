@@ -313,7 +313,7 @@ record on `blackbull.caps` when it fires.  Coverage:
 | `BB_HEADER_TIMEOUT` | slowloris defence — headers didn't arrive in time |
 | `BB_HEADER_MAX_LINE` | per-line header limit exceeded |
 | `BB_HEADER_MAX_TOTAL` | HTTP/1.1 header block or HTTP/2 encoded/decoded field section exceeded; decoded `requested` is a lower bound (`limit + 1`) |
-| `BB_BODY_TIMEOUT` | body bytes didn't arrive in time |
+| `BB_BODY_TIMEOUT` | HTTP/1.1 body bytes didn't arrive in time; HTTP/2 uses its request deadline and body rate/size bounds |
 | `BB_MAX_BODY_SIZE` | request body over the total cap (H/1.1 + H/2; `requested` is the declared length at head time, the running total mid-stream) |
 | `BB_MIN_BODY_RATE` | body delivered below the minimum rate past the grace period — `requested` is the observed rate in bytes/second |
 | `BB_REQUEST_TIMEOUT` | handler exceeded its request budget (HTTP/1.1 + HTTP/2) |
@@ -376,8 +376,8 @@ fields in `record.extra`:
 | `requested` | Value the peer asked for (frame size, header bytes, …) |
 | `limit` | Configured cap |
 | `peer` | Peer `(host, port)` tuple when available |
-| `scope_path` | ASGI `scope['path']` when available |
-| `protocol` | `"http1"`, `"http2"`, `"ws"`, `"h2-ws"`, `"compression"`, … |
+| `scope_path` | Request path when available |
+| `protocol` | Refusing subsystem: `"http1"`, `"http2"`, `"ws"`, `"h2-ws"`, `"mqtt"`, `"tcp"` (connection admission), `"transport"` (socket drain/backlog), `"compression"`, or a registered extension name. `"unknown"` means no binding was selected before detection timed out. |
 
 ### Rate limiting
 
@@ -385,9 +385,9 @@ A single misbehaving peer cannot flood the log: each
 `ConnectionActor` carries a `CapHitCounter` (installed via a
 `contextvars`-bound context manager so every actor on the same
 task tree picks it up without plumbing).  The first hit per
-`(connection, cap)` logs in full; subsequent hits on the same
-connection are silently counted.  When the connection closes, the
-counter emits one summary record per suppressed cap:
+`(connection, cap, protocol)` logs in full; repeats of that pair are
+silently counted. Threshold, interval and connection-close summaries retain
+the refusing subsystem and count each pair separately:
 
 ```
 cap hit summary: ws_max_frame_payload suppressed=99 more
