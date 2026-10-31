@@ -20,7 +20,8 @@ from blackbull.fault_injection import scenario_h1, scenario_h1_server
 
 ROOT = pathlib.Path(blackbull.__file__).parent
 PAGE = ROOT.parent / 'docs' / 'reference' / 'deprecations.md'
-_WARNING_CATEGORIES = {'DeprecationWarning', 'PendingDeprecationWarning', 'FutureWarning'}
+_WARNING_CATEGORIES = {'DeprecationWarning', 'PendingDeprecationWarning', 'FutureWarning',
+                       'BlackBullDeprecationWarning'}
 
 
 def _calls():
@@ -51,8 +52,10 @@ def test_every_warning_entry_is_used_and_every_use_is_an_entry():
 
 
 def test_the_published_list_is_the_registry():
-    assert table() in PAGE.read_text(), (
-        f'{PAGE.relative_to(ROOT.parent)} must contain the table that '
+    section = PAGE.read_text().split('## Current deprecations', 1)[1]
+    published = '\n'.join(line for line in section.splitlines() if line.startswith('|'))
+    assert published == table(), (
+        f'the table in {PAGE.relative_to(ROOT.parent)} must be exactly what '
         f'blackbull.deprecations.table() returns:\n{table()}')
 
 
