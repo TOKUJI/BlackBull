@@ -51,12 +51,16 @@ def test_every_warning_entry_is_used_and_every_use_is_an_entry():
     assert used == {key for key, entry in DEPRECATIONS.items() if entry.warns}
 
 
+_CLOSING = ('The table is generated from `blackbull/deprecations.py`; a test fails when\n'
+            'the two differ.\n')
+
+
 def test_the_published_list_is_the_registry():
-    section = PAGE.read_text().split('## Current deprecations', 1)[1]
-    published = '\n'.join(line for line in section.splitlines() if line.startswith('|'))
-    assert published == table(), (
-        f'the table in {PAGE.relative_to(ROOT.parent)} must be exactly what '
-        f'blackbull.deprecations.table() returns:\n{table()}')
+    # Everything after the heading, so no row Markdown would render can slip in.
+    section = PAGE.read_text().split('## Current deprecations\n', 1)[1]
+    assert section == f'\n{table()}\n\n{_CLOSING}', (
+        f'after its heading, {PAGE.relative_to(ROOT.parent)} must hold exactly '
+        f'what blackbull.deprecations.table() returns and the closing sentence:\n{table()}')
 
 
 def _fresh_import(name):
