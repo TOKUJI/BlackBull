@@ -12,6 +12,7 @@ from time import monotonic as _monotonic
 
 from hpack import OversizedHeaderListError
 
+from .._cleanup import cancel_and_wait
 from ..env import get_settings
 from ..protocol.frame import FrameFactory, _UnknownFrame
 from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, ErrorCodes,
@@ -407,11 +408,7 @@ class HTTP2Client(HTTP2Connection):
         self._closed = True
         # Cancel the receive loop first so it doesn't read past close.
         if self._receive_task is not None and not self._receive_task.done():
-            self._receive_task.cancel()
-            try:
-                await self._receive_task
-            except (asyncio.CancelledError, Exception):
-                pass  # teardown: the receive task was just cancelled; ignore its unwind.
+            await cancel_and_wait(self._receive_task)
 
         for sid in list(self._responses):
             pending = self._drop_pending(sid)
