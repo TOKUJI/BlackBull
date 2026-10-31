@@ -6768,10 +6768,9 @@ to opt out and impose your own deadline instead.</p>
         <span class="k">yield</span> <span class="n">port</span>
     <span class="k">finally</span><span class="p">:</span>
         <span class="n">task</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
-        <span class="k">try</span><span class="p">:</span>
-            <span class="k">await</span> <span class="n">task</span>
-        <span class="k">except</span> <span class="p">(</span><span class="n">asyncio</span><span class="o">.</span><span class="n">CancelledError</span><span class="p">,</span> <span class="ne">Exception</span><span class="p">):</span>
-            <span class="k">pass</span>
+        <span class="c1"># Wait without awaiting the task itself: its CancelledError would be</span>
+        <span class="c1"># indistinguishable from one aimed at this fixture.</span>
+        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">wait</span><span class="p">({</span><span class="n">task</span><span class="p">})</span>
 </code></pre></div>
 <p><code>server.port</code> returns the kernel-assigned port number after
 <code>open_socket(port=0)</code> — pass that to the client.</p>
