@@ -13,7 +13,8 @@ from itertools import chain
 from struct import iter_unpack
 
 from . import hpack_fastpath, structured_fields
-from .field_grammar import FIELD_VALUE_ALLOWED_OCTETS, LOWERCASE_TCHAR_OCTETS
+from .field_grammar import (FIELD_VALUE_ALLOWED_OCTETS, LOWERCASE_TCHAR_OCTETS,
+                            METHOD_TEXT, SCHEME_TEXT)
 
 import logging
 from ..logger import log, debug_gate
@@ -323,6 +324,10 @@ class PseudoHeaders(StrEnum):
     PROTOCOL  = ':protocol'
 
 
+# Module-level names: an identity test against a global is the cheapest one.
+_METHOD, _SCHEME, _AUTHORITY = (PseudoHeaders.METHOD, PseudoHeaders.SCHEME,
+                                PseudoHeaders.AUTHORITY)
+
 # Accept known pseudo-fields here; request/response restrictions are enforced
 # by server parse_headers and the HTTP/2 client.
 _PSEUDO_BY_BYTES: dict[bytes, PseudoHeaders] = {
@@ -443,6 +448,8 @@ class Headers(FrameBase):
         # Values stored as str so they can flow directly into the ASGI scope
         # (which requires str for method/path/scheme).
         self.pseudo_headers: dict[PseudoHeaders, str] = {}
+        #: The ``:authority`` octets as received, for the server's ``host``.
+        self.raw_authority: bytes | None = None
         # Keep regular headers as bytes pairs throughout decoding.
         self.headers: list[tuple[bytes, bytes]] = []
 
@@ -534,8 +541,16 @@ class Headers(FrameBase):
                 if pseudo_key in self.pseudo_headers:
                     self._mark_malformed(f'duplicate pseudo-header: {kb!r}')
                     return
+                if pseudo_key is _METHOD:
+                    value_text = METHOD_TEXT.get(vb)
+                elif pseudo_key is _SCHEME:
+                    value_text = SCHEME_TEXT.get(vb)
+                else:
+                    value_text = None
+                    if pseudo_key is _AUTHORITY:
+                        self.raw_authority = vb
                 try:
-                    value_text = vb.decode('utf-8')
+                    value_text = value_text or vb.decode('utf-8')
                 except UnicodeDecodeError:
                     # RFC 9113 §8.1.1 — a pseudo-header value that is not UTF-8
                     # text is malformed, which is a stream error of type

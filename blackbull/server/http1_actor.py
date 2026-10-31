@@ -54,7 +54,8 @@ _MAX_KEEPALIVE_DRAIN = 64 * 1024
 _H1_PATHSEND_EXTENSIONS = {'http.response.pathsend': {}}
 
 from ..protocol.field_grammar import (
-    URI_SCHEME_RE, FieldError, host_field_value, list_members)
+    METHOD_TEXT, URI_SCHEME_RE, VERSION_TEXT, FieldError, host_field_value,
+    list_members)
 
 
 def _reject_oversized_head(head: bytes, max_total: int) -> None:
@@ -568,8 +569,8 @@ class HTTP1Actor(Actor):
 
         conn = Connection(
             type='http',
-            http_version=version[5:].decode('utf-8'),
-            method=method.decode('utf-8'),
+            http_version=VERSION_TEXT.get(version) or version[5:].decode('utf-8'),
+            method=METHOD_TEXT.get(method) or method.decode('utf-8'),
             scheme='http',
             path=_decoded_path,
             # ASGI: raw_path is the undecoded path component only — the

@@ -40,21 +40,23 @@ def method_token_is_valid(value: bytes) -> bool:
     return bool(value) and not value.translate(None, TCHAR_OCTETS)
 
 
-#: Methods and schemes nearly every request carries, already known to satisfy
-#: the rule each stands in for.  The request paths decide these by set
-#: membership before falling back to the grammar; anything not listed still
-#: goes through it, so the accept set is unchanged.
-COMMON_METHODS_OCTETS = frozenset({b'GET', b'HEAD', b'POST', b'PUT', b'DELETE',
-                                   b'OPTIONS', b'PATCH', b'CONNECT', b'TRACE'})
+#: Methods, versions and schemes nearly every request carries, each mapped to
+#: the one ``str`` every request shares.  The methods and schemes are already
+#: known to satisfy the rule each stands in for; anything not listed is decoded
+#: and graded as before, so the accept set is unchanged.
+#: Read with ``TABLE.get(octets) or <decode>``: a miss costs one lookup.
+METHOD_TEXT = {m: m.decode('ascii') for m in (
+    b'GET', b'HEAD', b'POST', b'PUT', b'DELETE', b'OPTIONS', b'PATCH',
+    b'CONNECT', b'TRACE', b'QUERY')}
+#: The HTTP/1.x version field (``HTTP/1.1``) to the number after the slash.
+VERSION_TEXT = {b'HTTP/1.1': '1.1', b'HTTP/1.0': '1.0'}
+SCHEME_TEXT = {b'http': 'http', b'https': 'https'}
 
-#: The same methods as the ``str`` values a pseudo-header carries.  Derived
-#: from the octets so HTTP/1.1's request line and HTTP/2's ``:method`` cannot
-#: come to accept different methods.
-COMMON_METHODS = frozenset(m.decode('ascii') for m in COMMON_METHODS_OCTETS)
-
-#: The schemes, as the ``str`` a pseudo-header carries — checked against
-#: ``URI_SCHEME_RE``.
-COMMON_SCHEMES = frozenset({'https', 'http'})
+#: The same methods, as octets and as text, so HTTP/1.1's request line and
+#: HTTP/2's ``:method`` cannot come to accept different methods.
+COMMON_METHODS_OCTETS = frozenset(METHOD_TEXT)
+COMMON_METHODS = frozenset(METHOD_TEXT.values())
+COMMON_SCHEMES = frozenset(SCHEME_TEXT.values())
 
 
 class FieldError(ValueError):
