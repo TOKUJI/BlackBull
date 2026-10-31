@@ -6402,6 +6402,8 @@
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="blackbull.client._connect._TransportOwner">_TransportOwner</span></code></p>
 
 
 
@@ -6558,7 +6560,7 @@ the client closes the transport; after handoff, the session owns it.</p>
 
 
 <h4 id="blackbull.client.http1.HTTP1Client.read_response" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">read_response</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">request_method</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">read_response</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">request_method</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">offered_protocols</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -6573,7 +6575,10 @@ the client closes the transport; after handoff, the session owns it.</p>
 <p>Optional <code>timeout</code> bounds the entire read (status line + headers
 + body).  Raises <code>asyncio.TimeoutError</code> if the deadline is
 hit; the caller decides whether to treat that as a transport-
-fail or a normal protocol outcome.</p>
+fail or a normal protocol outcome. Supply the protocols offered with
+<code>Connection: upgrade</code> as <code>offered_protocols</code> to validate a 101
+for handoff; without them, a 101 is returned but its
+transport is closed.</p>
 
 
     </div>
@@ -7050,6 +7055,8 @@ only at the read.</p>
 
 
     <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="blackbull.client._connect._TransportClose">_TransportClose</span></code></p>
 
 
 

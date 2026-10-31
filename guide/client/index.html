@@ -5989,7 +5989,7 @@ abandoned by an exception elsewhere in the block raises rather than hanging.
 Both clients then close the transport best-effort. A closed client cannot be
 re-entered: the next call raises <code>ConnectionError</code>, naming the close you
 performed rather than blaming the peer.</p>
-<p>The one exception is <code>handoff()</code>, which transfers a CONNECT or 101 transport to
+<p>The one exception is <code>handoff()</code>, which transfers a CONNECT or negotiated 101 transport to
 an <code>HTTP1UpgradeSession</code> and moves ownership of closing it with it — see
 <a href="../testing/#connect-tunnels-and-protocol-upgrades">Testing</a>.</p>
 <h2 id="how-a-request-frames-its-body">How a request frames its body<a class="headerlink" href="#how-a-request-frames-its-body" title="Permanent link">&para;</a></h2>
@@ -6100,6 +6100,8 @@ selected subprotocol; extensions are not offered. Rejection, timeout or
 cancellation closes the connection. Enter a new client context before retrying.
 Non-101 responses are rejected without reading their bodies. An upgrade is
 rejected if it or a preceding interim response declares an HTTP body.
+Only one upgrade is allowed per connection. The returned WebSocket session
+closes the transport on <code>close()</code>; leaving the client context also closes it.
 HTTP/2 Extended CONNECT also rejects unoffered subprotocols or extensions,
 resetting the stream while keeping the connection open.</p>
 <h3 id="a-stall-is-not-a-clienterror-on-purpose">A stall is not a <code>ClientError</code>, on purpose<a class="headerlink" href="#a-stall-is-not-a-clienterror-on-purpose" title="Permanent link">&para;</a></h3>
