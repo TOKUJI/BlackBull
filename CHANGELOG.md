@@ -30,6 +30,9 @@ metadata; reinstall an editable checkout after changing that version.
   `blackbull.deprecations`.  Deprecation warnings are now
   `blackbull.BlackBullDeprecationWarning`, a `DeprecationWarning` subclass,
   and name their ID.  A deprecated feature is kept for at least one year.
+- Python 3.15 is supported.  [Python support](docs/reference/python-support.md)
+  states the policy: BlackBull supports the CPython versions CPython still
+  maintains.
 
 ### Deprecated
 
@@ -39,6 +42,8 @@ metadata; reinstall an editable checkout after changing that version.
   earlier than 2027-05-20.
 - `blackbull.client.scenario` and `blackbull.client.scenario_oracle` are
   removed in v0.82.0; import from `blackbull.fault_injection`.
+- Python 3.11 support ends in the first release from October 2027, when
+  CPython 3.11 reaches end of life (`BBD009`).
 - Fault-injection scenario JSON in the v1 per-vocabulary format (no
   `format` on the `HEADER` line) still reads, with a `DeprecationWarning`;
   reading it is removed no earlier than v0.84.0 (and not before
