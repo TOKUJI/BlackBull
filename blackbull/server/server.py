@@ -673,15 +673,19 @@ class _ServedConnection(ConnectionProtocol):
                 bound_binding=bound_binding,
             )
         finally:
-            # A bare close would RST away the response a peer that is
-            # still sending has not read yet.
-            await self.linger_close()
+            try:
+                # A bare close would RST away the response a peer that is
+                # still sending has not read yet.
+                await self.linger_close()
+            finally:
+                self._end()
 
     def connection_lost(self, exc):
         try:
             super().connection_lost(exc)
         finally:
             self.admission.release()
+            self._end()
 
 
 class Server:

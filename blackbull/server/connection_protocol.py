@@ -6,6 +6,7 @@ Published state has exactly one writer, its owner. See docs/about/internals.md.
 from __future__ import annotations
 
 import asyncio
+import copy
 
 from .read_buffer import ReadBuffer
 from ..protocol.http1 import IncompleteReadError, ReadLimitExceeded
@@ -317,6 +318,26 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         #: / [`resume_reading`][]; the reader polls it on the consuming path.
         self.reading_paused = False
         self._drain_waiter: asyncio.Future[None] | None = None
+        self._ends_seen = 0
+
+    def _end(self) -> None:
+        """Call once when serving ends and once when the transport is lost.
+
+        After both, drop the references that make the connection a cycle: the
+        reader, and the stored error's traceback (kept as an untraced copy; the
+        original exception is not modified).
+        """
+        self._ends_seen += 1
+        if self._ends_seen != 2:
+            return
+        self.reader = None
+        if self._exc is not None:
+            try:
+                self._exc = copy.copy(self._exc)
+            except Exception:
+                # An error that cannot be copied stays as it is: its cycle is
+                # left to the GC rather than failing connection_lost.
+                pass
 
     # -- state -------------------------------------------------------------
 
