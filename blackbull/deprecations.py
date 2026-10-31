@@ -53,6 +53,9 @@ DEPRECATIONS: dict[str, Deprecation] = {
     'BBD008': Deprecation(
         'the BLACKBULL_* environment variables', 'the same names with the BB_ prefix',
         'v0.81.1', 'no earlier than October 2027', 'BLA-559', warns=False),
+    'BBD009': Deprecation(
+        'Python 3.11 support', 'Python 3.12 or later', 'v0.81.1',
+        'in the first release from October 2027', 'BLA-586', warns=False),
 }
 
 

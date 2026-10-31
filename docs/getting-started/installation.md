@@ -1,6 +1,7 @@
 # Installation
 
-BlackBull requires **Python 3.11+**.
+BlackBull requires **Python 3.11+**; see [Python support](../reference/python-support.md)
+for the versions each release supports and when that changes.
 
 ## From PyPI
 

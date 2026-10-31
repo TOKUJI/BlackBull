@@ -38,6 +38,7 @@ pytest -W error::blackbull.BlackBullDeprecationWarning
 | BBD006 | scenario JSON in the v1 format | the current format: to_json(from_json(text)) | v0.81.1 | no earlier than v0.84.0 and 2026-11-28 | yes | BLA-584 |
 | BBD007 | the encode_* helpers of scenario_h1_server and scenario_h2_client | each step's wire() | v0.81.1 | no earlier than v0.84.0 and 2026-11-28 | yes | BLA-584 |
 | BBD008 | the BLACKBULL_* environment variables | the same names with the BB_ prefix | v0.81.1 | no earlier than October 2027 | no | BLA-559 |
+| BBD009 | Python 3.11 support | Python 3.12 or later | v0.81.1 | in the first release from October 2027 | no | BLA-586 |
 
 The table is generated from `blackbull/deprecations.py`; a test fails when
 the two differ.

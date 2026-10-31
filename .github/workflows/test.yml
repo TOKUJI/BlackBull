@@ -78,7 +78,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The matrix must equal the classifiers in pyproject.toml.  Advertising
+        # The matrix must equal the classifiers in pyproject.toml
+        # (tests/architecture/test_python_support.py).  Advertising
         # a version we do not test is the defect that let an HTTP/2
         # connection-window leak ship: CPython >=3.13 closes a coroutine before
         # TaskGroup.create_task() raises, the credit-replay fallback then
@@ -90,7 +91,7 @@ jobs:
         # honest — a static audit missed HTTPStatus.is_client_error being
         # 3.12-only and let a 3.11 crash ship (fixed 2026-07-18).  Also the
         # compat level a PyPy arm targets in the bench-window plan.
-        python-version: ['3.11', '3.12', '3.13', '3.14']
+        python-version: ['3.11', '3.12', '3.13', '3.14', '3.15']
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
@@ -126,44 +127,6 @@ jobs:
         run: |
           python -m pytest tests/unit tests/architecture tests/properties \
             --timeout=60 -q --beartype-packages=blackbull
-
-  fast-315:
-    # Informational 3.15 lane.  3.15.0 is GA (2026-10-09) and the tier
-    # passes on it (verified: 6606 passed with beartype 0.23.1 +
-    # pytest-beartype 0.3.0), but the support claim (matrix = classifiers)
-    # stays at 3.11-3.14 until this lane has stayed green; then add '3.15'
-    # to the fast matrix and the pyproject classifier.
-    name: Fast tier (unit + arch + properties) (3.15, informational)
-    needs: skip-check
-    if: needs.skip-check.outputs.skip == 'false'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    continue-on-error: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0   # v7.1.0
-        with:
-          python-version: '3.15'
-
-      - name: Install BlackBull (with test-relevant extras)
-        run: pip install -e '.[compression,testing,fault-injection,reload,speed]'
-
-      - name: Generate self-signed TLS material
-        run: |
-          # SAN must cover 127.0.0.1; see the fast job for the why.
-          openssl req -x509 -newkey rsa:2048 \
-            -keyout tests/key.pem -out tests/cert.pem \
-            -days 365 -nodes -subj '/CN=localhost' \
-            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
-
-      - name: Run fast test tier
-        run: |
-          python -m pytest tests/unit tests/architecture tests/properties \
-            --timeout=60 -q --beartype-packages=blackbull
-
 
   integration:
     name: Integration lane (integration + conformance)

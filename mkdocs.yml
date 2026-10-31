@@ -79,6 +79,7 @@ nav:
   - Reference:
     - Environment variables: reference/env-vars.md
     - Deprecations: reference/deprecations.md
+    - Python support: reference/python-support.md
     - API: api/
   - Security:
     - Severity criteria: security/severity.md
