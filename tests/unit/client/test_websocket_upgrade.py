@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from blackbull.client import HandshakeError, WebSocketClient
+from blackbull.server.sender import AsyncioWriter
 from tests.harness import Wire, peer
 
 
@@ -62,6 +63,44 @@ async def test_valid_upgrade_preserves_negotiation_and_buffered_frames(changes, 
             assert event['type'] == 'websocket.receive' and event['text'] == 'ok'
             assert (await session.receive())['type'] == 'websocket.disconnect'
         await asyncio.wait_for(origin.closed.wait(), 1)
+
+
+@pytest.mark.asyncio
+async def test_session_owns_transport_after_upgrade():
+    async with _origin() as origin:
+        async with WebSocketClient('127.0.0.1', origin.port) as client:
+            session = await client.connect('/ws')
+            with pytest.raises(HandshakeError):
+                await client.connect('/second-upgrade')
+            assert (await session.receive())['text'] == 'ok'
+            await session.close()
+            await session.close()
+            await asyncio.wait_for(origin.closed.wait(), 1)
+            assert b'GET /second-upgrade' not in origin.data
+
+
+@pytest.mark.asyncio
+async def test_cancelled_close_write_releases_transport(monkeypatch):
+    writing = asyncio.Event()
+    original = AsyncioWriter.write
+
+    async def blocked_close(self, data):
+        if data[0] == 0x88:
+            writing.set()
+            await asyncio.Future()
+        await original(self, data)
+
+    monkeypatch.setattr(AsyncioWriter, 'write', blocked_close)
+    async with _origin() as origin:
+        async with WebSocketClient('127.0.0.1', origin.port) as client:
+            session = await client.connect('/ws')
+            closing = asyncio.create_task(session.close())
+            await asyncio.wait_for(writing.wait(), 1)
+            closing.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await closing
+            await asyncio.wait_for(origin.closed.wait(), 1)
+            await session.close()
 
 
 @pytest.mark.asyncio

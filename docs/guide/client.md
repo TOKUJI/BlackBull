@@ -92,7 +92,7 @@ Both clients then close the transport best-effort. A closed client cannot be
 re-entered: the next call raises `ConnectionError`, naming the close you
 performed rather than blaming the peer.
 
-The one exception is `handoff()`, which transfers a CONNECT or 101 transport to
+The one exception is `handoff()`, which transfers a CONNECT or negotiated 101 transport to
 an `HTTP1UpgradeSession` and moves ownership of closing it with it — see
 [Testing](testing.md#connect-tunnels-and-protocol-upgrades).
 
@@ -196,6 +196,8 @@ selected subprotocol; extensions are not offered. Rejection, timeout or
 cancellation closes the connection. Enter a new client context before retrying.
 Non-101 responses are rejected without reading their bodies. An upgrade is
 rejected if it or a preceding interim response declares an HTTP body.
+Only one upgrade is allowed per connection. The returned WebSocket session
+closes the transport on `close()`; leaving the client context also closes it.
 HTTP/2 Extended CONNECT also rejects unoffered subprotocols or extensions,
 resetting the stream while keeping the connection open.
 

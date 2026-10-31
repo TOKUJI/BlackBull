@@ -15,13 +15,14 @@ from ..server.cap_log import log_cap_hit
 from ..server.rate_window import ByteRateFloor
 from ..server.recipient import AbstractReader
 from ..protocol.framing import _CRLF, is_informational
+from ..protocol.field_grammar import TCHAR_OCTETS
 from ..protocol.http1 import (CHUNKED, CLOSE_DELIMITED, LENGTH, NO_BODY,
                               ChunkedDecoder, FieldsTooLarge, IncompleteReadError,
                               LineCache, MessageError, ReadLimitExceeded,
                               connection_options, content_length, parse_head,
                               persistent, request_framing, response_framing)
 from ..server.sender import AbstractWriter, AsyncioWriter
-from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
+from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection, _TransportOwner,
                        open_connection as _open_connection)
 from .exceptions import ClientError, ConnectionError, ProtocolError, ResponseTooLarge
 from .http2 import ClientResponse  # shared dataclass
@@ -208,7 +209,7 @@ class Fate(enum.Enum):
     RETIRE = 'retire'
     #: Delimited by the close (RFC 9112 §6.3 item 8): no second message.
     EXHAUSTED = 'exhausted'
-    #: A 101 or a 2xx to CONNECT on a persistent connection: hand it off.
+    #: A 101 or a 2xx to CONNECT: hand it off.
     SWITCH = 'switch'
     #: The read stopped part-way; the position in the stream is unknown.
     BROKEN = 'broken'
@@ -218,6 +219,34 @@ class HTTP1ResponseHeadReader:
     """Read bounded response heads without body or connection-reuse policy."""
 
     _boundary_declared = False
+
+    @staticmethod
+    def _upgrade_protocols(headers: Headers) -> list[bytes]:
+        protocols = []
+        for member in (headers.get_combined(b'upgrade') or b'').split(b','):
+            member = member.strip(b' \t')
+            if not member:
+                continue
+            name, slash, version = member.partition(b'/')
+            if (not name or name.translate(None, TCHAR_OCTETS)
+                    or slash and (not version or version.translate(None, TCHAR_OCTETS))):
+                raise ProtocolError('invalid Upgrade protocol')
+            protocols.append(name.lower() + slash + version)
+        return protocols
+
+    def validate_upgrade(self, version: bytes, headers: Headers,
+                         offered: list[bytes]) -> list[bytes]:
+        if version != b'HTTP/1.1':
+            raise ProtocolError('101 requires HTTP/1.1')
+        if (self._boundary_declared or b'transfer-encoding' in headers
+                or _response_length(headers)):
+            raise ProtocolError('Upgrade response declared an HTTP body')
+        selected = self._upgrade_protocols(headers)
+        if not selected or any(protocol not in offered for protocol in selected):
+            raise ProtocolError('unoffered Upgrade protocol')
+        if b'upgrade' not in self._connection_options(headers):
+            raise ProtocolError('missing Connection upgrade token')
+        return selected
 
     @staticmethod
     def _connection_options(headers: Headers) -> list[bytes]:
@@ -321,6 +350,9 @@ class HTTP1ResponseRecipient(HTTP1ResponseHeadReader):
     ``stream()`` returns an async iterator of body chunks instead, so large
     responses don't have to fit in memory — true of all body framings.
     """
+
+    request_headers: Headers | None = None
+    request_options: list[bytes] | None = None
 
     def __init__(self, request_method: str | bytes | HTTPMethod | None = None) -> None:
         #: The method that caused this response, when known.  Direct users of
@@ -493,26 +525,6 @@ class HTTP1ResponseRecipient(HTTP1ResponseHeadReader):
         except MessageError as exc:
             raise ProtocolError(str(exc)) from exc
 
-    def _record_framing(self, framing: tuple[str, int | None, bool, bool], *,
-                        response_persistent: bool) -> None:
-        """The one place the connection's fate is decided.
-
-        Framing says whether this message delimits itself; ``Connection`` says
-        whether the peer means to keep the connection.  Reuse needs both.
-        """
-        mode, _declared, framing_reusable, switched = framing
-        # A peer that named a boundary it cannot have is not switching anything.
-        if switched and not self._boundary_declared:
-            self.fate = (Fate.SWITCH if response_persistent and not self.request_close
-                         else Fate.RETIRE)
-        elif mode == CLOSE_DELIMITED:
-            self.fate = Fate.EXHAUSTED
-        elif (framing_reusable and response_persistent and not self.request_close
-              and not self._boundary_declared):
-            self.fate = Fate.REUSE
-        else:
-            self.fate = Fate.RETIRE
-
     async def _read_head_and_policy(
             self, reader: AbstractReader, *, skip_interim: bool = True,
             method: str | bytes | HTTPMethod | None = None,
@@ -523,9 +535,28 @@ class HTTP1ResponseRecipient(HTTP1ResponseHeadReader):
         self.http_version = version
         request_method = (method if method is not None
                           else self.request_method)
-        framing = self._body_framing(status, headers, request_method)
-        self._record_framing(framing, response_persistent=self._response_is_persistent(
-            version, headers))
+        if status == 101 and self.request_headers is not None:
+            options = (self.request_options if self.request_options is not None
+                       else self._connection_options(self.request_headers))
+            offered = (self._upgrade_protocols(self.request_headers)
+                       if b'upgrade' in options
+                       else [])
+            self.validate_upgrade(version, headers, offered)
+            framing = NO_BODY, None, False, True
+        else:
+            framing = self._body_framing(status, headers, request_method)
+        mode, _declared, reusable, switched = framing
+        if switched:
+            self.fate = Fate.RETIRE if self._boundary_declared else Fate.SWITCH
+        else:
+            persistent = self._response_is_persistent(version, headers)
+            if mode == CLOSE_DELIMITED:
+                self.fate = Fate.EXHAUSTED
+            elif (reusable and persistent and not self.request_close
+                  and not self._boundary_declared):
+                self.fate = Fate.REUSE
+            else:
+                self.fate = Fate.RETIRE
         return status, headers, framing
 
     async def _read_body(self, reader: AbstractReader,
@@ -664,7 +695,7 @@ def _record_response(result, response) -> None:
     result.server_bytes_received += len(body)
 
 
-class HTTP1UpgradeSession:
+class HTTP1UpgradeSession(_TransportOwner):
     """Bidirectional transport after CONNECT or an HTTP 101 switch.
 
     Obtain one with [`HTTP1Client.handoff`][HTTP1Client.handoff].  The handoff is one-shot:
@@ -696,8 +727,7 @@ class HTTP1UpgradeSession:
         if self._closed:
             return
         self._closed = True
-        self._raw_writer.close()
-        await self._raw_writer.wait_closed()
+        await self._close_transport()
 
     async def __aenter__(self) -> 'HTTP1UpgradeSession':
         return self
@@ -722,7 +752,7 @@ class _State(enum.Enum):
     CLOSED = 'closed'
 
 
-class HTTP1Client:
+class HTTP1Client(_TransportOwner):
     """Async HTTP/1.1 client.
 
     Use as an async context manager::
@@ -881,10 +911,11 @@ class HTTP1Client:
         h = self._headers_with_host(headers)
         sender = HTTP1RequestSender(self._writer)
         prepared = sender.prepare(method, path, h, body)
-        request_close = (
-            b'close' in HTTP1ResponseRecipient._connection_options(h))
+        options = HTTP1ResponseRecipient._connection_options(h)
         recipient = HTTP1ResponseRecipient(request_method=method)
-        recipient.request_close = request_close
+        recipient.request_close = b'close' in options
+        recipient.request_headers = h
+        recipient.request_options = options
         self._begin_response(recipient)
         complete = False
         try:
@@ -910,10 +941,11 @@ class HTTP1Client:
         h = self._headers_with_host(headers)
         sender = HTTP1RequestSender(self._writer)
         prepared = sender.prepare(method, path, h, body)
-        request_close = (
-            b'close' in HTTP1ResponseRecipient._connection_options(h))
+        options = HTTP1ResponseRecipient._connection_options(h)
         recipient = HTTP1ResponseRecipient(request_method=method)
-        recipient.request_close = request_close
+        recipient.request_close = b'close' in options
+        recipient.request_headers = h
+        recipient.request_options = options
         self._begin_response(recipient)
         complete = False
         try:
@@ -947,12 +979,8 @@ class HTTP1Client:
                 'no completed CONNECT or 101 response is available for handoff')
         assert self._reader is not None and self._writer is not None
         assert self._raw_writer is not None
-        session = HTTP1UpgradeSession(
-            self._reader, self._writer, self._raw_writer)
+        session = self._handoff(HTTP1UpgradeSession)
         self._state = _State.HANDED_OFF
-        # The session now owns close.  In particular HTTP1Client.__aexit__
-        # must not close a transport that has escaped its context.
-        self._raw_writer = None
         return session
 
     # ---- Low-level test-instrument primitives ----------------------------
@@ -1050,13 +1078,16 @@ class HTTP1Client:
     async def read_response(
             self, *,
             request_method: str | bytes | HTTPMethod | None = None,
+            request_headers: HeaderList | None = None,
             timeout: float | None = None) -> ClientResponse:
         """Read one HTTP/1.1 response from the connection.
 
         Optional ``timeout`` bounds the entire read (status line + headers
         + body).  Raises ``asyncio.TimeoutError`` if the deadline is
         hit; the caller decides whether to treat that as a transport-
-        fail or a normal protocol outcome."""
+        fail or a normal protocol outcome. Supply ``request_headers`` to
+        validate a 101 for handoff; without them, a 101 is returned but its
+        transport is closed."""
         if self._state is _State.CLOSED:
             raise ConnectionError('HTTP1Client context is closed')
         if self._state is not _State.READY:
@@ -1067,6 +1098,8 @@ class HTTP1Client:
                 'a response body is still being consumed on this connection')
         assert self._reader is not None, 'connect via __aenter__ first'
         recipient = HTTP1ResponseRecipient(request_method=request_method)
+        if request_headers is not None:
+            recipient.request_headers = Headers(list(request_headers))
         self._active_response = recipient
         complete = False
         try:
@@ -1078,6 +1111,8 @@ class HTTP1Client:
                 response = await coro
             else:
                 response = await asyncio.wait_for(coro, timeout=timeout)
+            if response.status == 101 and request_headers is None:
+                recipient.fate = Fate.RETIRE
             complete = True
             return response
         finally:
@@ -1086,7 +1121,8 @@ class HTTP1Client:
             # poisoning the client.  Successful terminal states still retire
             # HTTP or enter CONNECT tunnel mode.
             self._finish_response(
-                recipient, complete=complete, abandon_incomplete=False)
+                recipient, complete=complete,
+                abandon_incomplete=request_headers is not None)
 
     async def execute_scenario(
         self, scenario: Scenario,

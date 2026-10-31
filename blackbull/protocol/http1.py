@@ -355,9 +355,10 @@ def response_framing(headers, method, status: int
     is refused.  A 1xx or 204 declaring a body is not reusable (§6.1).
     """
     index = headers._index
-    successful_connect = method_is(method, 'CONNECT') and 200 <= status < 300
-    switched = status == 101 or successful_connect
-    if successful_connect or not response_has_content(method, status):
+    if method_is(method, 'CONNECT') and 200 <= status < 300:
+        return NO_BODY, None, False, True
+    switched = status == 101
+    if not response_has_content(method, status):
         # Fields are read only here, so a HEAD or 304 never parses them.
         if (is_informational(status) or status == 204) and (
                 index.get(b'transfer-encoding')
