@@ -17,7 +17,7 @@ async def cancel_and_wait(*tasks: asyncio.Task) -> None:
         try:
             await task
         except (asyncio.CancelledError, Exception):
-            pass
+            pass  # how the task ended; the caller's cancellation is told apart below
         if caller.cancelling() > cancelling:
             for rest in tasks[i + 1:]:
                 rest.add_done_callback(_retrieved)
