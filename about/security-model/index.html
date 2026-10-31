@@ -6362,11 +6362,11 @@ stream, which an event stream or a long poll is not.</p>
 </tr>
 <tr>
 <td>Client-owned transport and WebSocket bounds</td>
-<td><code>tests/unit/client/test_client_owned_bounds.py</code>, <code>tests/unit/test_cap_log_sites.py</code></td>
+<td><code>tests/unit/client/test_client_owned_bounds.py</code>, <code>tests/caps/</code></td>
 </tr>
 <tr>
-<td>Every client bound names itself on <code>blackbull.caps</code>, on every protocol that enforces it</td>
-<td><code>tests/unit/test_cap_log_sites.py</code> — the per-cap tests, plus <code>test_client_caps_are_wired_on_every_protocol_that_enforces_them</code> and <code>test_every_client_env_var_has_a_verdict</code></td>
+<td>Every bound names its refusing subsystem on <code>blackbull.caps</code></td>
+<td><code>tests/caps/test_every_cap_has_a_row.py</code> audits source <code>(cap, protocol)</code> pairs; the caps tables provoke each refusal and check its record</td>
 </tr>
 <tr>
 <td>A buffered client response body costs about twice the cap</td>

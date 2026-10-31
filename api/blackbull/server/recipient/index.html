@@ -6904,7 +6904,7 @@ correctness (control frames are still serviced at the next read).</p>
   partial, which is a truncated request and not an idle close.</li>
 </ul>
 <p><em>limit</em> bounds the whole head and is what stops an unbounded read; 0
-disables it, and an overrun raises [<code>ReadLimitExceeded</code>][].</p>
+disables it, and an overrun raises <a class="autorefs autorefs-internal" href="../../protocol/http1/#blackbull.protocol.http1.ReadLimitExceeded"><code>ReadLimitExceeded</code></a>.</p>
 <p>The Internals page argues why this is a contract every reader meets
 rather than a capability the caller sniffs for.</p>
 
@@ -6951,7 +6951,7 @@ Concrete transport readers override this.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Read through <em>sep</em>; <em>limit</em> &gt; 0 bounds it ([<code>ReadLimitExceeded</code>][]).</p>
+        <p>Read through <em>sep</em>; <em>limit</em> &gt; 0 bounds it (<a class="autorefs autorefs-internal" href="../../protocol/http1/#blackbull.protocol.http1.ReadLimitExceeded"><code>ReadLimitExceeded</code></a>).</p>
 
 
     </div>

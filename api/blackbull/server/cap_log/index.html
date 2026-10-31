@@ -5924,7 +5924,7 @@ summary record reports any suppressed hits.</p>
 graceful path):</p>
 <ul>
 <li><code>flush_threshold</code> (default 100) — after this many suppressed
-  hits on any single cap, emit and reset.  Set to 0 to disable.</li>
+  hits on any single (cap, subsystem) pair, emit and reset. Set to 0 to disable.</li>
 <li><code>flush_interval</code> (default 60.0 s) — an asyncio timer that
   emits and resets after this many seconds if any cap has
   suppressed hits.  Set to 0 to disable.</li>
@@ -6008,11 +6008,12 @@ with counter.bind():
 
     <div class="doc doc-contents ">
 
-        <p>Emit one summary record per cap that had suppressed hits.</p>
+        <p>Emit one summary record per pair that had suppressed hits.</p>
 <p>Caps with zero suppressed hits (fired exactly once, or already
 emitted via an intermediate summary) are omitted.  Cancels the
 interval timer and clears all state — the counter is safe to
-reuse afterwards if the holder is pooled.</p>
+reuse afterwards if the holder is pooled. <code>protocol</code> supplies a
+fallback only for hits that did not name their subsystem.</p>
 
 
     </div>
@@ -6040,9 +6041,11 @@ reuse afterwards if the holder is pooled.</p>
     <div class="doc doc-contents ">
 
         <p>Log a cap refusal with structured fields and operator advice.</p>
-<p>Explicit counter and connection_id override ambient context. Without a
-counter, every call emits. With one, first hits emit and repeats accumulate
-until flush; the connection owner must flush at teardown.</p>
+<p><code>protocol</code> identifies the refusing subsystem, including transport and
+middleware; registered extension names are allowed. Explicit counter and
+connection_id override ambient context. Without a counter every call emits.
+With one, first hits per (cap, subsystem) emit; repeats accumulate until the
+connection owner flushes at teardown.</p>
 
 
     </div>

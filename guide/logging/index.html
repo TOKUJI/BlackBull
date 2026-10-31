@@ -6426,7 +6426,7 @@ record on <code>blackbull.caps</code> when it fires.  Coverage:</p>
 </tr>
 <tr>
 <td><code>BB_BODY_TIMEOUT</code></td>
-<td>body bytes didn't arrive in time</td>
+<td>HTTP/1.1 body bytes didn't arrive in time; HTTP/2 uses its request deadline and body rate/size bounds</td>
 </tr>
 <tr>
 <td><code>BB_MAX_BODY_SIZE</code></td>
@@ -6621,11 +6621,11 @@ fields in <code>record.extra</code>:</p>
 </tr>
 <tr>
 <td><code>scope_path</code></td>
-<td>ASGI <code>scope['path']</code> when available</td>
+<td>Request path when available</td>
 </tr>
 <tr>
 <td><code>protocol</code></td>
-<td><code>"http1"</code>, <code>"http2"</code>, <code>"ws"</code>, <code>"h2-ws"</code>, <code>"compression"</code>, …</td>
+<td>Refusing subsystem: <code>"http1"</code>, <code>"http2"</code>, <code>"ws"</code>, <code>"h2-ws"</code>, <code>"mqtt"</code>, <code>"tcp"</code> (connection admission), <code>"transport"</code> (socket drain/backlog), <code>"compression"</code>, or a registered extension name. <code>"unknown"</code> means no binding was selected before detection timed out.</td>
 </tr>
 </tbody>
 </table>
@@ -6634,9 +6634,9 @@ fields in <code>record.extra</code>:</p>
 <code>ConnectionActor</code> carries a <code>CapHitCounter</code> (installed via a
 <code>contextvars</code>-bound context manager so every actor on the same
 task tree picks it up without plumbing).  The first hit per
-<code>(connection, cap)</code> logs in full; subsequent hits on the same
-connection are silently counted.  When the connection closes, the
-counter emits one summary record per suppressed cap:</p>
+<code>(connection, cap, protocol)</code> logs in full; repeats of that pair are
+silently counted. Threshold, interval and connection-close summaries retain
+the refusing subsystem and count each pair separately:</p>
 <div class="highlight"><pre><span></span><code>cap hit summary: ws_max_frame_payload suppressed=99 more
 </code></pre></div>
 <h3 id="subscribing">Subscribing<a class="headerlink" href="#subscribing" title="Permanent link">&para;</a></h3>
