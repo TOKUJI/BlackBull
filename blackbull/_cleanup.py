@@ -5,13 +5,23 @@ import asyncio
 async def cancel_and_wait(*tasks: asyncio.Task) -> None:
     """Cancel *tasks* and wait for them to end, dropping what they end with.
 
-    A cancellation aimed at the caller during the wait still propagates;
-    awaiting a task itself would take it for the task's own.
+    A cancellation aimed at the caller during the wait still propagates: it
+    raises the caller's cancel count, which the tasks' own cancellation does
+    not, and it may reach the awaited task instead, which can absorb it.
     """
+    caller = asyncio.current_task()
+    cancelling = caller.cancelling()
     for task in tasks:
         task.cancel()
-        task.add_done_callback(_retrieved)
-    await asyncio.wait(tasks)
+    for i, task in enumerate(tasks):
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        if caller.cancelling() > cancelling:
+            for rest in tasks[i + 1:]:
+                rest.add_done_callback(_retrieved)
+            raise asyncio.CancelledError
 
 
 def _retrieved(task: asyncio.Task) -> None:
