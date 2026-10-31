@@ -396,6 +396,6 @@ class Session:           # in-tree, deprecated form
         ...
 ```
 
-Schedule removal at least three MINOR releases and one calendar month after
-announcing the deprecation, using whichever boundary is later. State both
-gates and the replacement in the warning so users can plan their migration.
+Follow the schedule BlackBull uses for its own deprecations, in
+[Deprecations](../reference/deprecations.md), and state the replacement and
+the removal in the warning so users can plan their migration.

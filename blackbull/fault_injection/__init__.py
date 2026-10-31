@@ -216,11 +216,8 @@ def __getattr__(name):
     """Resolve deprecated spellings with a caller-attributed warning.
     """
     if name in _DEPRECATED_SPELLINGS:
-        import warnings  # noqa: PLC0415
+        from ..deprecations import _warn_deprecated  # noqa: PLC0415
         replacement, step = _DEPRECATED_SPELLINGS[name]
-        warnings.warn(
-            f"{__name__}.{name} is deprecated; use {replacement}.  Removal no "
-            "earlier than 2027-08-19.",
-            DeprecationWarning, stacklevel=2)
+        _warn_deprecated('BBD005', f'{__name__}.{name}', replacement)
         return step
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

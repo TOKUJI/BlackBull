@@ -1123,13 +1123,10 @@ class _H1ScenarioDriver(_ClientDriver):
 
 # Unannotated: see tests/unit/test_deprecated_send_bytes_spellings.py::test_the_warning_is_attributed_to_the_callers_line.
 def __getattr__(name):
-    """Deprecated SendBytes alias for SendRawBytes; removal no earlier than 2027-08-19.
+    """Deprecated SendBytes alias for SendRawBytes (BBD005).
     """
     if name == 'SendBytes':
-        import warnings  # noqa: PLC0415
-        warnings.warn(
-            f"{__name__}.SendBytes is deprecated; use SendRawBytes.  Removal no "
-            "earlier than 2027-08-19.",
-            DeprecationWarning, stacklevel=2)
+        from ..deprecations import _warn_deprecated  # noqa: PLC0415
+        _warn_deprecated('BBD005', f'{__name__}.SendBytes', 'SendRawBytes')
         return SendRawBytes
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

@@ -26,7 +26,7 @@ __all__ = [
 # Deprecated aliases (PEP 562 — emit on access, not on package import)
 # ---------------------------------------------------------------------------
 
-import warnings as _warnings  # noqa: E402
+from ..deprecations import _warn_deprecated  # noqa: E402
 
 _DEPRECATED: dict[str, tuple[str, object]] = {
     'CacheMiddleware':         ('Cache',         Cache),
@@ -38,20 +38,9 @@ _DEPRECATED: dict[str, tuple[str, object]] = {
 def __getattr__(name):
     if name in _DEPRECATED:
         new_name, target = _DEPRECATED[name]
-        _warnings.warn(
-            f'{name} is deprecated; use {new_name} instead '
-            f'(``from blackbull.middleware import {new_name}``).',
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        _warn_deprecated('BBD001', f'blackbull.middleware.{name}', new_name)
         return target
     if name == 'compress':
-        _warnings.warn(
-            'The pre-built ``compress`` instance is deprecated; instantiate '
-            'Compression explicitly (``from blackbull.middleware import '
-            'Compression; app.use(Compression())``).',
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        _warn_deprecated('BBD002')
         return _make_default_compress()
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

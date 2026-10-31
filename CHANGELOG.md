@@ -25,9 +25,20 @@ metadata; reinstall an editable checkout after changing that version.
 
 - `blackbull.client.ClientConnection`, the buffered connection every client
   owns (the type of `WebSocketSession`'s `raw_writer`).
+- [Deprecations](docs/reference/deprecations.md): every planned removal, with
+  an ID (`BBDnnn`), its replacement and its removal condition, generated from
+  `blackbull.deprecations`.  Deprecation warnings are now
+  `blackbull.BlackBullDeprecationWarning`, a `DeprecationWarning` subclass,
+  and name their ID.  A deprecated feature is kept for at least one year.
 
 ### Deprecated
 
+- The `Middleware`-suffixed aliases (`CacheMiddleware`,
+  `CompressionMiddleware`, `TrustedProxyMiddleware`) and the pre-built
+  `compress` instance, deprecated since v0.28.0 without a date, are removed no
+  earlier than 2027-05-20.
+- `blackbull.client.scenario` and `blackbull.client.scenario_oracle` are
+  removed in v0.82.0; import from `blackbull.fault_injection`.
 - Fault-injection scenario JSON in the v1 per-vocabulary format (no
   `format` on the `HEADER` line) still reads, with a `DeprecationWarning`;
   reading it is removed no earlier than v0.84.0 (and not before

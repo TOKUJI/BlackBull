@@ -78,6 +78,7 @@ nav:
     - Hot reload: deployment/hot-reload.md
   - Reference:
     - Environment variables: reference/env-vars.md
+    - Deprecations: reference/deprecations.md
     - API: api/
   - Security:
     - Severity criteria: security/severity.md

@@ -85,8 +85,8 @@ async def update_item(item_id: int, conn: Connection):
 
 !!! note "`Request` is the old name"
     Before v0.60.0 this object was called `Request`.  `blackbull.Request`
-    still works as a deprecated alias (removal no earlier than
-    2027-08-01); new code should use `Connection`.
+    still works as a deprecated alias
+    ([BBD004](../reference/deprecations.md)); new code should use `Connection`.
 
 See [Requests and responses](../guide/requests-and-responses.md)
 for the full surface.
