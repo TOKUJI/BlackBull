@@ -6,11 +6,11 @@ cannot establish gRPC completion. This helper does not provide a general gRPC cl
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from dataclasses import dataclass
 from operator import itemgetter
 from urllib.parse import unquote_to_bytes
 
+from .._cleanup import cancel_and_wait
 from ..grpc import GrpcDecodeError, GrpcStatus, decode_messages, encode_message
 from ..grpc.asgi import _is_grpc_content_type
 from ..server.server import ASGIServer
@@ -81,17 +81,11 @@ class GrpcTestServer:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        if self._task is not None:
-            self._task.cancel()
-            # We cancelled it, so ``CancelledError`` is the expected answer
-            # and not an error; anything else the serve loop raises on its
-            # way down is a teardown detail that must not replace whatever
-            # the test was actually asserting.  ``contextlib.suppress`` is
-            # the idiom the rest of the tree uses for exactly this.
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self._task
-            self._task = None
-        self._server = None
+        task, self._task, self._server = self._task, None, None
+        if task is not None:
+            # What the serve loop raises on its way down must not replace
+            # whatever the test was asserting.
+            await cancel_and_wait(task)
 
     async def unary(self, method: str, request: bytes = b'', *,
                     metadata: list[tuple[str, str]] | None = None,

@@ -1,9 +1,9 @@
 """User-facing wiring for the MQTT 5 broker — detector + [`MQTTExtension`][]."""
 import asyncio
-import contextlib
 import logging
 from typing import Any, Callable, Iterator, NamedTuple
 
+from .._cleanup import cancel_and_wait
 from ..extension import Extension
 from ..server.protocol_registry import ProtocolDetector
 from .broker import BrokerActor
@@ -147,12 +147,14 @@ class MQTTExtension(Extension):
 
     async def shutdown(self, app: Any) -> None:
         """Stop the broker and tap actors on lifespan shutdown."""
-        for attr in ('_broker_task', '_tap_task'):
-            task = getattr(self, attr)
-            if task is not None:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await asyncio.gather(task)
-                setattr(self, attr, None)
-        # Cancelling the task does not reach what the actor armed on the loop.
-        self._broker.close()
+        tasks = [t for t in (self._broker_task, self._tap_task) if t is not None]
+        self._broker_task = self._tap_task = None
+        try:
+            if tasks:
+                await cancel_and_wait(*tasks)
+        finally:
+            # Cancelling the task does not reach what the actor armed on the loop.
+            self._broker.close()
+        for task in tasks:
+            if not task.cancelled() and task.exception() is not None:
+                raise task.exception()

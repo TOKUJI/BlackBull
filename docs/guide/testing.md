@@ -525,10 +525,9 @@ async def server_port():
         yield port
     finally:
         task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
+        # Wait without awaiting the task itself: its CancelledError would be
+        # indistinguishable from one aimed at this fixture.
+        await asyncio.wait({task})
 ```
 
 `server.port` returns the kernel-assigned port number after

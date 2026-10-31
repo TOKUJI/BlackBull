@@ -444,12 +444,19 @@ class NativeTestServer:
     async def _close_socket(self) -> None:
         if self._sock is None:
             return
+        task = asyncio.current_task()
+        cancelling = task.cancelling()
         try:
             await self._bb_server.stop(drain_timeout=self._timeout)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except asyncio.TimeoutError:
             # A wedged connection handler must not turn a passing test into a
             # hang; the socket is closed either way.
             pass
+        except asyncio.CancelledError:
+            # One raised from inside stop() is its own; one aimed at our
+            # caller while it waited is not ours to absorb.
+            if task.cancelling() > cancelling:
+                raise
         finally:
             self._sock.close()
             self._sock = None

@@ -57,6 +57,11 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- `HTTP2Client`, `NativeTestServer`, `GrpcTestServer` and the MQTT
+  extension's shutdown no longer swallow a cancellation aimed at their caller
+  while they tear down: it was taken for the cancellation they had sent their
+  own task, and teardown returned normally.  The rest of the teardown still
+  runs when it propagates (BLA-444).
 - HTTP/1.1 client handoff accepts every successful CONNECT, including HTTP/1.0
   and responses with `Connection: close` (BLA-468). A 101 must select an offered
   Upgrade protocol; low-level `read_response(offered_protocols=...)` validates

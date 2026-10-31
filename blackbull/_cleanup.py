@@ -1,4 +1,32 @@
 """Small primitives shared by resource-owning cleanup paths."""
+import asyncio
+
+
+async def cancel_and_wait(*tasks: asyncio.Task) -> None:
+    """Cancel *tasks* and wait for them to end, dropping what they end with.
+
+    A cancellation aimed at the caller during the wait still propagates, once
+    the awaited task has ended: it is forwarded to that task, which may absorb
+    it, but it raises the caller's cancel count, which the tasks' own does not.
+    """
+    caller = asyncio.current_task()
+    cancelling = caller.cancelling()
+    for task in tasks:
+        task.cancel()
+    for i, task in enumerate(tasks):
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass  # how the task ended; the caller's cancellation is told apart below
+        if caller.cancelling() > cancelling:
+            for rest in tasks[i + 1:]:
+                rest.add_done_callback(_retrieved)
+            raise asyncio.CancelledError
+
+
+def _retrieved(task: asyncio.Task) -> None:
+    if not task.cancelled():
+        task.exception()
 
 
 def combine_cleanup_errors(*errors):
