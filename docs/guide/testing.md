@@ -576,11 +576,12 @@ injected automatically.
 
 ### CONNECT tunnels and protocol upgrades
 
-A successful `CONNECT` response or a generic `101 Switching Protocols`
-response always ends HTTP processing.  When persistence policy also permits
-the transport to remain open—neither endpoint sent `Connection: close`, and an
-HTTP/1.0 response explicitly selected `keep-alive`—bytes already read into the
-client buffer are preserved.  Call `handoff()` exactly once to transfer both
+A successful `CONNECT` response ends HTTP processing, including HTTP/1.0
+responses and exchanges with `Connection: close`. Its Content-Length and
+Transfer-Encoding fields are ignored. A `101 Switching Protocols` response
+must select protocols offered in the request and include `Connection: upgrade`.
+HTTP/1.0 cannot switch with 101. Bytes already read into the client buffer
+are preserved. Call `handoff()` exactly once to transfer both
 sides of that transport to an `HTTP1UpgradeSession`:
 
 ```python
@@ -599,10 +600,14 @@ async with tunnel:
 After a successful switch, further HTTP requests are refused.  Before
 `handoff()`, exiting the `HTTP1Client` context closes the transport; after the
 handoff, only `HTTP1UpgradeSession.close()` (or its context-manager exit)
-closes it.  A switch on a non-persistent exchange is closed and cannot be
-handed off, and `handoff()` cannot be called after the client context has
+closes it. `handoff()` cannot be called after the client context has
 exited.  This API exposes raw protocol bytes and performs no TLS wrapping,
 content decoding, or protocol-specific framing.
+
+For low-level `read_response()`, pass the protocols sent with `Connection: upgrade`
+as `offered_protocols` (for example, `[b'example/1']`) to validate a 101 before
+handoff. Without them, the response remains observable but the
+connection is closed. CONNECT does not require Upgrade negotiation.
 
 ### Streaming request bodies
 

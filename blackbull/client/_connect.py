@@ -11,6 +11,23 @@ from ..server.connection_protocol import ConnectionProtocol
 DEFAULT_CONNECT_TIMEOUT: float = 30.0
 
 
+class _TransportClose:
+    async def _close_transport(self) -> None:
+        connection, self._raw_writer = self._raw_writer, None
+        if connection is not None:
+            connection.close()
+            await connection.wait_closed()
+
+
+class _TransportOwner(_TransportClose):
+    """Transfer an existing buffered transport only after session construction succeeds."""
+
+    def _handoff(self, session_type, **options):
+        session = session_type(self._reader, self._writer, self._raw_writer, **options)
+        self._raw_writer = None
+        return session
+
+
 class ClientConnection(ConnectionProtocol):
     """The server's buffered protocol, plus a close a client can await."""
 

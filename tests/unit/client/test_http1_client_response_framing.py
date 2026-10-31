@@ -665,6 +665,7 @@ async def test_http10_repeated_mixed_case_keep_alive_allows_reuse(api):
 @pytest.mark.parametrize('api', ['request', 'stream', 'read_response'])
 @pytest.mark.asyncio
 async def test_generic_101_preserves_transport_and_refuses_more_http(api):
+    offered = [(b'connection', b'upgrade'), (b'upgrade', b'example')]
     switched = b'protocol-prebuffer'
     reader = _Reader(
         _head(101, 'Switching Protocols',
@@ -674,12 +675,12 @@ async def test_generic_101_preserves_transport_and_refuses_more_http(api):
     client._raw_writer = raw
 
     if api == 'request':
-        response = await client.request('GET', '/')
+        response = await client.request('GET', '/', headers=offered)
         assert response.status == 101
     elif api == 'stream':
-        assert [chunk async for chunk in client.stream('GET', '/')] == []
+        assert [chunk async for chunk in client.stream('GET', '/', headers=offered)] == []
     else:
-        response = await client.read_response(request_method='GET')
+        response = await client.read_response(request_method='GET', offered_protocols=[b'example'])
         assert response.status == 101
 
     assert reader.peek() == switched
@@ -701,7 +702,7 @@ async def test_generic_101_preserves_transport_and_refuses_more_http(api):
     ('read_response', 'http10-default'),
 ])
 @pytest.mark.asyncio
-async def test_nonpersistent_protocol_switch_closes_without_handoff(
+async def test_nonpersistent_protocol_switch_policy(
         switch, api, policy):
     method = 'CONNECT' if switch == 'connect' else 'GET'
     status = 200 if switch == 'connect' else 101
@@ -718,6 +719,18 @@ async def test_nonpersistent_protocol_switch_closes_without_handoff(
     raw = _RawWriter()
     client._raw_writer = raw
 
+    if switch == '101' and api != 'read_response':
+        with pytest.raises(ProtocolError):
+            if api == 'request':
+                await client.request(method, '/', headers=request_headers)
+            else:
+                _ = [chunk async for chunk in client.stream(
+                    method, '/', headers=request_headers)]
+        assert raw.close_calls == 1
+        with pytest.raises(ConnectionError):
+            client.handoff()
+        return
+
     if api == 'request':
         response = await client.request(
             method, '/', headers=request_headers)
@@ -730,9 +743,13 @@ async def test_nonpersistent_protocol_switch_closes_without_handoff(
         assert response.status == status
 
     assert reader.peek() == switched
-    assert raw.close_calls == 1
-    with pytest.raises(ConnectionError, match='no completed CONNECT or 101'):
-        client.handoff()
+    if switch == '101':
+        assert raw.close_calls == 1
+        with pytest.raises(ConnectionError):
+            client.handoff()
+    else:
+        assert raw.close_calls == 0
+        assert await client.handoff().read() == switched
     with pytest.raises(ConnectionError):
         await client.request('GET', '/next')
 
@@ -776,12 +793,14 @@ def test_handoff_requires_completed_protocol_switch():
 
 @pytest.mark.asyncio
 async def test_upgrade_handoff_context_owns_close_after_client_exit():
-    reader = _Reader(_head(101, 'Switching Protocols') + b'upgraded')
+    reader = _Reader(_head(101, 'Switching Protocols',
+                          b'Connection: upgrade\r\nUpgrade: example\r\n') + b'upgraded')
     client = _client(reader)
     raw = _RawWriter()
     client._raw_writer = raw
 
-    await client.request('GET', '/')
+    await client.request('GET', '/', headers=[
+        (b'connection', b'upgrade'), (b'upgrade', b'example')])
     session = client.handoff()
     await client.__aexit__(None, None, None)
     assert raw.close_calls == 0
@@ -960,7 +979,7 @@ class TestContentlessResponsesDoNotClaimABoundary:
     @pytest.mark.asyncio
     async def test_a_boundary_violation_survives_a_protocol_switch(self):
         """A peer that named a boundary it cannot have is not switching
-        anything, so no handoff is offered. `_record_framing` settles that
+        anything, so no handoff is offered. The response policy settles that
         once, with the same verdict that retires the connection."""
         reader = _Reader(b'HTTP/1.1 100 Continue\r\nContent-Length: 5\r\n'
                          b'\r\nHTTP/1.1 101 Switching Protocols\r\n\r\n')

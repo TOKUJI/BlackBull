@@ -13,18 +13,17 @@ from ..asgi import WebSocketDisconnectEvent, WebSocketReceiveEvent
 
 import logging
 from ..headers import Headers
-from ..protocol.field_grammar import TCHAR_OCTETS, list_members
+from ..protocol.field_grammar import TCHAR_OCTETS
 from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
                                 ProtocolError as RecipientProtocolError,
                                 WebSocketRecipient)
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ..env import get_settings
 from ..server.ws_codec import WSOpcode, encode_frame
-from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
+from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection, _TransportClose, _TransportOwner,
                        open_connection as _open_connection)
 from .exceptions import HandshakeError, ProtocolError
-from .http1 import (HTTP1RequestSender, HTTP1ResponseHeadReader,
-                    _response_length)
+from .http1 import HTTP1RequestSender, HTTP1ResponseHeadReader
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +68,7 @@ def _validate_negotiation(fields: Iterable[tuple[bytes, bytes]],
     return chosen
 
 
-class WebSocketSession:
+class WebSocketSession(_TransportClose):
     """Frame-level WebSocket session over an established connection.
 
     Always masks outgoing frames (RFC 6455 §5.1).  Reads use
@@ -162,10 +161,10 @@ class WebSocketSession:
         self._closed = True
         payload = code.to_bytes(2, 'big')
         try:
-            await self._send_frame(payload, WSOpcode.CLOSE)
-        except Exception:
-            pass  # best-effort close frame; the socket may already be gone.
-        try:
+            try:
+                await self._send_frame(payload, WSOpcode.CLOSE)
+            except Exception:
+                pass  # best-effort close frame; the socket may already be gone.
             if not self._disconnect_seen:
                 async with asyncio.timeout(drain_timeout):
                     while True:
@@ -177,9 +176,18 @@ class WebSocketSession:
             # error — either way the drain is over; shut the reader down.
             pass
         finally:
-            await self._recipient.shutdown()
+            await self._release()
 
     # ---- internal --------------------------------------------------------
+
+    async def _release(self) -> None:
+        if self._raw_writer is None:
+            return
+        self._closed = True
+        try:
+            await self._recipient.shutdown()
+        finally:
+            await self._close_transport()
 
     async def _send_frame(self, payload: bytes, opcode: WSOpcode) -> None:
         frame = encode_frame(payload, opcode=opcode, mask=True)
@@ -195,7 +203,7 @@ class WebSocketSession:
         await self.close()
 
 
-class WebSocketClient:
+class WebSocketClient(_TransportOwner):
     """Async WebSocket client.
 
     Use as an async context manager::
@@ -220,6 +228,7 @@ class WebSocketClient:
         self._reader: AbstractReader | None = None
         self._writer: AbstractWriter | None = None
         self._raw_writer: ClientConnection | None = None
+        self._session: WebSocketSession | None = None
 
     async def __aenter__(self) -> 'WebSocketClient':
         conn = await _open_connection(self._host, self._port, self._ssl,
@@ -232,14 +241,15 @@ class WebSocketClient:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        connection, self._raw_writer = self._raw_writer, None
+        session, self._session = self._session, None
         self._reader = self._writer = None
-        if connection is not None:
-            try:
-                connection.close()
-                await connection.wait_closed()
-            except Exception:
-                pass  # best-effort close on context exit; peer may already be gone.
+        try:
+            if session is not None:
+                await session._release()
+            else:
+                await self._close_transport()
+        except Exception:
+            pass  # best-effort close on context exit; peer may already be gone.
 
     async def connect(self, path: str, *,
                       subprotocols: Iterable[bytes] = (),
@@ -276,17 +286,11 @@ class WebSocketClient:
                 async with asyncio.timeout(response_timeout):
                     version, status, headers = await recipient.receive_head(self._reader)
 
-            if (version != b'HTTP/1.1'
-                    or status != HTTPStatus.SWITCHING_PROTOCOLS):
+            if status != HTTPStatus.SWITCHING_PROTOCOLS:
                 raise HandshakeError(
                     f'server rejected WebSocket upgrade: status={status}')
-            if (recipient._boundary_declared or b'transfer-encoding' in headers
-                    or _response_length(headers)):
-                raise HandshakeError('WebSocket upgrade declared an HTTP body')
-            if list_members(headers.get_combined(b'upgrade') or b'') != [b'websocket']:
+            if recipient.validate_upgrade(version, headers, [b'websocket']) != [b'websocket']:
                 raise HandshakeError('invalid WebSocket Upgrade header')
-            if b'upgrade' not in recipient._connection_options(headers):
-                raise HandshakeError('missing WebSocket Connection upgrade token')
             accepts = headers.getlist(b'sec-websocket-accept')
             if len(accepts) != 1 or accepts[0][1] != expected_accept:
                 raise HandshakeError(
@@ -296,12 +300,12 @@ class WebSocketClient:
                 headers.getlist(b'sec-websocket-protocol'), offered,
                 has_extensions=b'sec-websocket-extensions' in headers)
 
-            return WebSocketSession(self._reader, self._writer, self._raw_writer,
-                                    subprotocol=chosen,
+            self._session = self._handoff(WebSocketSession, subprotocol=chosen,
                                     max_frame_payload=(
                                         get_settings().client_ws_max_frame_payload),
                                     max_message_size=(
                                         get_settings().client_ws_max_message_size))
+            return self._session
         except BaseException as exc:
             await self.__aexit__(None, None, None)
             if isinstance(exc, ProtocolError):
