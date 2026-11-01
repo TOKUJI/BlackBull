@@ -37,8 +37,8 @@ from blackbull.protocol.frame_types import (
 
 #: Each reader and the grammar names it imports.
 _READERS = {
-    http1_actor: ('host_field_value',),
-    codec_http1: ('FIELD_VALUE_ALLOWED_OCTETS', 'COMMON_METHODS_OCTETS', 'TCHAR_OCTETS',
+    http1_actor: ('host_field_value', 'METHOD_TEXT', 'VERSION_TEXT'),
+    codec_http1: ('FIELD_VALUE_ALLOWED_OCTETS', 'METHOD_TEXT', 'TCHAR_OCTETS',
                   'method_token_is_valid', 'field_line', 'PROHIBITED_TRAILER_FIELDS'),
     http2_actor: ('PROHIBITED_TRAILER_FIELDS',),
     connection_module: ('normalized_fields', 'host_field_value', 'media_type'),
@@ -48,7 +48,7 @@ _READERS = {
     framing_module: ('TCHAR_OCTETS', 'FIELD_VALUE_ALLOWED_OCTETS'),
     cache_module: ('TCHAR_SET', 'FIELD_VALUE_ALLOWED_SET', 'if_none_match_hit',
                    'list_members'),
-    parser: ('COMMON_METHODS', 'COMMON_SCHEMES', 'URI_SCHEME_RE',
+    parser: ('METHOD_TEXT', 'SCHEME_TEXT', 'URI_SCHEME_RE',
              'method_token_is_valid', 'authority_is_valid', 'host_field_value'),
     router: ('method_token_is_valid', 'media_type'),
 }
@@ -61,9 +61,8 @@ _OWNED_BY_THE_GRAMMAR = frozenset({
     'FIELD_NAME_INVALID_RE', '_FIELD_NAME_INVALID_RE', '_FIELD_NAME_OCTETS',
     'FIELD_VALUE_INVALID_RE', '_FIELD_VALUE_INVALID_RE',
     'FIELD_VALUE_ALLOWED_OCTETS', '_FIELD_VCHAR', '_BLOCK_ALLOWED_OCTETS',
-    'COMMON_METHODS_OCTETS', '_COMMON_METHODS_OCTETS',
-    'COMMON_METHODS', '_COMMON_METHODS',
-    'COMMON_SCHEMES', '_COMMON_SCHEMES',
+    'METHOD_TEXT', '_METHOD_TEXT', 'VERSION_TEXT', '_VERSION_TEXT',
+    'SCHEME_TEXT', '_SCHEME_TEXT',
     'PROHIBITED_TRAILER_FIELDS', '_PROHIBITED_TRAILER_FIELDS',
     'HOST_FORBIDDEN_BYTES', '_HOST_FORBIDDEN_BYTES',
     '_AUTHORITY_SCAN_BYTES', '_AUTHORITY_SCAN_RE',
@@ -132,26 +131,15 @@ def test_every_reader_reads_the_one_definition():
 def test_the_common_value_fast_path_is_inside_the_grammar():
     """The request paths skip the grammar for the values nearly every request
     carries.  A member that does not satisfy its own rule would be accepted
-    outright, so every set is pinned against the rule it stands in for; the
-    H/2 parser also hands a ``COMMON_SCHEMES`` hit on without case mapping,
-    so the members are lowercase (RFC 3986 §3.1)."""
-    for method in field_grammar.COMMON_METHODS_OCTETS:
+    outright, so every entry is pinned against the rule it stands in for, and
+    its shared text is its octets decoded; a scheme hit is handed on without
+    case mapping, so the schemes are lowercase (RFC 3986 §3.1)."""
+    for method, text in field_grammar.METHOD_TEXT.items():
         assert field_grammar.method_token_is_valid(method), method
-    for method in field_grammar.COMMON_METHODS:
-        assert field_grammar.method_token_is_valid(method.encode('utf-8')), method
-    for scheme in field_grammar.COMMON_SCHEMES:
-        assert field_grammar.URI_SCHEME_RE.fullmatch(
-            scheme.encode('utf-8')), scheme
-        assert scheme == scheme.lower(), scheme
-
-
-def test_the_two_spellings_of_the_common_method_set_are_one_set():
-    """HTTP/1.1 grades a request-line method as octets and HTTP/2 carries
-    ``:method`` as text.  The two spellings name one set; a method reachable
-    through one fast path and not the other would make the transports accept
-    different methods again."""
-    assert field_grammar.COMMON_METHODS == frozenset(
-        method.decode('ascii') for method in field_grammar.COMMON_METHODS_OCTETS)
+        assert text == method.decode('ascii'), method
+    for scheme, text in field_grammar.SCHEME_TEXT.items():
+        assert field_grammar.URI_SCHEME_RE.fullmatch(scheme), scheme
+        assert text == scheme.decode('ascii') == text.lower(), scheme
 
 
 def test_h2_name_rule_is_the_shared_alphabet_lowercased():

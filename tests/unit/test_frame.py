@@ -484,5 +484,5 @@ class TestContinuationAssembly:
         hframe.raw_block += cframe.payload
         assert bytes(hframe.raw_block) == block
         hframe.parse_payload()
-        assert hframe.pseudo_headers[PseudoHeaders.PATH] == '/split'
+        assert hframe.pseudo_headers[PseudoHeaders.PATH] == b'/split'
         assert (b'x-custom', b'continuation-value') in hframe.headers

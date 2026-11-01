@@ -215,13 +215,13 @@ class WebSocketH2Client:
             HeaderFrameFlags.END_HEADERS,
             self._stream_id,
         )
-        h_frame.pseudo_headers[PseudoHeaders.METHOD] = 'CONNECT'
-        h_frame.pseudo_headers[PseudoHeaders.PROTOCOL] = 'websocket'
+        h_frame.pseudo_headers[PseudoHeaders.METHOD] = b'CONNECT'
+        h_frame.pseudo_headers[PseudoHeaders.PROTOCOL] = b'websocket'
         h_frame.pseudo_headers[PseudoHeaders.SCHEME] = (
-            'https' if self._ssl else 'http')
-        h_frame.pseudo_headers[PseudoHeaders.PATH] = path
+            b'https' if self._ssl else b'http')
+        h_frame.pseudo_headers[PseudoHeaders.PATH] = path.encode('utf-8')
         h_frame.pseudo_headers[PseudoHeaders.AUTHORITY] = (
-            f'{self._host}:{self._port}')
+            f'{self._host}:{self._port}'.encode('utf-8'))
 
         sender = client._make_sender(self._stream_id)
         await sender(h_frame)
@@ -239,7 +239,7 @@ class WebSocketH2Client:
                 f'expected HEADERS response for Extended CONNECT, '
                 f'got frame type {frame.FrameType()!r}')
 
-        status = frame.pseudo_headers.get(PseudoHeaders.STATUS, '')
+        status = frame.pseudo_headers.get(PseudoHeaders.STATUS, b'')
         try:
             self._connect_status = int(status)
         except (TypeError, ValueError):

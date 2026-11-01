@@ -81,7 +81,7 @@ def _as_read(peer: FrameFactory, wire: bytes) -> list[tuple[bytes, bytes]]:
     correctly, which is the shape of test that let this ship.
     """
     frame = peer.load(wire)
-    return ([(f':{k.name.lower()}'.encode(), v.encode())
+    return ([(f':{k.name.lower()}'.encode(), v)
              for k, v in frame.pseudo_headers.items()] + list(frame.headers))
 
 

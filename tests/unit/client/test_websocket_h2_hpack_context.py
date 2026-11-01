@@ -129,8 +129,8 @@ def _peer_reads(peer: FrameFactory, blob: bytes) -> list[dict]:
 
 def _sent_request_block() -> dict:
     return {
-        'pseudo': {'METHOD': 'GET', 'PATH': _REQ_PATH,
-                   'SCHEME': 'http', 'AUTHORITY': _AUTHORITY},
+        'pseudo': {'METHOD': b'GET', 'PATH': _REQ_PATH.encode(),
+                   'SCHEME': b'http', 'AUTHORITY': _AUTHORITY.encode()},
         'fields': [_PROBE],
         'malformed': None,
     }
@@ -138,9 +138,9 @@ def _sent_request_block() -> dict:
 
 def _sent_connect_block() -> dict:
     return {
-        'pseudo': {'METHOD': 'CONNECT', 'PROTOCOL': 'websocket',
-                   'SCHEME': 'http', 'PATH': _WS_PATH,
-                   'AUTHORITY': _AUTHORITY},
+        'pseudo': {'METHOD': b'CONNECT', 'PROTOCOL': b'websocket',
+                   'SCHEME': b'http', 'PATH': _WS_PATH.encode(),
+                   'AUTHORITY': _AUTHORITY.encode()},
         'fields': [],
         'malformed': None,
     }
