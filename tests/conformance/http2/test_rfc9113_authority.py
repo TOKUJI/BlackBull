@@ -389,4 +389,4 @@ class TestPushPromiseAuthority:
                 pp = frame
                 break
         assert pp is not None, 'no PUSH_PROMISE sent'
-        assert pp.pseudo_headers[PseudoHeaders.AUTHORITY] == 'example.com:8443'
+        assert pp.pseudo_headers[PseudoHeaders.AUTHORITY] == b'example.com:8443'

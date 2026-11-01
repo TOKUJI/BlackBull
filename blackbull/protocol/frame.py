@@ -175,7 +175,7 @@ class FrameFactory:
         """Create a PUSH_PROMISE frame sent on parent_stream_id.
 
         promised_stream_id must be an even server-allocated ID (RFC 7540 §5.1.1).
-        pseudo_headers: dict mapping PseudoHeaders → str value.
+        pseudo_headers: dict mapping PseudoHeaders → bytes value.
         headers: list of (name, value) regular-header tuples.
         """
         frame = self.create(FrameTypes.PUSH_PROMISE, HeaderFrameFlags.END_HEADERS,

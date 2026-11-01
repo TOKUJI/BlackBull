@@ -11,7 +11,7 @@ from hpack import Decoder, Encoder
 
 from blackbull.protocol.field_grammar import METHOD_TEXT, SCHEME_TEXT, VERSION_TEXT
 from blackbull.protocol.frame import FrameFactory
-from blackbull.protocol.frame_types import FrameTypes
+from blackbull.protocol.frame_types import FrameTypes, PseudoHeaders
 from blackbull.server.parser import parse_headers
 from tests.conformance.http2._harness import h2_connect, h2_section, h2_terminal
 from tests.harness import served
@@ -128,12 +128,13 @@ async def test_authority_becomes_the_host_header(authority, host):
 
 
 def test_the_host_header_is_the_authority_as_received():
-    """No decode and re-encode: ``host`` is the very bytes ``:authority`` arrived as."""
+    """``host`` is the very octets ``:authority`` arrived as, never re-encoded."""
     block = Encoder().encode([(b':method', b'GET'), (b':path', b'/'),
                               (b':scheme', b'https'), (b':authority', b'example.test')])
     frame = FrameFactory().load(len(block).to_bytes(3, 'big') + FrameTypes.HEADERS
                                 + b'\x05' + (1).to_bytes(4, 'big') + block)
     conn = parse_headers(frame)
-    assert conn.headers.get(b'host') is frame.raw_authority == b'example.test'
+    authority = frame.pseudo_headers[PseudoHeaders.AUTHORITY]
+    assert conn.headers.get(b'host') is authority == b'example.test'
     assert conn.scheme is SCHEME_TEXT[b'https']
     assert conn.method is METHOD_TEXT[b'GET']

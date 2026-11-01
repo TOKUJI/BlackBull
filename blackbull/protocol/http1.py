@@ -8,7 +8,7 @@ Rules on which the roles differ are in the role policy section below.
 import asyncio
 import re
 
-from .field_grammar import (COMMON_METHODS_OCTETS, FIELD_VALUE_ALLOWED_OCTETS,
+from .field_grammar import (FIELD_VALUE_ALLOWED_OCTETS, METHOD_TEXT,
                             PROHIBITED_TRAILER_FIELDS, TCHAR_OCTETS, FieldError,
                             field_line, list_members, method_token_is_valid)
 from .framing import (_CRLF, is_informational, method_is, parse_content_length,
@@ -193,7 +193,7 @@ def parse_head(head: bytes, max_line: int, cache: LineCache, request: bool
                                f'parts, got {len(start)}: {lines[first]!r}')
         method, _target, version = start
         # RFC 9110 §9.1; a common method is a token, which tests/architecture pins.
-        if method not in COMMON_METHODS_OCTETS and not method_token_is_valid(method):
+        if method not in METHOD_TEXT and not method_token_is_valid(method):
             raise MessageError(f'invalid method {method!r}')
         if not _HTTP_VERSION_RE.match(version):
             raise MessageError(f'invalid HTTP-version {version!r}')

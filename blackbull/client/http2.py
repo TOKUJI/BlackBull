@@ -492,10 +492,11 @@ class HTTP2Client(HTTP2Connection):
             flags |= int(HeaderFrameFlags.END_STREAM)
 
         h_frame = self.factory.create(FrameTypes.HEADERS, flags, stream_id)
-        h_frame.pseudo_headers[PseudoHeaders.METHOD] = str(method)
-        h_frame.pseudo_headers[PseudoHeaders.PATH] = path
-        h_frame.pseudo_headers[PseudoHeaders.SCHEME] = self._scheme
-        h_frame.pseudo_headers[PseudoHeaders.AUTHORITY] = f'{self._host}:{self._port}'
+        h_frame.pseudo_headers[PseudoHeaders.METHOD] = str(method).encode('utf-8')
+        h_frame.pseudo_headers[PseudoHeaders.PATH] = path.encode('utf-8')
+        h_frame.pseudo_headers[PseudoHeaders.SCHEME] = self._scheme.encode('ascii')
+        h_frame.pseudo_headers[PseudoHeaders.AUTHORITY] = (
+            f'{self._host}:{self._port}'.encode('utf-8'))
         for name, value in headers:
             h_frame.headers.append((_to_str(name).lower(), _to_str(value)))
 
@@ -1252,16 +1253,16 @@ class HTTP2Client(HTTP2Connection):
                 await self._complete(frame.stream_id)
             return
 
-        status_str = frame.pseudo_headers.get(PseudoHeaders.STATUS)
-        if status_str is None:
+        status_octets = frame.pseudo_headers.get(PseudoHeaders.STATUS)
+        if status_octets is None:
             await self._reject_response(frame.stream_id, self._response_error(
                 frame.stream_id, 'no :status pseudo-header field'))
             return
-        status = parse_status(status_str)
+        status = parse_status(status_octets)
         if status is None:
             await self._reject_response(frame.stream_id, self._response_error(
                 frame.stream_id,
-                f':status is not three ASCII digits: {status_str!r}'))
+                f':status is not three ASCII digits: {status_octets!r}'))
             return
         if status == 101:
             # RFC 9113 §8.6 reserves the protocol switch for HTTP/1.1, so a
