@@ -53,6 +53,9 @@ keep it too.
 Code past dispatch relies on it and does not normalise again; code that
 rewrites a field after construction keeps it.
 
+Built-in middleware's non-`Connection` guards preserve direct-call fallbacks;
+they do not convert request scopes.
+
 A `NativeResponse` keeps the same field contract from the moment it exists:
 every way a field enters it (construction, `header`/`trailers` assignment,
 `append` on either view) checks that field once, lowercases its name and
@@ -151,6 +154,13 @@ sender conversions. A conversion gives the result its own field lists, and
 senders read them in place without copying. Validate and lowercase response
 heads and trailers once on entry. Push headers describe
 a promised request and bypass response header injection and middleware.
+
+`NativeResponse` owns response shapes. `StaticFiles` produces them;
+`Cache` retains a storable terminal body to generate its ETag, while
+`Compression` retains headers until it can encode a complete body.
+These buffers do not store or dynamically compress streamed, trailer-bearing
+or file responses. ETag matching and authority validation live in
+`protocol.field_grammar`; the cache only canonicalizes a validated origin.
 
 Bound socket drains and flow-control waits. File transfers use bounded
 chunks under the write deadline rather than a whole-file timeout.

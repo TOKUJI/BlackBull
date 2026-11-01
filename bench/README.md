@@ -54,7 +54,7 @@ Entry points are in **bold**; everything else is a part of the tool on its row.
 | `bench/ab/abba.sh` | their shared core: swap, import proof, schedule, run directory |
 | **`bench/ab/report.py`** | verdict for a `raw.tsv`: paired / per-mode Δ, bootstrap CI, null floor |
 | `bench/ab/static_ab.js` | a static asset the A/B lanes serve (e.g. `URL_PATH=/static/static_ab.js`) |
-| **`bench/ab/response_wire.py`**, **`bench/ab/hpack_encode.py`** | in-process ABBA of HTTP/2 response builders across two worktrees |
+| **`bench/ab/response_wire.py`**, **`bench/ab/hpack_encode.py`** | H1/H2 wire ABBA across worktrees (`--app FILE --path /route --header name:value` for custom apps); in-process HTTP/2 field-builder ABBA |
 | **`bench/ab/h2load/benchmark.sh`** | one server under h2load + k6; `bench/ab/h2load/h2load_run.sh`, `bench/ab/h2load/k6_run.sh`, `bench/ab/h2load/summarize.py` are its stages |
 | `bench/ab/h2load/app.py`, `bench/ab/h2load/lag_monitor.py` | the HTTP/2 bench app and its event-loop lag monitor |
 
