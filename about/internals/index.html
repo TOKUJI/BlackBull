@@ -6047,6 +6047,8 @@ or close 1002 for WebSocket); code that builds a <code>Connection</code> directl
 keep it too.
 Code past dispatch relies on it and does not normalise again; code that
 rewrites a field after construction keeps it.</p>
+<p>Built-in middleware's non-<code>Connection</code> guards preserve direct-call fallbacks;
+they do not convert request scopes.</p>
 <p>A <code>NativeResponse</code> keeps the same field contract from the moment it exists:
 every way a field enters it (construction, <code>header</code>/<code>trailers</code> assignment,
 <code>append</code> on either view) checks that field once, lowercases its name and
@@ -6123,6 +6125,12 @@ sender conversions. A conversion gives the result its own field lists, and
 senders read them in place without copying. Validate and lowercase response
 heads and trailers once on entry. Push headers describe
 a promised request and bypass response header injection and middleware.</p>
+<p><code>NativeResponse</code> owns response shapes. <code>StaticFiles</code> produces them;
+<code>Cache</code> retains a storable terminal body to generate its ETag, while
+<code>Compression</code> retains headers until it can encode a complete body.
+These buffers do not store or dynamically compress streamed, trailer-bearing
+or file responses. ETag matching and authority validation live in
+<code>protocol.field_grammar</code>; the cache only canonicalizes a validated origin.</p>
 <p>Bound socket drains and flow-control waits. File transfers use bounded
 chunks under the write deadline rather than a whole-file timeout.
 Read <code>blackbull/server/sender.py</code> and <code>blackbull/native.py</code>.</p>
