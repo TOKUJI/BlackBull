@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -52,3 +55,41 @@ def test_paired_report_keeps_all_rounds_when_rates_have_two_modes(tmp_path):
     assert all(p['method'] == 'paired' and p['rounds'] == 4
                and p['n'] == {'base': 8, 'treat': 8}
                for p in result['phases'].values())
+
+
+def test_wire_instrument_rejects_mislabeled_custom_status(tmp_path):
+    done = _run(tmp_path, 'bench/ab/response_wire.py', '--app', 'unused.py',
+                '--status', '201')
+    assert done.returncode == 2
+    assert '--app requires --status 200' in done.stderr
+    assert not done.stdout
+
+
+@pytest.mark.skipif(shutil.which('h2load') is None or not {3, 4} <= os.sched_getaffinity(0),
+                    reason='wire benchmark needs h2load and CPUs 3 and 4')
+@pytest.mark.parametrize('reject', [False, True])
+def test_wire_instrument_checks_custom_app_before_measuring(tmp_path, reject):
+    app = tmp_path / 'custom_app.py'
+    app.write_text('''from blackbull import BlackBull, Response
+app = BlackBull()
+@app.route(path='/custom')
+async def respond(conn):
+    assert conn.headers.get(b'x-bench') == b'proof'
+    return Response(b'proof')
+def check_response(response):
+    assert response.body == b'proof'
+''' + ("    raise ValueError('deliberate readiness rejection')\n" if reject else ''))
+    done = _run(tmp_path, 'bench/ab/response_wire.py', '--base', str(ROOT), '--head', str(ROOT),
+                '--app', str(app), '--path', '/custom', '--header', 'x-bench:proof',
+                '--rounds', '2', '--count', '1000', '--protocol', 'h1', '--asgi', '0')
+    if reject:
+        assert done.returncode != 0
+        assert 'deliberate readiness rejection' in done.stderr
+        assert not any('"arm"' in line for line in done.stdout.splitlines())
+    else:
+        assert done.returncode == 0, done.stderr
+        samples = [json.loads(line) for line in done.stdout.splitlines()]
+        assert samples[0]['metadata']['app']['path'] == str(app)
+        assert samples[0]['metadata']['headers'] == ['x-bench:proof']
+        assert len([sample for sample in samples if 'arm' in sample]) == 8
+        assert samples[-1]['complete'] is True

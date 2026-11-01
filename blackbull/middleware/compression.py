@@ -69,14 +69,6 @@ def _detect_codecs(brotli_quality: int = _BROTLI_QUALITY) -> dict[str, Callable[
     return available
 
 
-def _is_compressible_content_type(fields: list[tuple[bytes, bytes]]) -> bool:
-    """Return False when the Content-Type in response *fields* (lowercase
-    names) signals already-compressed content."""
-    ct = next((value for name, value in fields if name == b'content-type'), b'')
-    ct_str = media_type(ct).decode('ascii', errors='ignore')
-    return not any(ct_str.startswith(prefix) for prefix in _SKIP_CONTENT_TYPES)
-
-
 def _merge_vary(headers: _MinimalResponseHeaders,
                 field: bytes = b'Accept-Encoding') -> None:
     """Ensure the response ``Vary`` header lists *field* (RFC 9110 §12.5.5).
@@ -109,7 +101,9 @@ def _stamp_vary_if_compressible(header: _MinimalResponseHeaders) -> bool:
     stamped here rather than only where compression succeeds.  Mutates
     *header* in place (zero-copy; the caller owns the list).
     """
-    if not _is_compressible_content_type(header):
+    ct = next((value for name, value in header if name == b'content-type'), b'')
+    ct_str = media_type(ct).decode('ascii', errors='ignore')
+    if any(ct_str.startswith(prefix) for prefix in _SKIP_CONTENT_TYPES):
         return False
     if any(k == b'content-encoding' for k, _ in header):
         return False
@@ -243,35 +237,15 @@ class Compression:
 
     @staticmethod
     def _vary_ensuring_send(send):
-        """Wrap *send* so a compressible, not-yet-encoded ``ResponseStart`` gains
-        ``Vary: Accept-Encoding`` — used on the no-matching-codec path where the
-        body is forwarded verbatim but must still be cache-keyed on the encoding
-        Same predicate as the compress path's decision
-        point: compressible Content-Type AND no pre-existing Content-Encoding.
-        """
-        # Unannotated on purpose: rebuilt per request (see _wrap_send_native in
-        # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.  The
-        # import lives at per-request scope — inside the per-event closure it
-        # would re-bind for every chunk of a streamed response.
-
         async def vary_send(event):
-            # H1 native path: the header arm is a NativeResponse — stamp Vary
-            # directly on its header list (zero-copy; no expansion).  Absence
-            # is ``is not None`` — never truthiness.
             if (isinstance(event, NativeResponse)
-                    and (event._extension is None or event.push is None)):
-                if event._header is not None:
-                    header = event._header
-                    if _is_compressible_content_type(header) and not any(
-                            k == b'content-encoding' for k, _ in header):
-                        _merge_vary(event._header)
+                    and (event._extension is None or event.push is None)
+                    and event._header is not None):
+                _stamp_vary_if_compressible(event._header)
             await send(event)
         return vary_send
 
     async def __call__(self, conn, receive, send, call_next):
-        # Native Connection for HTTP and WebSocket; the guard is defensive
-        # against a raw ASGI scope dict (only reachable outside BlackBull's own
-        # dispatch).
         if not isinstance(conn, Connection):
             await call_next(conn, receive, send)
             return
@@ -289,17 +263,11 @@ class Compression:
 
         codec_name, compressor = selection
         start_forwarded = False
-        streaming = False
         skip_compression = False
         # A header-arm NativeResponse awaiting its body (the StaticFiles
         # shape).  Held, never expanded, so the pair can be merged back into
         # one object at the decision point.
         pending_header = None
-
-        # Unannotated on purpose: rebuilt per request (see _wrap_send_native in
-        # app.py).  ``event`` is a NativeResponse or an ASGISendEvent.  The
-        # import lives at per-request scope — inside the per-event closure it
-        # would re-bind for every chunk of a streamed response.
 
         async def _emit_native_complete(status, header, body,
                                         original=None) -> None:
@@ -321,7 +289,6 @@ class Compression:
                     existing.discard(b'content-length')
                     existing.add(b'content-encoding', codec_name.encode())
                     existing.add(b'content-length', str(len(compressed)).encode())
-                    _merge_vary(existing)
                     await send(NativeResponse.complete(status, existing, compressed))
                     return
             # Uncompressed forward: pre-encoded / non-compressible / too-small
@@ -343,16 +310,16 @@ class Compression:
             skip_compression = True
 
         async def intercepting_send(event):
-            nonlocal streaming, skip_compression, start_forwarded
+            nonlocal skip_compression, start_forwarded
             nonlocal pending_header
             # Keep complete and split head/body responses native; expanding them to
             # ASGI would duplicate boundary work. Trailers retain the event lane.
             if (isinstance(event, NativeResponse)
                     and (event._extension is None or event.push is None)):
-                # Pass-through: a forward-verbatim decision is already made,
-                # so later objects are relayed untouched (mirrors the
-                # ``_dict_event`` fast path).
-                if start_forwarded and (skip_compression or streaming):
+                # Once its headers have left, a streamed response cannot be
+                # collected again. Forward subsequent events without changing
+                # their objects or order.
+                if start_forwarded and skip_compression:
                     await send(event)
                     return
 
@@ -374,7 +341,7 @@ class Compression:
                     await send(event)
                     return
 
-                if (not streaming and not skip_compression
+                if (not skip_compression
                         and not start_forwarded
                         and event._header is not None
                         and event._body is not None
@@ -393,7 +360,7 @@ class Compression:
                     await send(event)
                     return
 
-                if (not streaming and not skip_compression
+                if (not skip_compression
                         and not start_forwarded
                         and event._header is not None
                         and event._body is None

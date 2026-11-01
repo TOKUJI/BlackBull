@@ -221,7 +221,7 @@ class _Capture:
     [`Cache.__call__`][blackbull.middleware.cache.Cache] the hit/miss decision
     alone.
     """
-    __slots__ = ('_cache', '_conn', '_send', '_base_key', '_held', '_body',
+    __slots__ = ('_cache', '_conn', '_send', '_base_key', '_held',
                  '_status', '_headers', '_vary_fields', '_released')
 
     def __init__(self, cache: 'Cache', conn: Connection, send,
@@ -231,7 +231,6 @@ class _Capture:
         self._send = send
         self._base_key = base_key
         self._held: list[NativeResponse] = []
-        self._body = bytearray()
         self._status: int | None = None
         self._headers: list[tuple[bytes, bytes]] = []
         self._vary_fields: tuple[bytes, ...] | None = ()
@@ -280,11 +279,11 @@ class _Capture:
             await self._forward(event)
             return
 
-        self._body.extend(event._body)
+        body = bytes(event._body)
         self._held.append(event)
         etag = _response_etag(self._headers)
         if etag is None and self._cache._generate_etag:
-            etag = self._cache._etag(bytes(self._body))
+            etag = self._cache._etag(body)
             # The live response and the stored copy must agree on it.
             self._headers.append((b'etag', etag))
             for buffered in self._held:
@@ -294,7 +293,7 @@ class _Capture:
         if etag is not None:
             self._cache._remember(self._base_key, self._conn.headers,
                                   self._vary_fields, self._status,
-                                  self._headers, bytes(self._body), etag)
+                                  self._headers, body, etag)
         await self.release()
 
 

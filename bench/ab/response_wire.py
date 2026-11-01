@@ -2,10 +2,12 @@
 
 python bench/ab/response_wire.py --base PATH --head PATH > samples.jsonl
 Use identical paths for the A/A control. Requires Linux CPUs 3 and 4.
+--app FILE --path /route --header name:value exercises a custom 200-response app.
 """
 import argparse
 import asyncio
 import hashlib
+import importlib.util
 import json
 import logging
 import os
@@ -20,18 +22,25 @@ import sys
 from hpack_encode import source_hashes
 
 
-async def serve(root):
+async def serve(root, app_path=None, path=None, headers=()):
     sys.path.insert(0, root)
     logging.disable(logging.CRITICAL)
     from blackbull import BlackBull, Response
     from blackbull.server.server import ASGIServer
     from blackbull.client.http1 import HTTP1Client
     from blackbull.client.http2 import HTTP2Client
-    app = BlackBull()
+    if app_path:
+        spec = importlib.util.spec_from_file_location('wire_bench_app', app_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        app = module.app
+    else:
+        app = BlackBull()
 
-    @app.route(path='/{status:int}')
-    async def respond(conn, status):
-        return Response(b'x' * 128, status=status, headers=[(b'x-state', b'reused-value')])
+        @app.route(path='/{status:int}')
+        async def respond(conn, status):
+            return Response(b'x' * 128, status=status, headers=[(b'x-state', b'reused-value')])
 
     server = ASGIServer(app)
     server.open_socket(port=0)
@@ -40,32 +49,45 @@ async def serve(root):
         await asyncio.sleep(.05)
         for client_type in (HTTP1Client, HTTP2Client):
             async with client_type('127.0.0.1', server.port) as client:
-                for status in (200, 201):
+                for status in ((200,) if app_path else (200, 201)):
                     async with asyncio.timeout(3):
-                        response = await client.request('GET', f'/{status}')
+                        response = await client.request('GET', path or f'/{status}', headers=[
+                            tuple(part.encode('ascii') for part in h.split(':', 1))
+                            for h in headers])
                     assert response.status == status
-                    assert response.body == b'x' * 128
-                    assert response.headers.get(b'x-state') == b'reused-value'
+                    if app_path and hasattr(module, 'check_response'):
+                        module.check_response(response)
+                    elif not app_path:
+                        assert response.body == b'x' * 128
+                        assert response.headers.get(b'x-state') == b'reused-value'
         print(json.dumps({'port': server.port, 'sources': source_hashes(root)}), flush=True)
 
 
-def sample(root, protocol, asgi, status, count):
+def sample(root, protocol, asgi, status, count, app_path=None, path=None, headers=()):
     environment = dict(os.environ, PYTHONHASHSEED='0', BB_FORCE_ASGI_SCOPE=str(asgi))
+    extra = (['--app', app_path] if app_path else []) + (['--path', path] if path else [])
+    for header in headers:
+        extra += ['--header', header]
     process = subprocess.Popen(['taskset', '-c', '3', sys.executable, str(Path(__file__).resolve()),
-                                '--serve', root], env=environment, stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL, text=True)
+                                '--serve', root, *extra], env=environment, stdout=subprocess.PIPE,
+                               stderr=None, text=True)
     try:
         if not select.select([process.stdout], [], [], 10)[0]:
             raise TimeoutError('server startup')
-        ready = json.loads(process.stdout.readline())
+        line = process.stdout.readline()
+        if not line:
+            raise RuntimeError('server exited before readiness; see its stderr')
+        ready = json.loads(line)
         port = ready['port']
         command = ['taskset', '-c', '4', 'h2load', '-c', '16', '-t', '1', '-m',
                    '1' if protocol == 'h1' else '8']
         if protocol == 'h1':
             command.append('--h1')
+        for header in headers:
+            command += ['-H', header]
         for requests in (1000, count):
             output = subprocess.check_output(command + ['-n', str(requests),
-                f'http://127.0.0.1:{port}/{status}'], timeout=30, text=True)
+                f'http://127.0.0.1:{port}{path or f"/{status}"}'], timeout=30, text=True)
             match = re.search(r'requests: (\d+) total, (\d+) started, (\d+) done, (\d+) succeeded, (\d+) failed, (\d+) errored, (\d+) timeout', output)
             assert match and tuple(map(int, match.groups())) == (requests,) * 4 + (0, 0, 0), output
             assert re.search(rf'status codes: {requests} 2xx, 0 3xx, 0 4xx, 0 5xx', output), output
@@ -86,14 +108,21 @@ def main():
     parser.add_argument('--base')
     parser.add_argument('--head')
     parser.add_argument('--serve')
+    parser.add_argument('--app', help='Python file exporting a 200-response app and optional check_response(response)')
+    parser.add_argument('--path', help='Request path; defaults to /<status>')
+    parser.add_argument('--header', action='append', default=[], help='Repeated name:value request field')
     parser.add_argument('--rounds', type=int, default=3)
     parser.add_argument('--count', type=int, default=10000)
     parser.add_argument('--protocol', choices=('h1', 'h2'))
     parser.add_argument('--asgi', type=int, choices=(0, 1))
     parser.add_argument('--status', type=int, choices=(200, 201))
     args = parser.parse_args()
+    if args.app and args.status not in (None, 200):
+        parser.error('--app requires --status 200')
+    if args.app and args.status is None:
+        args.status = 200
     if args.serve:
-        asyncio.run(serve(args.serve))
+        asyncio.run(serve(args.serve, args.app, args.path, args.header))
         return
     if not args.base or not args.head or args.rounds < 2 or args.count < 1000:
         parser.error('base/head, rounds >= 2 and count >= 1000 are required')
@@ -104,7 +133,11 @@ def main():
                    for path in Path(root).glob('blackbull/**/*.py')} for arm, root in roots.items()}
     print(json.dumps({'metadata': {'roots': roots, 'hashes': hashes, 'python': sys.version,
                                  'rounds': args.rounds, 'count': args.count,
-                                 'child_pythonhashseed': '0'}}), flush=True)
+                                 'child_pythonhashseed': '0', 'path': args.path,
+                                 'headers': args.header,
+                                 'app': ({'path': str(Path(args.app).resolve()),
+                                          'sha256': hashlib.sha256(Path(args.app).read_bytes()).hexdigest()}
+                                         if args.app else None)}}), flush=True)
     def terminate(signum, frame):
         raise SystemExit(128 + signum)
     signal.signal(signal.SIGTERM, terminate)
@@ -116,7 +149,8 @@ def main():
                 for round_ in range(args.rounds):
                     pair = {'A': [], 'B': []}
                     for arm in ('ABBA' if round_ % 2 == 0 else 'BAAB'):
-                        result = sample(roots[arm], protocol, asgi, status, args.count)
+                        result = sample(roots[arm], protocol, asgi, status, args.count,
+                                        args.app, args.path, args.header)
                         pair[arm].append(result['rps'])
                         print(json.dumps({'protocol': protocol, 'asgi': asgi, 'status': status,
                                           'round': round_, 'arm': arm, **result}), flush=True)
