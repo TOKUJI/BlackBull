@@ -201,6 +201,10 @@ closes the transport on `close()`; leaving the client context also closes it.
 HTTP/2 Extended CONNECT also rejects unoffered subprotocols or extensions,
 resetting the stream while keeping the connection open.
 
+WebSocket sends raise `RuntimeError('session is closed')` once local closing
+starts or the reader detects peer closure. Concurrent `session.close()` calls
+wait for reader and transport/stream cleanup, including when cancelled.
+
 ### A stall is not a `ClientError`, on purpose
 
 Every time bound in the client — the connect deadline, the head and body

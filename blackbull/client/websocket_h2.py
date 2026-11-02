@@ -4,7 +4,6 @@ The peer must advertise ENABLE_CONNECT_PROTOCOL. Reuse the connection
 factory and flow control; a second HPACK context corrupts sibling streams.
 """
 import asyncio
-import logging
 import ssl as _ssl
 import struct
 
@@ -22,14 +21,11 @@ from ._connect import DEFAULT_CONNECT_TIMEOUT
 from .client import Client
 from .exceptions import HandshakeError
 from .http2 import HTTP2Client
-from .websocket import _ClientWebSocketRecipient, _validate_negotiation
+from .websocket import (_ClientWebSocketRecipient, _WebSocketSession,
+                        _validate_negotiation)
 
-logger = logging.getLogger(__name__)
 
-# RFC 6455 §7.4.1 — normal closure status code.
-_CLOSE_CODE_NORMAL = 1000
-
-class WebSocketH2Session:
+class WebSocketH2Session(_WebSocketSession):
     """Frame-level WebSocket session over one HTTP/2 stream.
 
     Outgoing frames are masked (RFC 6455 §5.1) and wrapped in H2 DATA
@@ -46,7 +42,6 @@ class WebSocketH2Session:
         self._client = http2_client
         self._stream_id = stream_id
         self._closed = False
-        self._disconnect_seen = False
         # Per-stream HTTP2Sender so outgoing WS payloads larger than
         # ``max_frame_size`` are split into multiple DATA frames and
         # respect the peer's send window — same machinery the server
@@ -101,48 +96,25 @@ class WebSocketH2Session:
             return WSOpcode.BINARY, event.get('bytes') or b''
         # websocket.disconnect — peer CLOSE (echoed by the recipient) or
         # abnormal stream end (1006).
-        self._disconnect_seen = True
         code = event.get('code', 1006)
         return WSOpcode.CLOSE, struct.pack('>H', code)
 
-    async def close(self, code: int = _CLOSE_CODE_NORMAL, *,
-                    drain_timeout: float = 5.0) -> None:
-        """Send a WebSocket close frame (END_STREAM on the carrying DATA
-        frame), await the peer's echoed CLOSE bounded by *drain_timeout*,
-        and stop the recipient's reader task.  Idempotent.
+    async def _send_close(self, payload: bytes) -> None:
+        if not await self._recipient.write_close(payload, self._end_stream):
+            # The recipient's automatic reply leaves the HTTP/2 stream open.
+            await self._end_stream(b'')
 
-        Same close discipline as the H1
-        client's [`WebSocketSession.close`][WebSocketSession.close].
-        """
-        if self._closed:
-            return
-        self._closed = True
-        payload = struct.pack('>H', code)
-        ws_bytes = encode_frame(payload, opcode=WSOpcode.CLOSE, mask=True)
+    async def _end_stream(self, body: bytes) -> None:
+        await self._sender(NativeResponse(body=body))
+
+    async def _release_resources(self) -> None:
         try:
-            try:
-                # CLOSE is WebSocket control but HTTP/2 DATA: it consumes
-                # both send windows, just like every other WS payload.
-                await self._sender(NativeResponse(body=ws_bytes))
-            except Exception:
-                logger.debug('could not send WebSocket close on stream %d',
-                             self._stream_id)
-            if not self._disconnect_seen:
-                async with asyncio.timeout(drain_timeout):
-                    while True:
-                        event = await self._recipient()
-                        if event.get('type') == ASGIEvent.WS_DISCONNECT:
-                            break
-        except Exception:
-            # TimeoutError (silent peer) or a recipient-raised protocol
-            # error — either way the drain is over.
-            pass
-        finally:
             await self._recipient.shutdown()
+        finally:
             self._client.unregister_raw_stream(self._stream_id)
 
     async def _send_ws(self, payload: bytes, opcode: int) -> None:
-        if self._closed:
+        if self._closed or self._recipient.closing:
             raise RuntimeError('session is closed')
         ws_bytes = encode_frame(payload, opcode=opcode, mask=True)
         # Route through the per-stream HTTP2Sender so payloads larger
@@ -180,6 +152,7 @@ class WebSocketH2Client:
         self._connect_timeout = connect_timeout
         self._stream_id = stream_id
         self._client: HTTP2Client | None = None
+        self._session: WebSocketH2Session | None = None
         self._connect_status: int | None = None
 
     async def __aenter__(self) -> 'WebSocketH2Client':
@@ -191,8 +164,13 @@ class WebSocketH2Client:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         if self._client is not None:
             try:
-                await self._client.__aexit__(None, None, None)
+                try:
+                    if self._session is not None:
+                        await self._session._release()
+                finally:
+                    await self._client.__aexit__(None, None, None)
             finally:
+                self._session = None
                 self._client = None
 
     def _require_client(self) -> HTTP2Client:
@@ -227,6 +205,8 @@ class WebSocketH2Client:
         *response_timeout*.
         """
         client = self._require_client()
+        if self._session is not None:
+            raise HandshakeError('WebSocket stream already connected')
 
         queue = client.register_raw_stream(self._stream_id)
 
@@ -285,4 +265,6 @@ class WebSocketH2Client:
                 client.unregister_raw_stream(self._stream_id)
             raise
 
-        return WebSocketH2Session(client, self._stream_id, reader, sender=sender)
+        self._session = WebSocketH2Session(client, self._stream_id, reader,
+                                           sender=sender)
+        return self._session

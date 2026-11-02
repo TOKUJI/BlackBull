@@ -55,8 +55,12 @@ deployed working tree.
 
 `client-ab` sends the named run's scripts and hash-verified `base`/`treat`
 snapshots, without prior logs or git history. The treatment must match the
-working Python sources. It uses Python 3.14.6 with the locked dependencies;
-the supplied probe owns the schedule, measurement boundaries and report.
+working Python sources. Its install smoke test and measurements use Python
+3.14.6 with the same locked dependencies. The supplied probe owns the schedule,
+measurement boundaries and report.
+An optional `files` map in `sources.json` selects relative Python/`.inc` harness
+files and their SHA256 hashes; legacy inputs retain their fixed file list.
+`AB_CLIENT_TIMEOUT_SECONDS` overrides the runner's 1800-second limit.
 
 ## Prerequisites
 

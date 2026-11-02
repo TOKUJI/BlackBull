@@ -6,9 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from blackbull.client import HandshakeError, WebSocketClient
+from blackbull import BlackBull
+from blackbull.client import ClientConnection, HandshakeError, WebSocketClient
 from blackbull.server.sender import AsyncioWriter
-from tests.harness import Wire, peer
+from blackbull.utils import Scheme
+from tests.harness import Wire, peer, served
 
 
 @asynccontextmanager
@@ -101,6 +103,114 @@ async def test_cancelled_close_write_releases_transport(monkeypatch):
                 await closing
             await asyncio.wait_for(origin.closed.wait(), 1)
             await session.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cancel_at_loss', [False, True])
+async def test_cancelled_transport_wait_can_be_resumed(monkeypatch, cancel_at_loss):
+    finish = asyncio.Event()
+    original = ClientConnection.connection_lost
+    waiting = None
+
+    def connection_lost(self, exc):
+        if cancel_at_loss:
+            waiting.cancel()
+        original(self, exc)
+
+    async def origin(reader, writer):
+        await finish.wait()
+
+    monkeypatch.setattr(ClientConnection, 'connection_lost', connection_lost)
+    async with peer(origin) as port:
+        transport, connection = await asyncio.get_running_loop().create_connection(
+            ClientConnection, '127.0.0.1', port)
+        try:
+            waiting = asyncio.create_task(connection.wait_closed())
+            await asyncio.sleep(0)
+            if cancel_at_loss:
+                transport.close()
+            else:
+                waiting.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiting
+            transport.close()
+            finish.set()
+            await asyncio.wait_for(connection.wait_closed(), 1)
+        finally:
+            finish.set()
+            transport.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_old_transport_cleanup_does_not_replace_new_connection(monkeypatch):
+    entered, finish, disconnected = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original = ClientConnection.wait_closed
+
+    async def wait_closed(self):
+        entered.set()
+        await finish.wait()
+        await original(self)
+
+    app = BlackBull()
+
+    @app.route(path='/ws', scheme=Scheme.websocket)
+    async def websocket(conn, receive, send):
+        await receive()
+        await send({'type': 'websocket.accept'})
+        while (await receive())['type'] != 'websocket.disconnect':
+            pass
+        disconnected.set()
+
+    monkeypatch.setattr(ClientConnection, 'wait_closed', wait_closed)
+    async with served(app) as origin:
+        client = WebSocketClient('127.0.0.1', origin.server.port)
+        await client.__aenter__()
+        closing = asyncio.create_task(client.__aexit__(None, None, None))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            await client.__aenter__()
+            closing.cancel()
+            await asyncio.sleep(0)
+            finish.set()
+            with pytest.raises(asyncio.CancelledError):
+                await closing
+            session = await client.connect('/ws')
+            await session.close()
+            await asyncio.wait_for(disconnected.wait(), 1)
+        finally:
+            finish.set()
+            await asyncio.gather(closing, return_exceptions=True)
+            await client.__aexit__(None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_waits_for_transport_cleanup(monkeypatch):
+    entered, finish, cleaned = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original = ClientConnection.wait_closed
+
+    async def wait_closed(self):
+        entered.set()
+        await finish.wait()
+        await original(self)
+        cleaned.set()
+
+    monkeypatch.setattr(ClientConnection, 'wait_closed', wait_closed)
+    async with _origin() as origin:
+        async with WebSocketClient('127.0.0.1', origin.port) as client:
+            session = await client.connect('/ws')
+            closing = asyncio.create_task(session.close(drain_timeout=0.0))
+            await asyncio.wait_for(entered.wait(), 1)
+            try:
+                for _ in range(2):
+                    closing.cancel()
+                    await asyncio.sleep(0)
+                assert not closing.done()
+            finally:
+                finish.set()
+                with pytest.raises(asyncio.CancelledError):
+                    await closing
+            assert cleaned.is_set()
+            await asyncio.wait_for(origin.closed.wait(), 1)
 
 
 @pytest.mark.asyncio

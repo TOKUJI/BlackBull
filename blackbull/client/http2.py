@@ -27,7 +27,7 @@ from ..server.rate_window import ByteRateFloor
 from ..server.http2_ws import HTTP2StreamReader
 from ..server.recipient import AbstractReader
 from ..server.sender import AbstractWriter, AsyncioWriter, HTTP2Sender
-from ..utils import HTTP2 as _HTTP2_PREFACE
+from ..utils import HTTP2 as _HTTP2_PREFACE, create_eager_task
 from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection,
                        open_connection as _open_connection)
 from .exceptions import (ClientError, ConnectionError, ProtocolError,
@@ -681,7 +681,12 @@ class HTTP2Client(HTTP2Connection):
         on the stream is ignored as after our own reset (§5.1).
         """
         self._raw_streams.pop(stream_id, None)
-        self._stream_readers.pop(stream_id, None)
+        reader = self._stream_readers.pop(stream_id, None)
+        if reader is not None:
+            reader.put_disconnect()
+            uncredited = reader.take_uncredited()
+            if uncredited and not self._closed:
+                self._spawn(create_eager_task(self._try_credit_connection(uncredited)))
         # A WebSocket-over-H2 session writes through its sender until it
         # unregisters — its shutdown sends the CLOSE frame first — so this is
         # that stream's last-send boundary, the same one ``request()`` uses.
@@ -728,16 +733,10 @@ class HTTP2Client(HTTP2Connection):
         is consumed; frames already queued for the raw stream go first."""
         queue = self._raw_streams.pop(stream_id)
 
-        async def credit_connection(n: int) -> None:
-            try:
-                await self._credit_connection(n)
-            except Exception:
-                logger.debug('could not credit the connection')
-
         async def credit(n: int) -> None:
             # Owned before any await: cancelling the read must not revoke
             # connection credit every stream shares.
-            self._spawn(credit_connection(n))
+            self._spawn(self._try_credit_connection(n))
             if stream_id not in self._stream_readers:
                 return
             try:
@@ -1450,9 +1449,15 @@ class HTTP2Client(HTTP2Connection):
             return
         self._unacked_conn += n
         if self._unacked_conn >= _WINDOW_UPDATE_THRESHOLD:
+            credit, self._unacked_conn = self._unacked_conn, 0
             await self._send_raw_frame(
-                self.factory.window_update(0, self._unacked_conn))
-            self._unacked_conn = 0
+                self.factory.window_update(0, credit))
+
+    async def _try_credit_connection(self, n: int) -> None:
+        try:
+            await self._credit_connection(n)
+        except Exception:
+            logger.debug('could not credit the connection')
 
     async def _complete(self, stream_id: int, *, ended_on_head: bool = False) -> None:
         pending = self._responses.get(stream_id)

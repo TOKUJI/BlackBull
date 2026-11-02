@@ -71,8 +71,9 @@ if [ "$TOPO" = "split" ]; then
 fi
 
 echo "Running remote install on server ..."
+printf -v smoke_environment 'CLOUD_SMOKE_PYTHON_VERSION=%q' "${CLOUD_SMOKE_PYTHON_VERSION:-}"
 ssh "${SSH_OPTS[@]}" "$SERVER_REMOTE" \
-    "LOCAL_HEAD=$LOCAL_HEAD REGEN_CERT_SANS=$REGEN_CERT_SANS BIND_BENCH=server bash -se" <<'REMOTE_EOF'
+    "LOCAL_HEAD=$LOCAL_HEAD REGEN_CERT_SANS=$REGEN_CERT_SANS BIND_BENCH=server $smoke_environment bash -se" <<'REMOTE_EOF'
 set -euo pipefail
 
 cd "$HOME/BlackBull"
@@ -179,7 +180,15 @@ SYSCTL
 sudo sysctl --quiet -p /etc/sysctl.d/99-blackbull-bench.conf
 
 echo "=== Smoke test ==="
-.venv/bin/python -m pytest -q tests/unit/ --timeout=30 -x 2>&1 | tail -5
+smoke_python=.venv/bin/python
+if [ -n "${CLOUD_SMOKE_PYTHON_VERSION:-}" ]; then
+    UV_PROJECT_ENVIRONMENT=.venv-client-ab uv sync --locked --python "$CLOUD_SMOKE_PYTHON_VERSION" \
+        --extra testing --extra speed --extra compression --extra profiling --extra fault-injection --extra reload
+    smoke_python=.venv-client-ab/bin/python
+fi
+mkdir -p bench/.state
+"$smoke_python" --version
+"$smoke_python" -m pytest -q tests/unit/ --timeout=30 -x 2>&1 | tee bench/.state/install-smoke.log
 
 echo "=== Server CPU topology ==="
 {

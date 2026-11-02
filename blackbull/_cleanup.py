@@ -2,6 +2,19 @@
 import asyncio
 
 
+async def wait_for_cleanup(completion: asyncio.Future[None]) -> None:
+    """Defer caller cancellation until an owned cleanup finishes."""
+    cancelled = None
+    while not completion.done():
+        try:
+            await asyncio.shield(completion)
+        except asyncio.CancelledError as exc:
+            cancelled = exc
+    completion.result()
+    if cancelled is not None:
+        raise cancelled
+
+
 async def cancel_and_wait(*tasks: asyncio.Task) -> None:
     """Cancel *tasks* and wait for them to end, dropping what they end with.
 

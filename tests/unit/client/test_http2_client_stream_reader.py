@@ -14,6 +14,7 @@ from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (ErrorCodes, FrameTypes,
                                             SettingFrameFlags)
 from blackbull.server.recipient import IncompleteReadError
+from blackbull.server.sender import AsyncioWriter
 from tests import harness
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(10)]
@@ -32,8 +33,9 @@ def _rst(stream_id: int) -> bytes:
 class _Origin:
     """Sends *script* once released, and records every frame the client sends."""
 
-    def __init__(self, *script: bytes) -> None:
+    def __init__(self, *script: bytes, after_credit: bytes = b'') -> None:
         self.script = b''.join(script)
+        self.after_credit = after_credit
         self.release = asyncio.Event()
         self.frames: list[tuple[bytes, int, bytes]] = []
         self._changed = asyncio.Event()
@@ -53,6 +55,11 @@ class _Origin:
                 self.frames.append((head[3:4], int.from_bytes(head[5:], 'big'),
                                     payload))
                 self._changed.set()
+                if head[3:4] == FrameTypes.WINDOW_UPDATE.value and head[5:] == b'\0' * 4:
+                    if self.after_credit:
+                        writer.write(self.after_credit)
+                        self.after_credit = b''
+                        await writer.drain()
         except (asyncio.IncompleteReadError, ConnectionError):
             pass
 
@@ -133,4 +140,63 @@ async def test_a_reset_stream_returns_its_unread_credit_to_the_connection():
             with pytest.raises(IncompleteReadError):
                 await reset.readexactly(40001)
             await origin.until(lambda: origin.credit(0))
+    assert (origin.credit(1), origin.credit(0)) == (0, 40000)
+
+
+async def test_connection_credit_is_claimed_before_a_blocked_write(monkeypatch):
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = AsyncioWriter.write
+    blocked = False
+
+    async def write(self, data):
+        nonlocal blocked
+        if not blocked and data[3:9] == b'\x08\0\0\0\0\0':
+            blocked = True
+            entered.set()
+            await release.wait()
+        await original(self, data)
+
+    monkeypatch.setattr(AsyncioWriter, 'write', write)
+    origin = _Origin(_data(1, b'x' * 16384), _data(1, b'x' * 16384),
+                     _data(3, b'x' * 8192), _data(5, b'x' * 16384),
+                     _data(9, b'x'),
+                     after_credit=_data(7, b'x' * 8192) + _data(9, b'y'))
+    async with harness.peer(origin) as port:
+        async with HTTP2Client('127.0.0.1', port) as client:
+            first = await _attached(client, 1)
+            for stream in (3, 5, 7):
+                await _attached(client, stream)
+            barrier = client.register_raw_stream(9)
+            origin.release.set()
+            assert (await barrier.get()).payload == b'x'
+            try:
+                assert await first.readexactly(32768) == b'x' * 32768
+                await asyncio.wait_for(entered.wait(), 1)
+                client.unregister_raw_stream(3)
+                await asyncio.sleep(0)
+            finally:
+                release.set()
+            await origin.until(lambda: origin.credit(0) >= 32768)
+            assert origin.credit(0) == 32768
+            assert (await barrier.get()).payload == b'y'
+            client.unregister_raw_stream(5)
+            client.unregister_raw_stream(7)
+            await origin.until(lambda: origin.credit(0) >= 65536)
+    assert origin.credit(0) == 65536
+
+
+async def test_unregister_returns_unread_credit_without_waiting_for_another_read():
+    origin = _Origin(_data(1, b'x' * 16384), _data(1, b'x' * 16384),
+                     _data(1, b'x' * 7232), _data(3, b'ok'))
+    async with harness.peer(origin) as port:
+        async with HTTP2Client('127.0.0.1', port) as client:
+            retired = await _attached(client, 1)
+            sibling = await _attached(client, 3)
+            origin.release.set()
+            assert await sibling.readexactly(1) == b'o'
+            client.unregister_raw_stream(1)
+            await origin.until(lambda: origin.credit(0) == 40000)
+            assert await retired.readexactly(40000) == b'x' * 40000
+            client.unregister_raw_stream(1)
+            assert await sibling.readexactly(1) == b'k'
     assert (origin.credit(1), origin.credit(0)) == (0, 40000)

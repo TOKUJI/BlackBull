@@ -2,6 +2,8 @@
 server frames must not be. The returned session owns post-handshake reads.
 """
 import asyncio
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 import os
 import ssl as _ssl
 from base64 import b64encode
@@ -10,6 +12,7 @@ from http import HTTPStatus
 from typing import Iterable
 
 from ..asgi import WebSocketDisconnectEvent, WebSocketReceiveEvent
+from .._cleanup import wait_for_cleanup
 
 import logging
 from ..headers import Headers
@@ -20,6 +23,7 @@ from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
 from ..server.sender import AbstractWriter, AsyncioWriter
 from ..env import get_settings
 from ..server.ws_codec import WSOpcode, encode_frame
+from ..utils import create_eager_task
 from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection, _TransportClose, _TransportOwner,
                        open_connection as _open_connection)
 from .exceptions import HandshakeError, ProtocolError
@@ -43,6 +47,37 @@ _CLOSE_CODE_NORMAL = 1000
 
 
 class _ClientWebSocketRecipient(WebSocketRecipient):
+    closing = False
+    _reply_done: asyncio.Future[None] | None = None
+
+    def begin_close(self) -> bool:
+        if self.closing:
+            return False
+        self.closing = True
+        return True
+
+    async def write_close(self, payload: bytes,
+                          write: Callable[[bytes], Awaitable[None]]) -> bool:
+        if not self.begin_close():
+            if self._reply_done is not None:
+                await asyncio.shield(self._reply_done)
+            return False
+        await write(encode_frame(payload, opcode=WSOpcode.CLOSE, mask=True))
+        return True
+
+    async def _send_close(self, code: int) -> None:
+        if not self.closing:
+            self._reply_done = asyncio.get_running_loop().create_future()
+            try:
+                with suppress(Exception):
+                    await self.write_close(code.to_bytes(2, 'big'), self._writer.write)
+            finally:
+                self._reply_done.set_result(None)
+
+    async def _close_channel(self, code: int) -> None:
+        self.begin_close()
+        await super()._close_channel(code)
+
     def _receive_error(self, error: RecipientProtocolError) -> ProtocolError:
         translated = ProtocolError(str(error))
         translated.__cause__ = error
@@ -68,7 +103,80 @@ def _validate_negotiation(fields: Iterable[tuple[bytes, bytes]],
     return chosen
 
 
-class WebSocketSession(_TransportClose):
+class _WebSocketSession:
+    _recipient: _ClientWebSocketRecipient
+    _closed: bool
+    _close_waiter: asyncio.Event | None = None
+    _release_started = False
+    _release_done = False
+
+    async def close(self, code: int = _CLOSE_CODE_NORMAL, *,
+                    drain_timeout: float = 5.0) -> None:
+        """Close the session and release its reader and transport/stream.
+
+        Peer draining is bounded by *drain_timeout*. Concurrent calls wait
+        for cleanup; cancellation propagates after cleanup finishes.
+        """
+        if self._closed:
+            await self._wait_closed()
+            return
+        self._closed = True
+        try:
+            payload = code.to_bytes(2, 'big')
+            try:
+                try:
+                    await self._send_close(payload)
+                except Exception:
+                    pass  # The peer may already have disconnected.
+                if self._recipient.terminal_code is None:
+                    async with asyncio.timeout(drain_timeout):
+                        while True:
+                            event = await self._recipient()
+                            if event.get('type') == 'websocket.disconnect':
+                                break
+            except Exception:
+                pass  # A timeout or protocol error ends draining.
+        finally:
+            await self._release()
+
+    async def _wait_closed(self) -> None:
+        cancelled = None
+        while not self._release_done:
+            if self._close_waiter is None:
+                self._close_waiter = asyncio.Event()
+            try:
+                await self._close_waiter.wait()
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+        if cancelled is not None:
+            raise cancelled
+
+    async def _release(self) -> None:
+        self._closed = True
+        if self._release_started:
+            await self._wait_closed()
+            return
+        self._release_started = True
+        try:
+            try:
+                await self._release_resources()
+            except asyncio.CancelledError:
+                await wait_for_cleanup(create_eager_task(self._release_resources()))
+                raise
+        finally:
+            self._release_done = True
+            if self._close_waiter is not None:
+                self._close_waiter.set()
+
+    async def _send_close(self, payload: bytes) -> None:
+        raise NotImplementedError
+
+    async def _release_resources(self) -> None:
+        """Must be safe to retry after cancellation."""
+        raise NotImplementedError
+
+
+class WebSocketSession(_WebSocketSession, _TransportClose):
     """Frame-level WebSocket session over an established connection.
 
     Always masks outgoing frames (RFC 6455 §5.1).  Reads use
@@ -109,10 +217,6 @@ class WebSocketSession(_TransportClose):
         self._recipient._connect_sent = True
         self.subprotocol = subprotocol
         self._closed = False
-        # True once a 'websocket.disconnect' has been surfaced via
-        # ``receive`` — close() then skips its drain loop (the closing
-        # handshake already completed from our side's point of view).
-        self._disconnect_seen = False
 
     # ---- public API ------------------------------------------------------
 
@@ -140,56 +244,22 @@ class WebSocketSession(_TransportClose):
         ``WebSocketRecipient`` (with masking, since this session is the
         client).  Server PONG frames are silently dropped.
         """
-        event = await self._recipient()
-        if event.get('type') == 'websocket.disconnect':
-            self._disconnect_seen = True
-        return event
-
-    async def close(self, code: int = _CLOSE_CODE_NORMAL, *,
-                    drain_timeout: float = 5.0) -> None:
-        """Send a CLOSE frame, await the peer's echoed CLOSE (bounded by
-        *drain_timeout*), and stop the background reader task.
-
-        RFC 6455 §7.1.2 — the closing handshake
-        is complete once both endpoints have sent and received a Close
-        frame.  A silent peer cannot hang ``close()``: after
-        *drain_timeout* the reader is shut down regardless.  Data frames
-        still in flight during the drain are discarded.  Idempotent.
-        """
-        if self._closed:
-            return
-        self._closed = True
-        payload = code.to_bytes(2, 'big')
-        try:
-            try:
-                await self._send_frame(payload, WSOpcode.CLOSE)
-            except Exception:
-                pass  # best-effort close frame; the socket may already be gone.
-            if not self._disconnect_seen:
-                async with asyncio.timeout(drain_timeout):
-                    while True:
-                        event = await self._recipient()
-                        if event.get('type') == 'websocket.disconnect':
-                            break
-        except Exception:
-            # TimeoutError (silent peer) or a recipient-raised protocol
-            # error — either way the drain is over; shut the reader down.
-            pass
-        finally:
-            await self._release()
+        return await self._recipient()
 
     # ---- internal --------------------------------------------------------
 
-    async def _release(self) -> None:
-        if self._raw_writer is None:
-            return
-        self._closed = True
+    async def _send_close(self, payload: bytes) -> None:
+        await self._recipient.write_close(payload, self._writer.write)
+
+    async def _release_resources(self) -> None:
         try:
             await self._recipient.shutdown()
         finally:
             await self._close_transport()
 
     async def _send_frame(self, payload: bytes, opcode: WSOpcode) -> None:
+        if self._closed or self._recipient.closing:
+            raise RuntimeError('session is closed')
         frame = encode_frame(payload, opcode=opcode, mask=True)
         await self._writer.write(frame)
 
