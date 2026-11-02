@@ -6,6 +6,8 @@ import asyncio
 import ssl as _ssl
 
 from ..server.connection_protocol import ConnectionProtocol
+from .._cleanup import wait_for_cleanup
+from ..utils import create_eager_task
 
 # Default connection-establishment deadline, including TLS.
 DEFAULT_CONNECT_TIMEOUT: float = 30.0
@@ -16,7 +18,11 @@ class _TransportClose:
         connection, self._raw_writer = self._raw_writer, None
         if connection is not None:
             connection.close()
-            await connection.wait_closed()
+            try:
+                await connection.wait_closed()
+            except asyncio.CancelledError:
+                await wait_for_cleanup(create_eager_task(connection.wait_closed()))
+                raise
 
 
 class _TransportOwner(_TransportClose):
@@ -37,11 +43,21 @@ class ClientConnection(ConnectionProtocol):
 
     def connection_lost(self, exc: BaseException | None) -> None:
         super().connection_lost(exc)
-        if not self._lost.done():
+        try:
             self._lost.set_result(None)
+        except asyncio.InvalidStateError:
+            if self._lost.cancelled():
+                self._lost = asyncio.get_running_loop().create_future()
+                self._lost.set_result(None)
 
     async def wait_closed(self) -> None:
-        await self._lost
+        """Wait for connection loss; a cancelled wait can be retried."""
+        try:
+            await self._lost
+        except asyncio.CancelledError:
+            if self._lost.cancelled():
+                self._lost = asyncio.get_running_loop().create_future()
+            raise
 
 
 async def open_connection(

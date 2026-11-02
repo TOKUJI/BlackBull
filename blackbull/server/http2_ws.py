@@ -49,7 +49,8 @@ class HTTP2StreamReader(AbstractReader):
     def take_uncredited(self) -> int:
         """Return and clear the credit never returned; the stream is being released."""
         n = self._uncredited
-        self._uncredited = self._owed = self._ahead = 0
+        self._uncredited = self._owed = 0
+        self._ahead = len(self._buf)
         return n
 
     async def readexactly(self, n: int) -> bytes:

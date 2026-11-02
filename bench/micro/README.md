@@ -34,6 +34,7 @@ an unresolved control means the result cannot certify a small regression.
 | script | what it answers |
 |---|---|
 | `testing_client.py --base PATH --head PATH` | TestClient HTTP calls, WebSocket round trips and lifecycle cost: A/A and ABBA, source proof, static bytecode comparison and executed testing-helper instructions. Rates are operations/second, not wire throughput. |
+| `websocket_client.py --base PATH --head PATH` | H1/H1-TLS/H2-TLS client CPU and wall µs for WebSocket round trips, connection, close and lifecycle, plus persistent HTTP controls. Fresh client process per protocol/case, fixed peer; A/A, path control and ABBA; client GC on/off and separate instruction counts. |
 | `count_instructions.py` | Executed bytecode instructions per request, per file or per function (`BB_BY_FUNC`), via `sys.monitoring`.  Point `BB_REPO` at two worktrees and diff.  Set `BB_WRK_CONNS` / `BB_H2_CONNS` to the A/B's concurrency — the default `c=1` inflates the denominator with per-loop overhead that amortises away under load. |
 | `loop_touches.py` | Event-loop interactions per request; `--check` is the CI budget. |
 | `parser_microbench.py` | Request-head parse cost against httptools / h11 / sanic, swept over a real browser's header count, after a correctness gate. |

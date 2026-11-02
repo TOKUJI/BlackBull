@@ -31,6 +31,11 @@ belong to the application layer and fire exactly once on native and external
 ASGI transports. `request_completed` follows the global middleware chain,
 so buffering middleware has finished sending before observers run.
 
+WebSocket clients clean up in the calling task. Interrupted cleanup must be
+retryable: cancellation alone creates a protected recovery task, and concurrent
+close calls alone allocate a completion event. Keep reader ownership until its
+join finishes or times out; cancellation of that join must not discard it.
+
 Isolate application and stream failures from sibling streams. Connection
 framing or HPACK failures terminate the connection; peer GOAWAY permits
 accepted response work to drain. Read `blackbull/event_aggregator.py` and

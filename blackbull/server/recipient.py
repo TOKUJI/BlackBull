@@ -1576,8 +1576,12 @@ class WebSocketRecipient(BaseRecipient):
                 and not task.done()):
             task.cancel()
             # wait_for would also wait for cancellation to finish.
-            done, _pending = await asyncio.wait(
-                {task}, timeout=_READ_LOOP_JOIN_TIMEOUT)
+            try:
+                done, _pending = await asyncio.wait(
+                    {task}, timeout=_READ_LOOP_JOIN_TIMEOUT)
+            except asyncio.CancelledError:
+                self._reader_task = task
+                raise
             if not done:
                 logger.warning(
                     'read-loop task did not stop within %.1fs; leaving it to '

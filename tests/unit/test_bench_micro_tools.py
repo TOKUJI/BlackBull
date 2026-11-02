@@ -44,6 +44,35 @@ def test_testing_client_instrument_records_control_and_import_proof(tmp_path):
     assert (run / 'http.tsv').exists()
 
 
+@pytest.mark.skipif(shutil.which('openssl') is None or len(os.sched_getaffinity(0)) < 2,
+                    reason='wire client probe needs openssl and two CPUs')
+@pytest.mark.skipif(sys.version_info < (3, 12), reason='sys.monitoring needs Python 3.12+')
+@pytest.mark.timeout(90)
+def test_websocket_client_probe_checks_both_transports_and_source_controls(tmp_path):
+    cpus = sorted(os.sched_getaffinity(0))
+    done = _run(tmp_path, 'bench/micro/websocket_client.py', '--base', str(ROOT),
+                '--head', str(ROOT), '--rounds', '1', '--control-rounds', '1',
+                '--messages', '2', '--connections', '1', '--gc', 'on',
+                '--cases', 'text,close,http-churn',
+                '--client-cpu', str(cpus[0]), '--peer-cpu', str(cpus[-1]))
+    assert done.returncode == 0, done.stderr
+    run, = (tmp_path / 'websocket_client').iterdir()
+    samples = [json.loads(line) for line in (run / 'samples.jsonl').read_text().splitlines()]
+    assert len(samples) == 12
+    assert {row['phase'] for row in samples} == {'null', 'path', 'real'}
+    expected = {f'{protocol}/{case}' for protocol in ('h1', 'h1tls', 'h2tls')
+                for case in ('text', 'close', 'http-churn')}
+    assert all(set(row['metrics']) == expected for row in samples)
+    assert all(row['source_proof'] and row['pending_tasks'] == [] for row in samples)
+    assert all(len({m['process_id'] for m in row['metrics'].values()}) == len(expected)
+               for row in samples)
+    instructions = json.loads((run / 'instructions.json').read_text())
+    assert all(set(row['metrics']) == expected for row in instructions.values())
+    assert all(row['metrics']['h2tls/text']['instructions'] for row in instructions.values())
+    assert (run / 'summary.md').exists() and (run / 'COMPLETE').exists()
+    assert len(next(run.glob('*-cpu_us.tsv')).read_text().splitlines()[1].split('\t')[4]) == 64
+
+
 def test_paired_report_keeps_all_rounds_when_rates_have_two_modes(tmp_path):
     from bench.ab.report import analyse
     raw = tmp_path / 'raw.tsv'

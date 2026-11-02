@@ -22,15 +22,16 @@ import types
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def bytecode(root):
+def bytecode(root, function_files=('blackbull/testing/__init__.py',)):
     modules, functions = {}, {}
     for path in sorted(Path(root).glob('blackbull/**/*.py')):
         name = str(path.relative_to(root))
         code = compile(path.read_bytes(), name, 'exec')
         modules[name] = hashlib.sha256(marshal.dumps(code)).hexdigest()
-        if name == 'blackbull/testing/__init__.py':
+        if name in function_files:
             def visit(code):
-                functions[code.co_qualname] = [
+                key = code.co_qualname if len(function_files) == 1 else f'{name}:{code.co_qualname}'
+                functions[key] = [
                     [i.opname, i.argrepr] for i in dis.get_instructions(code)
                     if not isinstance(i.argval, types.CodeType)]
                 for const in code.co_consts:
