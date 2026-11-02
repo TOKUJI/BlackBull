@@ -2136,17 +2136,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.websocket.WebSocketSession.close" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        close
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.client.websocket.WebSocketSession.ping" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5874,17 +5863,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.client.websocket.WebSocketSession.close" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        close
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.client.websocket.WebSocketSession.ping" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6088,7 +6066,7 @@ only one concurrent session per <code>WebSocketClient</code> is supported.</p>
 
     <div class="doc doc-contents ">
             <p class="doc doc-class-bases">
-              Bases: <code><span title="blackbull.client._connect._TransportClose">_TransportClose</span></code></p>
+              Bases: <code><span title="blackbull.client.websocket._WebSocketSession">_WebSocketSession</span></code>, <code><span title="blackbull.client._connect._TransportClose">_TransportClose</span></code></p>
 
 
 
@@ -6134,34 +6112,6 @@ mask their outgoing frames.</p>
     <div class="doc doc-contents ">
 
         <p>Return the already-connected session; the handshake ran before this.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h4 id="blackbull.client.websocket.WebSocketSession.close" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">close</span><span class="p">(</span><span class="n">code</span><span class="o">=</span><span class="n">_CLOSE_CODE_NORMAL</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">drain_timeout</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.client.websocket.WebSocketSession.close" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Send a CLOSE frame, await the peer's echoed CLOSE (bounded by
-<em>drain_timeout</em>), and stop the background reader task.</p>
-<p>RFC 6455 §7.1.2 — the closing handshake
-is complete once both endpoints have sent and received a Close
-frame.  A silent peer cannot hang <code>close()</code>: after
-<em>drain_timeout</em> the reader is shut down regardless.  Data frames
-still in flight during the drain are discarded.  Idempotent.</p>
 
 
     </div>

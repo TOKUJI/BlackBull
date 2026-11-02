@@ -6188,6 +6188,9 @@ Only one upgrade is allowed per connection. The returned WebSocket session
 closes the transport on <code>close()</code>; leaving the client context also closes it.
 HTTP/2 Extended CONNECT also rejects unoffered subprotocols or extensions,
 resetting the stream while keeping the connection open.</p>
+<p>WebSocket sends raise <code>RuntimeError('session is closed')</code> once local closing
+starts or the reader detects peer closure. Concurrent <code>session.close()</code> calls
+wait for reader and transport/stream cleanup, including when cancelled.</p>
 <h3 id="a-stall-is-not-a-clienterror-on-purpose">A stall is not a <code>ClientError</code>, on purpose<a class="headerlink" href="#a-stall-is-not-a-clienterror-on-purpose" title="Permanent link">&para;</a></h3>
 <p>Every time bound in the client — the connect deadline, the head and body
 deadlines — raises a bare <code>TimeoutError</code>. That is a deliberate split, and it is
