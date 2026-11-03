@@ -157,6 +157,8 @@ with warnings.catch_warnings(record=True) as caught:
     assert lazy.Alias is core.Used
 assert caught[0].filename == '<string>'
 assert getattr(lazy, 'missing', None) is None
+assert getattr(lazy, '_module_getattr', None) is None
+assert getattr(lazy, 'module_getattr', None) is None
 try:
     lazy.missing
 except AttributeError as exc:

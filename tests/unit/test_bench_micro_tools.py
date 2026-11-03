@@ -48,6 +48,7 @@ def test_testing_client_instrument_records_control_and_import_proof(tmp_path):
                     reason='wire client probe needs openssl and two CPUs')
 @pytest.mark.skipif(sys.version_info < (3, 12), reason='sys.monitoring needs Python 3.12+')
 @pytest.mark.timeout(90)
+@pytest.mark.no_audit(reason='The benchmark subprocesses use their own instruction monitoring and timing; inherited tracing changes their measurements and deadlines.')
 def test_websocket_client_probe_checks_both_transports_and_source_controls(tmp_path):
     cpus = sorted(os.sched_getaffinity(0))
     done = _run(tmp_path, 'bench/micro/websocket_client.py', '--base', str(ROOT),

@@ -144,7 +144,8 @@ class Recorder:
                 self.reference(file, name, frame.f_globals[name])
                 return self.monitor.DISABLE
         finally:
-            del frame
+            frame = None
+        return None
 
     def save(self):
         path = self.output / f'observed-{os.getpid()}-{self.generation}.json'
@@ -158,6 +159,10 @@ class Recorder:
     def start(self):
         recorder = self
 
+        def module_getattr(module):
+            namespace = object.__getattribute__(module, '__dict__')
+            return namespace.get('__getattr__', partial(types.ModuleType.__getattribute__, module))
+
         class Module(types.ModuleType):
             def __getattribute__(self, name):
                 namespace = object.__getattribute__(self, '__dict__')
@@ -168,10 +173,7 @@ class Recorder:
                     recorder.reference(file, name, value)
                 return value
 
-            @property
-            def __getattr__(self):
-                namespace = object.__getattribute__(self, '__dict__')
-                return namespace.get('__getattr__', partial(types.ModuleType.__getattribute__, self))
+            __getattr__ = property(module_getattr)
 
         class Loader:
             def __init__(self, original):
@@ -194,6 +196,7 @@ class Recorder:
                     if spec and spec.origin and recorder.relative(spec.origin) and spec.loader:
                         spec.loader = Loader(spec.loader)
                         return spec
+                return None
 
         self.monitor.use_tool_id(self.tool, 'blackbull-execution-audit')
         self.monitor.register_callback(self.tool, self.monitor.events.PY_START, self.entered_code)
