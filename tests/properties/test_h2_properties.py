@@ -24,7 +24,7 @@ from hpack import Encoder, HPACKError
 
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (
-    ErrorCodes, FrameBase, FrameFormatError, FrameTypes,
+    ErrorCodes, FrameBase, FrameFormatError, FrameTypes, IncompleteFrameError,
     field_name_is_valid, field_value_has_boundary_whitespace,
     field_value_is_valid)
 from blackbull.server.http2_actor import HTTP2Actor
@@ -179,13 +179,23 @@ class TestFrameHeaderRobustness:
                            _RecordingWriter(), AsyncMock(), None)
         assert asyncio.run(actor.receive()) == b''
 
-        # The codec seam answers a short buffer with its own documented
-        # verdict — a plain incomplete-data Exception, not a parse crash.
-        # (Pinning the bare Exception is deliberate for now; BLA-517 tracks
-        # giving it a named error instead.)
-        with pytest.raises(Exception) as excinfo:
+        # The codec seam answers a short buffer with its own named verdict,
+        # a frame-size error the frame loop already answers as the peer's.
+        with pytest.raises(IncompleteFrameError) as excinfo:
             FrameFactory().load(partial_header)
-        assert type(excinfo.value) is Exception
+        assert excinfo.value.error_code is ErrorCodes.FRAME_SIZE_ERROR
+
+    @given(
+        length=st.integers(min_value=1, max_value=64),
+        data=st.data(),
+    )
+    def test_a_payload_shorter_than_its_header_says_is_incomplete(self, length, data):
+        """A header that declares more payload than follows is incomplete too,
+        never a frame built from the truncated remainder."""
+        short = data.draw(st.binary(max_size=length - 1))
+        header = length.to_bytes(3, 'big') + b'\x06\x00' + (0).to_bytes(4, 'big')
+        with pytest.raises(IncompleteFrameError):
+            FrameFactory().load(header + short)
 
     @given(
         frame=st.binary(min_size=9, max_size=9 + 16384),

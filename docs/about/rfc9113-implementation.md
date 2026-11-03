@@ -103,6 +103,8 @@ control frames. SETTINGS, PING and GOAWAY on a non-zero stream, and a
 stream-only frame on stream 0, are connection `PROTOCOL_ERROR`s (§6.1–§6.10). A frame whose length or padding breaks its type's layout
 raises `FrameFormatError` with the RFC's code, and the frame loop answers it
 with GOAWAY: every such case, HEADERS padding included, is a connection error.
+Octets short of a frame header, or of the payload a header declares, raise its
+subclass `IncompleteFrameError` (`FRAME_SIZE_ERROR`).
 Unknown frame types are ignored only outside an open field block.
 
 A frame on a stream this endpoint reset is ignored (§5.1): DATA still

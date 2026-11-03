@@ -57,6 +57,10 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- `FrameFactory.load` raises `IncompleteFrameError`, a `FrameFormatError` with
+  `FRAME_SIZE_ERROR`, for octets short of a frame header or of the payload the
+  header declares. It raised a bare `Exception` for the first and built a
+  frame from the truncated payload for the second (BLA-517).
 - Cap refusal records identify socket-level limits as `transport`; suppressed-hit
   summaries preserve and separately count each refusing subsystem (BLA-323).
 - `HTTP2Client`, `NativeTestServer`, `GrpcTestServer` and the MQTT

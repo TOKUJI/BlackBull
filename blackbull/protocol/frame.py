@@ -9,6 +9,7 @@ import logging
 from .frame_types import (
     FrameBase, FrameTypes, FrameFlags,
     HeaderFrameFlags, SettingFrameFlags, ErrorCodes, PushPromise, DEFAULT_MAX_FRAME_SIZE,
+    IncompleteFrameError,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,16 +188,19 @@ class FrameFactory:
 
     def load(self, data):
         if len(data) < 9:
-            logger.error(data)
-            raise Exception('not enough data length: {}'.format(data))
+            raise IncompleteFrameError(f'{len(data)} octets, short of a frame header')
 
         length = int.from_bytes(data[:3], 'big', signed=False)
+        end = 9 + length
+        if len(data) < end:
+            raise IncompleteFrameError(
+                f'{len(data) - 9} payload octets, short of the declared {length}')
         type_ = data[3:4]
         flags = int.from_bytes(data[4:5], 'big', signed=False)
         # RFC 9113 §4.1 — the high bit of the 32-bit stream identifier is
         # reserved (R) and MUST be ignored on receipt.
         stream_id = int.from_bytes(data[5:9], 'big', signed=False) & 0x7fffffff
-        payload = data[9: 9 + length]
+        payload = data[9:end]
 
         # RFC 9113 §5.5: unknown frame types are ignored without closing the connection.
         frame_type = _FRAME_TYPE_BY_VALUE.get(type_)
