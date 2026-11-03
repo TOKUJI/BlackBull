@@ -135,6 +135,14 @@ class FrameFormatError(ValueError):
         self.error_code = error_code
 
 
+class IncompleteFrameError(FrameFormatError):
+    """Fewer octets than a frame header, or than the payload its header
+    declares (RFC 9113 §4.1)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, ErrorCodes.FRAME_SIZE_ERROR)
+
+
 def peer_max_frame_size(settings) -> int | None:
     size = None
     for identifier, value in settings:
