@@ -80,13 +80,15 @@ def _freeze() -> None:
         pass
 
 
-async def warm_tls(ssl_context, *, n: int | None = None) -> None:
-    """Warm TLS using in-memory SSL BIOs, without binding a listener.
+async def warm_tls(ssl_context, *, n: int | None = None) -> int:
+    """Return completed TLS handshakes from up to n in-memory BIO attempts.
+
+    Return zero when disabled or no TLS context is supplied.
     """
     if n is None:
         n = get_settings().warmup_tls_n
     if ssl_context is None or n <= 0:
-        return
+        return 0
     import ssl  # noqa: PLC0415
     client_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     client_ctx.check_hostname = False
@@ -96,14 +98,17 @@ async def warm_tls(ssl_context, *, n: int | None = None) -> None:
         client_ctx.set_alpn_protocols(['h2', 'http/1.1'])
     except NotImplementedError:  # pragma: no cover - OpenSSL without ALPN
         pass
+    completed = n
     for _ in range(n):
-        _handshake_once(ssl_context, client_ctx)
+        if not _handshake_once(ssl_context, client_ctx):
+            completed -= 1
         # Yield so the wall-clock budget (asyncio.wait_for) can pre-empt a long
         # run of handshakes instead of blocking the loop.
         await asyncio.sleep(0)
+    return completed
 
 
-def _handshake_once(server_ctx, client_ctx) -> None:
+def _handshake_once(server_ctx, client_ctx) -> bool:
     """Complete one client<->server TLS handshake entirely in memory."""
     import ssl  # noqa: PLC0415
     c2s = ssl.MemoryBIO()  # client -> server bytes
@@ -129,5 +134,5 @@ def _handshake_once(server_ctx, client_ctx) -> None:
             # Server needs more bytes from the client; produced above / next round.
             pass
         if c_done and s_done:
-            return
-    # Incomplete within the round budget — warm-up is best-effort, so ignore.
+            return True
+    return False

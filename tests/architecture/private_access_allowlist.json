@@ -180,7 +180,7 @@
  "unit/test_streaming.py": 37,
  "unit/test_testclient.py": 6,
  "unit/test_unix_accept_queue_warning.py": 9,
- "unit/test_warmup.py": 3,
+ "unit/test_warmup.py": 1,
  "unit/test_websocket_actor_lifecycle.py": 16,
  "unit/test_websocket_injection.py": 3,
  "unit/test_websocket_object.py": 6,
