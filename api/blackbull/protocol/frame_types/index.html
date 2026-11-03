@@ -7009,9 +7009,9 @@ against the wrong table.  When <code>END_HEADERS</code> is set the block is deco
 immediately; otherwise append each CONTINUATION payload to <code>raw_block</code>
 and call <code>parse_payload</code> once the block is complete.</p>
 <p>Decoding splits the result two ways.  <code>pseudo_headers</code> maps
-<code>PseudoHeaders</code> to <code>str</code>, since those values become the request's
-method, path and scheme; <code>headers</code> is the ordinary field list as
-<code>(name, value)</code> byte pairs.</p>
+<code>PseudoHeaders</code> to the received octets, which the request and response
+layers grade and turn into text only where they need it; <code>headers</code> is
+the ordinary field list as <code>(name, value)</code> byte pairs.</p>
 <p>A block that breaks §8.1.2 / §8.2 does not raise — it sets <code>malformed</code>
 with a <code>malformed_reason</code>, so the caller can reset the stream while the
 connection-wide table stays in step with the peer's.</p>
