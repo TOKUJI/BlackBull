@@ -5579,6 +5579,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#startup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Startup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#events-and-failures" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5860,6 +5871,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#startup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Startup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#events-and-failures" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6024,6 +6046,11 @@ their inherited inbox does not imply that dispatch goes through it.</p>
 <h3 id="grpc-no-dedicated-actor">gRPC: no dedicated actor<a class="headerlink" href="#grpc-no-dedicated-actor" title="Permanent link">&para;</a></h3>
 <p>gRPC reuses HTTP/2 stream work and the receive/send boundary. Keep call
 semantics in <code>blackbull.grpc</code>; see <a href="../grpc-assessment/">gRPC design</a>.</p>
+<h2 id="startup">Startup<a class="headerlink" href="#startup" title="Permanent link">&para;</a></h2>
+<p><code>blackbull.server.warmup.warm_tls()</code> returns the number of attempts in which
+both TLS endpoints completed their handshake, rather than the number tried.
+Disabled warm-up or a missing TLS context returns zero; incomplete attempts
+remain best-effort and do not prevent startup.</p>
 <h2 id="events-and-failures">Events and failures<a class="headerlink" href="#events-and-failures" title="Permanent link">&para;</a></h2>
 <p>Connection events belong to <code>ConnectionActor</code>. Request-lifecycle events
 belong to the application layer and fire exactly once on native and external
