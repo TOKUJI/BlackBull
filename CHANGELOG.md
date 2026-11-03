@@ -26,6 +26,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+## [0.82.0] — 2026-11-04
+
+MINOR because `blackbull.client` changed its public API: see *Changed* and
+*Removed*. Applications that only serve with BlackBull need no change; the
+server-side changes are fixes.
+
 ### Added
 
 - A *Public API* check on every pull request and at publish:
@@ -49,7 +55,7 @@ metadata; reinstall an editable checkout after changing that version.
   `compress` instance, deprecated since v0.28.0 without a date, are removed no
   earlier than 2027-05-20.
 - `blackbull.client.scenario` and `blackbull.client.scenario_oracle` are
-  removed in v0.82.0; import from `blackbull.fault_injection`.
+  removed in v0.83.0; import from `blackbull.fault_injection`.
 - Python 3.11 support ends in the first release from October 2027, when
   CPython 3.11 reaches end of life (`BBD009`).
 - Fault-injection scenario JSON in the v1 per-vocabulary format (no
@@ -160,6 +166,10 @@ metadata; reinstall an editable checkout after changing that version.
   class under every vocabulary's name, and every vocabulary writes one JSON
   Lines format — `"format": 2` on the `HEADER` line, steps named by class,
   bytes as hex.
+- Fault injection constructors: `SideOutcome` takes a required `observed` and
+  no `timed_out` (now a property), and `ScenarioH1ServerResult` and
+  `ScenarioH2Result` take `peer_closed` before their other fields, so build
+  them by keyword.
 - `H2FaultServer.stop()` cancels connections still mid-scenario, as
   `H1FaultServer` did; `H1FaultServer` records any exception a step raises on
   `last_result.exception`, not only a connection reset.
@@ -226,6 +236,8 @@ metadata; reinstall an editable checkout after changing that version.
 - `blackbull.client.ResponderFactory` and `blackbull.server.response`. One
   HTTP/2 core, `blackbull.server.http2_connection.HTTP2Connection`, answers
   control frames for the server and the client.
+- `HTTP2Client.initial_window_size`. The window the server announces is
+  applied by the shared HTTP/2 core.
 - `AsyncioReader`, `PrefixReader` and `HTTP2WSReader`. `AbstractReader` no
   longer reads lines byte by byte: `readuntil` and `read_head` raise
   `NotImplementedError` except on `BufferReader`.
