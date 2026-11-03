@@ -1,6 +1,6 @@
 name: pytest
 
-# Five-lane pytest CI.
+# Six-lane pytest CI.
 #
 # Fast tier   — runs on every push/PR across the full supported interpreter
 #               matrix; no Docker, beartype enabled.  Catches regressions in
@@ -28,6 +28,8 @@ name: pytest
 #               already gates.  It files an issue when it fails: an unattended
 #               scheduled job that nothing reports on is indistinguishable from
 #               a green one.
+# Execution audit — collects all Docker-free suites on CPython 3.14 and
+#               rejects new unexercised definitions without an explicit reason.
 #
 # Both tiers install the full [compression,testing] extras and generate a
 # self-signed TLS cert so TLS-aware tests don't fail due to missing key files.
@@ -165,6 +167,40 @@ jobs:
         run: |
           python -m pytest tests/integration tests/conformance \
             --run-integration --timeout=120 -q --beartype-packages=blackbull
+
+  execution-audit:
+    name: Execution audit (release gate)
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up audit Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.14'
+      - name: Install test dependencies
+        run: pip install -e '.[compression,testing,fault-injection,reload,speed]'
+      - name: Generate TLS material
+        run: |
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout tests/key.pem -out tests/cert.pem \
+            -days 365 -nodes -subj '/CN=localhost' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+      - name: Check unexercised definitions and bindings
+        run: python -m tools.execution_audit run
+      - name: Preserve failure diagnosis
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: execution-audit-failure
+          path: |
+            build/execution-audit/**/report.json
+            build/execution-audit/**/untraced.xml
+            build/execution-audit/**/initialization-error-*.txt
+          retention-days: 7
 
   loop-touches:
     name: Loop-touch budget (hot-path exposure)

@@ -169,7 +169,7 @@ class TestBidiErrors:
                 await asyncio.sleep(0.2)
 
         scope = _grpc_scope('/svc/Slow', headers=[
-            (b'content-type', b'application/grpc'), (b'grpc-timeout', b'1m')])
+            (b'content-type', b'application/grpc'), (b'grpc-timeout', b'100m')])
         events, send = _collector()
         await serve_grpc(reg, Connection.from_scope(scope), _receive_chunks([_framed(b'a')]), send)
         # One message got out, then the deadline fired → status in trailers.

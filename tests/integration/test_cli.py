@@ -271,7 +271,7 @@ def test_cli_serves_raw_asgi_callable(tmp_path: Path, child_env):
 # must be the entry point's own.
 
 _SHUTDOWN_APP = '''
-import asyncio, os, signal, sys
+import asyncio, os, pathlib, signal, sys
 
 from blackbull import BlackBull
 
@@ -293,6 +293,8 @@ if os.environ.get('PARK_STARTUP'):
     @app.on_startup
     async def _park():
         print('STARTUP_PARKED', file=sys.stderr, flush=True)
+        if marker := os.environ.get('PARK_STARTUP_MARKER'):
+            pathlib.Path(marker).touch()
         await asyncio.sleep(float(os.environ['PARK_STARTUP']))
 
 
@@ -422,8 +424,13 @@ def _reap_or_kill(proc: subprocess.Popen) -> tuple[subprocess.CompletedProcess, 
 @pytest.mark.timeout(90)
 def test_sigterm_during_a_parked_lifespan_startup_still_stops(tmp_path: Path, child_env):
     port = _free_port()
-    proc = _spawn_server(tmp_path, 'return', port, child_env, {'PARK_STARTUP': '60'})
-    time.sleep(1.5)
+    marker = tmp_path / 'startup-parked'
+    proc = _spawn_server(tmp_path, 'return', port, child_env,
+                         {'PARK_STARTUP': '60', 'PARK_STARTUP_MARKER': str(marker)})
+    if not _wait_until(marker.exists, deadline=time.monotonic() + _STARTUP_DEADLINE_SEC):
+        proc.kill()
+        done = _reap(proc)
+        pytest.fail(f'the startup hook was never entered: {done.stderr[-2000:]}')
     assert proc.poll() is None, 'the server exited before the signal'
     started = time.monotonic()
     proc.send_signal(signal.SIGTERM)

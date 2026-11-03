@@ -63,7 +63,8 @@ from blackbull.server.sender import AbstractWriter
 
 from tests.harness import paced
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(60)]
+pytestmark = [pytest.mark.asyncio, pytest.mark.timeout(60),
+              pytest.mark.no_audit(reason='Coverage tracing changes the tracemalloc peak used by the byte-per-slice model.')]
 
 #: The cap under test, and the body delivered against it — exactly at the cap,
 #: which is the only size at which the multiplier is what an operator sees.

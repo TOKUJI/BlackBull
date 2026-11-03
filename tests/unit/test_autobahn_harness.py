@@ -39,8 +39,11 @@ def harness(tmp_path):
     _script(bindir / 'python3',
             'if [[ "$1" == -c ]]; then exit 0; fi\n'
             f'exec {shlex.quote(sys.executable)} "$@"\n')
-    env = {**os.environ, 'PATH': f'{bindir}:{os.environ["PATH"]}',
-           'CASES': '13.3.10', 'MAX_ATTEMPTS': '1', 'TMPDIR': str(tmp_path)}
+    # These subprocesses are shell-tool fixtures, not product coverage subjects.
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(('COVERAGE_', 'BB_EXECUTION_AUDIT_'))}
+    env.update(PATH=f'{bindir}:{os.environ["PATH"]}', CASES='13.3.10',
+               MAX_ATTEMPTS='1', TMPDIR=str(tmp_path))
     for name in ('EXCLUDE_CASES', 'BENCH_RUN_DIR', 'BENCH_RESULTS_ROOT'):
         env.pop(name, None)
     return tmp_path, scripts, bindir, env

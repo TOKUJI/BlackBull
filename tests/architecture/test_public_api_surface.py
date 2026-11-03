@@ -21,6 +21,7 @@ that; ``__all__`` records the intent and these tests keep the two in step.
 from __future__ import annotations
 
 import warnings
+from types import ModuleType
 
 import blackbull
 
@@ -31,7 +32,7 @@ def _public_attrs() -> set[str]:
 
 def _non_module_public() -> set[str]:
     return {n for n in _public_attrs()
-            if type(getattr(blackbull, n)).__name__ != 'module'}
+            if not isinstance(getattr(blackbull, n), ModuleType)}
 
 
 def test_all_is_defined():

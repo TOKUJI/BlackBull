@@ -66,6 +66,7 @@ def test_duration_live_without_finalize():
 
 def test_str_equals_format_and_is_cached():
     rec = _record()
+    rec.finalize()
     s1 = str(rec)
     assert s1 == rec.format()
     # Cached: second str() returns the same object (no re-build).

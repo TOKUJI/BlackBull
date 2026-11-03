@@ -3,13 +3,11 @@
 Downstream WebSocket objects adopt the recorded handshake state; do not
 wait for an already-consumed websocket.connect event.
 """
-import logging
 
 from ..asgi import ASGIEvent
 from ..websocket import (handshake_closed, mark_handshake_accepted,
                          mark_handshake_closed)
 
-logger = logging.getLogger(__name__)
 
 _accept  = {'type': ASGIEvent.WS_ACCEPT, 'subprotocol': None}
 _close   = {'type': ASGIEvent.WS_CLOSE}

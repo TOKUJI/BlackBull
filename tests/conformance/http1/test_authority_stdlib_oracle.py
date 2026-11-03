@@ -35,7 +35,7 @@ _ACTOR._ssl = False
 
 # RFC 3986 §3.2.2 — an IPvFuture literal (§3.2.2's other IP-literal form).
 # urlsplit reads it as a ``v``-prefixed special case; we do not read it at all.
-_IPV_FUTURE = re.compile(rb'\[v[0-9A-Fa-f]+\.')
+_IPV_FUTURE = re.compile(rb'\[v[0-9A-Fa-f]+\.', re.IGNORECASE)
 
 # What a bracketed authority can be built from, including the shapes the
 # grammar has to refuse.
@@ -125,7 +125,8 @@ class TestTheAuthorityGrammarMatchesTheStdlibUrlParser:
         assert _accepts(authority) is _expected(authority)
 
     @pytest.mark.parametrize('authority', [
-        b'', b'[v1.foo]', b'[v1.foo]:8100', b'[::1\t]', b'[::1] x',
+        b'', b'[v1.foo]', b'[v1.foo]:8100', b'[V1.foo]', b'[V1.foo]:8100',
+        b'[::1\t]', b'[::1] x',
         b'user@[::1]', b'[::1]#frag', b'[[]', b'[::1]:80]', b'[::1]:[80]',
         # A reg-name that is not ``host [":" port]`` (§3.2.2): no host, or a
         # port tail that is not ``*DIGIT``.

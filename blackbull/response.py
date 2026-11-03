@@ -2,14 +2,12 @@
 for send and streaming contracts.
 """
 import json
-import logging
 from collections.abc import AsyncIterator, Mapping
 from http import HTTPStatus
 
 from .headers import _as_response_fields
 from .native import NativeResponse, _native_from_asgi
 
-logger = logging.getLogger(__name__)
 
 
 def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
