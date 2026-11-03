@@ -168,8 +168,8 @@ server-side changes are fixes.
   bytes as hex.
 - Fault injection constructors: `SideOutcome` takes a required `observed` and
   no `timed_out` (now a property), and `ScenarioH1ServerResult` and
-  `ScenarioH2Result` take `peer_closed` before their other fields, so build
-  them by keyword.
+  `ScenarioH2Result` insert `peer_closed` before `terminated`, so build them
+  by keyword.
 - `H2FaultServer.stop()` cancels connections still mid-scenario, as
   `H1FaultServer` did; `H1FaultServer` records any exception a step raises on
   `last_result.exception`, not only a connection reset.
