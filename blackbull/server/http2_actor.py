@@ -19,6 +19,7 @@ from ..logger import log, debug_gate
 from ..protocol.frame import FrameFactory
 from ..protocol.field_grammar import PROHIBITED_TRAILER_FIELDS
 from ..protocol.framing import method_is, parse_content_length
+from .request_target import split_path_query
 from ..protocol.frame_types import (
     ErrorCodes, FrameBase, FrameTypes,
     DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
@@ -1232,7 +1233,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
 
         RFC 9113 §8.4 / §8.4.1 (safe, cacheable, body-less, always ``GET``)
         and §6.6 for the PUSH_PROMISE frame.  The ``:path`` split uses the
-        same ``_split_h2_path`` as request HEADERS, so a pushed request gets
+        same ``split_path_query`` as request HEADERS, so a pushed request gets
         the identical ``path`` / ``raw_path`` / ``query_string`` contract.
         """
         if not self._peer_enable_push:
@@ -1249,10 +1250,8 @@ class HTTP2Actor(Actor, HTTP2Connection):
                 parent_stream_id)
             return
 
-        from .parser import _split_h2_path  # noqa: PLC0415
-
         push_stream_id = self._allocate_push_stream_id()
-        path = event.push
+        path = event.push.encode('utf-8')
 
         parent = parent_stream.conn
         # Plain attribute reads, never ``.get()`` on a scope: under
@@ -1267,14 +1266,13 @@ class HTTP2Actor(Actor, HTTP2Connection):
         # §8.3.1 maps ``:authority`` into ``host``, so a dispatched parent
         # always carries one; the fallback only covers a parent with none.
         raw_authority = parent_headers.get(b'host') or b'localhost'
-        authority = raw_authority.decode()
 
         from ..protocol.frame_types import PseudoHeaders  # noqa: PLC0415
         pseudo = {
-            PseudoHeaders.METHOD:    'GET',
+            PseudoHeaders.METHOD:    b'GET',
             PseudoHeaders.PATH:      path,
-            PseudoHeaders.SCHEME:    parent_scheme,
-            PseudoHeaders.AUTHORITY: authority,
+            PseudoHeaders.SCHEME:    parent_scheme.encode('ascii'),
+            PseudoHeaders.AUTHORITY: raw_authority,
         }
         # NativeResponse holds lowercase tchar names, trimmed values and no
         # host; the promised request takes its host from the authority above.
@@ -1313,7 +1311,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             self._retire_stream(push_stream_id, via_rst=False)
             return
 
-        _pushed_path, _pushed_raw_path, _pushed_query = _split_h2_path(path)
+        _pushed_path, _pushed_raw_path, _pushed_query = split_path_query(path)
         pushed_conn = Connection(
             method='GET',
             path=_pushed_path,

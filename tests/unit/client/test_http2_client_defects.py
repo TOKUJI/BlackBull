@@ -914,7 +914,7 @@ class TestRawStreamFrameFilter:
 
         frame = queue.get_nowait()
         assert frame.FrameType() is FrameTypes.HEADERS
-        assert frame.pseudo_headers.get(PseudoHeaders.STATUS) == '200'
+        assert frame.pseudo_headers.get(PseudoHeaders.STATUS) == b'200'
         await self._end(c, task)
 
     async def test_rst_stream_still_reaches_the_queue(self):

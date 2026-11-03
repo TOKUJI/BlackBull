@@ -462,14 +462,16 @@ class TestParseHeadersNoneContract:
     def test_invalid_utf8_in_a_pseudo_header_is_malformed(self, name, value):
         """RFC 9113 §8.3 with §8.1.1 — a pseudo-header value is text; one that
         is not UTF-8 is malformed (stream error PROTOCOL_ERROR), not an
-        unhandled decode error."""
+        unhandled decode error.  The ASCII grammar each request pseudo-header
+        is graded by refuses it; ``:protocol`` has none, so the frame does."""
         fields = {b':method': b'GET', b':scheme': b'https', b':path': b'/',
                   b':authority': b'example.com'}
         fields[name] = value
         frame = self._headers_frame(list(fields.items()))
-        assert frame.malformed
-        assert 'UTF-8' in (frame.malformed_reason or '')
+        if name == b':protocol':
+            assert 'UTF-8' in (frame.malformed_reason or '')
         assert _real_parse_headers(frame) is None
+        assert frame.malformed
 
     @pytest.mark.parametrize('build,value', [
         pytest.param(_authority_request, b'example.com', id='authority-verdict-example'),

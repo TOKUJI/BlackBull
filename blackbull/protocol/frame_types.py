@@ -323,6 +323,9 @@ class PseudoHeaders(StrEnum):
     PROTOCOL  = ':protocol'
 
 
+# A module-level name: an identity test against a global is the cheapest one.
+_PROTOCOL = PseudoHeaders.PROTOCOL
+
 # Accept known pseudo-fields here; request/response restrictions are enforced
 # by server parse_headers and the HTTP/2 client.
 _PSEUDO_BY_BYTES: dict[bytes, PseudoHeaders] = {
@@ -413,9 +416,9 @@ class Headers(FrameBase):
     and call ``parse_payload`` once the block is complete.
 
     Decoding splits the result two ways.  ``pseudo_headers`` maps
-    ``PseudoHeaders`` to ``str``, since those values become the request's
-    method, path and scheme; ``headers`` is the ordinary field list as
-    ``(name, value)`` byte pairs.
+    ``PseudoHeaders`` to the received octets, which the request and response
+    layers grade and turn into text only where they need it; ``headers`` is
+    the ordinary field list as ``(name, value)`` byte pairs.
 
     A block that breaks §8.1.2 / §8.2 does not raise — it sets ``malformed``
     with a ``malformed_reason``, so the caller can reset the stream while the
@@ -439,10 +442,8 @@ class Headers(FrameBase):
         self.decoder = decoder
         self.encoder = encoder
 
-        # Pseudo-headers (RFC 7540 §8.1.2): :method, :path, :scheme, :status, etc.
-        # Values stored as str so they can flow directly into the ASGI scope
-        # (which requires str for method/path/scheme).
-        self.pseudo_headers: dict[PseudoHeaders, str] = {}
+        #: Pseudo-header fields (RFC 9113 §8.3) as octets, received or to send.
+        self.pseudo_headers: dict[PseudoHeaders, bytes] = {}
         # Keep regular headers as bytes pairs throughout decoding.
         self.headers: list[tuple[bytes, bytes]] = []
 
@@ -534,19 +535,19 @@ class Headers(FrameBase):
                 if pseudo_key in self.pseudo_headers:
                     self._mark_malformed(f'duplicate pseudo-header: {kb!r}')
                     return
-                try:
-                    value_text = vb.decode('utf-8')
-                except UnicodeDecodeError:
-                    # RFC 9113 §8.1.1 — a pseudo-header value that is not UTF-8
-                    # text is malformed, which is a stream error of type
-                    # PROTOCOL_ERROR, never a decode error out of the loader.
-                    self._mark_malformed(
-                        f'invalid UTF-8 in pseudo-header value: '
-                        f'{kb!r}: {vb!r}')
-                    return
-                self.pseudo_headers[pseudo_key] = value_text
+                # The request and response layers grade each value with an
+                # ASCII grammar; :protocol has none, so its octets must at
+                # least be text (RFC 9113 §8.1.1).
+                if pseudo_key is _PROTOCOL:
+                    try:
+                        vb.decode('utf-8')
+                    except UnicodeDecodeError:
+                        self._mark_malformed(
+                            f'invalid UTF-8 in pseudo-header value: {kb!r}: {vb!r}')
+                        return
+                self.pseudo_headers[pseudo_key] = vb
                 if debug:
-                    logger.debug('%r: %r', kb, value_text)
+                    logger.debug('%r: %r', kb, vb)
                 continue
 
             seen_regular = True
@@ -628,7 +629,7 @@ class PushPromise(FrameBase):
     def __init__(self, length: int, type_, flags: int, stream_id: int,
                  *, data: bytes = b'', decoder=None, encoder=None, **kwds):
         super().__init__(length, type_, flags, stream_id)
-        self.pseudo_headers: dict[PseudoHeaders, str] = {}
+        self.pseudo_headers: dict[PseudoHeaders, bytes] = {}
         self.headers: list[tuple[bytes, bytes]] = []
         self.encoder = encoder
         self.decoder = decoder
