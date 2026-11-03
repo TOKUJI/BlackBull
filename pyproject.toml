@@ -145,6 +145,8 @@ testing = [
     "httpx[http2]",
     "websockets",
     "hypothesis",
+    # tools.api_surface, the public-API gate.
+    "griffelib>=2.4,<3",
     # Exercises the `.env` resolution path in app.run() (blackbull[dotenv]).
     "python-dotenv",
     # Validates the generated OpenAPI 3.1 documents against the upstream
@@ -207,6 +209,21 @@ benchmark = []  # k6 and h2load are installed via bench/load/install.sh (not pip
 
 profiling = [
     "py-spy",
+]
+
+[tool.blackbull]
+# The public API: these packages' __all__, and the __all__ of any module they
+# export.  Everything else may change in any release.
+public-packages = [
+    "blackbull",
+    "blackbull.client",
+    "blackbull.fault_injection",
+    "blackbull.fault_injection.catalogue",
+    "blackbull.grpc",
+    "blackbull.middleware",
+    "blackbull.mqtt",
+    "blackbull.server",
+    "blackbull.testing",
 ]
 
 [tool.pyright]

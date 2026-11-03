@@ -1,0 +1,49 @@
+name: Public API
+
+# Fails a pull request that breaks the public API (tools/api_surface.py) and
+# lists each break: the next release must then raise MINOR.
+#
+# pull_request_target runs the base branch's copy of this workflow and of the
+# gate, so a pull request cannot change how it is judged.  The pull request's
+# code is only parsed, never imported or run.
+
+on:
+  pull_request_target:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  public-api:
+    name: Public API (breaks force MINOR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout the base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0   # v7.1.0
+        with:
+          python-version: '3.14'
+      - name: Install the gate
+        run: pip install 'griffelib>=2.4,<3'
+      # GitHub updates the merge ref asynchronously: judge it only once its
+      # second parent is the head this run is for.  Its first parent is the
+      # base as it is now.
+      - name: Compare the public API with the base
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3 4 5 6; do
+            git fetch -q --no-tags origin "+refs/pull/$PR/merge:refs/remotes/pr/merge"
+            [ "$(git rev-parse pr/merge^2)" = "$HEAD_SHA" ] && break
+            [ "$attempt" = 6 ] && { echo "Error: the merge ref is not up to date with $HEAD_SHA; re-run." | tee -a "$GITHUB_STEP_SUMMARY"; exit 2; }
+            sleep 10
+          done
+          python -m tools.api_surface diff pr/merge^1 pr/merge 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"

@@ -11,10 +11,15 @@ BlackBull uses [ZeroVer](https://0ver.org/): `0.MINOR.PATCH`.
   capabilities, APIs, environment settings, or behavior adopters must react to.
   State the strongest user-facing reason in the release notes. Sprint numbers
   do not determine version numbers; combined work may ship in one release.
-- PATCH covers fixes and harness work. Removing a deprecated API with a
-  documented replacement is PATCH if adopters following the deprecation need
-  no further action; otherwise the removal is MINOR.
+- PATCH covers fixes and harness work. Removing a public API is MINOR, even
+  after its deprecation.
 - No 1.0 commitment until the framework's identity and public API stabilize.
+
+The public API is the `__all__` of the packages `pyproject.toml` lists under
+`[tool.blackbull] public-packages`, published as the API reference's *Public
+API* page; nothing else is covered by these rules. A pull request that breaks
+it fails its *Public API* check, which lists each break. Publishing refuses a
+tag that breaks it since the previous tag without raising MINOR.
 
 `pyproject.toml` owns the version. `blackbull.__version__` reads installed
 metadata; reinstall an editable checkout after changing that version.
@@ -23,6 +28,9 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Added
 
+- A *Public API* check on every pull request and at publish:
+  `python -m tools.api_surface` compares the declared public API between two
+  git refs and names each break (BLA-589).
 - `blackbull.client.ClientConnection`, the buffered connection every client
   owns (the type of `WebSocketSession`'s `raw_writer`).
 - [Deprecations](docs/reference/deprecations.md): every planned removal, with

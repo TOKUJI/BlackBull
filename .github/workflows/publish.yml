@@ -44,7 +44,10 @@ jobs:
           python-version: '3.12'
 
       - name: Install build tooling
-        run: python -m pip install --upgrade build
+        run: python -m pip install --upgrade build 'griffelib>=2.4,<3'
+
+      - name: Refuse a tag that breaks the public API without raising MINOR
+        run: python -m tools.api_surface release "$GITHUB_REF_NAME"
 
       - name: Build wheel + sdist
         run: python -m build
