@@ -290,7 +290,8 @@ def test_main_config_file_sets_env_var(tmp_path, monkeypatch, capsys):
         import os
         called['BB_WORKERS'] = os.environ.get('BB_WORKERS')
     monkeypatch.setattr(cli, '_serve', _fake_serve)
-    # Clear any pre-existing BB_WORKERS so the config can set it.
+    # Record an absent original too: cli.main writes this key directly.
+    monkeypatch.setenv('BB_WORKERS', '')
     monkeypatch.delenv('BB_WORKERS', raising=False)
 
     mod = types.ModuleType('dummy_cfg_app')

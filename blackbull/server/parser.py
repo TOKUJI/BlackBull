@@ -7,14 +7,12 @@ from ..protocol.frame_types import PseudoHeaders
 from ..protocol.field_grammar import (COMMON_METHODS, COMMON_SCHEMES,
                                       URI_SCHEME_RE, method_token_is_valid)
 from ..protocol.framing import method_is
-import logging
 from ..connection import Connection
 from ..headers import Headers
 from ..protocol.field_grammar import FieldError, authority_is_valid, host_field_value
 from .http1_actor import _TARGET_ALLOWED_OCTETS
 from .request_target import split_path_query
 
-logger = logging.getLogger(__name__)
 
 # Plain HTTP shares this empty dictionary only until _apply_priority_and_extensions
 # replaces it before dispatch. WebSocket branches need their own dictionary.

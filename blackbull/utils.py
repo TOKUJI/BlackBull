@@ -4,10 +4,8 @@ from enum import StrEnum, auto
 from http import HTTPStatus
 
 import asyncio
-import logging
 import sys
 
-logger = logging.getLogger(__name__)
 
 _EAGER_TASKS = sys.version_info >= (3, 12)
 

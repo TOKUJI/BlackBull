@@ -1,6 +1,5 @@
 """WebSocket Actor — owns one upgraded connection's frame loop."""
 import asyncio
-import logging
 from collections.abc import Awaitable, Callable
 
 from ..actor import Actor, Message
@@ -18,7 +17,6 @@ from .permessage_deflate import (
 from .recipient import AbstractReader, RecipientFactory, _WS_READ_INLINE
 from .sender import AbstractWriter, SenderFactory
 
-logger = logging.getLogger(__name__)
 
 _DISCONNECT_HOOK_TIMEOUT = 5.0
 

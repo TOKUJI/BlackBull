@@ -7,7 +7,6 @@ bindings out of the top-level public exports.
 from __future__ import annotations
 
 import contextlib
-import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -19,7 +18,6 @@ from .http1_actor import HTTP1Actor
 from .recipient import AbstractReader, _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE
 from .sender import AbstractWriter
 
-logger = logging.getLogger(__name__)
 
 _HTTP2_PREFACE_FIRST_LINE = b'PRI * HTTP/2.0\r\n'
 _HTTP2_PREFACE_REMAINDER = b'\r\nSM\r\n\r\n'

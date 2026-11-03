@@ -2,12 +2,10 @@
 import ssl as _ssl
 from typing import Union
 
-import logging
 from ._connect import DEFAULT_CONNECT_TIMEOUT, open_connection as _open_connection
 from .http1 import HTTP1Client
 from .http2 import HTTP2Client
 
-logger = logging.getLogger(__name__)
 
 
 # Type alias: whichever inner client the dispatcher selected.

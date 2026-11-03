@@ -14,7 +14,6 @@ from typing import Iterable
 from ..asgi import WebSocketDisconnectEvent, WebSocketReceiveEvent
 from .._cleanup import wait_for_cleanup
 
-import logging
 from ..headers import Headers
 from ..protocol.field_grammar import TCHAR_OCTETS
 from ..server.recipient import (_WS_EVENT_QUEUE_DEPTH, AbstractReader,
@@ -29,7 +28,6 @@ from ._connect import (DEFAULT_CONNECT_TIMEOUT, ClientConnection, _TransportClos
 from .exceptions import HandshakeError, ProtocolError
 from .http1 import HTTP1RequestSender, HTTP1ResponseHeadReader
 
-logger = logging.getLogger(__name__)
 
 
 # RFC 6455 §1.3 — appended to the client's Sec-WebSocket-Key, hashed with

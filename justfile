@@ -9,6 +9,10 @@ install:
 test:
     uv run pytest -q -n auto
 
+# Release gate: untraced quantitative controls, then execution observations.
+audit-code:
+    uv run --python 3.14 python -m tools.execution_audit run
+
 # Mutation score of the mutants matching PATTERN against the tests under TESTS.
 # Two workers, 3.5 GB of address space each: a mutant that allocates without
 # bound fails its test instead of exhausting the machine.

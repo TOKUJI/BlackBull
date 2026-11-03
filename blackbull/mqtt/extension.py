@@ -1,6 +1,5 @@
 """User-facing wiring for the MQTT 5 broker — detector + [`MQTTExtension`][]."""
 import asyncio
-import logging
 from typing import Any, Callable, Iterator, NamedTuple
 
 from .._cleanup import cancel_and_wait
@@ -14,7 +13,6 @@ from .tap import Tap, TapActor, compile_tap
 #: §2.1.1 — CONNECT の固定先頭バイト(種別 1・フラグ 0)。
 _CONNECT_FIRST_BYTE = int(MQTTPacketType.CONNECT) << 4
 
-logger = logging.getLogger(__name__)
 
 
 class Subscription(NamedTuple):

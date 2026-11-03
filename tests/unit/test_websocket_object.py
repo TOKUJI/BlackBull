@@ -316,6 +316,7 @@ async def test_receive_raises_disconnect_with_code_and_reason():
     assert excinfo.value.code == 1001
     assert excinfo.value.reason == 'bye'
     assert ws.close_code == 1001
+    assert ws.close_reason == 'bye'
 
 
 @pytest.mark.asyncio
@@ -410,11 +411,22 @@ async def test_connection_facts_are_reachable():
     channel = _Channel(CONNECT)
     conn = _conn('/room/42')
     conn.path_params['room'] = '42'
+    conn.query_string = b'room=42'
+    conn.client = ('127.0.0.1', 4321)
     ws = WebSocket(conn, channel.receive, channel.send)
 
     assert ws.path == '/room/42'
     assert ws.path_params == {'room': '42'}
     assert ws.connection is conn
+    assert ws.query_string == b'room=42'
+    assert ws.client == ('127.0.0.1', 4321)
+
+
+@pytest.mark.asyncio
+async def test_unknown_receive_events_are_skipped_before_the_next_message():
+    ws, _ = _ws(CONNECT, {'type': 'unrelated.event'}, _text('next'))
+    await ws.accept()
+    assert await ws.receive() == 'next'
 
 
 @pytest.mark.asyncio
