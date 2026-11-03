@@ -16,7 +16,22 @@ from __future__ import annotations
 import pytest
 
 from blackbull.protocol.frame import FrameFactory
-from blackbull.protocol.frame_types import FrameTypes, PseudoHeaders
+from blackbull.protocol.frame_types import FrameBase, FrameTypes, PseudoHeaders
+
+# The shortest payload each type's own parser accepts.
+_MINIMAL_PAYLOAD = {
+    FrameTypes.DATA: b'',
+    FrameTypes.HEADERS: b'',
+    FrameTypes.PRIORITY: bytes(5),
+    FrameTypes.RST_STREAM: bytes(4),
+    FrameTypes.SETTINGS: b'',
+    FrameTypes.PUSH_PROMISE: bytes(4),
+    FrameTypes.PING: bytes(8),
+    FrameTypes.GOAWAY: bytes(8),
+    FrameTypes.WINDOW_UPDATE: (1).to_bytes(4, 'big'),
+    FrameTypes.CONTINUATION: b'',
+    FrameTypes.PRIORITY_UPDATE: bytes(4),
+}
 
 
 class TestTheMappingsAgreeWithTheEnums:
@@ -30,13 +45,6 @@ class TestTheMappingsAgreeWithTheEnums:
             key = member.value.encode('ascii')
             assert _PSEUDO_BY_BYTES[key] is member, (
                 f'{member!r} must map to the same singleton the enum returns')
-
-    def test_frame_type_map_covers_exactly_the_enum(self):
-        from blackbull.protocol.frame import _FRAME_TYPE_BY_VALUE
-
-        assert set(_FRAME_TYPE_BY_VALUE.values()) == set(FrameTypes)
-        for member in FrameTypes:
-            assert _FRAME_TYPE_BY_VALUE[member.value] is member
 
     def test_the_map_retires_the_duplicate_pseudo_header_list(self):
         """`_KNOWN_PSEUDO` and `PseudoHeaders` were the same six names twice.
@@ -74,10 +82,17 @@ class TestUnknownFrameTypesAreStillIgnored:
 
     @pytest.mark.parametrize('member', list(FrameTypes))
     def test_every_known_type_still_parses_as_itself(self, member):
-        from blackbull.protocol.frame import _FRAME_TYPE_BY_VALUE
+        payload = _MINIMAL_PAYLOAD[member]
+        raw = (len(payload).to_bytes(3, 'big') + member.value
+               + b'\x00' + (0).to_bytes(4, 'big') + payload)
 
-        assert _FRAME_TYPE_BY_VALUE[member.value] is member
-        assert _FRAME_TYPE_BY_VALUE.get(member.value) is not None
+        frame = FrameFactory().load(raw)
+
+        assert type(frame) is FrameBase._registry[member]
+        assert frame.type_ is member
+        assert frame.FrameType() is member
+        assert (frame.length, frame.flags, frame.stream_id) == (len(payload), 0, 0)
+        assert type(frame.flags) is int
 
 
 class TestPseudoHeaderValidationIsUnchanged:

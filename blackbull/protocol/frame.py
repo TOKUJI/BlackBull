@@ -14,7 +14,8 @@ from .frame_types import (
 
 logger = logging.getLogger(__name__)
 
-_FRAME_TYPE_BY_VALUE: dict[bytes, FrameTypes] = {m.value: m for m in FrameTypes}
+_FRAME_CLASS_BY_OCTET: dict[int, type[FrameBase]] = {
+    m.value[0]: FrameBase._registry[m] for m in FrameTypes}
 
 
 class _UnknownFrame:
@@ -86,10 +87,6 @@ class FrameFactory:
         HPACK codecs, so a HEADERS built here shares decoder state with every
         other frame on the connection.
         """
-        # NB: no per-create trace here — create() runs on every outbound frame
-        # and every inbound load(), so an eager f-string here is pure overhead
-        # on the hottest H2 loop.  The frame's
-        # fields are available via its __repr__ when a caller needs them.
         frame = FrameBase._registry[type_](
             len(data),
             type_,
@@ -193,20 +190,21 @@ class FrameFactory:
         if len(data) < end:
             raise IncompleteFrameError(
                 f'{len(data)} octets, short of the {end} the frame needs')
-        type_ = data[3:4]
-        flags = int.from_bytes(data[4:5], 'big', signed=False)
+        flags = data[4]
         # RFC 9113 §4.1 — the high bit of the 32-bit stream identifier is
         # reserved (R) and MUST be ignored on receipt.
         stream_id = int.from_bytes(data[5:9], 'big', signed=False) & 0x7fffffff
         payload = data[9:end]
 
         # RFC 9113 §5.5: unknown frame types are ignored without closing the connection.
-        frame_type = _FRAME_TYPE_BY_VALUE.get(type_)
-        if frame_type is None:
+        cls = _FRAME_CLASS_BY_OCTET.get(data[3])
+        if cls is None:
             # Return a sentinel so the frame loop skips dispatch but the
             # connection stays alive.
+            type_ = data[3:4]
             logger.debug('Unknown frame type %r (length=%d, flags=%#x, stream_id=%d) — ignoring',
                          type_, length, flags, stream_id)
             return _UnknownFrame(length, type_, flags, stream_id, payload)
 
-        return self.create(frame_type, flags, stream_id, data=payload)
+        return cls(length, cls.FRAME_TYPE, flags, stream_id, data=payload,
+                   decoder=self.decoder, encoder=self.encoder)

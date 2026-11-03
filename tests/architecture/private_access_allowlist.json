@@ -103,7 +103,7 @@
  "unit/test_debug_logging_gate.py": 3,
  "unit/test_default_line_table.py": 9,
  "unit/test_depends.py": 1,
- "unit/test_enum_lookup_hot_path.py": 8,
+ "unit/test_enum_lookup_hot_path.py": 7,
  "unit/test_error_routing.py": 1,
  "unit/test_event.py": 7,
  "unit/test_event_drain_seam.py": 1,
