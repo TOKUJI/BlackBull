@@ -208,30 +208,51 @@ async def test_warm_request_from_warmup_hook():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_warm_tls_attempts_n_handshakes_without_raising(monkeypatch):
-    """warm_tls drives exactly n handshake attempts through the TLS path,
-    none raising.  (Per-attempt completion is unobservable until warmup.py
-    exposes a success count — PRODUCT DEPENDENCY: BLA-518.)"""
+@pytest.mark.parametrize('alpn', ['h2', 'http/1.1'])
+@pytest.mark.parametrize('version', [ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3])
+async def test_warm_tls_completes_handshakes(alpn, version):
     ctx = _server_ssl_context()
-    attempts = {'n': 0, 'failures': 0}
-    real = warmup_mod._handshake_once
+    ctx.set_alpn_protocols([alpn])
+    ctx.minimum_version = ctx.maximum_version = version
+    assert await warm_tls(ctx, n=8) == 8
 
-    def counting(server_ctx, client_ctx):
-        attempts['n'] += 1
-        try:
-            real(server_ctx, client_ctx)
-        except Exception:
-            attempts['failures'] += 1
-            raise
 
-    monkeypatch.setattr(warmup_mod, '_handshake_once', counting)
-    await warm_tls(ctx, n=8)
-    assert attempts == {'n': 8, 'failures': 0}
+@pytest.mark.asyncio
+@pytest.mark.parametrize('blocked', [{0, 1, 2, 3}, {1, 3}])
+@pytest.mark.parametrize('server_side', [False, True])
+async def test_warm_tls_counts_only_completed_handshakes(monkeypatch, blocked, server_side):
+    connections = []
+    handshake = ssl.SSLObject.do_handshake
+
+    def stalled_handshake(connection):
+        result = handshake(connection)
+        if connection.server_side == server_side:
+            if connection not in connections:
+                connections.append(connection)
+            if connections.index(connection) in blocked:
+                raise ssl.SSLWantReadError()
+        return result
+
+    monkeypatch.setattr(ssl.SSLObject, 'do_handshake', stalled_handshake)
+    assert await warm_tls(_server_ssl_context(), n=4) == 4 - len(blocked)
+    assert len(connections) == 4
 
 
 @pytest.mark.asyncio
 async def test_warm_tls_none_context_is_noop():
-    await warm_tls(None, n=8)  # no context → nothing to do
+    assert await warm_tls(None, n=8) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('n', [0, -1])
+async def test_warm_tls_disabled(n):
+    assert await warm_tls(_server_ssl_context(), n=n) == 0
+
+
+@pytest.mark.asyncio
+async def test_warm_tls_uses_configured_attempt_count(monkeypatch):
+    monkeypatch.setenv('BB_WARMUP_TLS_N', '3')
+    assert await warm_tls(_server_ssl_context()) == 3
 
 
 @pytest.mark.asyncio

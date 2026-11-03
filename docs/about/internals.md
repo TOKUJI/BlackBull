@@ -24,6 +24,13 @@ their inherited inbox does not imply that dispatch goes through it.
 gRPC reuses HTTP/2 stream work and the receive/send boundary. Keep call
 semantics in `blackbull.grpc`; see [gRPC design](grpc-assessment.md).
 
+## Startup
+
+`blackbull.server.warmup.warm_tls()` returns the number of attempts in which
+both TLS endpoints completed their handshake, rather than the number tried.
+Disabled warm-up or a missing TLS context returns zero; incomplete attempts
+remain best-effort and do not prevent startup.
+
 ## Events and failures
 
 Connection events belong to `ConnectionActor`. Request-lifecycle events
