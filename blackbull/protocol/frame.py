@@ -187,14 +187,12 @@ class FrameFactory:
         return frame
 
     def load(self, data):
-        if len(data) < 9:
-            raise IncompleteFrameError(f'{len(data)} octets, short of a frame header')
-
         length = int.from_bytes(data[:3], 'big', signed=False)
         end = 9 + length
+        # One test covers both: fewer than nine octets is short of any end.
         if len(data) < end:
             raise IncompleteFrameError(
-                f'{len(data) - 9} payload octets, short of the declared {length}')
+                f'{len(data)} octets, short of the {end} the frame needs')
         type_ = data[3:4]
         flags = int.from_bytes(data[4:5], 'big', signed=False)
         # RFC 9113 §4.1 — the high bit of the 32-bit stream identifier is
