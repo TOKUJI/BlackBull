@@ -6288,7 +6288,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_WRITE_TIMEOUT</code></td>
 <td><code>30.0</code></td>
-<td>Seconds the server will wait for a single response socket drain, <code>sendfile</code> chunk, or HTTP/2 flow-control wait.  This is per progress wait, not a whole response total; <code>0</code> disables.</td>
+<td>Seconds the server will wait for a single response socket drain, <code>sendfile</code> chunk, or HTTP/2 flow-control wait.  This is per progress wait, not a whole response total; an HTTP/2 stream that waits past it is reset with <code>RST_STREAM(CANCEL)</code>, after at most the one response head already sent.  <code>0</code> disables.</td>
 </tr>
 <tr>
 <td><code>BB_KEEP_ALIVE_TIMEOUT</code></td>
