@@ -957,7 +957,7 @@ class HTTP2Sender(BaseSender):
         '_buffered_status', '_buffered_headers', '_expect_trailers',
         '_buffered_body', '_buffered_trailers', '_auto_flush_task',
         '_head_mode', '_suppress_body', '_remaining', '_poisoned',
-        '_log_record',
+        '_log_record', '_stalled',
     )
 
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
@@ -975,6 +975,8 @@ class HTTP2Sender(BaseSender):
         # Set once content broke its length after HEADERS left and the
         # stream was reset for it.
         self._poisoned = False
+        # The FlowControlStalled this stream raised, re-raised by every later send.
+        self._stalled: FlowControlStalled | None = None
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
@@ -1041,6 +1043,7 @@ class HTTP2Sender(BaseSender):
         self._poisoned = False
         self._log_record = None
         self._auto_flush_task = None
+        self._stalled = None
 
     def _stated_fields(self, status: HTTPStatus,
                        head: _MinimalResponseHeaders) -> _MinimalResponseHeaders:
@@ -1283,10 +1286,10 @@ class HTTP2Sender(BaseSender):
                                 limit=self._flow_control_timeout,
                                 protocol='http2')
                     cap_env = f'BB_{self._flow_control_cap.upper()}'
-                    raise FlowControlStalled(
+                    self._stalled = FlowControlStalled(
                         f'stream {self._stream_id}: peer sent no WINDOW_UPDATE '
-                        f'within {cap_env}={self._flow_control_timeout}s'
-                    ) from exc
+                        f'within {cap_env}={self._flow_control_timeout}s')
+                    raise self._stalled from exc
 
             chunk_size = min(
                 self._conn_window.size,
@@ -1399,11 +1402,15 @@ class HTTP2Sender(BaseSender):
                         payload,
                         end_stream=end_stream and not self._expect_trailers)
                 else:
-                    await self._write_response_start_and_body(
-                        payload, end_stream, self._buffered_status,
-                        self._buffered_headers, self._expect_trailers)
+                    buffered_status = self._buffered_status
+                    buffered_headers = self._buffered_headers
+                    # Take ownership before the write can stall on flow
+                    # control: the head is on the wire from then on.
                     self._buffered_status = None
                     self._buffered_headers = None
+                    await self._write_response_start_and_body(
+                        payload, end_stream, buffered_status,
+                        buffered_headers, self._expect_trailers)
         else:
             if self._suppress_body:
                 # No content before the final head: RFC 9113 §8.1 leaves an
@@ -1540,6 +1547,8 @@ class HTTP2Sender(BaseSender):
                         'the response was complete)',
                         self._stream_id)
                 return
+            if self._stalled is not None:
+                raise self._stalled
             headers = self._stated_fields(status, _as_response_fields(headers))
             if self._remaining is not None and self._remaining != len(body):
                 self._remaining = None
@@ -1592,6 +1601,11 @@ class HTTP2Sender(BaseSender):
                     logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
+                # A stalled stream has its head on the wire: an error handler's
+                # 500 must not follow it (RFC 9113 §8.1), and the stall must
+                # still reach the stream actor, which resets the stream.
+                if self._stalled is not None:
+                    raise self._stalled
                 status = HTTPStatus(body.status)
                 head = body._header
                 lengths = head.content_length

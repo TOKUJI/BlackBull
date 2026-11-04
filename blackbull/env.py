@@ -155,7 +155,7 @@ class Settings:
         doc="Seconds per HTTP/1.1 request-body read after the head. A breach surfaces `http.disconnect` and tears down the connection; `0` disables. Does not bound an HTTP/2 stream's body reads: use its request deadline and body rate/size bounds.")
     write_timeout: float = setting(
         'BB_WRITE_TIMEOUT', 30.0, minimum=0, section=_section,
-        doc='Seconds the server will wait for a single response socket drain, `sendfile` chunk, or HTTP/2 flow-control wait.  This is per progress wait, not a whole response total; `0` disables.')
+        doc='Seconds the server will wait for a single response socket drain, `sendfile` chunk, or HTTP/2 flow-control wait.  This is per progress wait, not a whole response total; an HTTP/2 stream that waits past it is reset with `RST_STREAM(CANCEL)`, after at most the one response head already sent.  `0` disables.')
     keep_alive_timeout: float = setting(
         'BB_KEEP_ALIVE_TIMEOUT', 5.0, minimum=0, config=('server', 'keep_alive_timeout'), section=_section,
         doc='Seconds an idle HTTP/1.1 keep-alive connection is held open after a complete response.  Lower for high-fan-in deployments; higher for chatty clients on slow links.')

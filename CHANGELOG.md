@@ -26,6 +26,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Fixed
+
+- HTTP/2: a response stalled on flow control past `BB_WRITE_TIMEOUT` is
+  reset with `RST_STREAM(CANCEL)` after its one response head; it sent the
+  head twice and then a `500` head on the same stream (BLA-557).
+
 ## [0.82.0] — 2026-11-04
 
 MINOR because `blackbull.client` changed its public API: see *Changed* and
