@@ -1250,7 +1250,14 @@ class Server:
             # finish; the drain is for the ones being served.
             errors.append(await _cancel_tasks(connecting, budget))
             await self._drain(drain_timeout)
-        except (asyncio.CancelledError, Exception) as exc:
+        except asyncio.CancelledError:
+            # Listener-close failures were already logged by _close_servers.
+            for exc in errors[1:]:
+                if exc is not None:
+                    logger.error('Server cleanup failed during cancellation',
+                                 exc_info=exc)
+            raise
+        except Exception as exc:
             errors.append(exc)
             logger.exception('Failed to drain connections during shutdown')
         except (KeyboardInterrupt, SystemExit) as exc:
