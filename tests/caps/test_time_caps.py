@@ -7,10 +7,10 @@ import hashlib
 import pytest
 
 from blackbull.client import HTTP1Client, HTTP2Client, WebSocketClient
-from blackbull.protocol.frame_types import FrameTypes
+from blackbull.protocol.frame_types import ErrorCodes, FrameTypes
 from blackbull.server import deadline
 from tests.conformance.http2._harness import _make_h2_frame, _make_headers_frame, h2_connect
-from tests.harness import peer, served
+from tests.harness import peer, read_h2_frame, served
 
 from ._drive import (_WS_GUID, _h2_answer, client_h2, client_http1, h2, h2_request, h2_response, head,
                      http1, http1_seen, make_app)
@@ -59,7 +59,14 @@ async def _unwindowed_h2_response() -> str:
                         + _make_h2_frame(FrameTypes.SETTINGS, 0, 0,
                                          b'\x00\x04' + (0).to_bytes(4, 'big'))
                         + h2_request(1, method=b'GET', path=b'/big', end_stream=True))
-        return await _h2_answer(wire)
+        heads = 0
+        while True:
+            kind, _, sid, payload = await asyncio.wait_for(read_h2_frame(wire.reader), 5)
+            if sid == 1 and kind == FrameTypes.HEADERS.value[0]:
+                heads += 1
+            if sid == 1 and kind == FrameTypes.RST_STREAM.value[0]:
+                code = ErrorCodes(int.from_bytes(payload[:4], 'big')).name
+                return f'{heads} HEADERS, RST_STREAM {code}'
 
 
 async def _late_body_after_an_unread_one() -> str:
@@ -154,10 +161,9 @@ ROWS = [
     Row('write_timeout', 'transport', 'truncated', setting='write_timeout',
         documented='socket drain', env={'BB_WRITE_TIMEOUT': '0.2'},
         provoke=_unread_response, under=lambda: http1(head()), under_answer='200'),
-    Row('write_timeout', 'http2', 'RST_STREAM INTERNAL_ERROR', setting='write_timeout',
+    Row('write_timeout', 'http2', '1 HEADERS, RST_STREAM CANCEL', setting='write_timeout',
         documented='flow-control wait', env={'BB_WRITE_TIMEOUT': '0.2'},
-        provoke=_unwindowed_h2_response,
-        xfail='BLA-557: sends HEADERS 200 twice and 500 before the reset'),
+        provoke=_unwindowed_h2_response),
     Row('client_head_timeout', 'http1', 'TimeoutError', setting='client_head_timeout',
         env={'BB_CLIENT_HEAD_TIMEOUT': '0.2'},
         provoke=lambda: client_http1(b'', hold=True)),
