@@ -69,6 +69,25 @@ async def _unwindowed_h2_response() -> str:
                 return f'{heads} HEADERS, RST_STREAM {code}'
 
 
+async def _late_body_after_an_unread_one() -> str:
+    """A body the handler never read stalls past the timeout, then its last
+    bytes arrive spelling a request: the drain must not serve it."""
+    smuggled = b'GET / HTTP/1.1\r\nHost: x\r\n\r\n'
+    async with served(make_app()) as s:
+        wire = await s.wire()
+        await wire.send(head(b'Content-Length: %d' % (2 + len(smuggled)),
+                             method=b'POST', target=b'/ignore') + b'ab')
+        first = (await wire.response()).status
+        await asyncio.sleep(0.5)
+        with contextlib.suppress(ConnectionError):
+            await wire.send(smuggled)
+        try:
+            closed = await asyncio.wait_for(wire.reader.read(1), 1) == b''
+        except TimeoutError:
+            closed = False
+        return f'{first}, {"closed" if closed else "open"}'
+
+
 async def _client_write_stall(client_cls, protocol: str) -> str:
     """A peer that accepts the connection and never reads what it is sent."""
     async def origin(reader, writer):
@@ -129,8 +148,10 @@ ROWS = [
         provoke=lambda: http1_seen(head(b'Content-Length: 10', method=b'POST', target=b'/seen')
                                    + b'ab'),
         under=lambda: http1(head(b'Content-Length: 10', method=b'POST') + b'x' * 10),
-        under_answer='200',
-        xfail='BLA-558: the connection stays open'),
+        under_answer='200'),
+    Row('body_timeout', 'http1', '200, closed', setting='body_timeout',
+        documented='http.disconnect', env={'BB_BODY_TIMEOUT': '0.2'},
+        provoke=_late_body_after_an_unread_one),
     Row('request_timeout', 'http1', '408', setting='request_timeout',
         env={'BB_REQUEST_TIMEOUT': '0.2'},
         provoke=lambda: http1(head(target=b'/hold'))),

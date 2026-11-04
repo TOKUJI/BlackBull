@@ -28,6 +28,10 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- HTTP/1.1: a request body that exceeds `BB_BODY_TIMEOUT` closes the
+  connection after the answer, as documented, whether or not the handler read
+  the body; it was kept open, so the rest of the body would have been read as
+  the next request (BLA-558).
 - HTTP/2: a response stalled on flow control past `BB_WRITE_TIMEOUT` is
   reset with `RST_STREAM(CANCEL)` after its one response head; it sent the
   head twice and then a `500` head on the same stream (BLA-557).

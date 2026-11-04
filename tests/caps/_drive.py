@@ -28,7 +28,7 @@ WS_UPGRADE = (b'GET /ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n'
 
 def make_app() -> BlackBull:
     """``/`` reads the whole body and answers 200, ``/seen`` answers the body's
-    last event type, ``/big`` sends 64 MiB,
+    last event type, ``/ignore`` answers without reading, ``/big`` sends 64 MiB,
     ``/hold`` never reads for two seconds, ``/ws`` accepts and reads."""
     app = BlackBull()
 
@@ -54,6 +54,11 @@ def make_app() -> BlackBull:
         for _ in range(64):
             await send({'type': 'http.response.body', 'body': chunk, 'more_body': True})
         await send({'type': 'http.response.body', 'body': b''})
+
+    @app.route(path='/ignore', methods=['POST'])
+    async def ignore(conn, receive, send):
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'ok'})
 
     @app.route(path='/hold', methods=['GET', 'POST'])
     async def hold(conn, receive, send):
