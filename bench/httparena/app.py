@@ -1,6 +1,7 @@
 """BlackBull entrypoint for the HttpArena benchmark profiles.
 
-Serves the H1 + WebSocket profiles; crud, *-grpc and *-h3 are not subscribed.
+Serves the H1, H2, WebSocket and unary gRPC profiles; crud and *-h3 are not
+subscribed.
 ``launcher.py`` starts one process per listener: cleartext :8080 (h2c by
 prior knowledge), h2c :8082, TLS HTTP/1.1 :8081, TLS HTTP/2 :8443.
 """
@@ -28,6 +29,7 @@ except ImportError:                                   # pragma: no cover
 from blackbull.middleware.compression import Compression
 
 import db
+from grpc_bench import build_registry
 
 
 DATASET_PATH = os.environ.get('DATASET_PATH', '/data/dataset.json')
@@ -41,6 +43,7 @@ except (OSError, ValueError):
 app = BlackBull()
 
 app.use(Compression())
+app.enable_grpc(build_registry())
 
 app.static('/static', os.environ.get('STATIC_DIR', '/data/static/'))
 

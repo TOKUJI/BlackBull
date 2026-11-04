@@ -18,14 +18,19 @@
     "static-h2",
     "echo-ws",
     "baseline",
-    "latency-1m", "latency-10k",
+    "latency-1m",
+    "latency-10k",
     "pipelined",
     "limited-conn",
     "json-comp",
     "json-tls",
     "8gbit",
     "async-db",
-    "static-tls"
+    "static-tls",
+    "baseline-h2c",
+    "json-h2c",
+    "unary-grpc",
+    "unary-grpc-tls"
   ],
   "maintainers": [
     "TOKUJI"
