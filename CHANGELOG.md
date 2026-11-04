@@ -26,6 +26,13 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Fixed
+
+- HTTP/1.1: a request body that exceeds `BB_BODY_TIMEOUT` closes the
+  connection after the answer, as documented, whether or not the handler read
+  the body; it was kept open, so the rest of the body would have been read as
+  the next request (BLA-558).
+
 ## [0.82.0] — 2026-11-04
 
 MINOR because `blackbull.client` changed its public API: see *Changed* and

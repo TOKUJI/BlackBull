@@ -383,7 +383,8 @@ class HTTP1Recipient(BaseRecipient):
         self._body_wait = 0.0
         self._judged_wait = 0.0
         self._rate_floor = None         # made on the first body chunk
-        # Over the size cap or below the rate floor; see [`must_close`][].
+        # Over the size cap, below the rate floor or past body_timeout; see
+        # [`must_close`][].
         self._body_refused = False
         # A chunked-framing violation; see [`must_close`][].
         self.framing_broken = False
@@ -394,8 +395,8 @@ class HTTP1Recipient(BaseRecipient):
         """This connection cannot carry another request.
 
         Two causes, one consequence.  A chunked-framing violation leaves the
-        byte stream desynced; a body refused for size leaves octets we
-        deliberately did not read.  Either way the bytes that follow are the
+        byte stream desynced; a body refused for size, rate or time leaves
+        octets we did not read.  Either way the bytes that follow are the
         peer's to choose, and parsing them as the next request line is the
         request-smuggling shape — so the answer is to close, not to resynchronise.
         """
@@ -435,8 +436,9 @@ class HTTP1Recipient(BaseRecipient):
     async def drain(self, max_bytes: int) -> bool:
         """Discard any unread request body so the next pipelined request parses
         cleanly.  Returns True if fully drained (or the peer disconnected),
-        False if the unread body exceeded *max_bytes* — the caller should then
-        close the connection rather than keep it alive.
+        False if the unread body exceeded *max_bytes* or stalled past
+        body_timeout — the caller should then close the connection rather than
+        keep it alive.
         """
         # Lazily, once per drain rather than per chunk: ``router`` cannot be
         # imported at module scope here (see [`_bad_request`][]).
@@ -446,8 +448,9 @@ class HTTP1Recipient(BaseRecipient):
             try:
                 chunk = await self.next_chunk()
             except ClientDisconnected:
-                # EOF or body_timeout mid-drain: nothing left to desync.
-                return True
+                # EOF leaves nothing to desync; a body_timeout leaves the rest
+                # of the body still to come, so the caller must close.
+                return not self._body_refused
             except HTTPException:
                 # A body limit tripped while draining: reachable only for an
                 # *undeclared* over-cap body the handler never read.  Report
@@ -590,6 +593,9 @@ class HTTP1Recipient(BaseRecipient):
                         scope_path=self._req_path,
                         protocol='http1')
             self._done = True
+            # The rest of the declared body may still arrive; read as the next
+            # request, it would desync the connection.
+            self._body_refused = True
             raise ClientDisconnected() from None
         except EOFError:
             # EOF mid-body — not a cap hit, and no synthetic 408.
