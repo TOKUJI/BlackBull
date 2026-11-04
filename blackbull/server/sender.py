@@ -1115,6 +1115,10 @@ class HTTP2Sender(BaseSender):
         """
         if self._closed:
             return
+        if self._stalled is not None:
+            # One final head per stream (RFC 9113 §8.1): the stream actor
+            # resets a stalled stream instead.
+            raise self._stalled
         headers = headers or []
         # END_STREAM rides the DATA frame below, never HEADERS — unless the
         # head was promised no content, when there is no DATA to ride on.
@@ -1538,8 +1542,6 @@ class HTTP2Sender(BaseSender):
                         'the response was complete)',
                         self._stream_id)
                 return
-            if self._stalled is not None:
-                raise self._stalled
             headers = self._stated_fields(status, _as_response_fields(headers))
             if self._remaining is not None and self._remaining != len(body):
                 self._remaining = None
@@ -1565,10 +1567,6 @@ class HTTP2Sender(BaseSender):
                     logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
-                # One final head per stream (RFC 9113 §8.1): after a stall the
-                # stream actor resets the stream instead.
-                if self._stalled is not None:
-                    raise self._stalled
                 status = HTTPStatus(body.status)
                 head = body._header
                 lengths = head.content_length
