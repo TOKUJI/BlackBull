@@ -6059,7 +6059,8 @@ own.  BlackBull takes <code>SIGTERM</code> while serving and restores your handl
 afterwards; it then runs once per signal received, after the drain, and its
 exit status wins.  Off the main thread BlackBull leaves <code>SIGTERM</code> alone.</p>
 <p><code>Server.stop()</code> ends <code>run()</code> cleanly at any point, including during lifespan
-startup.</p>
+startup. Cancelling <code>stop()</code> propagates <code>CancelledError</code>; concurrent cleanup
+failures are logged separately.</p>
 
 
 

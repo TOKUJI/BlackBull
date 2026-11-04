@@ -7203,8 +7203,8 @@ subsequent calls return http.disconnect.</p>
 
         <p>This connection cannot carry another request.</p>
 <p>Two causes, one consequence.  A chunked-framing violation leaves the
-byte stream desynced; a body refused for size leaves octets we
-deliberately did not read.  Either way the bytes that follow are the
+byte stream desynced; a body refused for size, rate or time leaves
+octets we did not read.  Either way the bytes that follow are the
 peer's to choose, and parsing them as the next request line is the
 request-smuggling shape — so the answer is to close, not to resynchronise.</p>
 
@@ -7312,8 +7312,9 @@ here, not in <code>__init__</code>.</p>
 
         <p>Discard any unread request body so the next pipelined request parses
 cleanly.  Returns True if fully drained (or the peer disconnected),
-False if the unread body exceeded <em>max_bytes</em> — the caller should then
-close the connection rather than keep it alive.</p>
+False if the unread body exceeded <em>max_bytes</em> or stalled past
+body_timeout — the caller should then close the connection rather than
+keep it alive.</p>
 
 
     </div>
