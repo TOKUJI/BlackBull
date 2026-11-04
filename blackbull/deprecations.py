@@ -34,7 +34,7 @@ DEPRECATIONS: dict[str, Deprecation] = {
         'BLA-581'),
     'BBD003': Deprecation(
         'blackbull.client.scenario and blackbull.client.scenario_oracle',
-        'blackbull.fault_injection', 'v0.42.0', 'in v0.82.0', 'BLA-578'),
+        'blackbull.fault_injection', 'v0.42.0', 'in v0.83.0', 'BLA-578'),
     'BBD004': Deprecation(
         'blackbull.Request', 'blackbull.Connection, which has the same members',
         'v0.60.0', 'no earlier than 2027-08-01', 'BLA-582'),
@@ -45,16 +45,16 @@ DEPRECATIONS: dict[str, Deprecation] = {
         'BLA-583'),
     'BBD006': Deprecation(
         'scenario JSON in the v1 format', 'the current format: to_json(from_json(text))',
-        'v0.81.1', 'no earlier than v0.84.0 and 2026-11-28', 'BLA-584'),
+        'v0.82.0', 'no earlier than v0.84.0 and 2026-11-28', 'BLA-584'),
     'BBD007': Deprecation(
         'the encode_* helpers of scenario_h1_server and scenario_h2_client',
-        "each step's wire()", 'v0.81.1', 'no earlier than v0.84.0 and 2026-11-28',
+        "each step's wire()", 'v0.82.0', 'no earlier than v0.84.0 and 2026-11-28',
         'BLA-584'),
     'BBD008': Deprecation(
         'the BLACKBULL_* environment variables', 'the same names with the BB_ prefix',
-        'v0.81.1', 'no earlier than October 2027', 'BLA-559', warns=False),
+        'v0.82.0', 'no earlier than October 2027', 'BLA-559', warns=False),
     'BBD009': Deprecation(
-        'Python 3.11 support', 'Python 3.12 or later', 'v0.81.1',
+        'Python 3.11 support', 'Python 3.12 or later', 'v0.82.0',
         'in the first release from October 2027', 'BLA-586', warns=False),
 }
 

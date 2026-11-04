@@ -17,7 +17,7 @@ version does not warn.
 | 3.12 | 2028-10 | supported |
 | 3.13 | 2029-10 | supported |
 | 3.14 | 2030-10 | supported |
-| 3.15 | 2031-10 | supported from v0.81.1 |
+| 3.15 | 2031-10 | supported from v0.82.0 |
 
 The supported versions are the `Programming Language :: Python` classifiers
 in `pyproject.toml`; a test keeps them, `requires-python`, the CI matrix and
