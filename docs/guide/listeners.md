@@ -154,4 +154,5 @@ afterwards; it then runs once per signal received, after the drain, and its
 exit status wins.  Off the main thread BlackBull leaves `SIGTERM` alone.
 
 `Server.stop()` ends `run()` cleanly at any point, including during lifespan
-startup.
+startup. Cancelling `stop()` propagates `CancelledError`; concurrent cleanup
+failures are logged separately.
