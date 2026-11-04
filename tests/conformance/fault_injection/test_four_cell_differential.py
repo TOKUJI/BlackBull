@@ -963,14 +963,14 @@ class TestACImplementationAgrees:
         from blackbull.fault_injection.catalogue import CATALOGUE_H1_SERVER
         from blackbull.fault_injection.h1_server import H1FaultServer
 
-        async def curl_stderr(build) -> str:
+        async def curl_exit(build) -> int:
             async with H1FaultServer(build()) as srv:
                 proc = await asyncio.create_subprocess_exec(
                     'curl', '-sS', '--max-time', '5', '--http1.1',
                     f'http://127.0.0.1:{srv.port}/',
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                _, err = await asyncio.wait_for(proc.communicate(), timeout=15)
-            return err.decode(errors='replace').lower()
+                await asyncio.wait_for(proc.communicate(), timeout=15)
+            return proc.returncode
 
         async def httpx_error(build) -> str:
             async with H1FaultServer(build()) as srv:
@@ -988,11 +988,13 @@ class TestACImplementationAgrees:
         # incomplete body, so both should say so in those terms.
         assert 'body' in await httpx_error(half), (
             'httpx did not describe the half-close as a truncated body')
-        assert 'transfer closed' in await curl_stderr(half) \
-            or 'partial' in await curl_stderr(half), (
-            'curl did not describe the half-close as a truncated transfer')
+        # curl's exit codes, not its wording, which changes between releases.
+        assert await curl_exit(half) == 18, (       # CURLE_PARTIAL_FILE
+            'curl did not report the half-close as a truncated transfer')
 
         # A reset before any response is a different report on both.
         assert 'body' not in await httpx_error(reset), (
             'httpx reported a pre-response reset the same way as a '
             'half-close — the two steps are indistinguishable on the wire')
+        assert await curl_exit(reset) == 52, (      # CURLE_GOT_NOTHING
+            'curl did not report the pre-response reset as an empty reply')
