@@ -187,8 +187,8 @@ class StreamActor(Actor):
                 self._app, self._aggregator, self._force_asgi,
             ).run()
         except FlowControlStalled:
-            # CANCEL, not INTERNAL_ERROR — see rfc9113-implementation.md §10.5,
-            # "Data dribble".
+            # CANCEL, not INTERNAL_ERROR: the peer's missing credit, not a
+            # server fault, ended the stream (BB_WRITE_TIMEOUT, env-vars.md).
             await self._http2_actor.send_frame(
                 self._http2_actor.factory.rst_stream(
                     self._stream_id, ErrorCodes.CANCEL)

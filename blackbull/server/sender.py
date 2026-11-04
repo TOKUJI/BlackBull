@@ -957,7 +957,7 @@ class HTTP2Sender(BaseSender):
         '_buffered_status', '_buffered_headers', '_expect_trailers',
         '_buffered_body', '_buffered_trailers', '_auto_flush_task',
         '_head_mode', '_suppress_body', '_remaining', '_poisoned',
-        '_log_record',
+        '_log_record', '_stalled',
     )
 
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
@@ -975,6 +975,8 @@ class HTTP2Sender(BaseSender):
         # Set once content broke its length after HEADERS left and the
         # stream was reset for it.
         self._poisoned = False
+        # The FlowControlStalled this stream raised; a later final head re-raises it.
+        self._stalled: FlowControlStalled | None = None
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
@@ -1041,6 +1043,7 @@ class HTTP2Sender(BaseSender):
         self._poisoned = False
         self._log_record = None
         self._auto_flush_task = None
+        self._stalled = None
 
     def _stated_fields(self, status: HTTPStatus,
                        head: _MinimalResponseHeaders) -> _MinimalResponseHeaders:
@@ -1112,6 +1115,10 @@ class HTTP2Sender(BaseSender):
         """
         if self._closed:
             return
+        if self._stalled is not None:
+            # One final head per stream (RFC 9113 §8.1): the stream actor
+            # resets a stalled stream instead.
+            raise self._stalled
         headers = headers or []
         # END_STREAM rides the DATA frame below, never HEADERS — unless the
         # head was promised no content, when there is no DATA to ride on.
@@ -1283,10 +1290,10 @@ class HTTP2Sender(BaseSender):
                                 limit=self._flow_control_timeout,
                                 protocol='http2')
                     cap_env = f'BB_{self._flow_control_cap.upper()}'
-                    raise FlowControlStalled(
+                    self._stalled = FlowControlStalled(
                         f'stream {self._stream_id}: peer sent no WINDOW_UPDATE '
-                        f'within {cap_env}={self._flow_control_timeout}s'
-                    ) from exc
+                        f'within {cap_env}={self._flow_control_timeout}s')
+                    raise self._stalled from exc
 
             chunk_size = min(
                 self._conn_window.size,
@@ -1379,17 +1386,15 @@ class HTTP2Sender(BaseSender):
                 self._buffered_body = payload
                 self._schedule_auto_flush()
             else:
+                # Take ownership first: the write can yield to auto-flush or
+                # stall on flow control, and the head is sent from then on.
+                status, headers = self._buffered_status, self._buffered_headers
+                self._buffered_status = None
+                self._buffered_headers = None
                 if self._buffered_body is not None:
-                    buffered_body = self._buffered_body
-                    buffered_status = self._buffered_status
-                    buffered_headers = self._buffered_headers
-                    # Take ownership before drain can yield to auto-flush.
-                    self._buffered_status = None
-                    self._buffered_headers = None
-                    self._buffered_body = None
+                    buffered_body, self._buffered_body = self._buffered_body, None
                     await self._write_response_start_and_body(
-                        buffered_body, False, buffered_status,
-                        buffered_headers, self._expect_trailers)
+                        buffered_body, False, status, headers, self._expect_trailers)
                     if self._suppress_body:
                         # No content before the final head: RFC 9113 §8.1
                         # leaves an informational response part of the same
@@ -1400,10 +1405,7 @@ class HTTP2Sender(BaseSender):
                         end_stream=end_stream and not self._expect_trailers)
                 else:
                     await self._write_response_start_and_body(
-                        payload, end_stream, self._buffered_status,
-                        self._buffered_headers, self._expect_trailers)
-                    self._buffered_status = None
-                    self._buffered_headers = None
+                        payload, end_stream, status, headers, self._expect_trailers)
         else:
             if self._suppress_body:
                 # No content before the final head: RFC 9113 §8.1 leaves an
@@ -1547,34 +1549,7 @@ class HTTP2Sender(BaseSender):
             if self._log_record is not None:
                 self._log_record.status = int(status)
                 self._log_record.response_bytes += len(body)
-            informational = is_informational(status)
-            forbidden = self._head_mode or int(status) in NO_CONTENT_GENERATED_STATUSES
-            self._suppress_body = forbidden
-            h_bytes = build_response_headers(
-                self._factory.encoder, self._stream_id, status, headers,
-                end_stream=forbidden and not informational,
-                max_frame_size=self.max_frame_size)
-            if forbidden:
-                await self._write(h_bytes)
-                if not informational:
-                    self._end_stream_sent = True
-                return
-
-            total = len(body)
-            sid_bytes = self._stream_id.to_bytes(4, 'big')
-            if (total <= self._conn_window.size and
-                    total <= self.stream_window_size and
-                    total <= self.max_frame_size):
-                end_flag = DataFrameFlags.END_STREAM.to_bytes(1, 'big')
-                if total == 0:
-                    d_bytes = b'\x00\x00\x00\x00' + end_flag + sid_bytes
-                else:
-                    d_bytes = total.to_bytes(3, 'big') + b'\x00' + end_flag + sid_bytes + body
-                await self._write_flow_controlled((h_bytes, d_bytes), total)
-            else:
-                await super()._write(h_bytes)
-                await self._write_data(body, end_stream=True)
-            self._end_stream_sent = True
+            await self._write_response_start_and_body(body, True, status, headers, False)
 
         elif isinstance(body, NativeResponse):
             if self._end_stream_sent:
