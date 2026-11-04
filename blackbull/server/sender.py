@@ -975,7 +975,7 @@ class HTTP2Sender(BaseSender):
         # Set once content broke its length after HEADERS left and the
         # stream was reset for it.
         self._poisoned = False
-        # The FlowControlStalled this stream raised, re-raised by every later send.
+        # The FlowControlStalled this stream raised; a later final head re-raises it.
         self._stalled: FlowControlStalled | None = None
         self._factory = factory
         self._stream_id = stream_id
@@ -1382,17 +1382,15 @@ class HTTP2Sender(BaseSender):
                 self._buffered_body = payload
                 self._schedule_auto_flush()
             else:
+                # Take ownership first: the write can yield to auto-flush or
+                # stall on flow control, and the head is sent from then on.
+                status, headers = self._buffered_status, self._buffered_headers
+                self._buffered_status = None
+                self._buffered_headers = None
                 if self._buffered_body is not None:
-                    buffered_body = self._buffered_body
-                    buffered_status = self._buffered_status
-                    buffered_headers = self._buffered_headers
-                    # Take ownership before drain can yield to auto-flush.
-                    self._buffered_status = None
-                    self._buffered_headers = None
-                    self._buffered_body = None
+                    buffered_body, self._buffered_body = self._buffered_body, None
                     await self._write_response_start_and_body(
-                        buffered_body, False, buffered_status,
-                        buffered_headers, self._expect_trailers)
+                        buffered_body, False, status, headers, self._expect_trailers)
                     if self._suppress_body:
                         # No content before the final head: RFC 9113 §8.1
                         # leaves an informational response part of the same
@@ -1402,15 +1400,8 @@ class HTTP2Sender(BaseSender):
                         payload,
                         end_stream=end_stream and not self._expect_trailers)
                 else:
-                    buffered_status = self._buffered_status
-                    buffered_headers = self._buffered_headers
-                    # Take ownership before the write can stall on flow
-                    # control: the head is on the wire from then on.
-                    self._buffered_status = None
-                    self._buffered_headers = None
                     await self._write_response_start_and_body(
-                        payload, end_stream, buffered_status,
-                        buffered_headers, self._expect_trailers)
+                        payload, end_stream, status, headers, self._expect_trailers)
         else:
             if self._suppress_body:
                 # No content before the final head: RFC 9113 §8.1 leaves an
@@ -1556,34 +1547,7 @@ class HTTP2Sender(BaseSender):
             if self._log_record is not None:
                 self._log_record.status = int(status)
                 self._log_record.response_bytes += len(body)
-            informational = is_informational(status)
-            forbidden = self._head_mode or int(status) in NO_CONTENT_GENERATED_STATUSES
-            self._suppress_body = forbidden
-            h_bytes = build_response_headers(
-                self._factory.encoder, self._stream_id, status, headers,
-                end_stream=forbidden and not informational,
-                max_frame_size=self.max_frame_size)
-            if forbidden:
-                await self._write(h_bytes)
-                if not informational:
-                    self._end_stream_sent = True
-                return
-
-            total = len(body)
-            sid_bytes = self._stream_id.to_bytes(4, 'big')
-            if (total <= self._conn_window.size and
-                    total <= self.stream_window_size and
-                    total <= self.max_frame_size):
-                end_flag = DataFrameFlags.END_STREAM.to_bytes(1, 'big')
-                if total == 0:
-                    d_bytes = b'\x00\x00\x00\x00' + end_flag + sid_bytes
-                else:
-                    d_bytes = total.to_bytes(3, 'big') + b'\x00' + end_flag + sid_bytes + body
-                await self._write_flow_controlled((h_bytes, d_bytes), total)
-            else:
-                await super()._write(h_bytes)
-                await self._write_data(body, end_stream=True)
-            self._end_stream_sent = True
+            await self._write_response_start_and_body(body, True, status, headers, False)
 
         elif isinstance(body, NativeResponse):
             if self._end_stream_sent:
@@ -1601,9 +1565,8 @@ class HTTP2Sender(BaseSender):
                     logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
-                # A stalled stream has its head on the wire: an error handler's
-                # 500 must not follow it (RFC 9113 §8.1), and the stall must
-                # still reach the stream actor, which resets the stream.
+                # One final head per stream (RFC 9113 §8.1): after a stall the
+                # stream actor resets the stream instead.
                 if self._stalled is not None:
                     raise self._stalled
                 status = HTTPStatus(body.status)
