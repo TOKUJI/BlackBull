@@ -36,17 +36,17 @@ profiles BlackBull's runtime supports today:
 | json-tls        | GET `/json/{count}` on :8081 | ✓ |
 | `/echo` | POST | Returns the request body back verbatim |
 | baseline-h2     | GET/POST `/baseline11` on :8443 (TLS, ALPN h2) | ✓ (claimed in `meta.json`) |
-| baseline-h2c    | GET `/baseline11`  on :8082 (h2 prior-knowledge) | runtime-capable; not claimed in `meta.json` yet |
-| json-h2c        | GET `/json/{count}` on :8082 (h2 prior-knowledge) | runtime-capable; not claimed in `meta.json` yet |
+| baseline-h2c    | GET `/baseline2`  on :8082 (h2 prior-knowledge) | ✓ |
+| json-h2c        | GET `/json/{count}` on :8082 (h2 prior-knowledge) | ✓ |
+| unary-grpc      | `benchmark.BenchmarkService/GetSum` on :8080 (h2c) | ✓ (`grpc_bench.py`) |
+| unary-grpc-tls  | `benchmark.BenchmarkService/GetSum` on :8443 (TLS) | ✓ |
 | echo-ws         | GET `/ws` upgrade      | ✓ (re-exported via the standard BlackBull WS handler — TODO mount at `/ws` here) |
 
 A dedicated `:8082` cleartext listener is opened so HttpArena's
 `validate.sh` port-open probe succeeds.  BlackBull's preface
 auto-detect dispatches h2c connections through the HTTP/2 actor on
 the same app/workers as `:8080`; the port stays idle during
-benchmark runs that do not exercise h2c.  `baseline-h2c` /
-`json-h2c` are runtime-capable on `:8082` but currently unclaimed in
-`meta.json`.
+benchmark runs that do not exercise h2c.
 
 Profiles **not** implemented (intentional carve-out):
 
@@ -55,7 +55,6 @@ Profiles **not** implemented (intentional carve-out):
 | `static-h3` | HTTP/3 / QUIC transport is intentionally out-of-scope per the project roadmap. |
 | `async-db`, `crud`, `fortunes` | Out of scope.  BlackBull is a protocol-layer framework, not a full-stack one — Postgres-backed implementations belong in a separate submission if we ever pursue the leaderboard (see Flask's HttpArena entry for the pattern). |
 | `*-h3`           | HTTP/3 / QUIC is out-of-scope. |
-| `*-grpc`         | No gRPC. |
 | `gateway-*`, `production-stack` | Need sidecar + DB work first; same scope rationale as the DB profiles. |
 
 ## Local smoke test
