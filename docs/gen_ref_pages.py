@@ -9,7 +9,7 @@ public API that ``pyproject.toml`` declares.
 Adding or removing a source file is reflected in the next build without any
 manual changes to ``mkdocs.yml`` or stub files.
 """
-import importlib
+import ast
 from pathlib import Path
 import tomllib
 
@@ -43,6 +43,17 @@ for path in sorted(src_root.rglob("*.py")):
     mkdocs_gen_files.set_edit_path(full_doc_path, path)
     nav[module_parts] = str(doc_path)
 
+def exported(package: str) -> list[str]:
+    """*package*'s ``__all__``, read from its source: the docs build installs
+    no optional extras, so importing a public package can fail."""
+    init = Path(*package.split(".")) / "__init__.py"
+    for node in ast.parse(init.read_text()).body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise ValueError(f"{package} declares no __all__")
+
+
 with open("pyproject.toml", "rb") as fh:
     public = tomllib.load(fh)["tool"]["blackbull"]["public-packages"]
 with mkdocs_gen_files.open("api/public.md", "w") as f:
@@ -52,7 +63,7 @@ with mkdocs_gen_files.open("api/public.md", "w") as f:
             "a pull request that does so fails its *Public API* check.  Every other\n"
             "module documented here may change in any release.\n")
     for package in public:
-        names = ", ".join(f"`{name}`" for name in importlib.import_module(package).__all__)
+        names = ", ".join(f"`{name}`" for name in exported(package))
         f.write(f"\n## `{package}`\n\n{names}\n")
 nav["Public API"] = "public.md"
 
