@@ -118,6 +118,7 @@ for p in requested:                      # requested order is preserved
 PYEOF
 }
 
+declare -A _SUBSCRIBED
 for fw in "${FRAMEWORKS[@]}"; do
     mapfile -t _FW_PROFILES < <(_subscribed_profiles "$fw")
     # Fail OPEN.  If the filter produced nothing it is far more likely that
@@ -130,7 +131,16 @@ for fw in "${FRAMEWORKS[@]}"; do
         _FW_PROFILES=("${PROFILES[@]}")
     fi
     echo "  - $fw: ${#_FW_PROFILES[@]} of ${#PROFILES[@]} requested profiles subscribed: ${_FW_PROFILES[*]}"
-    for prof in "${_FW_PROFILES[@]}"; do
+    for prof in "${_FW_PROFILES[@]}"; do _SUBSCRIBED["$fw/$prof"]=1; done
+done
+
+# Profile-major, with the framework order rotated per profile, so drift over
+# the session does not land on one framework.
+_rotation=0
+for prof in "${PROFILES[@]}"; do
+    for ((_k = 0; _k < ${#FRAMEWORKS[@]}; _k++)); do
+        fw="${FRAMEWORKS[(_rotation + _k) % ${#FRAMEWORKS[@]}]}"
+        [ -n "${_SUBSCRIBED[$fw/$prof]:-}" ] || continue
         echo "  - $fw / $prof"
         cd "$HARENA_DIR"
         if sudo ${_SUDO_ENV} ./scripts/benchmark.sh "$fw" "$prof" --save 2>&1 | tee "$RESULTS_DIR/benchmark-${fw}-${prof}.log"; then
@@ -152,6 +162,7 @@ for fw in "${FRAMEWORKS[@]}"; do
                 || true
         done
     done
+    _rotation=$((_rotation + 1))
 done
 
 echo "=== run_httparena.sh complete ==="
