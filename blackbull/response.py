@@ -165,8 +165,15 @@ def cookie_header(name: str, value: str, path: str = '/',
             f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
 
 
+async def _aclose(content) -> None:
+    """Close an async generator left suspended; a no-op once it is exhausted."""
+    aclose = getattr(content, 'aclose', None)
+    if aclose is not None:
+        await aclose()
+
+
 class StreamingResponse:
-    """Stream from an async iterator; finalize the generator on completion or cancellation.
+    """Stream from an async iterator; finalize the generator on completion, cancellation or a failed send.
 
     Return from a handler, pass to BlackBull send, or invoke as (conn, receive, send).
     """
@@ -188,11 +195,14 @@ class StreamingResponse:
         if not any(k.lower() == b'content-type' for k, _ in h):
             h.insert(0, (b'content-type', self._media_type))
         await send(NativeResponse(status=self._status, header=h))
-        async for chunk in self._content:
-            if isinstance(chunk, str):
-                chunk = chunk.encode()
-            if chunk:
-                await send(NativeResponse(body=chunk, more_body=True))
+        try:
+            async for chunk in self._content:
+                if isinstance(chunk, str):
+                    chunk = chunk.encode()
+                if chunk:
+                    await send(NativeResponse(body=chunk, more_body=True))
+        finally:
+            await _aclose(self._content)
         await send(NativeResponse(body=b'', more_body=False))
 
 
@@ -291,8 +301,11 @@ class EventSourceResponse(StreamingResponse):
     @staticmethod
     async def _encode(events):
         """Translate a stream of events into pre-formatted SSE byte chunks."""
-        async for event in events:
-            yield _format_sse_event(event)
+        try:
+            async for event in events:
+                yield _format_sse_event(event)
+        finally:
+            await _aclose(events)
 
 
 def WebSocketResponse(content) -> dict:
