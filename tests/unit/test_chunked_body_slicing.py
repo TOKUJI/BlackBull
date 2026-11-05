@@ -81,7 +81,8 @@ async def test_a_chunk_larger_than_the_slice_arrives_in_slices():
 
 
 @pytest.mark.asyncio
-async def test_no_read_is_larger_than_the_slice_however_large_the_chunk(reads):
+@pytest.mark.parametrize('declared', [b'40000000', b'F' * 16, b'F' * 40])
+async def test_no_read_is_larger_than_the_slice_however_large_the_chunk(reads, declared):
     """The security property, stated as the reader sees it.
 
     A peer declaring 1 GiB must not make the server ask for 1 GiB.  Asking
@@ -90,7 +91,7 @@ async def test_no_read_is_larger_than_the_slice_however_large_the_chunk(reads):
     the pause it triggered is still in effect.
     """
     payload = b'x' * (SLICE * 2)
-    src = fed(b'40000000\r\n' + payload).reader            # declares 1 GiB, sends 8 KiB
+    src = fed(declared + b'\r\n' + payload).reader
     r = _recipient(src)
 
     # Two full slices are available and must be delivered before the

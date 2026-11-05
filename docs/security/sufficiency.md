@@ -24,7 +24,7 @@ machinery — see the gate). Check IDs are validated against the registry by
 | Content-Length + Transfer-Encoding together must be refused | SMUGGLE-001 (RFC 9112 §6.3) |
 | Obfuscated or duplicated Transfer-Encoding must be refused | SMUGGLE-002 |
 | Duplicate or invalid Content-Length must be refused | SMUGGLE-003 |
-| Chunked chunk-size syntax | CHUNK-002 |
+| Chunked chunk-size syntax and incomplete bodies | CHUNK-002 |
 | Chunk extensions are bounded and ignored safely | CHUNK-001 |
 | Prohibited trailer fields must not be applied | TRAILER-001 (RFC 9112 §7.1.2) |
 | No state contamination across abusive exchanges | STATE-001 |
@@ -68,7 +68,7 @@ machinery — see the gate). Check IDs are validated against the registry by
 | Header read | obs-fold / bare CR / bad names | 400 | H1-ROBUST-004, H1-ROBUST-006, H1-ROBUST-007 |
 | Header read | duplicate Host / empty Host | 400 | HOST-001, H1-ROBUST-008 |
 | Body read (CL) | truncated or oversize body | timeout/close, no desync | STATE-001, RANGE-001 (body caps: resource ledger C) |
-| Body read (chunked) | bad sizes, bad extensions | 400 | CHUNK-001, CHUNK-002 |
+| Body read (chunked) | invalid sizes/extensions; incomplete body | 400 for syntax; close permitted for incomplete data | CHUNK-001, CHUNK-002 |
 | Body read (chunked) | trailers | forbidden fields refused, others ignored | TRAILER-001 |
 | Body read (CL+TE, dup CL, obfuscated TE) | framing ambiguity | refuse the request | SMUGGLE-001, SMUGGLE-002, SMUGGLE-003 |
 | Expect: 100-continue | early body / bogus expect list | no desync of the next request | EXPECT-001 |

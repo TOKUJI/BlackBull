@@ -114,7 +114,7 @@ Exclusions with reasons (G4-2):
 |---|---|---|
 | TLS-001 | `h2c` | endpoint-level TLS check; h2c has no TLS. The `https1` lane shares the same TLS listener as `h2`, so the endpoint check stays on `h2` alone. |
 | H1-ROBUST-005 | `https1` | the check ends its truncated body with a TCP half-close (FIN); TLS has no half-close for the probe to express, so the server's defence cannot be observed. Covered on `h1`. |
-| CHUNK-002 | `https1` | same half-close step as H1-ROBUST-005 (chunk-size overflow). Covered on `h1`. |
+| CHUNK-002 | `https1` | half-close is needed to expose an incomplete chunk body. Covered on `h1`. |
 | STATE-001 | `https1` | its truncated-body case uses the same half-close step. Covered on `h1`. |
 | H1-ROBUST-011 | quick tier | documented default defence waits; run in the long tier (G2-5). |
 
@@ -347,7 +347,7 @@ open.
 | SMUGGLE-002 | `Content-Length` plus obfuscated/duplicated TE (`chunked, identity`; `xchunked`; `Transfer-Encoding: chunked` + `Transfer-Encoding: x`; TE listed first) → 400 or close only (RFC 9112 §6.1/§6.3), then the STATE-001 follow-up |
 | SMUGGLE-003 | duplicate `Content-Length` with different values → 400 or close (RFC 9112 §6.3; catalogued `two_content_lengths`), then the STATE-001 follow-up |
 | CHUNK-001 | chunk extension (`1;x=y`, `4;foo="a b"`) + valid chunked body → 200 with the body echoed **exactly**, or 400, or close; then the STATE-001 follow-up |
-| CHUNK-002 | malformed chunk sizes (`-1`, `0x10`, `FFFFFFFFFFFFFFFF`) then FIN → 400 or close (RFC 9112 §7.1); then the STATE-001 follow-up. The FIN is part of the oracle: a size that swallows the pipelined `GET /` as chunk data cannot fake a hang-free exchange. |
+| CHUNK-002 | invalid size syntax (`-1`, `0x10`) or a valid large size (`FFFFFFFFFFFFFFFF`) with incomplete data, then FIN → 400 or close (RFC 9112 §§7.1, 8). The pipelined STATE-001 follow-up must not be misparsed as another request. |
 | STATE-001 | standalone battery: after **each** abusive exchange (chunk extension, obs-fold, garbage line, TE obfuscation, truncated body) a `GET /` pipelined on the same connection must yield exactly one clean `200 ok`, or the connection must be closed; a garbled/mixed response, a second response, or `GET /` ignored on a live connection = FAIL. The same oracle runs inside every SMUGGLE-\*/CHUNK-\* variant. |
 | H1-ROBUST-011 | slow-send lite (long tier only): 2 connections each send a partial request line (`GET / HT`) and hold without completing the request, waiting out the documented default header-idle defence (10 s) plus margin in real time. Acceptable outcomes are a refusal (4xx/5xx) or close; **silence is never a pass** (G2-1 — no answer and no close within the wait = FAIL), and a 2xx/3xx answer to a partial line = FAIL. Server survival after the hold is BASELINE-003's row. |
 | STATIC-001 | `GET /static/../fixture_app.py` and `/static/%2e%2e/fixture_app.py` → 400/403/404; any 200 = FAIL |
@@ -502,12 +502,6 @@ advisories (`gh api /advisories?ecosystem=pip&affects=hypercorn`).
   *first* colon, so a "colon in the name" is unobservable on the wire —
   `Foo:Bar: x` is a legal `Foo` field with value `Bar: x`. H1-ROBUST-006
   therefore tests the crisp cases (whitespace in the name).
-- **Chunk-size overflow outcome.** `FFFFFFFFFFFFFFFF` is valid *hex* per
-  RFC 9112 §7.1's grammar, so "400-or-close" accepts a silent close; the
-  fixture answers `-1`/`0x10` with 400 but closes silently on the overflow
-  size. Both outcomes are on the safe side but inconsistent — severity.md's
-  Info rank describes exactly this, and it is recorded in BLA-526's findings
-  rather than as a check failure.
 
 ## Recording findings
 

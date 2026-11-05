@@ -1530,13 +1530,15 @@ def _chunk_001(probe: Probe) -> Verdict:
 
 
 def _chunk_002(probe: Probe) -> Verdict:
-    """Malformed chunk sizes (RFC 9112 §7.1): 400-or-close + STATE-001.
-    Each variant ends with a half-close so a size that swallows the pipelined
-    ``GET /`` as chunk data cannot fake a hang-free exchange."""
+    """Invalid size syntax or incomplete chunk data: 400-or-close + STATE-001.
+
+    The large size is valid hexadecimal, not an integer overflow. Half-close
+    exposes its incomplete body (RFC 9112 §8), including the pipelined GET.
+    """
     variants = (
         ('negative', b'-1\r\n'),
         ('hex-prefix', b'0x10\r\n'),
-        ('overflow', b'FFFFFFFFFFFFFFFF\r\n'),
+        ('large-incomplete', b'FFFFFFFFFFFFFFFF\r\n'),
     )
     verdicts = []
     for label, size_line in variants:
@@ -2845,7 +2847,7 @@ CHECKS: tuple[Check, ...] = (
     Check('SMUGGLE-002', 'CL with obfuscated/duplicated TE rejected, pipelined GET / clean (RFC 9112 §6.1/§6.3)', 'High', 'CWE-444', _smuggle_002, 'h1'),
     Check('SMUGGLE-003', 'duplicate Content-Length with different values rejected, pipelined GET / clean (RFC 9112 §6.3)', 'High', 'CWE-444', _smuggle_003, 'h1'),
     Check('CHUNK-001', 'chunk extensions do not corrupt framing: exact body echo or 400, pipelined GET / clean', 'Medium', 'CWE-444', _chunk_001, 'h1', 'High'),
-    Check('CHUNK-002', 'malformed chunk sizes rejected (RFC 9112 §7.1), pipelined GET / clean', 'Medium', 'CWE-444', _chunk_002, 'h1', 'High', skip_lanes=frozenset({'https1'})),
+    Check('CHUNK-002', 'malformed sizes or incomplete chunks rejected (RFC 9112 §§7.1, 8), pipelined GET / clean', 'Medium', 'CWE-444', _chunk_002, 'h1', 'High', skip_lanes=frozenset({'https1'})),
     Check('TRAILER-001', 'chunked trailers must not smuggle: forbidden trailer fields 400/close, custom trailer ignored (RFC 9112 §7.1.2)', 'High', 'CWE-444', _trailer_001, 'h1'),
     Check('STATE-001', 'each abusive exchange leaves a pipelined GET / exactly one clean 200 "ok" or a closed connection', 'High', 'CWE-444', _state_001, 'h1', skip_lanes=frozenset({'https1'})),
     Check('H1-ROBUST-011', 'partial request line held open: defence must answer a refusal or close within the default header timeout', 'Medium', 'CWE-400', _h1_robust_011, 'h1', 'High', tiers=frozenset({'long'}), timeout_long=16.0),
