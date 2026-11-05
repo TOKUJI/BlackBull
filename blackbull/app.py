@@ -144,7 +144,8 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
     exc = state.get('error_exception')
     allowed = state.get('allowed_methods', ())
 
-    is_dev = get_settings().env == Environment.DEVELOPMENT and _local_peer(conn)
+    show_detail = (exc is not None and get_settings().env == Environment.DEVELOPMENT
+                   and _local_peer(conn))
     html_ok = _wants_html(conn)
 
     headers = []
@@ -152,18 +153,18 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
         headers.append((b'allow', ', '.join(m.upper() for m in allowed).encode()))
 
     tb_text = None
-    if is_dev and exc is not None:
+    if show_detail:
         if not (isinstance(exc, HTTPException) and is_client_error(exc.status)):
             tb_text = ''.join(
                 traceback.format_exception(type(exc), exc, exc.__traceback__))
 
     if html_ok:
-        body = _render_error_html(status, exc if is_dev else None,
+        body = _render_error_html(status, exc if show_detail else None,
                                   tb_text, conn)
         headers.append((b'content-type', b'text/html; charset=utf-8'))
     else:
         lines = [f"{status} {status.phrase}"]
-        if is_dev and exc is not None:
+        if show_detail:
             lines.append(f"{type(exc).__name__}: {exc}")
             if tb_text:
                 lines.append('')
