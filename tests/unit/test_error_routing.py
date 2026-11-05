@@ -412,7 +412,7 @@ class TestDevDetailOnlyForLocalPeer:
     @pytest.mark.parametrize('html', [False, True])
     @pytest.mark.parametrize('client, headers', [
         (('203.0.113.7', 50000), ()),
-        (('2001:db8::7', 50000, 0, 0), ()),
+        (('2001:db8::7', 50000), ()),
         (None, ()),
         (('localhost', 50000), ()),
         (('127.0.0.1', 50000), ((b'x-forwarded-for', b'203.0.113.7'),)),
