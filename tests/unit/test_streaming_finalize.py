@@ -39,6 +39,50 @@ async def test_a_failing_send_finalizes_the_generator(wrap, failure):
 
 
 @pytest.mark.asyncio
+async def test_a_failing_cleanup_does_not_mask_the_send_failure(caplog):
+    async def gen():
+        try:
+            yield b'x'
+            yield b'y'
+        finally:
+            raise RuntimeError('cleanup failed')
+
+    async def send(message):
+        if message.body == b'x':
+            raise ConnectionResetError()
+
+    with pytest.raises(ConnectionResetError):
+        await StreamingResponse(gen())(None, None, send)
+    assert 'cleanup failed' in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_an_iterator_with_a_sync_aclose_still_completes():
+    class Chunks:
+        def __init__(self):
+            self._left = [b'a', b'b']
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self._left:
+                raise StopAsyncIteration
+            return self._left.pop(0)
+
+        def aclose(self):
+            pass
+
+    bodies = []
+
+    async def send(message):
+        bodies.append(message.body)
+
+    await StreamingResponse(Chunks())(None, None, send)
+    assert bodies[1:] == [b'a', b'b', b'']
+
+
+@pytest.mark.asyncio
 async def test_h2_flow_control_stall_resets_and_finalizes(monkeypatch):
     from blackbull.client.http2 import HTTP2Client
     from blackbull.env import reset_settings_cache

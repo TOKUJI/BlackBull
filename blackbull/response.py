@@ -1,12 +1,16 @@
 """HTTP and WebSocket response objects. See docs/guide/requests-and-responses.md
 for send and streaming contracts.
 """
+import inspect
 import json
+import logging
 from collections.abc import AsyncIterator, Mapping
 from http import HTTPStatus
 
 from .headers import _as_response_fields
 from .native import NativeResponse, _native_from_asgi
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -165,11 +169,14 @@ def cookie_header(name: str, value: str, path: str = '/',
             f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
 
 
-async def _aclose(content) -> None:
-    """Close an async generator left suspended; a no-op once it is exhausted."""
-    aclose = getattr(content, 'aclose', None)
-    if aclose is not None:
-        await aclose()
+async def _abandon(iterator) -> None:
+    """Close an async generator a failure left suspended, so its ``finally``
+    runs now; a cleanup error is logged so the failure itself propagates."""
+    if inspect.isasyncgen(iterator):
+        try:
+            await iterator.aclose()
+        except Exception:  # noqa: BLE001
+            logger.exception('streamed response generator cleanup raised')
 
 
 class StreamingResponse:
@@ -201,8 +208,9 @@ class StreamingResponse:
                     chunk = chunk.encode()
                 if chunk:
                     await send(NativeResponse(body=chunk, more_body=True))
-        finally:
-            await _aclose(self._content)
+        except BaseException:
+            await _abandon(self._content)
+            raise
         await send(NativeResponse(body=b'', more_body=False))
 
 
@@ -304,8 +312,9 @@ class EventSourceResponse(StreamingResponse):
         try:
             async for event in events:
                 yield _format_sse_event(event)
-        finally:
-            await _aclose(events)
+        except BaseException:
+            await _abandon(events)
+            raise
 
 
 def WebSocketResponse(content) -> dict:
