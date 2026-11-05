@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from http import HTTPStatus, HTTPMethod
 from pathlib import Path
 import asyncio
+import ipaddress
 import re
 import traceback
 
@@ -80,6 +81,19 @@ def _wants_html(conn) -> bool:
                for r in accept.split(b','))
 
 
+def _local_peer(conn) -> bool:
+    """True when the transport peer is loopback and relays for nobody."""
+    if not conn.client or b'forwarded' in conn.headers or b'x-forwarded-for' in conn.headers:
+        return False
+    try:
+        addr = ipaddress.ip_address(conn.client[0])
+    except ValueError:
+        return False
+    if addr.version == 6 and addr.ipv4_mapped:
+        addr = addr.ipv4_mapped
+    return addr.is_loopback
+
+
 def _render_error_html(status, exc, tb_text: str | None, conn) -> bytes:
     """Build the DEV-mode HTML error page.  Traceback only when exc is set."""
     from html import escape
@@ -115,7 +129,7 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
     """Fallback error handler registered on every status at construction.
 
     Reads ``error_status`` / ``error_exception`` / ``allowed_methods`` off
-    ``conn.state`` and renders per ``BLACKBULL_ENV`` and ``Accept``.  The
+    ``conn.state`` and renders per ``BLACKBULL_ENV``, the peer and ``Accept``.  The
     dev/prod matrix, and why a 4xx [`HTTPException`][] keeps its detail
     line but not its traceback, are in ``docs/guide/error-handling.md``.
     """
@@ -127,7 +141,7 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
     exc = state.get('error_exception')
     allowed = state.get('allowed_methods', ())
 
-    is_dev = get_settings().env == Environment.DEVELOPMENT
+    is_dev = get_settings().env == Environment.DEVELOPMENT and _local_peer(conn)
     html_ok = _wants_html(conn)
 
     headers = []

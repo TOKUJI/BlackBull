@@ -14,13 +14,19 @@ them with `@app.on_error(...)`.
 | Unhandled exception in handler | 500 |
 
 The default handler adapts its body to the `BLACKBULL_ENV`
-environment variable and the request's `Accept` header.
+environment variable, the request's peer, and its `Accept` header.
 
 ### `development` (default)
 
 ```bash
 # BLACKBULL_ENV=development  (or unset — development is the default)
 ```
+
+The detail below is shown only to a loopback peer (`127.0.0.0/8`,
+`::1`) whose request carries no `Forwarded` or `X-Forwarded-For`
+header.  Any other client, including one relayed by a proxy or
+reached over a Unix socket, gets the `production` body, so a
+development server reachable from the network shows no internals.
 
 For 500 errors with an exception:
 
