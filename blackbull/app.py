@@ -85,6 +85,9 @@ def _local_peer(conn) -> bool:
     """True when the transport peer is loopback and relays for nobody."""
     if not conn.client or b'forwarded' in conn.headers or b'x-forwarded-for' in conn.headers:
         return False
+    # The in-process test clients' synthesised peer; no socket reports it.
+    if conn.client[0] == 'testclient':
+        return True
     try:
         addr = ipaddress.ip_address(conn.client[0])
     except ValueError:

@@ -414,7 +414,7 @@ class TestDevDetailOnlyForLocalPeer:
         (('203.0.113.7', 50000), ()),
         (('2001:db8::7', 50000, 0, 0), ()),
         (None, ()),
-        (('testclient', 50000), ()),
+        (('localhost', 50000), ()),
         (('127.0.0.1', 50000), ((b'x-forwarded-for', b'203.0.113.7'),)),
         (('127.0.0.1', 50000), ((b'forwarded', b'for=203.0.113.7'),)),
     ], ids=['remote-v4', 'remote-v6', 'no-address', 'non-ip', 'x-forwarded-for', 'forwarded'])
@@ -424,6 +424,23 @@ class TestDevDetailOnlyForLocalPeer:
         assert b'secret-internal-detail' not in body
         assert b'RuntimeError' not in body
         assert b'Traceback' not in body
+
+    def test_in_process_test_clients_count_as_local(self):
+        from blackbull.testing import NativeClient
+        app = BlackBull()
+
+        @app.route(path='/boom')
+        async def boom(conn):
+            raise RuntimeError('secret-internal-detail')
+
+        with TestClient(app) as client:
+            response = client.get('/boom')
+        assert response.status_code == 500
+        assert b'secret-internal-detail' in response.content
+        with NativeClient(app) as client:
+            native = client.get('/boom')
+        assert native.status == 500
+        assert b'secret-internal-detail' in native.body
 
 
 class TestProductionErrorPage:

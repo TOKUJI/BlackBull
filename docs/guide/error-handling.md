@@ -24,9 +24,12 @@ environment variable, the request's peer, and its `Accept` header.
 
 The detail below is shown only to a loopback peer (`127.0.0.0/8`,
 `::1`) whose request carries no `Forwarded` or `X-Forwarded-For`
-header.  Any other client, including one relayed by a proxy or
-reached over a Unix socket, gets the `production` body, so a
-development server reachable from the network shows no internals.
+header; the in-process test clients count as local.  Any other
+client, including one reached over a Unix socket, gets the
+`production` body.  A same-host relay that adds neither
+header (a TCP-mode TLS terminator, an SSH tunnel, a sidecar) makes
+every client look local, so set `BLACKBULL_ENV=production` on any
+deployment.
 
 For 500 errors with an exception:
 
