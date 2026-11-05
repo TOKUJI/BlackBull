@@ -9,7 +9,6 @@ from collections.abc import Awaitable, Callable, Iterable
 from http import HTTPStatus, HTTPMethod
 from pathlib import Path
 import asyncio
-import ipaddress
 import re
 import traceback
 
@@ -82,19 +81,15 @@ def _wants_html(conn) -> bool:
 
 
 def _local_peer(conn) -> bool:
-    """True when the transport peer is loopback and relays for nobody."""
+    """True when the transport peer is loopback and relays for nobody.
+
+    The host is the canonical text ``getpeername`` gives; ``'testclient'`` is
+    the in-process test clients' synthesised peer, which no socket reports.
+    """
     if not conn.client or b'forwarded' in conn.headers or b'x-forwarded-for' in conn.headers:
         return False
-    # The in-process test clients' synthesised peer; no socket reports it.
-    if conn.client[0] == 'testclient':
-        return True
-    try:
-        addr = ipaddress.ip_address(conn.client[0])
-    except ValueError:
-        return False
-    if addr.version == 6 and addr.ipv4_mapped:
-        addr = addr.ipv4_mapped
-    return addr.is_loopback
+    host = conn.client[0]
+    return host in ('::1', 'testclient') or host.startswith(('127.', '::ffff:127.'))
 
 
 def _render_error_html(status, exc, tb_text: str | None, conn) -> bytes:

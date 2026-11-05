@@ -413,11 +413,12 @@ class TestDevDetailOnlyForLocalPeer:
     @pytest.mark.parametrize('client, headers', [
         (('203.0.113.7', 50000), ()),
         (('2001:db8::7', 50000), ()),
+        (('::ffff:10.0.0.1', 50000), ()),
         (None, ()),
         (('localhost', 50000), ()),
         (('127.0.0.1', 50000), ((b'x-forwarded-for', b'203.0.113.7'),)),
         (('127.0.0.1', 50000), ((b'forwarded', b'for=203.0.113.7'),)),
-    ], ids=['remote-v4', 'remote-v6', 'no-address', 'non-ip', 'x-forwarded-for', 'forwarded'])
+    ], ids=['remote-v4', 'remote-v6', 'remote-mapped', 'no-address', 'non-ip', 'x-forwarded-for', 'forwarded'])
     async def test_other_peers_get_the_production_body(self, client, headers, html):
         body = await self._render(client, headers, html)
         assert b'Internal Server Error' in body
