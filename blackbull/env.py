@@ -25,7 +25,8 @@ class Environment(StrEnum):
 
     Two behaviours turn on it, and both tighten in ``PRODUCTION``:
     [`StaticFiles`][blackbull.middleware.static.StaticFiles] declines to serve
-    anything, and the default error handler answers without exception detail.
+    anything, and the default error handler answers without exception detail;
+    ``DEVELOPMENT`` shows that detail to a loopback, unproxied peer only.
     The fault-injection servers refuse to start there at all.
     """
 
@@ -118,7 +119,7 @@ class Settings:
     _section = 'Runtime and processes'
     env: Environment = setting(
         'BLACKBULL_ENV', Environment.DEVELOPMENT, parse=_environment, section=_section,
-        doc='`production` | `development` | `test`.  In `production`, `StaticFiles` declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details.')
+        doc='`production` | `development` | `test`.  In `production`, `StaticFiles` declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details; in `development` it shows them to a loopback peer without `Forwarded`/`X-Forwarded-For` only.')
     workers: int = setting(
         'BB_WORKERS', 1, minimum=1, config=('server', 'workers'), section=_section,
         doc='Pre-fork worker count.  `0` resolves to `os.cpu_count()`.  Combine with `BB_SOCKET_REUSEPORT=1`, except under `--reload` or on a port-bound non-ASGI protocol, which keep one listener.  See [Workers](../deployment/workers.md).')

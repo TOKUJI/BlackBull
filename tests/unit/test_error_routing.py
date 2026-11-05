@@ -121,7 +121,7 @@ class TestErrorRouterException:
 # BlackBull error dispatch integration tests (in-process, no real server)
 # ---------------------------------------------------------------------------
 
-def _make_scope(path='/', method='GET', type_='http'):
+def _make_scope(path='/', method='GET', type_='http', client=('127.0.0.1', 50000)):
     from blackbull.connection import Connection
     return Connection.from_scope({
         'type': type_,
@@ -129,6 +129,7 @@ def _make_scope(path='/', method='GET', type_='http'):
         'path': path,
         'scheme': 'http',
         'headers': [],
+        'client': client,
         'state': {},
     })
 
@@ -367,6 +368,80 @@ class TestDevClientErrorPage:
         finally:
             os.environ.pop('BLACKBULL_ENV', None)
             reset_settings_cache()
+
+
+class TestDevDetailOnlyForLocalPeer:
+    """DEV mode shows exception detail only to a loopback peer that is not
+    relaying for someone else, so an unconfigured public server stays terse."""
+
+    @pytest.fixture(autouse=True)
+    def _dev(self, monkeypatch):
+        from blackbull.env import reset_settings_cache
+        monkeypatch.setenv('BLACKBULL_ENV', 'development')
+        reset_settings_cache()
+        yield
+        monkeypatch.delenv('BLACKBULL_ENV')
+        reset_settings_cache()
+
+    @staticmethod
+    async def _render(client, headers=(), html=False):
+        try:
+            raise RuntimeError('secret-internal-detail')
+        except RuntimeError as e:
+            exc = e
+        scope = _make_scope(client=client)
+        pairs = list(headers)
+        if html:
+            pairs.append((b'accept', b'text/html'))
+        scope.headers = Headers(pairs)
+        scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
+        scope.state['error_exception'] = exc
+        send = _CaptureSend()
+        await _default_error_handler(scope, None, send)
+        assert send.status == 500
+        return send.body
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('host', ['127.0.0.1', '127.8.9.10', '::1', '::ffff:127.0.0.1'])
+    async def test_loopback_peer_sees_detail(self, host):
+        body = await self._render((host, 50000))
+        assert b'secret-internal-detail' in body
+        assert b'Traceback' in body
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('html', [False, True])
+    @pytest.mark.parametrize('client, headers', [
+        (('203.0.113.7', 50000), ()),
+        (('2001:db8::7', 50000), ()),
+        (('::ffff:10.0.0.1', 50000), ()),
+        (None, ()),
+        (('localhost', 50000), ()),
+        (('127.0.0.1', 50000), ((b'x-forwarded-for', b'203.0.113.7'),)),
+        (('127.0.0.1', 50000), ((b'forwarded', b'for=203.0.113.7'),)),
+    ], ids=['remote-v4', 'remote-v6', 'remote-mapped', 'no-address', 'non-ip', 'x-forwarded-for', 'forwarded'])
+    async def test_other_peers_get_the_production_body(self, client, headers, html):
+        body = await self._render(client, headers, html)
+        assert b'Internal Server Error' in body
+        assert b'secret-internal-detail' not in body
+        assert b'RuntimeError' not in body
+        assert b'Traceback' not in body
+
+    def test_in_process_test_clients_count_as_local(self):
+        from blackbull.testing import NativeClient
+        app = BlackBull()
+
+        @app.route(path='/boom')
+        async def boom(conn):
+            raise RuntimeError('secret-internal-detail')
+
+        with TestClient(app) as client:
+            response = client.get('/boom')
+        assert response.status_code == 500
+        assert b'secret-internal-detail' in response.content
+        with NativeClient(app) as client:
+            native = client.get('/boom')
+        assert native.status == 500
+        assert b'secret-internal-detail' in native.body
 
 
 class TestProductionErrorPage:

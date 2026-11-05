@@ -80,6 +80,18 @@ def _wants_html(conn) -> bool:
                for r in accept.split(b','))
 
 
+def _local_peer(conn) -> bool:
+    """True when the transport peer is loopback and relays for nobody.
+
+    The host is the canonical text ``getpeername`` gives; ``'testclient'`` is
+    the in-process test clients' synthesised peer, which no socket reports.
+    """
+    if not conn.client or b'forwarded' in conn.headers or b'x-forwarded-for' in conn.headers:
+        return False
+    host = conn.client[0]
+    return host in ('::1', 'testclient') or host.startswith(('127.', '::ffff:127.'))
+
+
 def _render_error_html(status, exc, tb_text: str | None, conn) -> bytes:
     """Build the DEV-mode HTML error page.  Traceback only when exc is set."""
     from html import escape
@@ -115,7 +127,7 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
     """Fallback error handler registered on every status at construction.
 
     Reads ``error_status`` / ``error_exception`` / ``allowed_methods`` off
-    ``conn.state`` and renders per ``BLACKBULL_ENV`` and ``Accept``.  The
+    ``conn.state`` and renders per ``BLACKBULL_ENV``, the peer and ``Accept``.  The
     dev/prod matrix, and why a 4xx [`HTTPException`][] keeps its detail
     line but not its traceback, are in ``docs/guide/error-handling.md``.
     """
@@ -127,7 +139,8 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
     exc = state.get('error_exception')
     allowed = state.get('allowed_methods', ())
 
-    is_dev = get_settings().env == Environment.DEVELOPMENT
+    show_detail = (exc is not None and get_settings().env == Environment.DEVELOPMENT
+                   and _local_peer(conn))
     html_ok = _wants_html(conn)
 
     headers = []
@@ -135,18 +148,18 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
         headers.append((b'allow', ', '.join(m.upper() for m in allowed).encode()))
 
     tb_text = None
-    if is_dev and exc is not None:
+    if show_detail:
         if not (isinstance(exc, HTTPException) and is_client_error(exc.status)):
             tb_text = ''.join(
                 traceback.format_exception(type(exc), exc, exc.__traceback__))
 
     if html_ok:
-        body = _render_error_html(status, exc if is_dev else None,
+        body = _render_error_html(status, exc if show_detail else None,
                                   tb_text, conn)
         headers.append((b'content-type', b'text/html; charset=utf-8'))
     else:
         lines = [f"{status} {status.phrase}"]
-        if is_dev and exc is not None:
+        if show_detail:
             lines.append(f"{type(exc).__name__}: {exc}")
             if tb_text:
                 lines.append('')

@@ -32,7 +32,7 @@ variable, then a `.env` entry, then `AppConfig`.
 <!-- generated: Runtime and processes -->
 | Variable | Default | Controls |
 |---|---|---|
-| `BLACKBULL_ENV` | `development` | `production` \| `development` \| `test`.  In `production`, `StaticFiles` declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details. |
+| `BLACKBULL_ENV` | `development` | `production` \| `development` \| `test`.  In `production`, `StaticFiles` declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details; in `development` it shows them to a loopback peer without `Forwarded`/`X-Forwarded-For` only. |
 | `BB_WORKERS` | `1` | Pre-fork worker count.  `0` resolves to `os.cpu_count()`.  Combine with `BB_SOCKET_REUSEPORT=1`, except under `--reload` or on a port-bound non-ASGI protocol, which keep one listener.  See [Workers](../deployment/workers.md). |
 | `BB_UVLOOP` | `0` | Install `uvloop`'s asyncio policy at startup.  Requires `pip install 'blackbull[speed]'`; falls back to the standard loop with a warning when uvloop is missing. |
 | `BB_FORCE_ASGI_SCOPE` | `0` | Exercise the native-to-ASGI compatibility conversion on every request. Leave off for normal native serving. |

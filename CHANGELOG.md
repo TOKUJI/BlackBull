@@ -36,6 +36,15 @@ metadata; reinstall an editable checkout after changing that version.
   reset with `RST_STREAM(CANCEL)` after its one response head; it sent the
   head twice and then a `500` head on the same stream (BLA-557).
 
+### Security
+
+- In `development`, the default when `BLACKBULL_ENV` is unset, the default
+  error handler shows exception detail and tracebacks only to a loopback peer
+  that sends no `Forwarded` or `X-Forwarded-For` header, or to an in-process
+  test client; every other client, including a Unix-socket peer, gets the
+  terse `production` body. An unconfigured server reachable from the
+  network showed them to anyone (BLA-529).
+
 ## [0.82.0] — 2026-11-04
 
 MINOR because `blackbull.client` changed its public API: see *Changed* and
