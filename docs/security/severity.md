@@ -139,7 +139,7 @@ would carry. The convention throughout: a hang or crash is **High**
 | SMUGGLE-002 (obfuscated/duplicated TE) | High | CWE-444 |
 | SMUGGLE-003 (duplicate Content-Length) | High | CWE-444 |
 | CHUNK-001 (chunk extensions) | Medium (framing ambiguity / latent intermediary desync), or High if crash/hang | CWE-444 |
-| CHUNK-002 (malformed chunk sizes) | Medium (framing ambiguity / latent intermediary desync), or High if crash/hang | CWE-444 |
+| CHUNK-002 (invalid sizes / incomplete chunks) | Medium (framing ambiguity / latent intermediary desync), or High if crash/hang | CWE-444 |
 | STATE-001 (state contamination) | High (desync primitive) | CWE-444 |
 | STATIC-001 (path traversal) | High | CWE-22 |
 | HDR-001 (internal detail leak) | Low | CWE-200 |
