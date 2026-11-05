@@ -5947,10 +5947,18 @@ them with <code>@app.on_error(...)</code>.</p>
 </tbody>
 </table>
 <p>The default handler adapts its body to the <code>BLACKBULL_ENV</code>
-environment variable and the request's <code>Accept</code> header.</p>
+environment variable, the request's peer, and its <code>Accept</code> header.</p>
 <h3 id="development-default"><code>development</code> (default)<a class="headerlink" href="#development-default" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># BLACKBULL_ENV=development  (or unset — development is the default)</span>
 </code></pre></div>
+<p>The detail below is shown only to a loopback peer (<code>127.0.0.0/8</code>,
+<code>::1</code>) whose request carries no <code>Forwarded</code> or <code>X-Forwarded-For</code>
+header; the in-process test clients count as local.  Any other
+client, including one reached over a Unix socket, gets the
+<code>production</code> body.  A same-host relay that adds neither
+header (a TCP-mode TLS terminator, an SSH tunnel, a sidecar) makes
+every client look local, so set <code>BLACKBULL_ENV=production</code> on any
+deployment.</p>
 <p>For 500 errors with an exception:</p>
 <ul>
 <li><code>Accept: text/html</code> (browser) → styled HTML page with the full

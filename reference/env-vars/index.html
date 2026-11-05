@@ -6195,7 +6195,7 @@ namespace. Until then only the <code>BLACKBULL_</code> names are read.</p>
 <tr>
 <td><code>BLACKBULL_ENV</code></td>
 <td><code>development</code></td>
-<td><code>production</code> | <code>development</code> | <code>test</code>.  In <code>production</code>, <code>StaticFiles</code> declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details.</td>
+<td><code>production</code> | <code>development</code> | <code>test</code>.  In <code>production</code>, <code>StaticFiles</code> declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details; in <code>development</code> it shows them to a loopback peer without <code>Forwarded</code>/<code>X-Forwarded-For</code> only.</td>
 </tr>
 <tr>
 <td><code>BB_WORKERS</code></td>

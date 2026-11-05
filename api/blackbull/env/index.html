@@ -6123,7 +6123,8 @@ three resolves to <code>DEVELOPMENT</code> rather than raising, so a misspelled
 about it — worth asserting on at startup if it matters to you.</p>
 <p>Two behaviours turn on it, and both tighten in <code>PRODUCTION</code>:
 <a class="autorefs autorefs-internal" href="../middleware/static/#blackbull.middleware.static.StaticFiles"><code>StaticFiles</code></a> declines to serve
-anything, and the default error handler answers without exception detail.
+anything, and the default error handler answers without exception detail;
+<code>DEVELOPMENT</code> shows that detail to a loopback, unproxied peer only.
 The fault-injection servers refuse to start there at all.</p>
 
 
