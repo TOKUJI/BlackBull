@@ -6386,7 +6386,7 @@ needs a TLS <code>--h2-url</code>).</p>
 <tr>
 <td>CHUNK-002</td>
 <td><code>https1</code></td>
-<td>same half-close step as H1-ROBUST-005 (chunk-size overflow). Covered on <code>h1</code>.</td>
+<td>half-close is needed to expose an incomplete chunk body. Covered on <code>h1</code>.</td>
 </tr>
 <tr>
 <td>STATE-001</td>
@@ -6723,7 +6723,7 @@ open.</p>
 </tr>
 <tr>
 <td>CHUNK-002</td>
-<td>malformed chunk sizes (<code>-1</code>, <code>0x10</code>, <code>FFFFFFFFFFFFFFFF</code>) then FIN → 400 or close (RFC 9112 §7.1); then the STATE-001 follow-up. The FIN is part of the oracle: a size that swallows the pipelined <code>GET /</code> as chunk data cannot fake a hang-free exchange.</td>
+<td>invalid size syntax (<code>-1</code>, <code>0x10</code>) or a valid large size (<code>FFFFFFFFFFFFFFFF</code>) with incomplete data, then FIN → 400 or close (RFC 9112 §§7.1, 8). For the large-size case, the pipelined GET is chunk data, not a new request.</td>
 </tr>
 <tr>
 <td>STATE-001</td>
@@ -7238,12 +7238,6 @@ advisories (<code>gh api /advisories?ecosystem=pip&amp;affects=hypercorn</code>)
   <em>first</em> colon, so a "colon in the name" is unobservable on the wire —
   <code>Foo:Bar: x</code> is a legal <code>Foo</code> field with value <code>Bar: x</code>. H1-ROBUST-006
   therefore tests the crisp cases (whitespace in the name).</li>
-<li><strong>Chunk-size overflow outcome.</strong> <code>FFFFFFFFFFFFFFFF</code> is valid <em>hex</em> per
-  RFC 9112 §7.1's grammar, so "400-or-close" accepts a silent close; the
-  fixture answers <code>-1</code>/<code>0x10</code> with 400 but closes silently on the overflow
-  size. Both outcomes are on the safe side but inconsistent — severity.md's
-  Info rank describes exactly this, and it is recorded in BLA-526's findings
-  rather than as a check failure.</li>
 </ul>
 <h2 id="recording-findings">Recording findings<a class="headerlink" href="#recording-findings" title="Permanent link">&para;</a></h2>
 <ul>

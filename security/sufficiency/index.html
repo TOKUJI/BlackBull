@@ -5906,7 +5906,7 @@ machinery — see the gate). Check IDs are validated against the registry by
 <td>SMUGGLE-003</td>
 </tr>
 <tr>
-<td>Chunked chunk-size syntax</td>
+<td>Chunked chunk-size syntax and incomplete bodies</td>
 <td>CHUNK-002</td>
 </tr>
 <tr>
@@ -6088,8 +6088,8 @@ machinery — see the gate). Check IDs are validated against the registry by
 </tr>
 <tr>
 <td>Body read (chunked)</td>
-<td>bad sizes, bad extensions</td>
-<td>400</td>
+<td>invalid sizes/extensions; incomplete body</td>
+<td>400 for syntax; close permitted for incomplete data</td>
 <td>CHUNK-001, CHUNK-002</td>
 </tr>
 <tr>
