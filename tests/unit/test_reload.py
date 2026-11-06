@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+import sys
 import threading
 import time
 from pathlib import Path
@@ -23,7 +24,61 @@ from blackbull.server.reload import (
     FileChangeWatcher,
     _default_filter,
     _describe_changes,
+    exec_self_with_sockets,
 )
+
+
+@pytest.fixture
+def exec_calls(monkeypatch):
+    calls = []
+
+    def capture(executable, arguments):
+        calls.append((executable, arguments))
+        raise OSError('intercepted exec')
+
+    monkeypatch.setattr(os, 'execvp', capture)
+    return calls
+
+
+@pytest.mark.parametrize('invocation', [
+    ['python', '-m', 'blackbull.cli', 'demo:app', '--reload'],
+    ['python', '-O', '-W', 'default', '-X', 'dev', '-m', 'blackbull.cli', 'demo:app'],
+    ['python', '/srv/app.py', '--reload'],
+    ['python', '/venv/bin/blackbull', 'demo:app', '--reload'],
+    ['python', '-c', 'import demo; demo.app.run(reload=True)'],
+])
+def test_reexec_preserves_original_python_invocation(monkeypatch, exec_calls, invocation):
+    original = invocation.copy()
+    monkeypatch.setattr(sys, 'orig_argv', invocation)
+    monkeypatch.setattr(sys, 'argv', ['/resolved/blackbull/cli.py', 'demo:app'])
+    with socket.socket() as listener:
+        with pytest.raises(OSError, match='intercepted exec'):
+            exec_self_with_sockets([listener])
+    assert exec_calls == [(sys.executable, [sys.executable, *invocation[1:]])]
+    assert invocation == original
+
+
+def test_reexec_explicit_arguments_override_original_invocation(monkeypatch, exec_calls):
+    monkeypatch.setattr(sys, 'orig_argv', ['python', '-m', 'blackbull.cli', 'demo:app'])
+    with socket.socket() as listener:
+        with pytest.raises(OSError, match='intercepted exec'):
+            exec_self_with_sockets([listener], argv=['replacement.py', 'argument'])
+    assert exec_calls == [(sys.executable, [sys.executable, 'replacement.py', 'argument'])]
+
+
+@pytest.mark.parametrize('arguments', [None, []])
+@pytest.mark.parametrize('invocation', [[], ['python']])
+def test_reexec_refuses_empty_invocation_without_changing_handoff(
+        monkeypatch, exec_calls, arguments, invocation):
+    monkeypatch.setattr(sys, 'orig_argv', invocation)
+    monkeypatch.setenv(_INHERIT_FDS_ENV, 'previous')
+    with socket.socket() as listener:
+        before = os.get_inheritable(listener.fileno())
+        with pytest.raises(RuntimeError, match='empty'):
+            exec_self_with_sockets([listener], argv=arguments)
+        assert os.get_inheritable(listener.fileno()) == before
+    assert os.environ[_INHERIT_FDS_ENV] == 'previous'
+    assert exec_calls == []
 
 
 # ---------------------------------------------------------------------------

@@ -158,6 +158,9 @@ if __name__ == '__main__':
 general-purpose settings store — server-tuning knobs stay in the
 `BB_*` environment variables.
 
+Development reload preserves the Python invocation and interpreter options;
+see [Hot reload](../deployment/hot-reload.md).
+
 Resolution order in `run()` is, highest to lowest:
 
 1. an explicit `run(...)` keyword argument — `app.run(port=9000)`
