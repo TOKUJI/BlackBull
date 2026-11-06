@@ -83,7 +83,7 @@ class _MinimalResponseHeaders(list):
 
     def copy(self) -> '_MinimalResponseHeaders':
         """A copy with the same fields and framing facts."""
-        out = self.__class__(self)
+        out = _MinimalResponseHeaders(self)
         out.content_length = (None if self.content_length is None
                               else list(self.content_length))
         out.transfer_encoding = self.transfer_encoding
@@ -109,6 +109,11 @@ class _ConnectionSpecificFields(_MinimalResponseHeaders):
     """A response field section that may carry a field HTTP/2 forbids."""
     __slots__ = ()
     connection_specific = True
+
+    def copy(self) -> '_ConnectionSpecificFields':
+        out = _MinimalResponseHeaders.copy(self)
+        out.__class__ = _ConnectionSpecificFields
+        return out
 
 
 #: Fields an HTTP/2 message must not carry (RFC 9113 §8.2.2): TE is allowed

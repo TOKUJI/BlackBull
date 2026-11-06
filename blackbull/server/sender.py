@@ -118,14 +118,25 @@ _http_date.cache_ts: int = 0
 _http_date.value: bytes = b''
 
 
+def _h2_fields(headers) -> _MinimalResponseHeaders:
+    """*headers* as a response field section without the fields HTTP/2 forbids.
+
+    The exact base type is already both, so the common section returns at once.
+    """
+    if type(headers) is not _MinimalResponseHeaders:
+        headers = _as_response_fields(headers)
+        if headers.connection_specific:
+            headers = _as_response_fields(
+                [field for field in headers if field[0] not in _CONNECTION_SPECIFIC])
+    return headers
+
+
 def build_response_headers(encoder, stream_id: int, status,
                            headers, *, end_stream: bool,
                            max_frame_size: int = DEFAULT_MAX_FRAME_SIZE) -> bytes:
     """Encode response HEADERS, adding Date and dropping connection-specific fields."""
-    headers = _as_response_fields(headers)
+    headers = _h2_fields(headers)
     fields = headers if headers.date else (*headers, (b'date', _http_date()))
-    if headers.connection_specific:
-        fields = [field for field in fields if field[0] not in _CONNECTION_SPECIFIC]
 
     payload = hpack_fastpath.encode_status(encoder, str(status), fields)
 
@@ -138,10 +149,7 @@ def build_response_headers(encoder, stream_id: int, status,
 def build_trailers(encoder, stream_id: int, headers, *,
                    max_frame_size: int = DEFAULT_MAX_FRAME_SIZE) -> bytes:
     """Encode a terminal field section without pseudo-headers or connection-specific fields."""
-    headers = _as_response_fields(headers)
-    if headers.connection_specific:
-        headers = [field for field in headers if field[0] not in _CONNECTION_SPECIFIC]
-    payload = encoder.encode(headers)
+    payload = encoder.encode(_h2_fields(headers))
     flags = HeaderFrameFlags.END_HEADERS.value | HeaderFrameFlags.END_STREAM.value
     return serialize_field_block(payload, b'\x01', flags, stream_id, max_frame_size)
 
