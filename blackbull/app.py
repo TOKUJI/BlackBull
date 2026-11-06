@@ -711,6 +711,8 @@ class BlackBull:
         exc: BaseException | None = None
         try:
             await self._chain(request, receive, send)
+        except ClientDisconnected:
+            pass  # an answer found the peer gone: an ordinary close
         except BaseException as e:
             exc = e
             raise

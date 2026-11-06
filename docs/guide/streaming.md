@@ -154,7 +154,7 @@ and **plain `StreamingResponse`** for non-browser HTTP clients
   `content-length`; the transport advertises chunked encoding
   (HTTP/1.1) or stream framing (HTTP/2).  Clients that require a
   known length should buffer client-side.
-- **Cancellation**: when the client disconnects, the handler's
-  next `await send(...)` raises and the generator's `finally`
-  blocks run.  Use a `try / finally` around any resource that
+- **Cancellation**: once a write finds the client gone, the
+  handler's next `await send(...)` raises `ClientDisconnected`
+  (HTTP/1.1 and HTTP/2) and the generator's `finally` blocks run.  Use a `try / finally` around any resource that
   outlives a single yield (DB cursors, subscriptions, …).

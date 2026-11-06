@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from ..actor import Actor, Message
 from ..env import get_settings
 from ..event_aggregator import EventAggregator
+from ..request import ClientDisconnected
 from .cap_log import _LazyCapHitCounter
 from .deadline import Guard
 from .protocol_registry import (ConnectionView, ProtocolBinding,
@@ -18,7 +19,8 @@ from .sender import AbstractWriter
 logger = logging.getLogger(__name__)
 
 #: Transport errors that mean "the peer went away" rather than a bug.
-_PEER_GONE = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+_PEER_GONE = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError,
+              ClientDisconnected)
 
 
 def _peer_gone(exc: Exception) -> bool:

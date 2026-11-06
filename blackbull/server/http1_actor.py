@@ -19,6 +19,7 @@ from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
+from ..request import ClientDisconnected
 from ..protocol.framing import _CRLF, _HEAD_END, method_is
 from ..protocol.http1 import (FieldsTooLarge, LineCache, MessageError,
                               ReadLimitExceeded, Unimplemented, UnsupportedVersion,
@@ -179,6 +180,8 @@ class RequestActor(Actor):
             receive = self._recipient
         try:
             await self._app(target, receive, self._send)
+        except ClientDisconnected:
+            pass  # an answer found the peer gone: an ordinary close
         except BaseException as e:
             if self._aggregator is not None:
                 await self._aggregator.on_error(target, e)
@@ -443,11 +446,11 @@ class HTTP1Actor(Actor):
                 self._request = b''
                 keep_alive = True
 
-        except IncompleteReadError:
-            # Safety net for an IncompleteReadError that escaped the explicit
-            # catches above (a body-read EOF ``HTTP1Recipient`` did not
-            # absorb).  The peer is gone: drop what is in flight rather than
-            # raise on a dead pipe.
+        except (IncompleteReadError, ClientDisconnected):
+            # Safety net for a lost peer that escaped the explicit catches
+            # above (a body-read EOF ``HTTP1Recipient`` did not absorb, or a
+            # server-written response after a write found the peer gone):
+            # drop what is in flight rather than raise on a dead pipe.
             send.mark_client_gone()
 
     # ------------------------------------------------------------------

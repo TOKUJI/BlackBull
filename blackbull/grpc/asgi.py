@@ -553,6 +553,8 @@ async def _serve_unary(handler, request, context, send, content_type,
         await _finish_stream_error(
             send, context, exc.status, exc.details, content_type)
         return
+    except ClientDisconnected:
+        raise
     except Exception as exc:  # noqa: BLE001 — handler isolation
         # Handler errors are INTERNAL; task cancellation propagates.
         _check_deadline(context)
@@ -651,6 +653,8 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
                 await asyncio.gather(idle_flusher, return_exceptions=True)
             else:
                 await idle_flusher
+        except ClientDisconnected:
+            pass  # the peer is gone; the call ends with nothing to report
         except Exception:  # noqa: BLE001 — send failures already surfaced
             logger.exception('gRPC stream idle flusher raised')
 
@@ -675,6 +679,8 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
         await _finish_stream_error(
             send, context, exc.status, exc.details, content_type)
         return
+    except ClientDisconnected:
+        raise
     except Exception as exc:  # noqa: BLE001 — handler isolation
         # Preserve messages already yielded before a handler failure.
         _check_deadline(context)

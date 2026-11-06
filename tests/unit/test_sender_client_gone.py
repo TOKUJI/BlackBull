@@ -95,3 +95,26 @@ async def test_http_disconnect_is_no_longer_accepted_on_the_send_channel():
     assert not send._closed
     await send(b'still writable')
     assert w.written != b''
+
+
+@pytest.mark.asyncio
+async def test_a_send_after_the_connection_was_found_gone_raises():
+    """The application learns of the lost peer from its next send (BLA-630);
+    the server's own frames on that connection stay silent."""
+    from blackbull.protocol.frame import FrameFactory
+    from blackbull.request import ClientDisconnected
+    from blackbull.server.sender import AsyncioWriter
+
+    w = _Writer()
+    writer = AsyncioWriter(w)
+    factory = FrameFactory()
+    h1 = SenderFactory.http1(writer)
+    stream = SenderFactory.http2(writer, factory, 1)
+    control = SenderFactory.http2(writer, factory, 0)
+    writer.peer_gone = True
+    with pytest.raises(ClientDisconnected):
+        await h1(b'late body')
+    with pytest.raises(ClientDisconnected):
+        await stream(b'late body')
+    await control(factory.settings())
+    assert w.written == b''

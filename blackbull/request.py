@@ -11,7 +11,8 @@ from .asgi import ASGIEvent, ASGIReceiveCallable
 
 
 class ClientDisconnected(Exception):
-    """Raised when the client disconnects before the request body is complete.
+    """Raised when the client disconnects before the request body is complete,
+    and by ``send`` once a write has found the client gone.
 
     ASGI signals a mid-body disconnect with an ``http.disconnect`` event that
     carries no ``body``/``more_body`` keys.  Treating it as end-of-message
