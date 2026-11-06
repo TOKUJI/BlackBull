@@ -239,7 +239,8 @@ def _write_app(script: Path, port: int, version: str) -> None:
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT_SEC)
-def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env):
+@pytest.mark.parametrize('entry', ['script', 'module', 'module-options', 'console'])
+def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env, entry):
     port = _free_port()
     script = tmp_path / 'reload_app.py'
     _write_app(script, port, 'v1')
@@ -263,9 +264,18 @@ def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env):
     # fills, which silently stalls reload progression mid-test.
     log_path = tmp_path / 'subprocess.log'
     log_fh = open(log_path, 'w', buffering=1)
+    cli_args = ['reload_app:app', '--bind', f'127.0.0.1:{port}',
+                '--reload', '--reload-path', str(tmp_path)]
+    if entry == 'script':
+        command = [sys.executable, str(script)]
+    elif entry == 'console':
+        command = ['blackbull', *cli_args]
+    else:
+        options = ['-O', '-W', 'default', '-X', 'dev'] if entry == 'module-options' else []
+        command = [sys.executable, *options, '-m', 'blackbull.cli', *cli_args]
     spawn_start = time.monotonic()
     proc = subprocess.Popen(
-        [sys.executable, str(script)],
+        command,
         env=env,
         cwd=str(tmp_path),
         stdout=log_fh,

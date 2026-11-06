@@ -21,6 +21,9 @@ pip install 'blackbull[reload]'
 # Watch the current working directory
 blackbull myapp:app --bind 127.0.0.1:8000 --reload
 
+# Module invocation is preserved across reloads
+python -m blackbull.cli myapp:app --bind 127.0.0.1:8000 --reload
+
 # Watch specific directories (repeatable)
 blackbull myapp:app --reload --reload-path src/ --reload-path templates/
 
@@ -35,7 +38,7 @@ When `--reload` is on, BlackBull's master process:
 
 1. Watches the configured paths for `*.py` file changes.
 2. On a change, sends `SIGTERM` to the running workers.
-3. Re-execs itself (`os.execvp`) with the original argv,
+3. Re-execs itself (`os.execvp`) with the original Python options and invocation,
    marking listening sockets as inheritable so the new master
    can adopt them.
 4. The fresh master forks workers from the new code.

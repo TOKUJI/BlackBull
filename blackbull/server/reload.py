@@ -129,13 +129,14 @@ def exec_self_with_sockets(sockets: Sequence[socket.socket],
                            argv: Sequence[str] | None = None) -> None:
     """Re-execute without returning on success, preserving listening descriptors.
 
-    The caller must terminate subprocesses holding copies first. argv defaults
-    to sys.argv; sys.executable is always the executable.
+    The caller must terminate subprocesses holding copies first. Preserve the
+    original interpreter options and invocation unless argv overrides them.
+    sys.executable is always the executable.
     """
     if argv is None:
-        argv = sys.argv
+        argv = sys.orig_argv[1:]
     if not argv:
-        raise RuntimeError('cannot re-exec: sys.argv is empty')
+        raise RuntimeError('cannot re-exec: invocation arguments are empty')
 
     previous_env = os.environ.get(_INHERIT_FDS_ENV)
     previous_flags: list[tuple[int, bool]] = []
