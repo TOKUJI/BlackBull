@@ -1,5 +1,7 @@
-"""A streamed response whose send fails closes its generator (BLA-641)."""
+"""A streamed response whose send fails, or whose peer goes, closes its
+generator (BLA-641, BLA-630)."""
 import asyncio
+import logging
 
 import pytest
 
@@ -123,3 +125,121 @@ async def test_h2_flow_control_stall_resets_and_finalizes(monkeypatch):
     finally:
         monkeypatch.delenv('BB_WRITE_TIMEOUT')
         reset_settings_cache()
+
+
+def _slow_stream_app(state):
+    app = BlackBull()
+
+    @app.route(path='/long')
+    async def long(conn):
+        async def gen():
+            try:
+                for _ in range(100):
+                    state['produced'] += 1
+                    yield b'x' * 10
+                    await asyncio.sleep(0.05)
+            finally:
+                state['finalized'] += 1
+        return StreamingResponse(gen(), media_type='text/plain')
+
+    @app.on('scope_completed')
+    async def ended(event):
+        state['ended'] += 1
+    return app
+
+
+async def _abort_mid_stream(client_scenario):
+    """Abort mid-stream; the generator, the request and the connection must
+    all end while the server runs, so its stop then drains at once."""
+    from tests.harness import served
+
+    state = {'produced': 0, 'finalized': 0, 'ended': 0}
+    loop = asyncio.get_running_loop()
+    async with served(_slow_stream_app(state)) as s:
+        result = await asyncio.wait_for(client_scenario(s.server.port), timeout=10.0)
+        assert result.aborted
+        for _ in range(100):
+            if state['finalized'] and state['ended']:
+                break
+            await asyncio.sleep(0.02)
+        assert state['finalized'] == 1 and state['ended'] == 1
+        assert state['produced'] < 30
+        stopping = loop.time()
+    assert loop.time() - stopping < 1.0, 'a connection outlived its request'
+
+
+@pytest.mark.asyncio
+async def test_h1_peer_abort_finalizes_the_stream():
+    from blackbull.client.http1 import HTTP1Client
+    from blackbull.fault_injection import Abort, H1CSendRawBytes, Scenario, Sleep
+
+    async def scenario(port):
+        async with HTTP1Client('127.0.0.1', port) as client:
+            return await client.execute_scenario(Scenario(steps=(
+                H1CSendRawBytes(b'GET /long HTTP/1.1\r\nHost: x\r\n\r\n'),
+                Sleep(0.3),
+                Abort())))
+    await _abort_mid_stream(scenario)
+
+
+@pytest.mark.asyncio
+async def test_h2_connection_abort_finalizes_the_stream():
+    from blackbull.client.http2 import HTTP2Client
+    from blackbull.fault_injection import Abort, Sleep
+    from blackbull.fault_injection.scenario_h2_client import (
+        ScenarioH2Client, SendFrame, SendHeaders, SendPreface,
+    )
+    from blackbull.protocol.frame_types import FrameTypes
+
+    async def scenario(port):
+        async with HTTP2Client('127.0.0.1', port, scenario_mode=True) as client:
+            return await client.execute_scenario(ScenarioH2Client(steps=(
+                SendPreface(),
+                SendFrame(FrameTypes.SETTINGS),
+                SendHeaders(pseudo=((':method', 'GET'), (':scheme', 'http'),
+                                    (':authority', 'x'), (':path', '/long')),
+                            end_stream=True),
+                Sleep(0.3),
+                Abort())))
+    await _abort_mid_stream(scenario)
+
+
+@pytest.mark.asyncio
+async def test_grpc_stream_to_a_gone_peer_ends_quietly(caplog):
+    from blackbull.connection import Connection
+    from blackbull.grpc import GrpcServiceRegistry, encode_message
+    from blackbull.grpc.asgi import serve_grpc
+    from blackbull.request import ClientDisconnected
+
+    state = {'finalized': 0}
+    registry = GrpcServiceRegistry()
+
+    @registry.method('/s.S/Stream')
+    async def stream(request, context):
+        try:
+            for _ in range(100):
+                yield b'm'
+                await asyncio.sleep(0)
+        finally:
+            state['finalized'] += 1
+
+    sends = 0
+
+    async def send(event):
+        nonlocal sends
+        sends += 1
+        if sends > 2:
+            raise ClientDisconnected()
+
+    sent = False
+
+    async def receive():
+        nonlocal sent
+        body, sent = (b'' if sent else encode_message(b'')), True
+        return {'type': 'http.request', 'body': body, 'more_body': False}
+
+    conn = Connection.from_scope({'type': 'http', 'path': '/s.S/Stream',
+                                  'headers': [(b'content-type', b'application/grpc')]})
+    await serve_grpc(registry, conn, receive, send)
+    assert state['finalized'] == 1
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]

@@ -36,6 +36,7 @@ from ..asgi import (
 from ..headers import (
     HeaderList, _MinimalResponseHeaders, _as_response_fields)
 from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
+from ..request import ClientDisconnected
 
 from ..logger import debug_gate  # noqa: E402
 logger = logging.getLogger(__name__)
@@ -512,9 +513,12 @@ class HTTP1Sender(BaseSender):
         Buffer a start until body framing is known. Streaming without Content-Length
         uses chunked encoding; declared trailers own the terminator. Unknown ASGI
         event types are logged and dropped; unsupported values raise TypeError.
+        Once a write has found the peer gone, raise ClientDisconnected.
         """
         if self._completed or self._poisoned:
             return
+        if self._writer.peer_gone:
+            raise ClientDisconnected()
 
         if isinstance(body, dict):
             body = _native_from_asgi(body)
@@ -1518,7 +1522,11 @@ class HTTP2Sender(BaseSender):
     async def __call__(self, body: _SenderBody | FrameBase,
                        status: HTTPStatus = HTTPStatus.OK,
                        headers: HeaderList = []):
-        if self._closed:
+        if self._closed or self._writer.peer_gone:
+            # The connection's own frames stay silent; the application
+            # learns of a lost peer from its next response event.
+            if self._writer.peer_gone and not isinstance(body, FrameBase):
+                raise ClientDisconnected()
             return
         # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)
         if isinstance(body, FrameBase):

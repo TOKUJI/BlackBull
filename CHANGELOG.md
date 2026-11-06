@@ -38,6 +38,11 @@ metadata; reinstall an editable checkout after changing that version.
 - `StreamingResponse` and `EventSourceResponse` close their generator when a
   send fails, so its `finally` runs; after an HTTP/2 flow-control stall reset
   the generator stayed suspended until the server stopped (BLA-641).
+- HTTP/1.1 and HTTP/2: after a write finds the connection gone, the
+  application's next `send` raises `ClientDisconnected`, as the streaming guide
+  documents, so a streamed response stops and its generator closes; writes
+  were dropped silently and the stream ran to its end. gRPC calls end without
+  logging a handler failure (BLA-630).
 
 ### Security
 

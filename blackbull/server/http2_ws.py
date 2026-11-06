@@ -7,6 +7,7 @@ from typing import Awaitable, Callable
 from .recipient import AbstractReader, IncompleteReadError
 from .sender import AbstractWriter
 from ..native import NativeResponse
+from ..request import ClientDisconnected
 from ..protocol.frame_types import Data
 
 
@@ -101,9 +102,15 @@ class HTTP2WSWriter(AbstractWriter):
         # StaticFiles and CORS.  The header arm went out with the RFC 8441
         # handshake, so these carry a body arm only; ``more_body`` keeps
         # END_STREAM withheld and the session open.
-        await self._sender(NativeResponse(body=data, more_body=True))
+        try:
+            await self._sender(NativeResponse(body=data, more_body=True))
+        except ClientDisconnected:
+            pass  # dropped, as WebSocketSender drops writes to a gone peer
 
     async def close(self) -> None:
         if not self._ended:
             self._ended = True
-            await self._sender(NativeResponse(body=b'', more_body=False))
+            try:
+                await self._sender(NativeResponse(body=b'', more_body=False))
+            except ClientDisconnected:
+                pass
