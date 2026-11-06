@@ -6019,8 +6019,9 @@ watch_filter:
     <div class="doc doc-contents ">
 
         <p>Re-execute without returning on success, preserving listening descriptors.</p>
-<p>The caller must terminate subprocesses holding copies first. argv defaults
-to sys.argv; sys.executable is always the executable.</p>
+<p>The caller must terminate subprocesses holding copies first. Preserve the
+original interpreter options and invocation unless argv overrides them.
+sys.executable is always the executable.</p>
 
 
     </div>

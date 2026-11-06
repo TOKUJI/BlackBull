@@ -6125,6 +6125,8 @@ through every <code>run()</code> call site — build the app with an
 <code>ws_queue_depth</code>, <code>reload</code>, <code>reload_paths</code>).  It is not a
 general-purpose settings store — server-tuning knobs stay in the
 <code>BB_*</code> environment variables.</p>
+<p>Development reload preserves the Python invocation and interpreter options;
+see <a href="../../deployment/hot-reload/">Hot reload</a>.</p>
 <p>Resolution order in <code>run()</code> is, highest to lowest:</p>
 <ol>
 <li>an explicit <code>run(...)</code> keyword argument — <code>app.run(port=9000)</code>

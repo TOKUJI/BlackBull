@@ -5921,6 +5921,9 @@ notify-driven file watcher:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Watch the current working directory</span>
 blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--bind<span class="w"> </span><span class="m">127</span>.0.0.1:8000<span class="w"> </span>--reload
 
+<span class="c1"># Module invocation is preserved across reloads</span>
+python<span class="w"> </span>-m<span class="w"> </span>blackbull.cli<span class="w"> </span>myapp:app<span class="w"> </span>--bind<span class="w"> </span><span class="m">127</span>.0.0.1:8000<span class="w"> </span>--reload
+
 <span class="c1"># Watch specific directories (repeatable)</span>
 blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--reload<span class="w"> </span>--reload-path<span class="w"> </span>src/<span class="w"> </span>--reload-path<span class="w"> </span>templates/
 
@@ -5933,7 +5936,7 @@ app.run<span class="o">(</span><span class="nv">port</span><span class="o">=</sp
 <ol>
 <li>Watches the configured paths for <code>*.py</code> file changes.</li>
 <li>On a change, sends <code>SIGTERM</code> to the running workers.</li>
-<li>Re-execs itself (<code>os.execvp</code>) with the original argv,
+<li>Re-execs itself (<code>os.execvp</code>) with the original Python options and invocation,
    marking listening sockets as inheritable so the new master
    can adopt them.</li>
 <li>The fresh master forks workers from the new code.</li>
