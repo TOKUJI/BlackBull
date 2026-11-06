@@ -1186,9 +1186,9 @@ class HTTP2Sender(BaseSender):
         task.add_done_callback(self._on_auto_flush_done)
 
     def _on_auto_flush_done(self, task: asyncio.Future) -> None:
-        """Clear the slot and surface any non-connection failure.  Connection
-        errors are already swallowed inside ``_guarded_write``, so anything that
-        reaches here (e.g. an HPACK encode error) is a real bug worth logging."""
+        """Clear the slot and surface any non-connection failure.  A lost peer
+        (ClientDisconnected) reaches the application from its next send; anything
+        else here (e.g. an HPACK encode error) is a real bug worth logging."""
         if task is self._auto_flush_task:
             self._auto_flush_task = None
         if task.cancelled():
