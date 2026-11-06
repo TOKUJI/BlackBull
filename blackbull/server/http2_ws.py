@@ -113,4 +113,4 @@ class HTTP2WSWriter(AbstractWriter):
             try:
                 await self._sender(NativeResponse(body=b'', more_body=False))
             except ClientDisconnected:
-                pass
+                pass  # no stream end to send to a gone peer

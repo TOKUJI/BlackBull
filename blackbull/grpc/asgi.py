@@ -654,7 +654,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
             else:
                 await idle_flusher
         except ClientDisconnected:
-            pass
+            pass  # the peer is gone; the call ends with nothing to report
         except Exception:  # noqa: BLE001 — send failures already surfaced
             logger.exception('gRPC stream idle flusher raised')
 
