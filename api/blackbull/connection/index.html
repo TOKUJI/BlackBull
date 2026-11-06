@@ -6319,7 +6319,8 @@ in _CONNECTION_FIELDS; state and extensions remain shared after conversion.</p>
 
 
 
-        <p>Raised when the client disconnects before the request body is complete.</p>
+        <p>Raised when the client disconnects before the request body is complete,
+and by <code>send</code> once a write has found the client gone.</p>
 <p>ASGI signals a mid-body disconnect with an <code>http.disconnect</code> event that
 carries no <code>body</code>/<code>more_body</code> keys.  Treating it as end-of-message
 would return a <em>truncated</em> upload as if it were whole, so

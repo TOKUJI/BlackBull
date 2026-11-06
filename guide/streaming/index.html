@@ -6126,9 +6126,9 @@ and <strong>plain <code>StreamingResponse</code></strong> for non-browser HTTP c
   <code>content-length</code>; the transport advertises chunked encoding
   (HTTP/1.1) or stream framing (HTTP/2).  Clients that require a
   known length should buffer client-side.</li>
-<li><strong>Cancellation</strong>: when the client disconnects, the handler's
-  next <code>await send(...)</code> raises and the generator's <code>finally</code>
-  blocks run.  Use a <code>try / finally</code> around any resource that
+<li><strong>Cancellation</strong>: once a write finds the client gone, the
+  handler's next <code>await send(...)</code> raises <code>ClientDisconnected</code>
+  (HTTP/1.1 and HTTP/2) and the generator's <code>finally</code> blocks run.  Use a <code>try / finally</code> around any resource that
   outlives a single yield (DB cursors, subscriptions, …).</li>
 </ul>
 

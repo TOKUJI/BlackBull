@@ -6973,7 +6973,8 @@ that Content-Length can be injected when the app omits it.</p>
         <p>Dispatch supported native or ASGI response events and bytes.</p>
 <p>Buffer a start until body framing is known. Streaming without Content-Length
 uses chunked encoding; declared trailers own the terminator. Unknown ASGI
-event types are logged and dropped; unsupported values raise TypeError.</p>
+event types are logged and dropped; unsupported values raise TypeError.
+Once a write has found the peer gone, raise ClientDisconnected.</p>
 
 
     </div>
