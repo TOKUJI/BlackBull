@@ -1,6 +1,7 @@
 """A streamed response whose send fails, or whose peer goes, closes its
 generator (BLA-641, BLA-630)."""
 import asyncio
+import contextlib
 import logging
 
 import pytest
@@ -242,7 +243,8 @@ async def test_grpc_stream_to_a_gone_peer_ends_quietly(caplog):
     conn = Connection.from_scope({'type': 'http', 'method': 'POST', 'path': '/s.S/Stream',
                                   'scheme': 'http', 'http_version': '2',
                                   'headers': [(b'content-type', b'application/grpc')]})
-    await app(conn, receive, send)
+    with contextlib.suppress(ClientDisconnected):   # the server's RequestActor absorbs it
+        await app(conn, receive, send)
     assert state['finalized'] == 1
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
 

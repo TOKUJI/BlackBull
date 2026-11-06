@@ -706,16 +706,13 @@ class BlackBull:
                                   and dispatcher.has_listeners('request_completed'))
         if not (want_request_completed
                 or dispatcher.has_listeners('scope_completed')):
-            try:
-                await self._chain(request, receive, send)
-            except ClientDisconnected:
-                pass  # an answer found the peer gone: an ordinary close
+            await self._chain(request, receive, send)
             return
         exc: BaseException | None = None
         try:
             await self._chain(request, receive, send)
         except ClientDisconnected:
-            pass
+            pass  # an answer found the peer gone: an ordinary close
         except BaseException as e:
             exc = e
             raise

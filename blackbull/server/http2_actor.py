@@ -27,6 +27,7 @@ from ..protocol.frame_types import (
 from ..protocol.stream import Stream, StreamState
 from ..connection import Connection
 from ..headers import Headers
+from ..request import ClientDisconnected
 from .parser import parse_headers
 from .deadline import Deadline
 from .cap_log import log_cap_hit
@@ -1188,7 +1189,9 @@ class HTTP2Actor(Actor, HTTP2Connection):
             # coalesces HEADERS with the first DATA, and an RFC 8441 accept has
             # no body, so the HEADERS would never leave and the handshake would
             # hang.  No END_STREAM — the stream stays open for WS DATA frames.
-            await stream_send.send_response_headers(HTTPStatus(200), headers)
+            # A gone peer is dropped, as on WebSocket over HTTP/1.1.
+            with contextlib.suppress(ClientDisconnected):
+                await stream_send.send_response_headers(HTTPStatus(200), headers)
 
         conn._ws = {'send_101': _ws_send_200, 'deflate': deflate_params}
 

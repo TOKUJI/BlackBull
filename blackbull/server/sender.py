@@ -380,6 +380,9 @@ class BaseSender(ABC):
     """
 
     __slots__ = ('_writer', '_closed')
+    #: Whether a write to a gone peer raises ClientDisconnected (response
+    #: senders) or is dropped (the connection's own frames, WebSocket).
+    _raise_when_gone = False
 
     def __init__(self, writer: AbstractWriter):
         self._writer = writer
@@ -414,6 +417,8 @@ class BaseSender(ABC):
         other sender on the connection has to rediscover it.
         """
         if self._closed or self._writer.peer_gone:
+            if self._writer.peer_gone and self._raise_when_gone:
+                raise _response_lost()
             return
         if self._writer.peer_is_gone():
             self._closed = self._writer.peer_gone = True
@@ -475,6 +480,7 @@ class HTTP1Sender(BaseSender):
         '_body_bytes', '_suppress_body', '_informational',
         '_response_started', '_poisoned',
     )
+    _raise_when_gone = True
 
     def __init__(self, writer: AbstractWriter, *,
                  supports_interim: bool = True):
@@ -523,8 +529,6 @@ class HTTP1Sender(BaseSender):
         """
         if self._completed or self._poisoned:
             return
-        if self._writer.peer_gone:
-            raise _response_lost()
 
         if isinstance(body, dict):
             body = _native_from_asgi(body)
@@ -970,6 +974,10 @@ class HTTP2Sender(BaseSender):
         '_log_record', '_stalled',
     )
 
+    @property
+    def _raise_when_gone(self) -> bool:
+        return self._stream_id != 0   # stream 0 carries the connection's own frames
+
     def __init__(self, writer: AbstractWriter, factory, stream_id: int,
                  push_callback=None,
                  conn_window: 'ConnectionWindow | None' = None,
@@ -1186,7 +1194,7 @@ class HTTP2Sender(BaseSender):
         if task.cancelled():
             return
         exc = task.exception()
-        if exc is not None:
+        if exc is not None and not isinstance(exc, ClientDisconnected):
             logger.error(
                 'HTTP2Sender auto-flush failed on stream %d: %r',
                 self._stream_id, exc, exc_info=exc)
@@ -1265,6 +1273,8 @@ class HTTP2Sender(BaseSender):
         offset = 0
         while offset < total:
             if self._closed or self._writer.peer_gone:
+                if self._writer.peer_gone and self._raise_when_gone:
+                    raise _response_lost()
                 return
             while (self._conn_window.size <= 0 or
                    self.stream_window_size <= 0):
@@ -1528,10 +1538,8 @@ class HTTP2Sender(BaseSender):
     async def __call__(self, body: _SenderBody | FrameBase,
                        status: HTTPStatus = HTTPStatus.OK,
                        headers: HeaderList = []):
-        if self._closed or self._writer.peer_gone:
-            # The connection's own frames stay silent; the application
-            # learns of a lost peer from its next response event.
-            if self._writer.peer_gone and not isinstance(body, FrameBase):
+        if self._closed:
+            if self._writer.peer_gone and self._raise_when_gone:
                 raise _response_lost()
             return
         # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)

@@ -180,6 +180,8 @@ class RequestActor(Actor):
             receive = self._recipient
         try:
             await self._app(target, receive, self._send)
+        except ClientDisconnected:
+            pass  # an answer found the peer gone: an ordinary close
         except BaseException as e:
             if self._aggregator is not None:
                 await self._aggregator.on_error(target, e)

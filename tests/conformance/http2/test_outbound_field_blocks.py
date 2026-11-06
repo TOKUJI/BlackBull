@@ -7,6 +7,7 @@ import pytest
 from blackbull.client.http2 import HTTP2Client
 from blackbull.native import _native_from_asgi
 from blackbull.protocol.frame import FrameFactory
+from blackbull.request import ClientDisconnected
 from blackbull.protocol.frame_types import ErrorCodes, FrameTypes, PseudoHeaders, serialize_field_block
 from blackbull.server.sender import AbstractWriter, HTTP2Sender, build_response_headers, build_trailers
 from tests.conformance.http2._harness import CoreEndpoint
@@ -177,7 +178,8 @@ async def test_failed_fragmented_write_disables_connection():
     first = HTTP2Sender(writer, factory, 1)
     second = HTTP2Sender(writer, factory, 3)
     await first.send_response_headers(HTTPStatus.OK, FIELDS)
-    await second.send_response_headers(HTTPStatus.OK, FIELDS)
+    with pytest.raises(ClientDisconnected):   # a sibling stream learns of it
+        await second.send_response_headers(HTTPStatus.OK, FIELDS)
     assert len(writer.writes) == 1
     assert writer.peer_gone
 
