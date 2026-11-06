@@ -827,8 +827,6 @@ async def serve_grpc(registry: GrpcServiceRegistry, conn: Connection,
             await call
         else:
             await _serve_with_deadline(call, context)
-    except ClientDisconnected:
-        return  # no peer to report a status to
     except _RpcDeadlineExceeded:
         context._deadline_expired = True
         try:

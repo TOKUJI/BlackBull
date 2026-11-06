@@ -208,7 +208,6 @@ async def test_h2_connection_abort_finalizes_the_stream():
 async def test_grpc_stream_to_a_gone_peer_ends_quietly(caplog):
     from blackbull.connection import Connection
     from blackbull.grpc import GrpcServiceRegistry, encode_message
-    from blackbull.grpc.asgi import serve_grpc
     from blackbull.request import ClientDisconnected
 
     state = {'finalized': 0}
@@ -238,8 +237,45 @@ async def test_grpc_stream_to_a_gone_peer_ends_quietly(caplog):
         body, sent = (b'' if sent else encode_message(b'')), True
         return {'type': 'http.request', 'body': body, 'more_body': False}
 
-    conn = Connection.from_scope({'type': 'http', 'path': '/s.S/Stream',
+    app = BlackBull()
+    app.enable_grpc(registry)
+    conn = Connection.from_scope({'type': 'http', 'method': 'POST', 'path': '/s.S/Stream',
+                                  'scheme': 'http', 'http_version': '2',
                                   'headers': [(b'content-type', b'application/grpc')]})
-    await serve_grpc(registry, conn, receive, send)
+    await app(conn, receive, send)
     assert state['finalized'] == 1
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('path, reported', [
+    ('/boom', ValueError), ('/missing', type(None)), ('/grpc', type(None)),
+])
+async def test_an_error_answer_to_a_gone_peer_is_an_ordinary_close(path, reported):
+    """An error answer that finds the peer gone ends the scope quietly and
+    still reports what went wrong, not the lost connection."""
+    from blackbull.connection import Connection
+    from blackbull.grpc import GrpcServiceRegistry
+    from blackbull.request import ClientDisconnected
+
+    app = BlackBull()
+    app.enable_grpc(GrpcServiceRegistry())   # /grpc: UNIMPLEMENTED
+    seen = []
+
+    @app.route(path='/boom')
+    async def boom(conn):
+        raise ValueError('handler failed')
+
+    @app.on('scope_completed', blocking=True)
+    async def ended(event):
+        seen.append(event.detail['exception'])
+
+    async def send(*args, **kwargs):
+        raise ClientDisconnected()
+
+    headers = [(b'content-type', b'application/grpc')] if path == '/grpc' else []
+    conn = Connection.from_scope({'type': 'http', 'method': 'POST' if path == '/grpc' else 'GET',
+                                  'path': path, 'scheme': 'http', 'http_version': '2',
+                                  'headers': headers})
+    await app(conn, None, send)
+    assert [type(e) for e in seen] == [reported]

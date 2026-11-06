@@ -38,6 +38,12 @@ from ..headers import (
 from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
 from ..request import ClientDisconnected
 
+
+def _response_lost() -> ClientDisconnected:
+    exc = ClientDisconnected()
+    exc.args = ('client disconnected before the response completed',)
+    return exc
+
 from ..logger import debug_gate  # noqa: E402
 logger = logging.getLogger(__name__)
 _DEBUG = debug_gate(logger)
@@ -518,7 +524,7 @@ class HTTP1Sender(BaseSender):
         if self._completed or self._poisoned:
             return
         if self._writer.peer_gone:
-            raise ClientDisconnected()
+            raise _response_lost()
 
         if isinstance(body, dict):
             body = _native_from_asgi(body)
@@ -1526,7 +1532,7 @@ class HTTP2Sender(BaseSender):
             # The connection's own frames stay silent; the application
             # learns of a lost peer from its next response event.
             if self._writer.peer_gone and not isinstance(body, FrameBase):
-                raise ClientDisconnected()
+                raise _response_lost()
             return
         # Control-plane: raw frame object (SETTINGS, PING ACK, WINDOW_UPDATE, …)
         if isinstance(body, FrameBase):
