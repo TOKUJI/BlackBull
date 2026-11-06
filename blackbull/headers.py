@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from typing import TypeAlias
 
 from .protocol import structured_fields as sf
+from .protocol.frame_types import _HOP_BY_HOP_HEADERS
 from .protocol.field_grammar import (
     FIELD_VALUE_ALLOWED_OCTETS, LOWERCASE_TCHAR_OCTETS, TCHAR_OCTETS)
 
@@ -30,14 +31,17 @@ class _MinimalResponseHeaders(list):
     located —
     ``content_length`` (the Content-Length fields, or ``None``),
     ``transfer_encoding`` and ``date`` (whether present), and
-    ``connection_specific`` (whether a field HTTP/2 forbids may be present).
+    ``connection_specific`` (whether a field HTTP/2 forbids may be present;
+    such a section is a [`_ConnectionSpecificFields`][], so the common
+    one stores nothing for it).
 
     Build one with [`_as_response_fields`][]; add or remove fields only with
     [`add`][], [`extend`][] and [`discard`][], which keep the framing facts
     true.  A value replaced in place must still keep the contract.
     """
 
-    __slots__ = ('content_length', 'transfer_encoding', 'date', 'connection_specific')
+    __slots__ = ('content_length', 'transfer_encoding', 'date')
+    connection_specific = False
 
     def __eq__(self, other: object) -> bool:
         """Field and framing-fact equality: the class stores both, so both
@@ -79,12 +83,11 @@ class _MinimalResponseHeaders(list):
 
     def copy(self) -> '_MinimalResponseHeaders':
         """A copy with the same fields and framing facts."""
-        out = _MinimalResponseHeaders(self)
+        out = self.__class__(self)
         out.content_length = (None if self.content_length is None
                               else list(self.content_length))
         out.transfer_encoding = self.transfer_encoding
         out.date = self.date
-        out.connection_specific = self.connection_specific
         return out
 
     def _locate(self, field: tuple[bytes, bytes]) -> None:
@@ -97,14 +100,20 @@ class _MinimalResponseHeaders(list):
             elif name == b'date':
                 self.date = True
             else:
-                self.connection_specific = True
+                self.__class__ = _ConnectionSpecificFields
                 if name == b'transfer-encoding':
                     self.transfer_encoding = True
 
 
-#: Fields an HTTP/2 message must not carry (RFC 9113 §8.2.2); TE only in a request.
-_CONNECTION_SPECIFIC = frozenset((b'connection', b'keep-alive', b'proxy-connection',
-                                  b'te', b'transfer-encoding', b'upgrade'))
+class _ConnectionSpecificFields(_MinimalResponseHeaders):
+    """A response field section that may carry a field HTTP/2 forbids."""
+    __slots__ = ()
+    connection_specific = True
+
+
+#: Fields an HTTP/2 message must not carry (RFC 9113 §8.2.2): TE is allowed
+#: in a request only.
+_CONNECTION_SPECIFIC = _HOP_BY_HOP_HEADERS | {b'te'}
 #: The fields whose presence _MinimalResponseHeaders records.
 _FRAMING_NAMES = frozenset((b'content-length', b'date')) | _CONNECTION_SPECIFIC
 
@@ -122,7 +131,7 @@ def _as_response_fields(fields: Iterable) -> _MinimalResponseHeaders:
         return fields
     head = _MinimalResponseHeaders(fields)
     content_length = None
-    transfer_encoding = date = connection_specific = False
+    transfer_encoding = date = False
     for i, field in enumerate(head):
         name, value = field
         if (type(name) is not bytes or type(value) is not bytes
@@ -141,13 +150,12 @@ def _as_response_fields(fields: Iterable) -> _MinimalResponseHeaders:
             elif name == b'date':
                 date = True
             else:
-                connection_specific = True
+                head.__class__ = _ConnectionSpecificFields
                 if name == b'transfer-encoding':
                     transfer_encoding = True
     head.content_length = content_length
     head.transfer_encoding = transfer_encoding
     head.date = date
-    head.connection_specific = connection_specific
     return head
 
 

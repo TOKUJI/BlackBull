@@ -1224,10 +1224,8 @@ class HTTP2Sender(BaseSender):
                             ) -> None:
         """Write an interim head now and leave the stream open for its final
         one.  Both event arms funnel here, its length already dropped by
-        ``_stated_fields``; transfer-encoding is connection-specific, and
-        RFC 9113 §8.2.2 keeps it out of HTTP/2 entirely."""
-        kept = [(hk, hv) for hk, hv in headers if hk != b'transfer-encoding']
-        await self.send_response_headers(status, kept)
+        ``_stated_fields``."""
+        await self.send_response_headers(status, headers)
         self._buffered_status = None
         self._buffered_headers = None
         self._expect_trailers = False
