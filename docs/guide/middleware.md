@@ -461,6 +461,10 @@ app.use(CORS(
 `allow_origins=['*']` — the CORS spec forbids it.  List explicit
 origins instead.
 
+With credentials enabled, `allow_headers='*'` lists the requested header names
+in the preflight response instead of emitting a literal `*`.
+Configured response-header values are validated when `CORS` is constructed.
+
 Apply to specific route groups rather than globally when only some
 routes need CORS:
 

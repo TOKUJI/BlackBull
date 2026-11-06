@@ -5,6 +5,7 @@ pass through without granting cross-origin access.
 """
 from ..native import NativeResponse
 from ..connection import Connection
+from ..headers import Headers, _MinimalResponseHeaders, _as_response_fields
 from .utils import as_middleware
 
 
@@ -61,41 +62,45 @@ class CORS:
                 "allow_credentials=True cannot be combined with allow_origins=['*']. "
                 "List explicit origins instead."
             )
-        self._origins     = set(allow_origins)
-        self._wildcard    = '*' in allow_origins
-        self._methods     = ','.join(allow_methods or ['GET', 'POST', 'HEAD', 'OPTIONS'])
-        self._allow_hdrs  = ','.join(allow_headers) if allow_headers != ['*'] else '*'
-        self._credentials = allow_credentials
-        self._expose      = ','.join(expose_headers or [])
-        self._max_age     = str(max_age) if max_age is not None else None
+        self._origins = set(allow_origins)
+        self._wildcard = '*' in allow_origins
+        self._reflect_headers = allow_credentials and allow_headers == ['*']
+        fields = []
+        if allow_credentials:
+            fields.append((b'access-control-allow-credentials', b'true'))
+        if exposed := ','.join(expose_headers or []).encode():
+            fields.append((b'access-control-expose-headers', exposed))
+        if not self._wildcard:
+            fields.append((b'vary', b'Origin'))
+        self._cors_fields = _as_response_fields(fields)
+        preflight = self._cors_fields.copy()
+        preflight.add(b'access-control-allow-methods',
+                      ','.join(allow_methods or ['GET', 'POST', 'HEAD', 'OPTIONS']).encode())
+        if self._reflect_headers:
+            preflight.discard(b'vary')
+            preflight.add(b'vary', b'Origin, Access-Control-Request-Headers')
+        elif allowed := ','.join(allow_headers).encode():
+            preflight.add(b'access-control-allow-headers', allowed)
+        if max_age is not None:
+            preflight.add(b'access-control-max-age', str(max_age).encode())
+        self._preflight_fields = preflight
 
     def _is_allowed(self, origin: str) -> bool:
         return self._wildcard or origin in self._origins
 
-    def _cors_headers(self, origin: str) -> list[tuple[bytes, bytes]]:
-        hdrs = [(b'access-control-allow-origin',
-                 b'*' if self._wildcard else origin.encode())]
-        if self._credentials:
-            hdrs.append((b'access-control-allow-credentials', b'true'))
-        if self._expose:
-            hdrs.append((b'access-control-expose-headers', self._expose.encode()))
-        if not self._wildcard:
-            # Vary: Origin tells caches that the response differs by origin
-            hdrs.append((b'vary', b'Origin'))
+    def _cors_headers(self, origin: bytes,
+                      template: _MinimalResponseHeaders) -> _MinimalResponseHeaders:
+        hdrs = template.copy()
+        hdrs.add(b'access-control-allow-origin', b'*' if self._wildcard else origin)
         return hdrs
 
-    def _preflight_headers(self, origin: str) -> list[tuple[bytes, bytes]]:
-        """The base CORS set plus the headers only a preflight answers.
-
-        Extends the fresh list ``_cors_headers`` returns, keeping both header
-        sets described next to each other.  ``max-age`` is emitted only when
-        configured, so a preflight carries two or three extra headers.
-        """
-        hdrs = self._cors_headers(origin)
-        hdrs.append((b'access-control-allow-methods', self._methods.encode()))
-        hdrs.append((b'access-control-allow-headers', self._allow_hdrs.encode()))
-        if self._max_age:
-            hdrs.append((b'access-control-max-age', self._max_age.encode()))
+    def _preflight_headers(self, origin: bytes, headers: Headers) -> _MinimalResponseHeaders:
+        """Build the CORS headers for this preflight."""
+        hdrs = self._cors_headers(origin, self._preflight_fields)
+        if self._reflect_headers:
+            allowed = headers.get_combined(b'access-control-request-headers')
+            if allowed:
+                hdrs.add(b'access-control-allow-headers', allowed)
         return hdrs
 
     @staticmethod
@@ -109,10 +114,8 @@ class CORS:
         async def cors_send(event):
             if (isinstance(event, NativeResponse)
                     and (event._extension is None or event.push is None)):
-                # Header arm — presence is `is not None` (never truthiness);
-                # raw slot for the check, view for the guarded append.
                 if event._header is not None:
-                    event.header.append(cors_hdrs)
+                    event._header.extend(cors_hdrs)
             await send(event)
 
         return cors_send
@@ -124,21 +127,20 @@ class CORS:
 
         headers = conn.headers
 
-        origin = headers.get(b'origin', b'').decode()
-        if not origin or not self._is_allowed(origin):
+        origin = headers.get(b'origin', b'')
+        if not origin or not self._is_allowed(origin.decode()):
             await call_next(conn, receive, send)
             return
 
         # Preflight: respond directly, never call call_next
-        acr_method = headers.get(b'access-control-request-method', b'')
-        if conn.method == 'OPTIONS' and acr_method:
+        if conn.method == 'OPTIONS' and headers.get(b'access-control-request-method'):
             # Framework-owned producer: emits native, like every other
             # response BlackBull generates itself.  One object, one send.
             await send(NativeResponse(status=200,
-                                      header=self._preflight_headers(origin),
+                                      header=self._preflight_headers(origin, headers),
                                       body=b''))
             return
 
         # Actual cross-origin request: inject CORS headers into the response start event
-        cors_hdrs = self._cors_headers(origin)
+        cors_hdrs = self._cors_headers(origin, self._cors_fields)
         await call_next(conn, receive, self._injecting_send(send, cors_hdrs))

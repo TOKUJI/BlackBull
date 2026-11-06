@@ -140,6 +140,13 @@ async def test_expose_headers_present():
     assert b'X-Request-Id' in val
 
 
+@pytest.mark.asyncio
+async def test_empty_expose_headers_omits_field():
+    mw = CORS(expose_headers=[''])
+    sent, _ = await _call(mw, _make_scope(origin='https://example.com'))
+    assert _header(sent, b'access-control-expose-headers') is None
+
+
 # ---------------------------------------------------------------------------
 # Preflight
 # ---------------------------------------------------------------------------
@@ -173,15 +180,135 @@ async def test_preflight_max_age_none_omits_header():
 
 
 @pytest.mark.asyncio
-async def test_preflight_custom_max_age():
-    mw = CORS(allow_origins=['*'], max_age=3600)
+@pytest.mark.parametrize('max_age', [0, 3600])
+async def test_preflight_custom_max_age(max_age):
+    mw = CORS(allow_origins=['*'], max_age=max_age)
     scope = _make_scope(
         method='OPTIONS',
         origin='https://any.com',
         headers={b'access-control-request-method': b'DELETE'},
     )
     sent, _ = await _call(mw, scope)
-    assert _header(sent, b'access-control-max-age') == b'3600'
+    assert _header(sent, b'access-control-max-age') == str(max_age).encode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('credentials,allowed,requested,expected', [
+    (True, '*', b' Authorization, X-Token,authorization ', b'authorization,x-token'),
+    (True, ['*'], b'Content-Type', b'content-type'),
+    (True, '*', None, None),
+    (True, '*', b'', None),
+    (True, ['X-Allowed'], b'x-other', b'X-Allowed'),
+    (True, [], b'x-other', None),
+    (True, [''], b'x-other', None),
+    (False, ['X-Allowed'], b'x-other', b'X-Allowed'),
+    (False, '*', b'authorization', b'*'),
+])
+async def test_preflight_allowed_headers(credentials, allowed, requested, expected):
+    mw = CORS(allow_origins=['https://example.com'], allow_credentials=credentials,
+              allow_headers=allowed)
+    headers = {b'access-control-request-method': b'POST'}
+    if requested is not None:
+        headers[b'access-control-request-headers'] = requested
+    sent, called = await _call(mw, _make_scope(
+        method='OPTIONS', origin='https://example.com', headers=headers))
+    assert called == []
+    actual = _header(sent, b'access-control-allow-headers')
+    if expected is None:
+        assert actual is None
+    else:
+        assert actual is not None
+        assert {name.strip().lower() for name in actual.split(b',')} == {
+            name.strip().lower() for name in expected.split(b',')}
+
+
+@pytest.mark.asyncio
+async def test_credentialed_preflight_combines_requested_header_fields():
+    mw = CORS(allow_origins=['https://example.com'], allow_credentials=True)
+    conn = _make_scope(method='OPTIONS', origin='https://example.com', headers={
+        b'access-control-request-method': b'POST',
+        b'access-control-request-headers': b'Authorization',
+    })
+    conn.headers.append(b'access-control-request-headers', b'X-Token, authorization')
+    sent, _ = await _call(mw, conn)
+    actual = _header(sent, b'access-control-allow-headers')
+    assert actual is not None
+    assert {name.strip().lower() for name in actual.split(b',')} == {b'authorization', b'x-token'}
+    vary = b','.join(v for k, v in sent[0]['headers'] if k == b'vary')
+    assert {v.strip().lower() for v in vary.split(b',')} == {
+        b'origin', b'access-control-request-headers'}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method,headers', [
+    ('GET', {b'access-control-request-method': b'POST'}),
+    ('POST', {b'access-control-request-method': b'GET'}),
+    ('OPTIONS', {}),
+])
+async def test_non_preflight_requests_reach_handler(method, headers):
+    mw = CORS(allow_origins=['https://example.com'], allow_credentials=True)
+    sent, called = await _call(mw, _make_scope(
+        method=method, origin='https://example.com', headers=headers))
+    assert called == [True]
+    assert _header(sent, b'access-control-allow-methods') is None
+    assert _header(sent, b'vary') == b'Origin'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('allowed', ['*', ['Authorization', 'X-Token']])
+async def test_preflight_response_mutation_does_not_leak_between_requests(allowed):
+    mw = CORS(allow_origins=['https://a.example', 'https://b.example'],
+              allow_credentials=True, allow_headers=allowed, expose_headers=['X-Response'])
+
+    async def mutate(event):
+        event.header.append(b'x-leaked', b'first-response')
+        event.header.append(b'vary', b'X-Leaked')
+
+    first = _make_scope(method='OPTIONS', origin='https://a.example', headers={
+        b'access-control-request-method': b'GET',
+        b'access-control-request-headers': b'Authorization',
+    })
+    await mw(first, None, mutate, None)
+    for origin, requested in (('https://b.example', b'X-Token'), ('https://a.example', b'')):
+        sent, called = await _call(mw, _make_scope(method='OPTIONS', origin=origin, headers={
+            b'access-control-request-method': b'GET',
+            b'access-control-request-headers': requested,
+        }))
+        assert called == []
+        assert _header(sent, b'access-control-allow-origin') == origin.encode()
+        assert _header(sent, b'access-control-expose-headers') == b'X-Response'
+        assert _header(sent, b'x-leaked') is None
+        names = _header(sent, b'access-control-allow-headers')
+        assert names == (requested or None if allowed == '*' else b'Authorization,X-Token')
+        vary = b','.join(v for k, v in sent[0]['headers'] if k == b'vary')
+        expected = {b'origin', b'access-control-request-headers'} if allowed == '*' else {b'origin'}
+        assert {v.strip().lower() for v in vary.split(b',')} == expected
+    sent, _ = await _call(mw, _make_scope(origin='https://b.example'))
+    assert _header(sent, b'vary') == b'Origin'
+    assert _header(sent, b'access-control-allow-headers') is None
+    assert _header(sent, b'x-leaked') is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('requested', [b'X-Token\r\nInjected: yes', b'X-Token\x00'])
+async def test_preflight_rejects_unsafe_reflected_header_values(requested):
+    mw = CORS(allow_origins=['https://example.com'], allow_credentials=True)
+    with pytest.raises(ValueError):
+        await _call(mw, _make_scope(method='OPTIONS', origin='https://example.com', headers={
+            b'access-control-request-method': b'GET',
+            b'access-control-request-headers': requested,
+        }))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('option', ['allow_methods', 'allow_headers', 'expose_headers'])
+async def test_cors_rejects_unsafe_configured_header_values(option):
+    with pytest.raises(ValueError):
+        mw = CORS(allow_origins=['https://example.com'],
+                  **{option: ['X-Token\r\nInjected: yes']})
+        await _call(mw, _make_scope(method='OPTIONS', origin='https://example.com', headers={
+            b'access-control-request-method': b'GET',
+        }))
 
 
 # ---------------------------------------------------------------------------
