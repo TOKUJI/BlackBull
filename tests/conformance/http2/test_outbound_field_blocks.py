@@ -223,3 +223,46 @@ async def test_interim_response_and_trailers_share_fragmentation(native, buffere
     assert (b':status', b'200') in sections[1]
     assert all(all(field in section for field in FIELDS) for section in sections)
     assert [flags & 1 for kind, flags, _, _ in emitted if kind == 1] == [0, 0, 1]
+
+
+_CONNECTION_SPECIFIC = [
+    (b'connection', b'close'), (b'keep-alive', b'timeout=5'),
+    (b'proxy-connection', b'keep-alive'), (b'upgrade', b'h2c'),
+    (b'te', b'trailers'), (b'transfer-encoding', b'chunked'),
+]
+
+
+def test_connection_specific_fields_never_reach_an_h2_field_block():
+    """RFC 9113 §8.2.2: an HTTP/2 response carries none of them; TE is
+    allowed in requests only."""
+    factory = FrameFactory()
+    fields = [(b'x-kept', b'1'), *_CONNECTION_SPECIFIC]
+    head = build_response_headers(factory.encoder, 1, HTTPStatus.OK, fields, end_stream=False)
+    tail = build_trailers(factory.encoder, 1, fields)
+    decoder = Decoder()
+    for block in (head, tail):
+        names = {name for name, _ in decoder.decode(frames(block)[0][3], raw=True)}
+        assert b'x-kept' in names
+        assert not names & {name for name, _ in _CONNECTION_SPECIFIC}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('http2', [False, True])
+async def test_an_app_setting_connection_specific_fields_stays_readable(http2):
+    import httpx
+    from blackbull import BlackBull, Response
+    from tests.harness import served
+
+    app = BlackBull()
+
+    @app.route(path='/h')
+    async def h(conn):
+        return Response('ok', headers=_CONNECTION_SPECIFIC[:-1])
+
+    async with served(app, tls=True) as s:
+        async with httpx.AsyncClient(http1=not http2, http2=http2, verify=False, timeout=5) as client:
+            response = await client.get(f'https://127.0.0.1:{s.server.port}/h')
+    assert response.http_version == ('HTTP/2' if http2 else 'HTTP/1.1')
+    assert (response.status_code, response.text) == (200, 'ok')
+    if http2:   # httpx does not validate inbound HTTP/2 fields, so look
+        assert not {name for name, _ in _CONNECTION_SPECIFIC} & {name for name, _ in response.headers.raw}

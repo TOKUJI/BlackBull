@@ -43,6 +43,10 @@ metadata; reinstall an editable checkout after changing that version.
   documents, so a streamed response stops and its generator closes; writes
   were dropped silently and the stream ran to its end. gRPC calls end without
   logging a handler failure (BLA-630).
+- HTTP/2: response and trailer fields `Connection`, `Keep-Alive`,
+  `Proxy-Connection`, `TE`, `Transfer-Encoding` and `Upgrade` set by the
+  application are dropped (RFC 9113 §8.2.2); they were sent, and conforming
+  clients reject such a response as malformed (BLA-611).
 
 ### Security
 
