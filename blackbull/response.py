@@ -1,12 +1,16 @@
 """HTTP and WebSocket response objects. See docs/guide/requests-and-responses.md
 for send and streaming contracts.
 """
+import inspect
 import json
+import logging
 from collections.abc import AsyncIterator, Mapping
 from http import HTTPStatus
 
 from .headers import _as_response_fields
 from .native import NativeResponse, _native_from_asgi
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -165,8 +169,18 @@ def cookie_header(name: str, value: str, path: str = '/',
             f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
 
 
+async def _abandon(iterator) -> None:
+    """Close an async generator a failure left suspended, so its ``finally``
+    runs now; a cleanup error is logged so the failure itself propagates."""
+    if inspect.isasyncgen(iterator):
+        try:
+            await iterator.aclose()
+        except Exception:  # noqa: BLE001
+            logger.exception('streamed response generator cleanup raised')
+
+
 class StreamingResponse:
-    """Stream from an async iterator; finalize the generator on completion or cancellation.
+    """Stream from an async iterator; finalize the generator on completion, cancellation or a failed send.
 
     Return from a handler, pass to BlackBull send, or invoke as (conn, receive, send).
     """
@@ -188,11 +202,15 @@ class StreamingResponse:
         if not any(k.lower() == b'content-type' for k, _ in h):
             h.insert(0, (b'content-type', self._media_type))
         await send(NativeResponse(status=self._status, header=h))
-        async for chunk in self._content:
-            if isinstance(chunk, str):
-                chunk = chunk.encode()
-            if chunk:
-                await send(NativeResponse(body=chunk, more_body=True))
+        try:
+            async for chunk in self._content:
+                if isinstance(chunk, str):
+                    chunk = chunk.encode()
+                if chunk:
+                    await send(NativeResponse(body=chunk, more_body=True))
+        except BaseException:
+            await _abandon(self._content)
+            raise
         await send(NativeResponse(body=b'', more_body=False))
 
 
@@ -291,8 +309,12 @@ class EventSourceResponse(StreamingResponse):
     @staticmethod
     async def _encode(events):
         """Translate a stream of events into pre-formatted SSE byte chunks."""
-        async for event in events:
-            yield _format_sse_event(event)
+        try:
+            async for event in events:
+                yield _format_sse_event(event)
+        except BaseException:
+            await _abandon(events)
+            raise
 
 
 def WebSocketResponse(content) -> dict:

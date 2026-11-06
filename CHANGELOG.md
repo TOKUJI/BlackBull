@@ -35,6 +35,9 @@ metadata; reinstall an editable checkout after changing that version.
 - HTTP/2: a response stalled on flow control past `BB_WRITE_TIMEOUT` is
   reset with `RST_STREAM(CANCEL)` after its one response head; it sent the
   head twice and then a `500` head on the same stream (BLA-557).
+- `StreamingResponse` and `EventSourceResponse` close their generator when a
+  send fails, so its `finally` runs; after an HTTP/2 flow-control stall reset
+  the generator stayed suspended until the server stopped (BLA-641).
 
 ### Security
 
