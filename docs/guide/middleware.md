@@ -303,6 +303,8 @@ pip install 'blackbull[compression]'
 
 The default `min_size` is 100 bytes — responses smaller than that
 pass through uncompressed.
+`206 Partial Content` and responses carrying `Content-Range` pass through
+unchanged, preserving the selected byte range and any existing content coding.
 
 Every compressed response carries `Vary: Accept-Encoding` (folded into
 any existing `Vary`) so a shared cache never replays an encoded body to

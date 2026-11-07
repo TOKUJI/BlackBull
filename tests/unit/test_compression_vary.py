@@ -105,6 +105,22 @@ async def test_vary_not_duplicated_when_already_present():
     assert tokens.count(b'accept-encoding') == 1
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('content_type,compress', [
+    (b'IMAGE/PNG; charset=binary', False),
+    (b'font/woff', False),
+    (b'font/woff2', False),
+    (b'application/font-woff', False),
+    (b'application/x-gzip', False),
+    (b'font/ttf', True),
+    (b'text/plain; charset=utf-8', True),
+    (b'', True),
+])
+async def test_content_type_compression_policy(content_type, compress):
+    res = await _run(Compression(), _BODY, [(b'content-type', content_type)])
+    assert (dict(res['headers']).get(b'content-encoding') == b'gzip') is compress
+
+
 def _has_vary_accept_encoding(headers) -> bool:
     return any(k.lower() == b'vary' and b'accept-encoding' in v.lower()
                for k, v in headers)
