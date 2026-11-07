@@ -112,17 +112,142 @@ def _bench(n_middleware: int, port: int, cert: str, key: str,
             p.join()
 
 
-async def _compression_probe(root: str, count: int, cpu: int, gc_mode: str,
-                             instructions: bool) -> dict:
-    root = str(Path(root).resolve())
-    sys.path.insert(0, root)
+def _compression_case(case):
     import gzip
     from blackbull.connection import Connection
     from blackbull.middleware import compression
     from blackbull.native import NativeResponse
 
-    source = Path(compression.__file__).resolve()
-    assert source == Path(root) / 'blackbull/middleware/compression.py'
+    body = b'0123456789' * (1 if case.startswith('range') else 50)
+    status = 206 if case.startswith('range206') else 200
+    fields = [(b'content-type', b'image/png' if case == 'binary' else
+               b'application/grpc' if case == 'grpc-trailers' else b'text/plain')]
+    if case in ('range206', 'range200'):
+        fields.append((b'content-range', b'bytes 0-9/1000'))
+    if case == 'preencoded':
+        body = gzip.compress(body)
+        fields.append((b'content-encoding', b'gzip'))
+    fields.append((b'content-length', str(len(body)).encode()))
+    conn = Connection.from_scope({'type': 'http', 'method': 'GET', 'path': '/',
+        'headers': [(b'accept-encoding', b'identity' if case == 'identity' else b'gzip')]})
+    middleware = compression.Compression(min_size=1)
+    events = []
+
+    async def send(event):
+        events.append(event)
+
+    async def next_(conn, receive, send):
+        if case == 'gzip-split':
+            await send(NativeResponse(status=status, header=fields))
+            await send(NativeResponse(body=body))
+        elif case == 'grpc-trailers':
+            await send(NativeResponse.with_trailers(status, fields, body,
+                                                   [(b'grpc-status', b'0')]))
+        else:
+            await send(NativeResponse(status=status, header=fields, body=body))
+
+    async def operation():
+        events.clear()
+        await middleware(conn, None, send, next_)
+
+    def check():
+        assert len(events) == 1
+        event = events[0]
+        head = next(e for e in event.to_asgi() if e['type'] == 'http.response.start')
+        coding = dict(head['headers']).get(b'content-encoding')
+        assert head['status'] == status
+        expected = gzip.decompress(body) if case == 'preencoded' else body
+        assert (gzip.decompress(event.body) if coding == b'gzip' else event.body) == expected
+        if case.startswith('gzip-'):
+            assert coding == b'gzip'
+        elif case == 'grpc-trailers':
+            assert coding is None and event.trailers.get(b'grpc-status') == b'0'
+        return {'encoding': coding.decode() if coding else None}
+
+    return operation, check
+
+
+def _response_case(case):
+    from blackbull.response import (Response, JSONResponse, RedirectResponse,
+                                    StreamingResponse, EventSourceResponse)
+    events = []
+    extra = [(b'x-extra', b'v')]
+    explicit = [(b'content-type', b'application/custom')]
+    many = [(f'x-{i}'.encode(), b'v') for i in range(12)]
+    strings = [('X-Extra', 'v')]
+    many_strings = [(f'X-{i}', 'v') for i in range(12)]
+
+    async def chunks():
+        yield b'hello'
+
+    factory = {
+        'response-default': lambda: Response(b'hello'),
+        'response-extra': lambda: Response(b'hello', headers=extra),
+        'response-explicit': lambda: Response(b'hello', headers=explicit),
+        'response-many': lambda: Response(b'hello', headers=many),
+        'response-strings': lambda: Response(b'hello', headers=strings),
+        'response-many-strings': lambda: Response(b'hello', headers=many_strings),
+        'response-explicit-strings': lambda: Response(b'hello', headers={'Content-Type': 'application/custom'}),
+        'json-default': lambda: JSONResponse({'ok': True}),
+        'json-extra': lambda: JSONResponse({'ok': True}, headers=extra),
+        'json-explicit': lambda: JSONResponse({'ok': True}, headers=explicit),
+        'redirect-default': lambda: RedirectResponse('/target'),
+        'redirect-extra': lambda: RedirectResponse('/target', headers=extra),
+        'redirect-explicit': lambda: RedirectResponse('/target', headers=explicit),
+        'stream-default': lambda: StreamingResponse(chunks()),
+        'stream-extra': lambda: StreamingResponse(chunks(), headers=extra),
+        'stream-explicit': lambda: StreamingResponse(chunks(), headers=explicit),
+        'sse-default': lambda: EventSourceResponse(chunks()),
+        'sse-extra': lambda: EventSourceResponse(chunks(), headers=extra),
+        'sse-explicit': lambda: EventSourceResponse(chunks(), headers=explicit),
+        'sse-many': lambda: EventSourceResponse(chunks(), headers=many),
+    }
+    if case == 'response-serialize':
+        cached = Response(b'hello')
+        make = lambda: cached
+    else:
+        make = factory[case]
+
+    async def send(event):
+        events.append(event)
+
+    if case.startswith(('stream-', 'sse-')):
+        async def operation():
+            events.clear()
+            await make()(None, None, send)
+    else:
+        async def operation():
+            events.clear()
+            events.append(make().to_native())
+
+    def check():
+        expanded = [e for event in events for e in event.to_asgi()]
+        head = next(e for e in expanded if e['type'] == 'http.response.start')
+        assert head['status'] == (302 if case.startswith('redirect-') else 200)
+        content_types = [v for k, v in head['headers'] if k == b'content-type']
+        assert content_types
+        if '-explicit' in case:
+            assert content_types[-1] == b'application/custom'
+        else:
+            assert len(content_types) == 1
+        expected = (b'{"ok": true}' if case.startswith('json-') else
+                    b'' if case.startswith('redirect-') else
+                    b'data: hello\n\n' if case.startswith('sse-') else b'hello')
+        assert b''.join(e.get('body', b'') for e in expanded) == expected
+        return {'content_types': [v.decode() for v in content_types]}
+
+    return operation, check
+
+
+async def _probe(root: str, count: int, cpu: int, gc_mode: str,
+                 instructions: bool, profile: str) -> dict:
+    root = str(Path(root).resolve())
+    sys.path.insert(0, root)
+    from blackbull import response
+    from blackbull.middleware import compression
+    source = Path((response if profile == 'responses' else compression).__file__).resolve()
+    relative = 'response.py' if profile == 'responses' else 'middleware/compression.py'
+    assert source == Path(root) / 'blackbull' / relative
     os.sched_setaffinity(0, {cpu})
     (gc.enable if gc_mode == 'on' else gc.disable)()
     counts, calls = Counter(), Counter()
@@ -145,40 +270,16 @@ async def _compression_probe(root: str, count: int, cpu: int, gc_mode: str,
         monitor.register_callback(monitor.PROFILER_ID, monitor.events.PY_START, call)
 
     metrics = {}
-    for case in ('gzip-complete', 'gzip-split', 'identity', 'binary', 'preencoded',
-                 'range206', 'range206-no-header', 'range200', 'grpc-trailers'):
-        body = b'0123456789' * (1 if case.startswith('range') else 50)
-        status = 206 if case.startswith('range206') else 200
-        fields = [(b'content-type', b'image/png' if case == 'binary' else
-                   b'application/grpc' if case == 'grpc-trailers' else b'text/plain')]
-        if case in ('range206', 'range200'):
-            fields.append((b'content-range', b'bytes 0-9/1000'))
-        if case == 'preencoded':
-            body = gzip.compress(body)
-            fields.append((b'content-encoding', b'gzip'))
-        fields.append((b'content-length', str(len(body)).encode()))
-        conn = Connection.from_scope({'type': 'http', 'method': 'GET', 'path': '/',
-            'headers': [(b'accept-encoding', b'identity' if case == 'identity' else b'gzip')]})
-        middleware = compression.Compression(min_size=1)
-        events = []
-
-        async def send(event):
-            events.append(event)
-
-        async def next_(conn, receive, send):
-            if case == 'gzip-split':
-                await send(NativeResponse(status=status, header=fields))
-                await send(NativeResponse(body=body))
-            elif case == 'grpc-trailers':
-                await send(NativeResponse.with_trailers(status, fields, body,
-                                                       [(b'grpc-status', b'0')]))
-            else:
-                await send(NativeResponse(status=status, header=fields, body=body))
-
-        async def operation():
-            events.clear()
-            await middleware(conn, None, send, next_)
-
+    cases = (('response-default', 'response-extra', 'response-explicit', 'response-many',
+              'response-strings', 'response-many-strings', 'response-explicit-strings',
+              'json-default', 'json-extra', 'json-explicit', 'redirect-default',
+              'redirect-extra', 'redirect-explicit', 'stream-default', 'stream-extra',
+              'stream-explicit', 'sse-default', 'sse-extra', 'sse-explicit', 'sse-many',
+              'response-serialize') if profile == 'responses' else
+             ('gzip-complete', 'gzip-split', 'identity', 'binary', 'preencoded',
+              'range206', 'range206-no-header', 'range200', 'grpc-trailers'))
+    for case in cases:
+        operation, check = (_response_case if profile == 'responses' else _compression_case)(case)
         for _ in range(100):
             await operation()
         counts.clear()
@@ -192,20 +293,9 @@ async def _compression_probe(root: str, count: int, cpu: int, gc_mode: str,
         cpu_end, wall_end = time.process_time_ns(), time.perf_counter_ns()
         if instructions:
             monitor.set_events(monitor.PROFILER_ID, 0)
-        assert len(events) == 1
-        event = events[0]
-        head = next(e for e in event.to_asgi() if e['type'] == 'http.response.start')
-        coding = dict(head['headers']).get(b'content-encoding')
-        assert head['status'] == status
-        expected = gzip.decompress(body) if case == 'preencoded' else body
-        assert (gzip.decompress(event.body) if coding == b'gzip' else event.body) == expected
-        if case.startswith('gzip-'):
-            assert coding == b'gzip'
-        elif case == 'grpc-trailers':
-            assert coding is None and event.trailers.get(b'grpc-status') == b'0'
         metrics[case] = {'wall_us': (wall_end - wall) / count / 1000,
                          'cpu_us': (cpu_end - cpu_start) / count / 1000,
-                         'encoding': coding.decode() if coding else None,
+                         **check(),
                          'instructions': {k: v / count for k, v in sorted(counts.items())},
                          'python_calls': {k: v / count for k, v in sorted(calls.items())}}
     if instructions:
@@ -215,17 +305,19 @@ async def _compression_probe(root: str, count: int, cpu: int, gc_mode: str,
             'affinity': sorted(os.sched_getaffinity(0)), 'gc': gc_mode}
 
 
-def _compression_compare(args) -> None:
+def _compare(args) -> None:
     from bench.lib.results import run_dir
     from bench.micro.testing_client import bytecode
     run = run_dir('middleware_stack', vars(args))
     roots = {'base': str(Path(args.base).resolve()), 'treat': str(Path(args.head).resolve())}
-    states = {arm: bytecode(root, ('blackbull/middleware/compression.py',))
+    relative = 'blackbull/response.py' if args.responses else 'blackbull/middleware/compression.py'
+    states = {arm: bytecode(root, (relative,))
               for arm, root in roots.items()}
     (run / 'bytecode.json').write_text(json.dumps(states, indent=2))
 
     def child(root, gc_mode, instructions=False):
-        command = [sys.executable, __file__, '--compression-worker', root,
+        command = [sys.executable, __file__,
+                   '--response-worker' if args.responses else '--compression-worker', root,
                    '--count', str(16 if instructions else args.count),
                    '--cpu', str(args.cpu), '--gc', gc_mode]
         if instructions:
@@ -253,6 +345,7 @@ def _compression_compare(args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compression', action='store_true', help='Compression middleware A/A and ABBA')
+    parser.add_argument('--responses', action='store_true', help='Response helper A/A and ABBA')
     parser.add_argument('--base')
     parser.add_argument('--head')
     parser.add_argument('--rounds', type=int, default=16)
@@ -261,6 +354,7 @@ def main() -> None:
     parser.add_argument('--cpu', type=int, default=min(os.sched_getaffinity(0)))
     parser.add_argument('--gc', choices=('on', 'off', 'both'), default='both')
     parser.add_argument('--compression-worker', help=argparse.SUPPRESS)
+    parser.add_argument('--response-worker', help=argparse.SUPPRESS)
     parser.add_argument('--instructions', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--port', type=int, default=8443)
     parser.add_argument('--cert', default='cert.pem')
@@ -274,18 +368,19 @@ def main() -> None:
     parser.add_argument('--layers', type=str, default='0,1,4,10,20,40',
                         help='comma-separated list of middleware counts')
     args = parser.parse_args()
-    if args.compression_worker:
+    if args.compression_worker or args.response_worker:
         if args.gc == 'both':
             parser.error('worker requires one GC mode')
-        print(json.dumps(asyncio.run(_compression_probe(
-            args.compression_worker, args.count, args.cpu, args.gc, args.instructions))))
+        print(json.dumps(asyncio.run(_probe(
+            args.response_worker or args.compression_worker, args.count, args.cpu,
+            args.gc, args.instructions, 'responses' if args.response_worker else 'compression'))))
         return
-    if args.compression:
+    if args.compression or args.responses:
         if sys.version_info < (3, 12):
             parser.error('compression diagnostics need Python 3.12+')
         if not args.base or not args.head or min(args.rounds, args.aa_rounds, args.count) < 1:
             parser.error('compression requires base/head and positive rounds/count')
-        _compression_compare(args)
+        _compare(args)
         return
 
     layer_counts = [int(x) for x in args.layers.split(',')]

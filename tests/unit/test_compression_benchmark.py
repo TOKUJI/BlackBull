@@ -12,10 +12,24 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.mark.skipif(sys.version_info < (3, 12), reason='sys.monitoring needs Python 3.12+')
 @pytest.mark.no_audit(reason='The benchmark measures untraced timings and uses its own monitoring.')
-def test_compression_instrument_records_controls_and_source_proof(tmp_path):
+@pytest.mark.parametrize('profile,module,cases', [
+    ('--compression', 'middleware/compression.py', {
+        'gzip-complete', 'gzip-split', 'identity', 'binary', 'preencoded',
+        'range206', 'range206-no-header', 'range200', 'grpc-trailers',
+    }),
+    ('--responses', 'response.py', {
+        'response-default', 'response-extra', 'response-explicit', 'response-many',
+        'response-strings', 'response-many-strings', 'response-explicit-strings',
+        'json-default', 'json-extra', 'json-explicit', 'redirect-default',
+        'redirect-extra', 'redirect-explicit', 'stream-default', 'stream-extra',
+        'stream-explicit', 'sse-default', 'sse-extra', 'sse-explicit', 'sse-many',
+        'response-serialize',
+    }),
+])
+def test_middleware_instrument_records_controls_and_source_proof(tmp_path, profile, module, cases):
     environment = {k: v for k, v in os.environ.items() if k != 'BENCH_RUN_DIR'}
     done = subprocess.run([
-        sys.executable, 'bench/micro/middleware_stack.py', '--compression',
+        sys.executable, 'bench/micro/middleware_stack.py', profile,
         '--base', str(ROOT), '--head', str(ROOT), '--rounds', '1', '--aa-rounds', '1',
         '--count', '2', '--gc', 'on', '--cpu', str(min(os.sched_getaffinity(0))),
     ], cwd=ROOT, capture_output=True, text=True, timeout=60,
@@ -25,13 +39,10 @@ def test_compression_instrument_records_controls_and_source_proof(tmp_path):
     rows = json.loads((run / 'samples.json').read_text())
     assert len(rows) == 8
     assert {s['phase'] for s in rows} == {'null', 'real'}
-    assert all(s['source'] == str(ROOT / 'blackbull/middleware/compression.py') for s in rows)
-    assert all(set(s['metrics']) == {
-        'gzip-complete', 'gzip-split', 'identity', 'binary', 'preencoded',
-        'range206', 'range206-no-header', 'range200', 'grpc-trailers',
-    } for s in rows)
+    assert all(s['source'] == str(ROOT / 'blackbull' / module) for s in rows)
+    assert all(set(s['metrics']) == cases for s in rows)
     assert all(v['cpu_us'] > 0 and v['wall_us'] > 0 for s in rows for v in s['metrics'].values())
     instructions = json.loads((run / 'instructions.json').read_text())
     assert instructions['base']['sha256'] == instructions['treat']['sha256']
-    assert instructions['base']['metrics']['identity']['instructions']
+    assert all(v['instructions'] for v in instructions['base']['metrics'].values())
     assert (run / 'COMPLETE').exists()
