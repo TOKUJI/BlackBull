@@ -6808,6 +6808,9 @@ section.</p>
 <p>String names and values are encoded as ASCII. Pass bytes explicitly when an
 RFC-defined field needs <code>obs-text</code>. Empty values and repeated fields such as
 <code>Set-Cookie</code> remain valid.</p>
+<p><code>Content-Type</code> in <code>headers</code> overrides the response helper's default or
+<code>content_type</code>/<code>media_type</code> argument. Multiple explicit <code>Content-Type</code> fields
+raise <code>ValueError</code>.</p>
 <h3 id="set-cookie-helper"><code>Set-Cookie</code> helper<a class="headerlink" href="#set-cookie-helper" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">cookie_header</span>
 
