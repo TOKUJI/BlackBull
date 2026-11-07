@@ -318,6 +318,14 @@ what the client offered.
 | Per-message-deflate strategy | Context takeover is accepted by default; `*_no_context_takeover` is honoured when the client offers it. |
 | RSV1 bit | Set on compressed data frames per §7 of the RFC; clients without the negotiated extension that send RSV1 are rejected as protocol violations. |
 
+### Non-conforming handshakes are refused
+
+An HTTP/1.1 handshake switches protocols only as RFC 6455 §4.2.1 requires: a
+`GET` of HTTP/1.1 or later, `Connection` including `Upgrade`, exactly one
+16-byte `Sec-WebSocket-Key`, and exactly one `Sec-WebSocket-Version: 13`.
+Anything else is answered `400 Bad Request` and the connection closes; the
+handler is not called.
+
 ### Handshakes that carry a body are refused
 
 A handshake request that declares content — `Content-Length` above

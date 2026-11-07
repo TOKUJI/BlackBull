@@ -23,7 +23,8 @@ from ..request import ClientDisconnected
 from ..protocol.framing import _CRLF, _HEAD_END, method_is
 from ..protocol.http1 import (FieldsTooLarge, LineCache, MessageError,
                               ReadLimitExceeded, Unimplemented, UnsupportedVersion,
-                              parse_head, persistent, request_framing)
+                              connection_options, parse_head, persistent,
+                              request_framing)
 from .deadline import Guard
 from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
@@ -656,8 +657,8 @@ class HTTP1Actor(Actor):
         """Validate the WebSocket upgrade and store a deferred 101 callback.
 
         Returns True if the handshake is valid and ready to proceed, False if
-        a 400 Bad Request was already sent (declared content, bad
-        Sec-WebSocket-Key, or bad Sec-WebSocket-Version).
+        a 400 Bad Request was already sent (RFC 6455 §4.2.1, or declared
+        content).
 
         The actual HTTP 101 response is deferred: it is sent by
         WebSocketActor._send when the ASGI app calls websocket.accept, so that
@@ -675,22 +676,22 @@ class HTTP1Actor(Actor):
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'content-type', b'text/plain')])
             return False
-        key = headers.get(b'sec-websocket-key', b'')
-        # RFC 6455 §4.2.1 — the client MUST send a Sec-WebSocket-Key whose
-        # base64-decoded value is 16 bytes.  An absent or malformed key is a
-        # bad handshake; answer 400 rather than completing an accept hash over
-        # the GUID alone (which some clients would then wrongly accept).
+        # RFC 6455 §4.2.1 / §11.3 — a GET of HTTP/1.1 or later, a Connection
+        # carrying ``upgrade``, and exactly one Sec-WebSocket-Key that decodes
+        # to 16 bytes and one Sec-WebSocket-Version.
+        keys = headers.getlist(b'sec-websocket-key')
         try:
-            valid_key = bool(key) and len(b64decode(key)) == 16
+            valid = (conn.method == 'GET' and conn.http_version != '1.0'
+                     and b'upgrade' in connection_options(headers)
+                     and len(keys) == 1 and len(b64decode(keys[0][1])) == 16)
         except (ValueError, BinasciiError):
-            valid_key = False
-        if not valid_key:
+            valid = False
+        if not valid:
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'content-type', b'text/plain')])
             return False
-        accept_key = b64encode(sha1(key + _WS_GUID).digest())
-        version = headers.get(b'sec-websocket-version', b'')
-        if version != b'13':
+        accept_key = b64encode(sha1(keys[0][1] + _WS_GUID).digest())
+        if [v for _, v in headers.getlist(b'sec-websocket-version')] != [b'13']:
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'sec-websocket-version', b'13')])
             return False
