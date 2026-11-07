@@ -91,7 +91,7 @@ def _merge_vary(headers: _MinimalResponseHeaders,
     headers.add(b'vary', field)
 
 
-def _stamp_vary_if_compressible(header: _MinimalResponseHeaders) -> bool:
+def _stamp_vary_if_compressible(header: _MinimalResponseHeaders, status: int) -> bool:
     """Whether *header* describes a body worth compressing; stamps ``Vary``.
 
     The decision point shared by every native exit: a compressible
@@ -101,11 +101,13 @@ def _stamp_vary_if_compressible(header: _MinimalResponseHeaders) -> bool:
     stamped here rather than only where compression succeeds.  Mutates
     *header* in place (zero-copy; the caller owns the list).
     """
+    if status == 206:
+        return False
     ct = next((value for name, value in header if name == b'content-type'), b'')
     ct_str = media_type(ct).decode('ascii', errors='ignore')
-    if any(ct_str.startswith(prefix) for prefix in _SKIP_CONTENT_TYPES):
+    if ct_str.startswith(_SKIP_CONTENT_TYPES):
         return False
-    if any(k == b'content-encoding' for k, _ in header):
+    if any(k in (b'content-encoding', b'content-range') for k, _ in header):
         return False
     _merge_vary(header)
     return True
@@ -241,7 +243,7 @@ class Compression:
             if (isinstance(event, NativeResponse)
                     and (event._extension is None or event.push is None)
                     and event._header is not None):
-                _stamp_vary_if_compressible(event._header)
+                _stamp_vary_if_compressible(event._header, event.status)
             await send(event)
         return vary_send
 
@@ -271,7 +273,7 @@ class Compression:
 
         async def _emit_native_complete(status, header, body,
                                         original=None) -> None:
-            if _stamp_vary_if_compressible(header) and len(body) >= self._min_size:
+            if _stamp_vary_if_compressible(header, status) and len(body) >= self._min_size:
                 threshold = self._executor_threshold
                 if threshold > 0 and len(body) >= threshold:
                     compressed = await self._compress(compressor, body)
@@ -304,7 +306,7 @@ class Compression:
             The sender requires a preceding start for pathsend.
             """
             nonlocal start_forwarded, skip_compression
-            _stamp_vary_if_compressible(held._header)
+            _stamp_vary_if_compressible(held._header, held.status)
             await send(held)
             start_forwarded = True
             skip_compression = True
@@ -379,7 +381,7 @@ class Compression:
                 # bytes (sendfile) or no longer hold them in one piece.
                 # Decide once, then relay verbatim.
                 if event._header is not None:
-                    _stamp_vary_if_compressible(event._header)
+                    _stamp_vary_if_compressible(event._header, event.status)
                     start_forwarded = True
                 skip_compression = True
                 await send(event)
@@ -402,7 +404,7 @@ class Compression:
             # headers and stopped).  Release it rather than swallow the
             # response.
             held, pending_header = pending_header, None
-            _stamp_vary_if_compressible(held._header)
+            _stamp_vary_if_compressible(held._header, held.status)
             await send(held)
             return
 

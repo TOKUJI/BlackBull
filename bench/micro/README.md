@@ -39,7 +39,7 @@ an unresolved control means the result cannot certify a small regression.
 | `loop_touches.py` | Event-loop interactions per request; `--check` is the CI budget. |
 | `parser_microbench.py` | Request-head parse cost against httptools / h11 / sanic, swept over a real browser's header count, after a correctness gate. |
 | `router_microbench.py` | `Router._resolve` and the route cache, per regime (fixed, param, miss). |
-| `middleware_stack.py` | Per-middleware cost: N no-op middleware in front of a tiny app. |
+| `middleware_stack.py` | Per-middleware cost: N no-op middleware; `--compression --base PATH --head PATH` compares complete/split, identity/binary/preencoded, range and gRPC-trailer shapes with A/A+ABBA, CPU affinity, GC on/off, source proof and separate executed instructions. |
 | `streams_vs_protocol.py` | asyncio streams against a raw `Protocol`, identical wire behaviour. |
 | `grpc_bridge.py` | The gRPC bridge's request path (see `grpc-request-verification.md`). |
 | `profile_under_load.sh` | py-spy flame graph (speedscope JSON) of the HTTP/2 app under k6 stress. |

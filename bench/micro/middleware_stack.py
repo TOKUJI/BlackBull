@@ -15,7 +15,13 @@ process so the cold-start chain build doesn't pollute later numbers.
 from __future__ import annotations
 
 import argparse
+import asyncio
+from collections import Counter
+import gc
+import hashlib
+import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -23,11 +29,9 @@ from multiprocessing import Process
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from blackbull import BlackBull
-
-
-def _make_app(n_middleware: int) -> BlackBull:
+def _make_app(n_middleware: int):
     """Build an app whose only route is /ping, behind *n* no-op middleware."""
+    from blackbull import BlackBull
     app = BlackBull()
 
     @app.route(path='/ping')
@@ -108,8 +112,156 @@ def _bench(n_middleware: int, port: int, cert: str, key: str,
             p.join()
 
 
+async def _compression_probe(root: str, count: int, cpu: int, gc_mode: str,
+                             instructions: bool) -> dict:
+    root = str(Path(root).resolve())
+    sys.path.insert(0, root)
+    import gzip
+    from blackbull.connection import Connection
+    from blackbull.middleware import compression
+    from blackbull.native import NativeResponse
+
+    source = Path(compression.__file__).resolve()
+    assert source == Path(root) / 'blackbull/middleware/compression.py'
+    os.sched_setaffinity(0, {cpu})
+    (gc.enable if gc_mode == 'on' else gc.disable)()
+    counts, calls = Counter(), Counter()
+    monitor = getattr(sys, 'monitoring', None)
+    if instructions:
+        if monitor is None:
+            raise RuntimeError('Instruction counting needs Python 3.12+')
+        monitor.use_tool_id(monitor.PROFILER_ID, 'middleware-stack')
+        prefix = str(Path(root) / 'blackbull') + os.sep
+
+        def instruction(code, offset):
+            if code.co_filename.startswith(prefix):
+                counts[code.co_qualname] += 1
+
+        def call(code, offset):
+            if code.co_filename.startswith(prefix):
+                calls[code.co_qualname] += 1
+
+        monitor.register_callback(monitor.PROFILER_ID, monitor.events.INSTRUCTION, instruction)
+        monitor.register_callback(monitor.PROFILER_ID, monitor.events.PY_START, call)
+
+    metrics = {}
+    for case in ('gzip-complete', 'gzip-split', 'identity', 'binary', 'preencoded',
+                 'range206', 'range206-no-header', 'range200', 'grpc-trailers'):
+        body = b'0123456789' * (1 if case.startswith('range') else 50)
+        status = 206 if case.startswith('range206') else 200
+        fields = [(b'content-type', b'image/png' if case == 'binary' else
+                   b'application/grpc' if case == 'grpc-trailers' else b'text/plain')]
+        if case in ('range206', 'range200'):
+            fields.append((b'content-range', b'bytes 0-9/1000'))
+        if case == 'preencoded':
+            body = gzip.compress(body)
+            fields.append((b'content-encoding', b'gzip'))
+        fields.append((b'content-length', str(len(body)).encode()))
+        conn = Connection.from_scope({'type': 'http', 'method': 'GET', 'path': '/',
+            'headers': [(b'accept-encoding', b'identity' if case == 'identity' else b'gzip')]})
+        middleware = compression.Compression(min_size=1)
+        events = []
+
+        async def send(event):
+            events.append(event)
+
+        async def next_(conn, receive, send):
+            if case == 'gzip-split':
+                await send(NativeResponse(status=status, header=fields))
+                await send(NativeResponse(body=body))
+            elif case == 'grpc-trailers':
+                await send(NativeResponse.with_trailers(status, fields, body,
+                                                       [(b'grpc-status', b'0')]))
+            else:
+                await send(NativeResponse(status=status, header=fields, body=body))
+
+        async def operation():
+            events.clear()
+            await middleware(conn, None, send, next_)
+
+        for _ in range(100):
+            await operation()
+        counts.clear()
+        calls.clear()
+        if instructions:
+            monitor.set_events(monitor.PROFILER_ID,
+                               monitor.events.INSTRUCTION | monitor.events.PY_START)
+        wall, cpu_start = time.perf_counter_ns(), time.process_time_ns()
+        for _ in range(count):
+            await operation()
+        cpu_end, wall_end = time.process_time_ns(), time.perf_counter_ns()
+        if instructions:
+            monitor.set_events(monitor.PROFILER_ID, 0)
+        assert len(events) == 1
+        event = events[0]
+        head = next(e for e in event.to_asgi() if e['type'] == 'http.response.start')
+        coding = dict(head['headers']).get(b'content-encoding')
+        assert head['status'] == status
+        expected = gzip.decompress(body) if case == 'preencoded' else body
+        assert (gzip.decompress(event.body) if coding == b'gzip' else event.body) == expected
+        if case.startswith('gzip-'):
+            assert coding == b'gzip'
+        elif case == 'grpc-trailers':
+            assert coding is None and event.trailers.get(b'grpc-status') == b'0'
+        metrics[case] = {'wall_us': (wall_end - wall) / count / 1000,
+                         'cpu_us': (cpu_end - cpu_start) / count / 1000,
+                         'encoding': coding.decode() if coding else None,
+                         'instructions': {k: v / count for k, v in sorted(counts.items())},
+                         'python_calls': {k: v / count for k, v in sorted(calls.items())}}
+    if instructions:
+        monitor.free_tool_id(monitor.PROFILER_ID)
+    return {'metrics': metrics, 'source': str(source),
+            'sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+            'affinity': sorted(os.sched_getaffinity(0)), 'gc': gc_mode}
+
+
+def _compression_compare(args) -> None:
+    from bench.lib.results import run_dir
+    from bench.micro.testing_client import bytecode
+    run = run_dir('middleware_stack', vars(args))
+    roots = {'base': str(Path(args.base).resolve()), 'treat': str(Path(args.head).resolve())}
+    states = {arm: bytecode(root, ('blackbull/middleware/compression.py',))
+              for arm, root in roots.items()}
+    (run / 'bytecode.json').write_text(json.dumps(states, indent=2))
+
+    def child(root, gc_mode, instructions=False):
+        command = [sys.executable, __file__, '--compression-worker', root,
+                   '--count', str(16 if instructions else args.count),
+                   '--cpu', str(args.cpu), '--gc', gc_mode]
+        if instructions:
+            command.append('--instructions')
+        return json.loads(subprocess.check_output(command, text=True, timeout=60,
+                          env={**os.environ, 'PYTHONHASHSEED': '0'}))
+
+    rows = []
+    for gc_mode in (('on', 'off') if args.gc == 'both' else (args.gc,)):
+        for phase, rounds in (('null', args.aa_rounds), ('real', args.rounds)):
+            for rnd in range(rounds):
+                for arm in (('base', 'treat', 'treat', 'base') if rnd % 2 == 0
+                            else ('treat', 'base', 'base', 'treat')):
+                    source = 'base' if phase == 'null' else arm
+                    rows.append({'phase': phase, 'round': rnd, 'arm': arm, 'source_arm': source,
+                                 **child(roots[source], gc_mode)})
+                    (run / 'samples.json').write_text(json.dumps(rows, indent=2))
+            print(f'{gc_mode}/{phase}: {rounds} rounds complete', flush=True)
+    (run / 'instructions.json').write_text(json.dumps(
+        {arm: child(root, 'off', True) for arm, root in roots.items()}, indent=2))
+    (run / 'COMPLETE').write_text('exit_code=0\n')
+    print(run)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--compression', action='store_true', help='Compression middleware A/A and ABBA')
+    parser.add_argument('--base')
+    parser.add_argument('--head')
+    parser.add_argument('--rounds', type=int, default=16)
+    parser.add_argument('--aa-rounds', type=int, default=8)
+    parser.add_argument('--count', type=int, default=1000)
+    parser.add_argument('--cpu', type=int, default=min(os.sched_getaffinity(0)))
+    parser.add_argument('--gc', choices=('on', 'off', 'both'), default='both')
+    parser.add_argument('--compression-worker', help=argparse.SUPPRESS)
+    parser.add_argument('--instructions', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--port', type=int, default=8443)
     parser.add_argument('--cert', default='cert.pem')
     parser.add_argument('--key', default='key.pem')
@@ -122,6 +274,19 @@ def main() -> None:
     parser.add_argument('--layers', type=str, default='0,1,4,10,20,40',
                         help='comma-separated list of middleware counts')
     args = parser.parse_args()
+    if args.compression_worker:
+        if args.gc == 'both':
+            parser.error('worker requires one GC mode')
+        print(json.dumps(asyncio.run(_compression_probe(
+            args.compression_worker, args.count, args.cpu, args.gc, args.instructions))))
+        return
+    if args.compression:
+        if sys.version_info < (3, 12):
+            parser.error('compression diagnostics need Python 3.12+')
+        if not args.base or not args.head or min(args.rounds, args.aa_rounds, args.count) < 1:
+            parser.error('compression requires base/head and positive rounds/count')
+        _compression_compare(args)
+        return
 
     layer_counts = [int(x) for x in args.layers.split(',')]
     print(f'h2load -n {args.n} -c {args.c} -m {args.m} https://127.0.0.1:{args.port}/ping')
