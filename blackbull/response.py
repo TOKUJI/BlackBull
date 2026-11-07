@@ -14,17 +14,19 @@ logger = logging.getLogger(__name__)
 
 
 
-def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
+def _normalize_headers(headers, default_content_type=None) -> list[tuple[bytes, bytes]]:
     """Return a Mapping or pair iterable as ``(bytes, bytes)`` pairs, in order.
 
     str names/values must encode as ASCII (else UnicodeEncodeError); a bad
     shape raises TypeError.  The field grammar is checked when a
     NativeResponse is built from the pairs, not here.
+    With a default, allow one explicit Content-Type and fill it in when absent.
     """
     if not headers:
-        return []
+        return [] if default_content_type is None else [default_content_type]
     items = headers.items() if isinstance(headers, Mapping) else headers
     out: list[tuple[bytes, bytes]] = []
+    found_content_type = False
     for pair in items:
         if isinstance(pair, (str, bytes, bytearray)):
             raise TypeError(
@@ -41,11 +43,19 @@ def _normalize_headers(headers) -> list[tuple[bytes, bytes]]:
             k = k.encode('ascii')
         if isinstance(v, str):
             v = v.encode('ascii')
-        if not isinstance(k, (bytes, bytearray)) or not isinstance(v, (bytes, bytearray)):
-            raise TypeError(
-                'header name and value must be str or bytes; got '
-                f'({type(k).__name__}, {type(v).__name__})')
-        out.append((bytes(k), bytes(v)))
+        if type(k) is not bytes or type(v) is not bytes:
+            if not isinstance(k, (bytes, bytearray)) or not isinstance(v, (bytes, bytearray)):
+                raise TypeError(
+                    'header name and value must be str or bytes; got '
+                    f'({type(k).__name__}, {type(v).__name__})')
+            k, v = bytes(k), bytes(v)
+        if default_content_type is not None and k.lower() == b'content-type':
+            if found_content_type:
+                raise ValueError('multiple Content-Type headers')
+            found_content_type = True
+        out.append((k, v))
+    if default_content_type is not None and not found_content_type:
+        out.insert(0, default_content_type)
     return out
 
 
@@ -86,7 +96,7 @@ class Response:
     An arbitrary ASGI host's raw send does not accept Response objects.
     """
 
-    #: ``(pair, checked)`` for the leading content-type, from _content_type_pair.
+    #: Cached default Content-Type, reused only while it leads the headers.
     _checked = (None, None)
 
     def __init__(self, content: str | bytes,
@@ -104,9 +114,10 @@ class Response:
         # See _normalize_headers for the accepted shapes and the ASCII /
         # RFC 9110 §5.5 coercion rules.
         self._checked = _content_type_pair(content_type)
-        self.headers = [self._checked[0]]
         if headers:
-            self.headers.extend(_normalize_headers(headers))
+            self.headers = _normalize_headers(headers, self._checked[0])
+        else:
+            self.headers = [self._checked[0]]
 
     async def __call__(self, conn, receive, send) -> None:
         """Send a complete native response when invoked directly.
@@ -156,7 +167,9 @@ class RedirectResponse(Response):
     def __init__(self, url: str,
                  status: HTTPStatus = HTTPStatus.FOUND,
                  headers: Mapping | list | None = None):
-        merged = [(b'location', url.encode('ascii')), *_normalize_headers(headers)]
+        merged = [(b'location', url.encode('ascii'))]
+        if headers:
+            merged.extend(headers.items() if isinstance(headers, Mapping) else headers)
         super().__init__(b'', status=status, headers=merged)
 
 
@@ -192,15 +205,11 @@ class StreamingResponse:
                  media_type: str = 'text/plain'):
         self._content = content
         self._status = status
-        self._headers = _normalize_headers(headers)
-        self._media_type = _normalize_headers([
-            (b'content-type', media_type),
-        ])[0][1]
+        [default] = _normalize_headers([(b'content-type', media_type)])
+        self._headers = _normalize_headers(headers, default)
 
     async def __call__(self, conn, receive, send) -> None:
         h = list(self._headers)
-        if not any(k.lower() == b'content-type' for k, _ in h):
-            h.insert(0, (b'content-type', self._media_type))
         await send(NativeResponse(status=self._status, header=h))
         try:
             async for chunk in self._content:
@@ -296,15 +305,13 @@ class EventSourceResponse(StreamingResponse):
                  *,
                  status: int = 200,
                  headers: Mapping | list | None = None):
-        # Caller-provided Cache-Control / Content-Type wins (case-insensitive).
-        h = _normalize_headers(headers)
-        if not any(k.lower() == b'cache-control' for k, _ in h):
-            h.append((b'cache-control', b'no-cache'))
         super().__init__(
             self._encode(content),
-            status=status, headers=h,
+            status=status, headers=headers,
             media_type='text/event-stream',
         )
+        if not any(k.lower() == b'cache-control' for k, _ in self._headers):
+            self._headers.append((b'cache-control', b'no-cache'))
 
     @staticmethod
     async def _encode(events):

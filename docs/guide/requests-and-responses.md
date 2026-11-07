@@ -474,6 +474,10 @@ String names and values are encoded as ASCII. Pass bytes explicitly when an
 RFC-defined field needs `obs-text`. Empty values and repeated fields such as
 `Set-Cookie` remain valid.
 
+`Content-Type` in `headers` overrides the response helper's default or
+`content_type`/`media_type` argument. Multiple explicit `Content-Type` fields
+raise `ValueError`.
+
 ### `Set-Cookie` helper
 
 ```python
