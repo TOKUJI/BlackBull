@@ -6556,7 +6556,9 @@ it does not infer a host rewrite from <code>Forwarded: host</code> or <code>X-Fo
 <p>A weak ETag (<code>W/"&lt;sha256-prefix&gt;"</code>) is generated automatically when
 the handler doesn't supply one.  Subsequent requests with a
 matching <code>If-None-Match</code> header receive <code>304 Not Modified</code> with no
-body.</p>
+body; it carries the stored response's fields except <code>Content-Type</code>,
+<code>Content-Encoding</code>, <code>Content-Language</code>, <code>Content-Length</code> and
+<code>Last-Modified</code> (RFC 9110 §15.4.5).</p>
 <p>A response's own rules win over the cache's defaults, and every
 <code>Cache-Control</code> field is read.  Its lifetime is <code>max-age</code>,
 <code>s-maxage</code> (which wins) or <code>Expires − Date</code>; an incoming <code>Age</code>
