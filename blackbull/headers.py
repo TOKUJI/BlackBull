@@ -36,8 +36,9 @@ class _MinimalResponseHeaders(list):
     one stores nothing for it).
 
     Build one with [`_as_response_fields`][]; add or remove fields only with
-    [`add`][], [`extend`][] and [`discard`][], which keep the framing facts
-    true.  A value replaced in place must still keep the contract.
+    [`add`][], [`add_valid`][], [`extend`][], [`discard`][] and
+    [`without`][], which keep the framing facts true.  A value replaced in
+    place must still keep the contract.
     """
 
     __slots__ = ('content_length', 'transfer_encoding', 'date')
@@ -62,6 +63,12 @@ class _MinimalResponseHeaders(list):
         trimmed of edge SP/HTAB."""
         _validate_response_header_field(name, value)
         field = (name.lower(), value.strip(b' \t'))
+        self.append(field)
+        self._locate(field)
+
+    def add_valid(self, name: bytes, value: bytes) -> None:
+        """Append one field the caller guarantees keeps the contract."""
+        field = (name, value)
         self.append(field)
         self._locate(field)
 

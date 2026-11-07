@@ -66,13 +66,13 @@ class _StoredResponse(NamedTuple):
     def replay(self, age: int) -> NativeResponse:
         """A private copy carrying its *current* age (RFC 9111 §4.2.3)."""
         header = self.header.copy()
-        header.add(b'age', str(age).encode())
+        header.add_valid(b'age', str(age).encode())
         return NativeResponse.complete(self.status, header, self.body)
 
     def not_modified(self, age: int) -> NativeResponse:
         """The 304 answering a matching ``If-None-Match``."""
         header = self.not_modified_header.copy()
-        header.add(b'age', str(age).encode())
+        header.add_valid(b'age', str(age).encode())
         return NativeResponse.complete(304, header, b'')
 
     def expired(self, now: float | None = None) -> bool:
