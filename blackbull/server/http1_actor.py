@@ -677,9 +677,7 @@ class HTTP1Actor(Actor):
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'content-type', b'text/plain')])
             return False
-        # RFC 6455 §4.2.1 / §11.3 — a GET, a Connection carrying ``upgrade``,
-        # and exactly one base64 Sec-WebSocket-Key that decodes to 16 bytes
-        # and one Sec-WebSocket-Version.
+        # RFC 6455 §4.2.1; §11.3 allows the key and the version once each.
         keys = headers.getlist(b'sec-websocket-key')
         try:
             valid = (conn.method == 'GET'
@@ -693,7 +691,8 @@ class HTTP1Actor(Actor):
                        [(b'content-type', b'text/plain')])
             return False
         accept_key = b64encode(sha1(keys[0][1] + _WS_GUID).digest())
-        if [v for _, v in headers.getlist(b'sec-websocket-version')] != [b'13']:
+        versions = headers.getlist(b'sec-websocket-version')
+        if len(versions) != 1 or versions[0][1] != b'13':
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'sec-websocket-version', b'13')])
             return False
