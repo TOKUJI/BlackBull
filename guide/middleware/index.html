@@ -6692,6 +6692,9 @@ client.  A response with <code>Vary: *</code> is passed through unstored
 <p><code>allow_credentials=True</code> cannot be combined with
 <code>allow_origins=['*']</code> — the CORS spec forbids it.  List explicit
 origins instead.</p>
+<p>With credentials enabled, <code>allow_headers='*'</code> lists the requested header names
+in the preflight response instead of emitting a literal <code>*</code>.
+Configured response-header values are validated when <code>CORS</code> is constructed.</p>
 <p>Apply to specific route groups rather than globally when only some
 routes need CORS:</p>
 <div class="highlight"><pre><span></span><code><span class="n">api</span> <span class="o">=</span> <span class="n">app</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">CORS</span><span class="p">(</span><span class="n">allow_origins</span><span class="o">=</span><span class="p">[</span><span class="s1">'https://myapp.example.com'</span><span class="p">])])</span>
