@@ -28,6 +28,9 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- Static files: a request path that decodes to a NUL (`/static/%00`) is
+  answered `400 Bad Request`; it raised inside `StaticFiles` and was answered
+  `500` (BLA-598).
 - WebSocket over HTTP/1.1: a handshake that is not a `GET`, lacks
   `Connection: Upgrade`, repeats `Sec-WebSocket-Key` or
   `Sec-WebSocket-Version`, or carries a key outside the base64 alphabet is
