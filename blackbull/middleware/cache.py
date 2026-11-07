@@ -203,12 +203,9 @@ class Cache:
         key = _variant_key(vary_fields, req_headers)
         stored = _owned_response_fields(headers)
         stored.discard(b'age')
-        not_modified = stored.copy()
-        for name, _ in stored:
-            if name in _NOT_IN_304:
-                not_modified.discard(name)
         bucket.entries[key] = _StoredResponse(
-            status=status, header=stored, not_modified_header=not_modified,
+            status=status, header=stored,
+            not_modified_header=stored.without(_NOT_IN_304),
             body=body, etag=etag,
             expires_at=now + ttl, stored_at=now)
         bucket.entries.move_to_end(key)

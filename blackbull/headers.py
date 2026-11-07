@@ -90,6 +90,16 @@ class _MinimalResponseHeaders(list):
         out.date = self.date
         return out
 
+    def without(self, names: frozenset[bytes]) -> '_MinimalResponseHeaders':
+        """A copy lacking every field whose (lowercase) name is in *names*."""
+        out = type(self)([field for field in self if field[0] not in names])
+        out.content_length = (None if self.content_length is None
+                              or b'content-length' in names
+                              else list(self.content_length))
+        out.transfer_encoding = self.transfer_encoding and b'transfer-encoding' not in names
+        out.date = self.date and b'date' not in names
+        return out
+
     def _locate(self, field: tuple[bytes, bytes]) -> None:
         name = field[0]
         if name in _FRAMING_NAMES:
