@@ -36,8 +36,9 @@ class _MinimalResponseHeaders(list):
     one stores nothing for it).
 
     Build one with [`_as_response_fields`][]; add or remove fields only with
-    [`add`][], [`extend`][] and [`discard`][], which keep the framing facts
-    true.  A value replaced in place must still keep the contract.
+    [`add`][], [`add_valid`][], [`extend`][], [`discard`][] and
+    [`without`][], which keep the framing facts true.  A value replaced in
+    place must still keep the contract.
     """
 
     __slots__ = ('content_length', 'transfer_encoding', 'date')
@@ -65,6 +66,12 @@ class _MinimalResponseHeaders(list):
         self.append(field)
         self._locate(field)
 
+    def add_valid(self, name: bytes, value: bytes) -> None:
+        """Append one field the caller guarantees keeps the contract."""
+        field = (name, value)
+        self.append(field)
+        self._locate(field)
+
     def extend(self, fields: Iterable) -> None:
         """Append *fields*, validated unless they already keep the contract."""
         for field in _as_response_fields(fields):
@@ -88,6 +95,16 @@ class _MinimalResponseHeaders(list):
                               else list(self.content_length))
         out.transfer_encoding = self.transfer_encoding
         out.date = self.date
+        return out
+
+    def without(self, names: frozenset[bytes]) -> '_MinimalResponseHeaders':
+        """A copy lacking every field whose (lowercase) name is in *names*."""
+        out = type(self)([field for field in self if field[0] not in names])
+        out.content_length = (None if self.content_length is None
+                              or b'content-length' in names
+                              else list(self.content_length))
+        out.transfer_encoding = self.transfer_encoding and b'transfer-encoding' not in names
+        out.date = self.date and b'date' not in names
         return out
 
     def _locate(self, field: tuple[bytes, bytes]) -> None:
