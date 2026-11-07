@@ -7291,7 +7291,7 @@ consistency but are unused for WebSocket connections.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Encode response HEADERS, adding Date when absent.</p>
+        <p>Encode response HEADERS, adding Date and dropping connection-specific fields.</p>
 
 
     </div>
@@ -7309,7 +7309,7 @@ consistency but are unused for WebSocket connections.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Encode a terminal field section without pseudo-headers.</p>
+        <p>Encode a terminal field section without pseudo-headers or connection-specific fields.</p>
 
 
     </div>

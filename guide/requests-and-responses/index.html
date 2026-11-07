@@ -6739,7 +6739,10 @@ the stream.  Repeated or comma-joined lengths are accepted only when every
 numeric value is equal, then emitted as one canonical field.</p>
 <p>Response header names are sent lowercase on both transports, whatever
 case the application wrote: names are case-insensitive (RFC 9110 §5.1),
-and HTTP/2 requires lowercase (RFC 9113 §8.2.2).</p>
+and HTTP/2 requires lowercase (RFC 9113 §8.2.2).  HTTP/2 drops
+<code>Connection</code>, <code>Keep-Alive</code>, <code>Proxy-Connection</code>, <code>TE</code>,
+<code>Transfer-Encoding</code> and <code>Upgrade</code> from responses and trailers, which
+that section forbids; HTTP/1.1 sends them except <code>Transfer-Encoding</code>.</p>
 <p>Sending a Response through the normalizers uses to_native(), bypassing
 a subclass's <strong>call</strong> override. Override to_native() to customize that
 serialization. Calling the response directly invokes <strong>call</strong>; test the
