@@ -28,10 +28,11 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
-- WebSocket over HTTP/1.1: a handshake that is not a `GET` of HTTP/1.1 or
-  later, lacks `Connection: Upgrade`, or repeats `Sec-WebSocket-Key` or
-  `Sec-WebSocket-Version` is answered `400 Bad Request`; it switched to
-  WebSocket and reached the handler (BLA-642).
+- WebSocket over HTTP/1.1: a handshake that is not a `GET`, lacks
+  `Connection: Upgrade`, repeats `Sec-WebSocket-Key` or
+  `Sec-WebSocket-Version`, or carries a key outside the base64 alphabet is
+  answered `400 Bad Request`, and an HTTP/1.0 `Upgrade` is ignored; both
+  switched to WebSocket and reached the handler (BLA-642).
 - HTTP/1.1: a request body that exceeds `BB_BODY_TIMEOUT` closes the
   connection after the answer, as documented, whether or not the handler read
   the body; it was kept open, so the rest of the body would have been read as

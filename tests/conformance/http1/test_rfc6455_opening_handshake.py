@@ -24,12 +24,13 @@ REFUSED = {
     'put': _handshake(b'PUT /ws HTTP/1.1'),
     'head': _handshake(b'HEAD /ws HTTP/1.1'),
     'lowercase-get': _handshake(b'get /ws HTTP/1.1'),
-    'http-1.0': _handshake(b'GET /ws HTTP/1.0'),
     'no-connection': _handshake(connection=None),
     'connection-keep-alive': _handshake(connection=b'Connection: keep-alive'),
     'duplicate-key': _handshake(fields=(KEY, b'Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==',
                                         VERSION)),
     'duplicate-version': _handshake(fields=(KEY, VERSION, b'Sec-WebSocket-Version: 8')),
+    'key-outside-base64-alphabet': _handshake(fields=(
+        b'Sec-WebSocket-Key: !!dGhlIHNhbXBsZSBub25jZQ==', VERSION)),
 }
 
 
@@ -37,9 +38,13 @@ async def _status(raw: bytes) -> tuple[int | None, list]:
     called = []
 
     async def app(conn, receive, send):
-        called.append(conn)
+        called.append(conn.type)
         await receive()
-        await send({'type': 'websocket.accept'})
+        if conn.type == 'http':
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+        else:
+            await send({'type': 'websocket.accept'})
 
     async with served(app) as s:
         async with HTTP1Client('127.0.0.1', s.server.port, connect_timeout=2.0) as client:
@@ -58,4 +63,10 @@ async def test_a_nonconforming_handshake_is_refused_before_101(raw):
                                         b'Connection: keep-alive, upgrade'])
 async def test_a_conforming_handshake_switches_protocols(connection):
     status, called = await _status(_handshake(connection=connection))
-    assert (status, len(called)) == (101, 1)
+    assert (status, called) == (101, ['websocket'])
+
+
+async def test_an_http10_upgrade_is_served_as_http():
+    # RFC 9110 §7.8 — a server MUST ignore Upgrade in an HTTP/1.0 request.
+    status, called = await _status(_handshake(b'GET /ws HTTP/1.0'))
+    assert (status, called) == (200, ['http'])

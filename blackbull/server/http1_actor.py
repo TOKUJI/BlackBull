@@ -606,8 +606,9 @@ class HTTP1Actor(Actor):
             # may switch ``conn.type``; any other token (notably curl's default
             # ``Upgrade: h2c`` probe on ``--http2``) is served as ordinary
             # HTTP/1.1, because dispatch has no route for it and the connection
-            # would close with no reply.
-            if b'websocket' in list_members(b','.join([value for _, value in upgrade])):
+            # would close with no reply.  It MUST ignore Upgrade from HTTP/1.0.
+            if version != b'HTTP/1.0' and b'websocket' in list_members(
+                    b','.join([value for _, value in upgrade])):
                 conn.type = 'websocket'
                 conn.scheme = 'ws'
 
@@ -676,14 +677,15 @@ class HTTP1Actor(Actor):
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'content-type', b'text/plain')])
             return False
-        # RFC 6455 §4.2.1 / §11.3 — a GET of HTTP/1.1 or later, a Connection
-        # carrying ``upgrade``, and exactly one Sec-WebSocket-Key that decodes
-        # to 16 bytes and one Sec-WebSocket-Version.
+        # RFC 6455 §4.2.1 / §11.3 — a GET, a Connection carrying ``upgrade``,
+        # and exactly one base64 Sec-WebSocket-Key that decodes to 16 bytes
+        # and one Sec-WebSocket-Version.
         keys = headers.getlist(b'sec-websocket-key')
         try:
-            valid = (conn.method == 'GET' and conn.http_version != '1.0'
+            valid = (conn.method == 'GET'
                      and b'upgrade' in connection_options(headers)
-                     and len(keys) == 1 and len(b64decode(keys[0][1])) == 16)
+                     and len(keys) == 1
+                     and len(b64decode(keys[0][1], validate=True)) == 16)
         except (ValueError, BinasciiError):
             valid = False
         if not valid:

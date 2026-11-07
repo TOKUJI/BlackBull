@@ -321,10 +321,11 @@ what the client offered.
 ### Non-conforming handshakes are refused
 
 An HTTP/1.1 handshake switches protocols only as RFC 6455 §4.2.1 requires: a
-`GET` of HTTP/1.1 or later, `Connection` including `Upgrade`, exactly one
-16-byte `Sec-WebSocket-Key`, and exactly one `Sec-WebSocket-Version: 13`.
+`GET`, `Connection` including `Upgrade`, exactly one base64
+`Sec-WebSocket-Key` of 16 bytes, and exactly one `Sec-WebSocket-Version: 13`.
 Anything else is answered `400 Bad Request` and the connection closes; the
-handler is not called.
+handler is not called.  An HTTP/1.0 request's `Upgrade` is ignored and the
+request is served as ordinary HTTP (RFC 9110 §7.8).
 
 ### Handshakes that carry a body are refused
 
