@@ -23,7 +23,8 @@ from ..request import ClientDisconnected
 from ..protocol.framing import _CRLF, _HEAD_END, method_is
 from ..protocol.http1 import (FieldsTooLarge, LineCache, MessageError,
                               ReadLimitExceeded, Unimplemented, UnsupportedVersion,
-                              parse_head, persistent, request_framing)
+                              connection_options, parse_head, persistent,
+                              request_framing)
 from .deadline import Guard
 from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
@@ -374,7 +375,7 @@ class HTTP1Actor(Actor):
                 self._fill_connection_info(conn)
 
                 if conn.type == 'websocket':
-                    await self._handle_upgrade(conn)
+                    await self._handle_upgrade(conn, send)
                     return
 
                 # Refuse oversized declared bodies before Expect: 100-continue. Close without
@@ -553,7 +554,6 @@ class HTTP1Actor(Actor):
         # RFC 9112 §6 — framing rejected before any body byte is read.  ``run``
         # weighs the returned length against ``BB_MAX_BODY_SIZE``.
         self._request_framing = request_framing(headers)
-        self._persistent = persistent(version, headers)
         self._declared_body_len = self._request_framing[0] or 0
         expect = index.get(b'expect')
         self._expects_continue = expect is not None and b'100-continue' in list_members(
@@ -598,18 +598,22 @@ class HTTP1Actor(Actor):
             host, port = _parse_host_header(host_value, default_port)
             conn.server = (host, port)
 
+        # RFC 9110 §7.8 — a server MAY ignore an Upgrade it does not support
+        # and MUST NOT fail the request over it.  Only WebSocket may switch
+        # ``conn.type``; any other token (notably curl's default ``Upgrade:
+        # h2c`` probe on ``--http2``) is served as ordinary HTTP/1.1, because
+        # dispatch has no route for it and the connection would close with no
+        # reply.  It MUST ignore Upgrade from HTTP/1.0.
         upgrade = index.get(b'upgrade')
-        if upgrade:
-            # RFC 9110 §7.8 — a server MAY ignore an Upgrade it does not
-            # support and MUST NOT fail the request over it.  Only WebSocket
-            # may switch ``conn.type``; any other token (notably curl's default
-            # ``Upgrade: h2c`` probe on ``--http2``) is served as ordinary
-            # HTTP/1.1, because dispatch has no route for it and the connection
-            # would close with no reply.
-            if b'websocket' in list_members(b','.join([value for _, value in upgrade])):
-                conn.type = 'websocket'
-                conn.scheme = 'ws'
-
+        if upgrade and version != b'HTTP/1.0' and b'websocket' in list_members(
+                b','.join([value for _, value in upgrade])):
+            # RFC 6455 §4.2.1.  An upgrade never persists as HTTP/1.1.
+            if b'upgrade' not in connection_options(headers):
+                raise MessageError('WebSocket upgrade without Connection: upgrade')
+            conn.type = 'websocket'
+            conn.scheme = 'ws'
+        else:
+            self._persistent = persistent(version, headers)
         return conn
 
     def _fill_connection_info(self, conn: Connection) -> None:
@@ -622,7 +626,7 @@ class HTTP1Actor(Actor):
         if self._ssl:
             conn.scheme = 'wss' if conn.type == 'websocket' else 'https'
 
-    async def _handle_upgrade(self, conn: Connection) -> None:
+    async def _handle_upgrade(self, conn: Connection, send) -> None:
         """Handle WebSocket upgrade, threading the native Connection."""
         from .conn_id import new_connection_id  # noqa: PLC0415
         from .websocket_actor import WebSocketActor  # noqa: PLC0415
@@ -637,7 +641,8 @@ class HTTP1Actor(Actor):
         log_record = _start_record(conn)
         log_record.status = 101
 
-        if not await self._do_ws_handshake(conn):
+        send.reset_per_request_state()
+        if not await self._do_ws_handshake(conn, send):
             return  # 400 already sent
         # One id per TCP connection: reuse the accept-time id; mint one only
         # when the actor was constructed without it (direct test drives).
@@ -652,19 +657,18 @@ class HTTP1Actor(Actor):
         finally:
             _close_ws_record(log_record, ws_actor._disconnect_code)
 
-    async def _do_ws_handshake(self, conn: Connection) -> bool:
+    async def _do_ws_handshake(self, conn: Connection, send) -> bool:
         """Validate the WebSocket upgrade and store a deferred 101 callback.
 
         Returns True if the handshake is valid and ready to proceed, False if
-        a 400 Bad Request was already sent (declared content, bad
-        Sec-WebSocket-Key, or bad Sec-WebSocket-Version).
+        a 400 Bad Request was already sent (RFC 6455 §4.2.1, or declared
+        content).
 
         The actual HTTP 101 response is deferred: it is sent by
         WebSocketActor._send when the ASGI app calls websocket.accept, so that
         the chosen subprotocol from that event can be included in the 101 headers
         (RFC 6455 §4.2.2).
         """
-        send = SenderFactory.http1(self._writer)
         headers = conn.headers
         # RFC 9110 §9.3.1 — refuse rather than drain; see
         # ``docs/about/internals.md`` §Keep-alive drain invariant.
@@ -675,33 +679,30 @@ class HTTP1Actor(Actor):
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'content-type', b'text/plain')])
             return False
-        key = headers.get(b'sec-websocket-key', b'')
-        # RFC 6455 §4.2.1 — the client MUST send a Sec-WebSocket-Key whose
-        # base64-decoded value is 16 bytes.  An absent or malformed key is a
-        # bad handshake; answer 400 rather than completing an accept hash over
-        # the GUID alone (which some clients would then wrongly accept).
+        # RFC 6455 §4.2.1; §11.3 allows the key and the version once each.
+        keys = headers.getlist(b'sec-websocket-key')
         try:
-            valid_key = bool(key) and len(b64decode(key)) == 16
+            valid = (conn.method == 'GET' and len(keys) == 1
+                     and len(b64decode(keys[0][1], validate=True)) == 16)
         except (ValueError, BinasciiError):
-            valid_key = False
-        if not valid_key:
+            valid = False
+        if not valid:
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'content-type', b'text/plain')])
             return False
-        accept_key = b64encode(sha1(key + _WS_GUID).digest())
-        version = headers.get(b'sec-websocket-version', b'')
-        if version != b'13':
+        accept_key = b64encode(sha1(keys[0][1] + _WS_GUID).digest())
+        versions = headers.getlist(b'sec-websocket-version')
+        if len(versions) != 1 or versions[0][1] != b'13':
             await send(b'', HTTPStatus.BAD_REQUEST,
                        [(b'sec-websocket-version', b'13')])
             return False
 
-        client_protos = conn.subprotocols
-
         # Used when the handler calls websocket.accept without a subprotocol.
-        available_raw = getattr(self._app, 'available_ws_protocols', [])
-        available = {(p.decode('utf-8', errors='replace') if isinstance(p, bytes) else p)
-                     for p in available_raw}
-        auto_subprotocol = next((p for p in client_protos if p in available), None)
+        auto_subprotocol = None
+        if client_protos := conn.subprotocols:
+            available = {(p.decode('utf-8', errors='replace') if isinstance(p, bytes) else p)
+                         for p in getattr(self._app, 'available_ws_protocols', [])}
+            auto_subprotocol = next((p for p in client_protos if p in available), None)
 
         # RFC 7692 permessage-deflate negotiation.  Cached on the Connection so
         # WebSocketActor can pick it up after the handshake commits, and
@@ -710,18 +711,18 @@ class HTTP1Actor(Actor):
         deflate_params, deflate_response = _negotiate_deflate(headers)
 
         async def _send_101(subprotocol=None, app_headers=None):
-            hs_headers = Headers([
+            hs_headers = [
                 (b'upgrade', b'websocket'),
                 (b'connection', b'upgrade'),
                 (b'sec-websocket-accept', accept_key),
-            ])
+            ]
             if subprotocol:
                 sp = subprotocol.encode() if isinstance(subprotocol, str) else subprotocol
-                hs_headers.append(b'sec-websocket-protocol', sp)
+                hs_headers.append((b'sec-websocket-protocol', sp))
             if deflate_response is not None:
-                hs_headers.append(b'sec-websocket-extensions', deflate_response)
+                hs_headers.append((b'sec-websocket-extensions', deflate_response))
             if app_headers:
-                hs_headers.append(app_headers)
+                hs_headers.extend(app_headers)
             await send(b'', HTTPStatus.SWITCHING_PROTOCOLS, hs_headers)
 
         conn._ws = {
