@@ -183,6 +183,24 @@ class TestStaticFilesPathSecurity:
             f'{label} must be rejected; got {start["status"]}'
         )
 
+    @pytest.mark.parametrize('path', ['/\x00', '/hello.txt\x00.png', '/%00'],
+                             ids=['nul', 'nul-before-suffix', 'encoded-nul'])
+    async def test_a_nul_in_the_path_is_a_bad_request(self, static_dir, path):
+        from blackbull.middleware.static import StaticFiles
+        app = StaticFiles(directory=str(static_dir))
+        start, _ = await _collect(app, _scope(path=path))
+        assert start['status'] == 400
+
+    async def test_a_nul_on_the_wire_is_a_bad_request(self, static_dir):
+        from blackbull import BlackBull
+        from tests.harness import served
+        app = BlackBull()
+        app.static('/static', str(static_dir))
+        async with served(app) as s:
+            w = await s.wire()
+            await w.send(b'GET /static/%00 HTTP/1.1\r\nHost: x\r\n\r\n')
+            assert (await w.response()).status == 400
+
     async def test_directory_listing_not_served(self, static_dir):
         """Requesting a bare directory path must return 404 (no directory listing)."""
         from blackbull.middleware.static import StaticFiles

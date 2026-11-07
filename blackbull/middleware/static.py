@@ -226,7 +226,10 @@ class StaticFiles:
 
         decoded = unquote(raw_path)
         # Resolve symlinks before checking the root boundary.
-        target = os.path.realpath(os.path.join(self._root_str, decoded.lstrip('/')))
+        try:
+            target = os.path.realpath(os.path.join(self._root_str, decoded.lstrip('/')))
+        except ValueError:  # an embedded NUL names no file
+            target = ''
         if not self._inside_root(target):
             await self._respond(send, HTTPStatus.BAD_REQUEST)
             return
