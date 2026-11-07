@@ -384,7 +384,10 @@ package to parse the body manually.
 
     Response header names are sent lowercase on both transports, whatever
     case the application wrote: names are case-insensitive (RFC 9110 §5.1),
-    and HTTP/2 requires lowercase (RFC 9113 §8.2.2).
+    and HTTP/2 requires lowercase (RFC 9113 §8.2.2).  HTTP/2 drops
+    `Connection`, `Keep-Alive`, `Proxy-Connection`, `TE`,
+    `Transfer-Encoding` and `Upgrade` from responses and trailers, which
+    that section forbids; HTTP/1.1 sends them except `Transfer-Encoding`.
 
     Sending a Response through the normalizers uses to_native(), bypassing
     a subclass's __call__ override. Override to_native() to customize that

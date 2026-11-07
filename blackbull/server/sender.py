@@ -34,7 +34,7 @@ from ..asgi import (
     WebSocketSendEvent,
 )
 from ..headers import (
-    HeaderList, _MinimalResponseHeaders, _as_response_fields)
+    HeaderList, _CONNECTION_SPECIFIC, _MinimalResponseHeaders, _as_response_fields)
 from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
 from ..request import ClientDisconnected
 
@@ -118,11 +118,24 @@ _http_date.cache_ts: int = 0
 _http_date.value: bytes = b''
 
 
+def _h2_fields(headers) -> _MinimalResponseHeaders:
+    """*headers* as a response field section without the fields HTTP/2 forbids.
+
+    The exact base type is already both, so the common section returns at once.
+    """
+    if type(headers) is not _MinimalResponseHeaders:
+        headers = _as_response_fields(headers)
+        if headers.connection_specific:
+            headers = _as_response_fields(
+                [field for field in headers if field[0] not in _CONNECTION_SPECIFIC])
+    return headers
+
+
 def build_response_headers(encoder, stream_id: int, status,
                            headers, *, end_stream: bool,
                            max_frame_size: int = DEFAULT_MAX_FRAME_SIZE) -> bytes:
-    """Encode response HEADERS, adding Date when absent."""
-    headers = _as_response_fields(headers)
+    """Encode response HEADERS, adding Date and dropping connection-specific fields."""
+    headers = _h2_fields(headers)
     fields = headers if headers.date else (*headers, (b'date', _http_date()))
 
     payload = hpack_fastpath.encode_status(encoder, str(status), fields)
@@ -135,9 +148,8 @@ def build_response_headers(encoder, stream_id: int, status,
 
 def build_trailers(encoder, stream_id: int, headers, *,
                    max_frame_size: int = DEFAULT_MAX_FRAME_SIZE) -> bytes:
-    """Encode a terminal field section without pseudo-headers."""
-    headers = _as_response_fields(headers)
-    payload = encoder.encode(headers)
+    """Encode a terminal field section without pseudo-headers or connection-specific fields."""
+    payload = encoder.encode(_h2_fields(headers))
     flags = HeaderFrameFlags.END_HEADERS.value | HeaderFrameFlags.END_STREAM.value
     return serialize_field_block(payload, b'\x01', flags, stream_id, max_frame_size)
 
@@ -1220,10 +1232,8 @@ class HTTP2Sender(BaseSender):
                             ) -> None:
         """Write an interim head now and leave the stream open for its final
         one.  Both event arms funnel here, its length already dropped by
-        ``_stated_fields``; transfer-encoding is connection-specific, and
-        RFC 9113 §8.2.2 keeps it out of HTTP/2 entirely."""
-        kept = [(hk, hv) for hk, hv in headers if hk != b'transfer-encoding']
-        await self.send_response_headers(status, kept)
+        ``_stated_fields``."""
+        await self.send_response_headers(status, headers)
         self._buffered_status = None
         self._buffered_headers = None
         self._expect_trailers = False
