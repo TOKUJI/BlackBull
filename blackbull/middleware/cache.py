@@ -41,6 +41,10 @@ _MAX_DELTA_SECONDS = 365 * 24 * 60 * 60
 #: header cannot grow one bucket without bound.
 _MAX_VARIANTS_PER_KEY = 16
 
+#: RFC 9110 §15.4.5 — representation metadata a 304 should not repeat; the
+#: stored response's other fields go out as they would on its 200.
+_NOT_IN_304 = frozenset({b'content-type', b'content-encoding', b'content-language',
+                         b'content-length', b'last-modified'})
 
 
 
@@ -52,6 +56,8 @@ class _StoredResponse(NamedTuple):
     """
     status: int
     header: list[tuple[bytes, bytes]]
+    #: ``header`` less ``_NOT_IN_304``.
+    not_modified_header: list[tuple[bytes, bytes]]
     body: bytes
     etag: bytes
     expires_at: float
@@ -62,6 +68,12 @@ class _StoredResponse(NamedTuple):
         header = self.header.copy()
         header.add(b'age', str(age).encode())
         return NativeResponse.complete(self.status, header, self.body)
+
+    def not_modified(self, age: int) -> NativeResponse:
+        """The 304 answering a matching ``If-None-Match``."""
+        header = self.not_modified_header.copy()
+        header.add(b'age', str(age).encode())
+        return NativeResponse.complete(304, header, b'')
 
     def expired(self, now: float | None = None) -> bool:
         return (now if now is not None else time.monotonic()) >= self.expires_at
@@ -149,11 +161,7 @@ class Cache:
             age = max(0, int(entry.age()))
             inm = conn.headers.get_combined(b'if-none-match')
             if inm and if_none_match_hit(inm, entry.etag):
-                await send(NativeResponse(
-                    status=304,
-                    header=[(b'etag', entry.etag),
-                            (b'age', str(age).encode())],
-                    body=b''))
+                await send(entry.not_modified(age))
                 return
             await send(entry.replay(age))
             return
@@ -195,8 +203,13 @@ class Cache:
         key = _variant_key(vary_fields, req_headers)
         stored = _owned_response_fields(headers)
         stored.discard(b'age')
+        not_modified = stored.copy()
+        for name, _ in stored:
+            if name in _NOT_IN_304:
+                not_modified.discard(name)
         bucket.entries[key] = _StoredResponse(
-            status=status, header=stored, body=body, etag=etag,
+            status=status, header=stored, not_modified_header=not_modified,
+            body=body, etag=etag,
             expires_at=now + ttl, stored_at=now)
         bucket.entries.move_to_end(key)
         self._store.move_to_end(base_key)

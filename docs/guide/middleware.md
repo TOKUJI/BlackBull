@@ -387,7 +387,9 @@ async def feed(scope, receive, send):
 A weak ETag (`W/"<sha256-prefix>"`) is generated automatically when
 the handler doesn't supply one.  Subsequent requests with a
 matching `If-None-Match` header receive `304 Not Modified` with no
-body.
+body; it carries the stored response's fields except `Content-Type`,
+`Content-Encoding`, `Content-Language`, `Content-Length` and
+`Last-Modified` (RFC 9110 §15.4.5).
 
 A response's own rules win over the cache's defaults, and every
 `Cache-Control` field is read.  Its lifetime is `max-age`,

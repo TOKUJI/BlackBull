@@ -28,6 +28,11 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- `Cache`: the `304` it answers a matching `If-None-Match` with carries the
+  stored response's `Cache-Control`, `Vary`, `Expires` and other fields, such
+  as CORS ones from inner middleware, less its representation metadata; it
+  carried only `ETag` and `Age` (BLA-631).
+
 - Static files: a request path that decodes to a NUL (`/static/%00`) is
   answered `400 Bad Request`; it raised inside `StaticFiles` and was answered
   `500` (BLA-598).
