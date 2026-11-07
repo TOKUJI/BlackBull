@@ -6267,8 +6267,8 @@ revalidation of a large asset costs no disk I/O.  Pass
 <ul>
 <li><strong>Path traversal</strong>: URL-encoded paths are decoded with
   <code>urllib.parse.unquote</code> before resolution.  Any resolved path
-  that escapes the configured root directory returns
-  <code>400 Bad Request</code>.</li>
+  that escapes the configured root directory, or that decodes to a NUL,
+  returns <code>400 Bad Request</code>.</li>
 <li><strong>Directory listing</strong>: Requests for bare directories return
   <code>404</code>; no directory listing is ever served.</li>
 <li><strong>Precompressed variants</strong>: the check applies to the file finally
