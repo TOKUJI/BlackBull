@@ -6487,7 +6487,9 @@ refuses its named codec; a refusal in any duplicate also takes precedence.</p>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'blackbull[compression]'</span>
 </code></pre></div>
 <p>The default <code>min_size</code> is 100 bytes — responses smaller than that
-pass through uncompressed.</p>
+pass through uncompressed.
+<code>206 Partial Content</code> and responses carrying <code>Content-Range</code> pass through
+unchanged, preserving the selected byte range and any existing content coding.</p>
 <p>Every compressed response carries <code>Vary: Accept-Encoding</code> (folded into
 any existing <code>Vary</code>) so a shared cache never replays an encoded body to
 a client that sent <code>identity</code> / no <code>Accept-Encoding</code> (RFC 9110 §12.5.5).
