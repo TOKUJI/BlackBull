@@ -9,6 +9,7 @@ import gzip
 import threading
 from collections.abc import Callable
 from ..connection import Connection
+from ..env import Settings, get_settings
 from ..headers import _MinimalResponseHeaders
 from ..native import NativeResponse
 from ..protocol.framing import is_informational
@@ -16,16 +17,7 @@ from ..server.cap_log import log_cap_hit
 from ._accept_encoding import select_encoding
 from .utils import as_middleware
 
-_MIN_SIZE = 100  # default minimum body size to bother compressing
-_EXECUTOR_THRESHOLD = 65536  # default body size above which compression is offloaded
-# Dynamic brotli quality; BB_BROTLI_QUALITY overrides it.
-_BROTLI_QUALITY = 4
-# Default cap on concurrent executor offloads.  When at the cap, additional
-# eligible responses are served *uncompressed* rather than queued — bounded
-# fall-back instead of unbounded executor queue growth.  ``0`` disables.
-import os as _os  # noqa: PLC0415
 from ..protocol.field_grammar import list_members, media_type
-_MAX_INFLIGHT = max((_os.cpu_count() or 1) * 2, 4)
 
 # Skip compressed/binary media. Do not skip font/ wholesale: TTF, OTF and
 # SFNT still need compression, while WOFF and WOFF2 are already compressed.
@@ -52,7 +44,7 @@ _SKIP_CONTENT_TYPES = (
 # Codec detection and selection
 # ---------------------------------------------------------------------------
 
-def _detect_codecs(brotli_quality: int = _BROTLI_QUALITY) -> dict[str, Callable[[bytes], bytes]]:
+def _detect_codecs(brotli_quality: int = Settings.brotli_quality) -> dict[str, Callable[[bytes], bytes]]:
     available: dict[str, Callable[[bytes], bytes]] = {}
     try:
         import brotli  # type: ignore[import-untyped]
@@ -146,7 +138,7 @@ class _Permit:
 
 @as_middleware
 class Compression:
-    """ASGI middleware: compress the response body using the best codec the
+    """Compress the response body using the best codec the
     client accepts (br > zstd > gzip, in server-preference order).
 
     Bodies smaller than *min_size* bytes are forwarded uncompressed.
@@ -163,10 +155,23 @@ class Compression:
         async def handler(conn, receive, send): ...
     """
 
-    def __init__(self, min_size: int = _MIN_SIZE,
-                 executor_threshold: int = _EXECUTOR_THRESHOLD,
-                 executor_max_inflight: int = _MAX_INFLIGHT,
-                 brotli_quality: int = _BROTLI_QUALITY):
+    def __init__(self, min_size: int | None = None,
+                 executor_threshold: int | None = None,
+                 executor_max_inflight: int | None = None,
+                 brotli_quality: int | None = None):
+        if brotli_quality is not None and not 0 <= brotli_quality <= 11:
+            raise ValueError('brotli_quality must be between 0 and 11')
+        if (min_size is None or executor_threshold is None
+                or executor_max_inflight is None or brotli_quality is None):
+            cfg = get_settings()
+            if min_size is None:
+                min_size = cfg.compression_min_size
+            if executor_threshold is None:
+                executor_threshold = cfg.compression_executor_threshold
+            if executor_max_inflight is None:
+                executor_max_inflight = cfg.compression_max_inflight
+            if brotli_quality is None:
+                brotli_quality = cfg.brotli_quality
         self._min_size = min_size
         self._executor_threshold = executor_threshold
         # Concurrency cap on executor offloads.  When at cap, fall back to
@@ -411,17 +416,3 @@ class Compression:
         # Every other path already emitted its response inside
         # ``intercepting_send`` — the native seam decides and sends in one
         # place, so there is no buffered tail left to flush here.
-
-
-def _make_default_compress() -> 'Compression':
-    try:
-        from ..env import get_settings as _get_settings  # noqa: PLC0415
-        cfg = _get_settings()
-        return Compression(
-            min_size=cfg.compression_min_size,
-            executor_threshold=cfg.compression_executor_threshold,
-            executor_max_inflight=cfg.compression_max_inflight,
-            brotli_quality=cfg.brotli_quality,
-        )
-    except Exception:
-        return Compression()

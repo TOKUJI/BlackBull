@@ -167,6 +167,46 @@ def _compression_case(case):
     return operation, check
 
 
+def _compression_init_case(case):
+    from blackbull import middleware
+    from blackbull.env import Settings, get_settings, reset_settings_cache
+
+    explicit = dict(min_size=Settings.compression_min_size,
+                    executor_threshold=Settings.compression_executor_threshold,
+                    executor_max_inflight=Settings.compression_max_inflight,
+                    brotli_quality=Settings.brotli_quality)
+    factories = {
+        'compression-default': middleware.Compression,
+        'compression-partial': lambda: middleware.Compression(min_size=1),
+        'compression-explicit': lambda: middleware.Compression(**explicit),
+        'compression-legacy': lambda: middleware.compress,
+        'compression-settings-cold': middleware.Compression,
+        'settings-cold': get_settings,
+    }
+    factory = factories[case]
+    current = None
+
+    async def operation():
+        nonlocal current
+        if case.endswith('-cold'):
+            reset_settings_cache()
+        current = factory()
+
+    def check():
+        if case == 'settings-cold':
+            assert current.compression_min_size == Settings.compression_min_size
+            assert current.brotli_quality == Settings.brotli_quality
+        else:
+            assert current._min_size == (1 if case == 'compression-partial' else Settings.compression_min_size)
+            assert current._executor_threshold == Settings.compression_executor_threshold
+            assert current._executor_max_inflight == Settings.compression_max_inflight
+            if 'br' in current._available:
+                assert current._available['br'].keywords['quality'] == Settings.brotli_quality
+        return {}
+
+    return operation, check
+
+
 def _response_case(case):
     from blackbull.response import (Response, JSONResponse, RedirectResponse,
                                     StreamingResponse, EventSourceResponse)
@@ -240,14 +280,19 @@ def _response_case(case):
 
 
 async def _probe(root: str, count: int, cpu: int, gc_mode: str,
-                 instructions: bool, profile: str) -> dict:
+                 instructions: bool, profile: str, selected=None) -> dict:
     root = str(Path(root).resolve())
     sys.path.insert(0, root)
     from blackbull import response
+    from blackbull import env
     from blackbull.middleware import compression
     source = Path((response if profile == 'responses' else compression).__file__).resolve()
     relative = 'response.py' if profile == 'responses' else 'middleware/compression.py'
     assert source == Path(root) / 'blackbull' / relative
+    assert Path(env.__file__).resolve() == Path(root) / 'blackbull/env.py'
+    if profile == 'compression-init':
+        import warnings
+        warnings.simplefilter('ignore', DeprecationWarning)
     os.sched_setaffinity(0, {cpu})
     (gc.enable if gc_mode == 'on' else gc.disable)()
     counts, calls = Counter(), Counter()
@@ -257,14 +302,15 @@ async def _probe(root: str, count: int, cpu: int, gc_mode: str,
             raise RuntimeError('Instruction counting needs Python 3.12+')
         monitor.use_tool_id(monitor.PROFILER_ID, 'middleware-stack')
         prefix = str(Path(root) / 'blackbull') + os.sep
+        generated = {env.Settings.__init__.__code__: 'Settings.__init__'}
 
         def instruction(code, offset):
-            if code.co_filename.startswith(prefix):
-                counts[code.co_qualname] += 1
+            if code.co_filename.startswith(prefix) or code in generated:
+                counts[generated.get(code, code.co_qualname)] += 1
 
         def call(code, offset):
-            if code.co_filename.startswith(prefix):
-                calls[code.co_qualname] += 1
+            if code.co_filename.startswith(prefix) or code in generated:
+                calls[generated.get(code, code.co_qualname)] += 1
 
         monitor.register_callback(monitor.PROFILER_ID, monitor.events.INSTRUCTION, instruction)
         monitor.register_callback(monitor.PROFILER_ID, monitor.events.PY_START, call)
@@ -276,10 +322,19 @@ async def _probe(root: str, count: int, cpu: int, gc_mode: str,
               'redirect-extra', 'redirect-explicit', 'stream-default', 'stream-extra',
               'stream-explicit', 'sse-default', 'sse-extra', 'sse-explicit', 'sse-many',
               'response-serialize') if profile == 'responses' else
+             ('compression-default', 'compression-partial', 'compression-explicit',
+              'compression-legacy', 'compression-settings-cold', 'settings-cold')
+             if profile == 'compression-init' else
              ('gzip-complete', 'gzip-split', 'identity', 'binary', 'preencoded',
               'range206', 'range206-no-header', 'range200', 'grpc-trailers'))
+    if selected:
+        if unknown := set(selected) - set(cases):
+            raise ValueError(f'Unknown {profile} cases: {sorted(unknown)}')
+        cases = tuple(case for case in cases if case in selected)
     for case in cases:
-        operation, check = (_response_case if profile == 'responses' else _compression_case)(case)
+        factory = {'responses': _response_case, 'compression': _compression_case,
+                   'compression-init': _compression_init_case}[profile]
+        operation, check = factory(case)
         for _ in range(100):
             await operation()
         counts.clear()
@@ -302,6 +357,7 @@ async def _probe(root: str, count: int, cpu: int, gc_mode: str,
         monitor.free_tool_id(monitor.PROFILER_ID)
     return {'metrics': metrics, 'source': str(source),
             'sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+            'settings_sha256': hashlib.sha256(Path(env.__file__).read_bytes()).hexdigest(),
             'affinity': sorted(os.sched_getaffinity(0)), 'gc': gc_mode}
 
 
@@ -311,17 +367,22 @@ def _compare(args) -> None:
     run = run_dir('middleware_stack', vars(args))
     roots = {'base': str(Path(args.base).resolve()), 'treat': str(Path(args.head).resolve())}
     relative = 'blackbull/response.py' if args.responses else 'blackbull/middleware/compression.py'
-    states = {arm: bytecode(root, (relative,))
+    files = ((relative,) if args.responses else
+             (relative, 'blackbull/env.py', 'blackbull/middleware/__init__.py'))
+    states = {arm: bytecode(root, files)
               for arm, root in roots.items()}
     (run / 'bytecode.json').write_text(json.dumps(states, indent=2))
 
     def child(root, gc_mode, instructions=False):
         command = [sys.executable, __file__,
-                   '--response-worker' if args.responses else '--compression-worker', root,
+                   '--response-worker' if args.responses else
+                   '--compression-init-worker' if args.compression_init else '--compression-worker', root,
                    '--count', str(16 if instructions else args.count),
                    '--cpu', str(args.cpu), '--gc', gc_mode]
         if instructions:
             command.append('--instructions')
+        for case in args.case or ():
+            command.extend(('--case', case))
         return json.loads(subprocess.check_output(command, text=True, timeout=60,
                           env={**os.environ, 'PYTHONHASHSEED': '0'}))
 
@@ -346,6 +407,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compression', action='store_true', help='Compression middleware A/A and ABBA')
     parser.add_argument('--responses', action='store_true', help='Response helper A/A and ABBA')
+    parser.add_argument('--compression-init', action='store_true', help='Compression construction and settings A/A and ABBA')
     parser.add_argument('--base')
     parser.add_argument('--head')
     parser.add_argument('--rounds', type=int, default=16)
@@ -355,7 +417,9 @@ def main() -> None:
     parser.add_argument('--gc', choices=('on', 'off', 'both'), default='both')
     parser.add_argument('--compression-worker', help=argparse.SUPPRESS)
     parser.add_argument('--response-worker', help=argparse.SUPPRESS)
+    parser.add_argument('--compression-init-worker', help=argparse.SUPPRESS)
     parser.add_argument('--instructions', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--case', action='append', help='Select a comparison case; repeat for multiple cases')
     parser.add_argument('--port', type=int, default=8443)
     parser.add_argument('--cert', default='cert.pem')
     parser.add_argument('--key', default='key.pem')
@@ -368,14 +432,16 @@ def main() -> None:
     parser.add_argument('--layers', type=str, default='0,1,4,10,20,40',
                         help='comma-separated list of middleware counts')
     args = parser.parse_args()
-    if args.compression_worker or args.response_worker:
+    if args.compression_worker or args.response_worker or args.compression_init_worker:
         if args.gc == 'both':
             parser.error('worker requires one GC mode')
         print(json.dumps(asyncio.run(_probe(
-            args.response_worker or args.compression_worker, args.count, args.cpu,
-            args.gc, args.instructions, 'responses' if args.response_worker else 'compression'))))
+            args.response_worker or args.compression_worker or args.compression_init_worker,
+            args.count, args.cpu, args.gc, args.instructions,
+            'responses' if args.response_worker else
+            'compression-init' if args.compression_init_worker else 'compression', args.case))))
         return
-    if args.compression or args.responses:
+    if args.compression or args.responses or args.compression_init:
         if sys.version_info < (3, 12):
             parser.error('compression diagnostics need Python 3.12+')
         if not args.base or not args.head or min(args.rounds, args.aa_rounds, args.count) < 1:

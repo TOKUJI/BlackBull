@@ -4,7 +4,7 @@ Legacy Middleware-suffixed aliases and compress emit DeprecationWarning;
 use the unsuffixed classes for new code.
 """
 from .cache import Cache
-from .compression import Compression, _make_default_compress
+from .compression import Compression
 from .cors import CORS
 from .proxy import TrustedProxy
 from .static import StaticFiles
@@ -42,5 +42,5 @@ def __getattr__(name):
         return target
     if name == 'compress':
         _warn_deprecated('BBD002')
-        return _make_default_compress()
+        return Compression()
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

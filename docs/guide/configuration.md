@@ -75,6 +75,12 @@ naming (lower-cased, the `BB_` prefix dropped).  Unknown
 sections and keys are silently ignored, so future TOML keys
 don't break older binaries.
 
+`Compression()` resolves omitted or `None` arguments from the cached settings
+at construction: `BB_COMPRESSION_MIN_SIZE`, `BB_COMPRESSION_EXECUTOR_THRESHOLD`,
+`BB_COMPRESSION_MAX_INFLIGHT`, and `BB_BROTLI_QUALITY`. Explicit arguments,
+including `0`, take precedence. An explicit `brotli_quality` outside 0–11
+raises `ValueError` at construction.
+
 The TLS keys (`[tls] cert`, `[tls] key`) are CLI-arg fallbacks
 applied to `--certfile` / `--keyfile` when those aren't
 specified on the command line.
