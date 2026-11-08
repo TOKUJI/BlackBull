@@ -216,14 +216,18 @@ def test_main_warns_on_specific_host(capsys, monkeypatch):
     pytest.param('[limits]\ncompression_min_size = 3\n', 'BB_COMPRESSION_MIN_SIZE', '3'),
     pytest.param('[limits]\ncompression_executor_threshold = 7\n',
                  'BB_COMPRESSION_EXECUTOR_THRESHOLD', '7'),
-    pytest.param('[limits]\ncompression_max_inflight = 0\n', 'BB_COMPRESSION_MAX_INFLIGHT', '0'),
-    pytest.param('[limits]\nbrotli_quality = 1\n', 'BB_BROTLI_QUALITY', '1'),
 ])
 def test_load_config_maps_server_workers(tmp_path, content, key, value):
     cfg_file = tmp_path / 'bb.toml'
     cfg_file.write_text(content)
     result = _load_config(str(cfg_file))
     assert result[key] == value
+
+
+def test_future_compression_config_keys_are_not_enabled(tmp_path):
+    config = tmp_path / 'bb.toml'
+    config.write_text('[limits]\ncompression_max_inflight = 0\nbrotli_quality = 1\n')
+    assert _load_config(str(config)) == {}
 
 
 @pytest.mark.asyncio

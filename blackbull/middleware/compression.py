@@ -19,6 +19,18 @@ from .utils import as_middleware
 
 from ..protocol.field_grammar import list_members, media_type
 
+
+class _ConfiguredDefault(int):
+    """Keep numeric defaults; identity distinguishes omission from an explicit equal value."""
+
+    __slots__ = ()
+
+
+_MIN_SIZE = _ConfiguredDefault(Settings.compression_min_size)
+_EXECUTOR_THRESHOLD = _ConfiguredDefault(Settings.compression_executor_threshold)
+_MAX_INFLIGHT = _ConfiguredDefault(Settings.compression_max_inflight)
+_BROTLI_QUALITY = _ConfiguredDefault(Settings.brotli_quality)
+
 # Skip compressed/binary media. Do not skip font/ wholesale: TTF, OTF and
 # SFNT still need compression, while WOFF and WOFF2 are already compressed.
 _SKIP_CONTENT_TYPES = (
@@ -155,22 +167,22 @@ class Compression:
         async def handler(conn, receive, send): ...
     """
 
-    def __init__(self, min_size: int | None = None,
-                 executor_threshold: int | None = None,
-                 executor_max_inflight: int | None = None,
-                 brotli_quality: int | None = None):
-        if brotli_quality is not None and not 0 <= brotli_quality <= 11:
+    def __init__(self, min_size: int = _MIN_SIZE,
+                 executor_threshold: int = _EXECUTOR_THRESHOLD,
+                 executor_max_inflight: int = _MAX_INFLIGHT,
+                 brotli_quality: int = _BROTLI_QUALITY):
+        if brotli_quality is not _BROTLI_QUALITY and not 0 <= brotli_quality <= 11:
             raise ValueError('brotli_quality must be between 0 and 11')
-        if (min_size is None or executor_threshold is None
-                or executor_max_inflight is None or brotli_quality is None):
+        if (min_size is _MIN_SIZE or executor_threshold is _EXECUTOR_THRESHOLD
+                or executor_max_inflight is _MAX_INFLIGHT or brotli_quality is _BROTLI_QUALITY):
             cfg = get_settings()
-            if min_size is None:
+            if min_size is _MIN_SIZE:
                 min_size = cfg.compression_min_size
-            if executor_threshold is None:
+            if executor_threshold is _EXECUTOR_THRESHOLD:
                 executor_threshold = cfg.compression_executor_threshold
-            if executor_max_inflight is None:
+            if executor_max_inflight is _MAX_INFLIGHT:
                 executor_max_inflight = cfg.compression_max_inflight
-            if brotli_quality is None:
+            if brotli_quality is _BROTLI_QUALITY:
                 brotli_quality = cfg.brotli_quality
         self._min_size = min_size
         self._executor_threshold = executor_threshold

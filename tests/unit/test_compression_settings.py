@@ -1,11 +1,12 @@
 import asyncio
 import gzip
+import inspect
 import threading
 
 import pytest
 
 from blackbull.connection import Connection
-from blackbull.env import reset_settings_cache
+from blackbull.env import Settings, reset_settings_cache
 from blackbull.middleware.compression import Compression
 from blackbull.native import NativeResponse
 
@@ -29,20 +30,34 @@ async def reply(middleware, codec=b'gzip'):
     return response
 
 
+def test_constructor_keeps_numeric_public_defaults():
+    parameters = inspect.signature(Compression).parameters
+    for name, default in [('min_size', Settings.compression_min_size),
+                          ('executor_threshold', Settings.compression_executor_threshold),
+                          ('executor_max_inflight', Settings.compression_max_inflight),
+                          ('brotli_quality', Settings.brotli_quality)]:
+        assert parameters[name].annotation is int
+        assert isinstance(parameters[name].default, int)
+        assert parameters[name].default == default
+        assert repr(parameters[name].default) == repr(default)
+
+
 @pytest.mark.asyncio
-async def test_min_size_defaults_to_settings(monkeypatch):
+@pytest.mark.parametrize('explicit', [0, Settings.compression_min_size])
+async def test_min_size_defaults_to_settings(monkeypatch, explicit):
     monkeypatch.setenv('BB_COMPRESSION_MIN_SIZE', '1000')
     response = await reply(Compression())
     assert b'content-encoding' not in response.header
     assert response.body == BODY
-    explicit = await reply(Compression(min_size=0))
-    assert explicit.header.get(b'content-encoding') == b'gzip'
-    assert gzip.decompress(explicit.body) == BODY
+    overridden = await reply(Compression(min_size=explicit))
+    assert overridden.header.get(b'content-encoding') == b'gzip'
+    assert gzip.decompress(overridden.body) == BODY
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('threshold,explicit,offloaded', [
     ('1', None, True), ('0', None, False), ('1', 0, False), ('0', 1, True),
+    ('1', Settings.compression_executor_threshold, False),
 ])
 async def test_executor_threshold_defaults_to_settings(monkeypatch, threshold, explicit, offloaded):
     monkeypatch.setenv('BB_COMPRESSION_EXECUTOR_THRESHOLD', threshold)
@@ -64,6 +79,7 @@ async def test_executor_threshold_defaults_to_settings(monkeypatch, threshold, e
 @pytest.mark.asyncio
 @pytest.mark.parametrize('configured,explicit,capped', [
     ('1', None, True), ('0', None, False), ('1', 0, False), ('0', 1, True),
+    ('1', Settings.compression_max_inflight, False),
 ])
 async def test_inflight_limit_defaults_to_settings(monkeypatch, configured, explicit, capped):
     monkeypatch.setenv('BB_COMPRESSION_MAX_INFLIGHT', configured)
@@ -103,7 +119,8 @@ async def test_inflight_limit_defaults_to_settings(monkeypatch, configured, expl
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('quality,explicit', [('1', None), ('11', 0), ('99', None)])
+@pytest.mark.parametrize('quality,explicit', [('1', None), ('11', 0), ('99', None),
+                                           ('1', Settings.brotli_quality)])
 async def test_brotli_quality_defaults_to_validated_settings(monkeypatch, quality, explicit):
     brotli = pytest.importorskip('brotli')
     monkeypatch.setenv('BB_BROTLI_QUALITY', quality)
