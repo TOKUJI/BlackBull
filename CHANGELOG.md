@@ -28,6 +28,10 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- HTTP/2: a `HEAD` request is dispatched as `GET` with its body dropped, as
+  over HTTP/1.1, so a `GET` route answers it; it was answered `405`
+  (BLA-606).
+
 - `Cache`: the `304` it answers a matching `If-None-Match` with carries the
   stored response's `Cache-Control`, `Vary`, `Expires` and other fields, such
   as CORS ones from inner middleware, less its representation metadata; it

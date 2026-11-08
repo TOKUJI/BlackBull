@@ -356,7 +356,8 @@ according to [RFC 9110 §4.3.1](https://www.rfc-editor.org/rfc/rfc9110.html#sect
 HTTP and HTTPS, different hosts, and different non-default ports have separate
 cache buckets even when path and query match; `Vary: Host` is not required.
 Host/scheme case, leading zeros in a port and an explicit default port do not
-create a different origin. GET and HEAD remain separate keys.
+create a different origin. BlackBull's own server dispatches HEAD as GET, so
+the two share an entry; under an external ASGI host they remain separate keys.
 
 Native HTTP/1.1 and external ASGI use `Host`; the native HTTP/2 parser maps
 `:authority` to that same header before dispatch. If `Host` is absent, the

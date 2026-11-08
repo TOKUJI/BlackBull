@@ -1013,8 +1013,8 @@ class HTTP2Actor(Actor, HTTP2Connection):
         stream.conn = conn
         # Before anything can refuse the request and write its own response:
         # that response owes the same content rules as the application's.
-        self.make_sender(stream.stream_id,
-                         head_mode=method_is(conn.method, 'HEAD'))
+        head = method_is(conn.method, 'HEAD')
+        self.make_sender(stream.stream_id, head_mode=head)
 
         # Keep the common admission check inline; the refusal path rechecks
         # and enforces the limit.
@@ -1035,6 +1035,9 @@ class HTTP2Actor(Actor, HTTP2Connection):
         # Capture native sends inside sender arms; None means no record consumer.
         log_record = _open_record(conn, self._aggregator)
         send._log_record = log_record
+        if head:
+            # Dispatched as GET, like HTTP/1.1; the record keeps HEAD.
+            conn.method = 'GET'
         self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, send, log_record)
         return True
 

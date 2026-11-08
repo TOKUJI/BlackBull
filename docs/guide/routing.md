@@ -30,6 +30,11 @@ async def healthz(conn, receive, send):
     await send(Response(b'ok'))
 ```
 
+On BlackBull's own server, over HTTP/1.1 and HTTP/2 alike, a `HEAD`
+request is dispatched as `GET` (handlers see `conn.method == 'GET'`) and
+its response body is dropped, so a `GET` route answers `HEAD` without
+listing it.
+
 Any valid method token is accepted, as a string or an `HTTPMethod`
 member — extension methods (`PROPFIND`, vendor tokens) route the same
 way as the standard ones, and appear in the 405 `Allow` header when
