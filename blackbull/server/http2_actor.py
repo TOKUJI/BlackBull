@@ -330,7 +330,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         self._next_push_stream_id += 2
         return sid
 
-    def make_sender(self, stream_id: int, head_mode: bool | None = None):
+    def make_sender(self, stream_id: int):
         if stream_id not in self._senders:
             sender = SenderFactory.http2(
                 self._writer, self.factory, stream_id,
@@ -340,12 +340,8 @@ class HTTP2Actor(Actor, HTTP2Connection):
                 # SETTINGS received before this stream opened may have moved it.
                 initial_window=self._peer_initial_window_size,
                 flow_control_timeout=self._write_timeout,
-                head_mode=bool(head_mode),
             )
             self._senders[stream_id] = sender
-        elif head_mode is not None:
-            # Cached before the request head said what the method was.
-            self._senders[stream_id]._head_mode = head_mode
         return self._senders[stream_id]
 
     def _make_stream_recipient(self, stream_id: int) -> HTTP2Recipient:
@@ -1013,8 +1009,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         stream.conn = conn
         # Before anything can refuse the request and write its own response:
         # that response owes the same content rules as the application's.
-        head = method_is(conn.method, 'HEAD')
-        self.make_sender(stream.stream_id, head_mode=head)
+        send._head_mode = head = method_is(conn.method, 'HEAD')
 
         # Keep the common admission check inline; the refusal path rechecks
         # and enforces the limit.
@@ -1170,9 +1165,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         conn = stream.conn
         assert conn is not None
         conn.connection_id = self._connection_id or new_connection_id()
-        stream_send = self.make_sender(stream.stream_id,
-                                       head_mode=method_is(conn.method,
-                                                           'HEAD'))
+        stream_send = self.make_sender(stream.stream_id)
 
         # RFC 7692 permessage-deflate negotiation, shared with the HTTP/1.1
         # handshake: the offer decides, the answer rides the 200, and the
