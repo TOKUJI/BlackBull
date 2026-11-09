@@ -351,6 +351,13 @@ Captures the handler's response on the first hit, stores it under
 `(method, origin, path, query_string)`, and replays it directly on
 subsequent matching requests until the entry expires.
 
+!!! warning "Shared between clients"
+    `Cookie` is not an implicit cache key, and `Set-Cookie` does not prevent
+    storage. A cached body and session cookie can be replayed to another client.
+    `cache_authenticated=False` bypasses `Authorization`, not cookie-based
+    sessions. Mark personalized or cookie-issuing responses
+    `Cache-Control: private` or `no-store` ([RFC 9111 §7.3](https://www.rfc-editor.org/rfc/rfc9111.html#section-7.3)).
+
 The effective **origin** is the request's scheme, host and port, normalized
 according to [RFC 9110 §4.3.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-4.3.1).
 HTTP and HTTPS, different hosts, and different non-default ports have separate
@@ -371,18 +378,20 @@ not interpret `Forwarded` or `X-Forwarded-*` itself and does not expand the
 proxy trust boundary. `TrustedProxy` applies its supported scheme rewrites;
 it does not infer a host rewrite from `Forwarded: host` or `X-Forwarded-Host`.
 
+Apply the cache to public routes; keep personal responses out of shared caches:
+
 ```python
-from blackbull.middleware.cache import Cache
+from blackbull import Response
+from blackbull.middleware import Cache
 
-app.use(Cache(max_age=600))   # 10-minute TTL
+@app.route(path='/feed', middlewares=[Cache(max_age=600)])
+async def feed(conn):
+    return Response(render(await fetch_news()), content_type='text/html')
 
-@app.route(path='/feed')
-async def feed(scope, receive, send):
-    items = await fetch_news()           # expensive
-    body = render(items).encode()
-    await send({'type': 'http.response.start', 'status': 200,
-                'headers': [(b'content-type', b'text/html')]})
-    await send({'type': 'http.response.body', 'body': body})
+@app.route(path='/account')
+async def account(conn):
+    return Response(await account_page(conn),
+                    headers=[(b'cache-control', b'private, no-store')])
 ```
 
 A weak ETag (`W/"<sha256-prefix>"`) is generated automatically when
@@ -413,6 +422,9 @@ middleware), the varied request-header values are folded into the
 cache key, so a brotli variant is never replayed to an `identity`
 client.  A response with `Vary: *` is passed through unstored
 (RFC 9110 §12.5.5).
+
+`Vary: Cookie` separates incoming cookie values; clients without `Cookie`
+still share one variant. It does not make a cookie-issuing response private.
 
 Constructor arguments:
 
