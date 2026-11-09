@@ -6087,6 +6087,10 @@ multiple methods on the same handler:</p>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">healthz</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">'ok'</span><span class="p">))</span>
 </code></pre></div>
+<p>On BlackBull's own server, over HTTP/1.1 and HTTP/2 alike, a <code>HEAD</code>
+request is dispatched as <code>GET</code> (handlers see <code>conn.method == 'GET'</code>) and
+its response body is dropped, so a <code>GET</code> route answers <code>HEAD</code> without
+listing it.</p>
 <p>Any valid method token is accepted, as a string or an <code>HTTPMethod</code>
 member — extension methods (<code>PROPFIND</code>, vendor tokens) route the same
 way as the standard ones, and appear in the 405 <code>Allow</code> header when
