@@ -28,6 +28,10 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- Docs: the environment-variable reference no longer says a boolean `BB_*`
+  value that does not parse falls back to its default; it is false only for
+  `0`, `false`, `no` or `off`, and true otherwise (BLA-627).
+
 - HTTP/2: a `HEAD` request is dispatched as `GET` with its body dropped, as
   over HTTP/1.1, so a `GET` route answers it; it was answered `405`
   (BLA-606).

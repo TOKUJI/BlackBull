@@ -98,7 +98,8 @@ def setting(env: str, default: Any, *, section: str, doc: str,
     """Declare one environment variable as a ``Settings`` field.
 
     A value that does not parse, or is outside *minimum*/*maximum*, falls back to
-    *default*.  *parse* replaces that rule and also receives ``None`` when the
+    *default*; a ``bool`` is false only for ``0``/``false``/``no``/``off`` and
+    true for anything else.  *parse* replaces that rule and also receives ``None`` when the
     variable is unset.  *config* is the ``[section] key`` that ``blackbull run
     --config`` maps onto *env*; *shown* is the default as the reference page
     states it, when it is a rule rather than a value.

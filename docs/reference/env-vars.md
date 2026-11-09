@@ -5,7 +5,9 @@ Defaults and enforcement scope are generated from the `Settings` and
 See [Configuration](../guide/configuration.md) for startup-setting precedence;
 BB_* runtime tuning is a separate namespace. Most settings are cached on first
 use, and import-time settings require a restart. A value that does not parse,
-or is outside a setting's range, falls back to its default.
+or is outside a setting's range, falls back to its default. A boolean is false
+only for `0`, `false`, `no` or `off` (any case); every other value, a typo
+included, is true.
 
 ## Deployment
 
