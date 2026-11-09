@@ -93,12 +93,17 @@ jobs:
         # `$HOME/.local/bin` isn't pre-created on a fresh ubuntu-latest
         # runner — `tar -C` into a missing directory exits non-zero.
         # mkdir first, then add to GITHUB_PATH so subsequent steps see it.
+        # The archive is fetched to a file and checked before tar sees it.
+        # h2spec publishes no checksums; the digest is the v2.6.0 asset's.
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
-          curl -L -sS \
-            https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz \
-            | tar -xz -C "$HOME/.local/bin" h2spec
+          archive="$RUNNER_TEMP/h2spec.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$archive" \
+            https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz
+          echo "157ee0de702e01ad40e752dbf074b366027e550c8e7504f9450da2809e279318  $archive" \
+            | sha256sum -c -
+          tar -xzf "$archive" -C "$HOME/.local/bin" h2spec
           chmod +x "$HOME/.local/bin/h2spec"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/h2spec" --version
