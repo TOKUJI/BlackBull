@@ -6060,6 +6060,13 @@ variables</a>.  Highlights:</p>
 naming (lower-cased, the <code>BB_</code> prefix dropped).  Unknown
 sections and keys are silently ignored, so future TOML keys
 don't break older binaries.</p>
+<p><code>Compression()</code> resolves omitted arguments from the cached settings
+at construction: <code>BB_COMPRESSION_MIN_SIZE</code>, <code>BB_COMPRESSION_EXECUTOR_THRESHOLD</code>,
+<code>BB_COMPRESSION_MAX_INFLIGHT</code>, and <code>BB_BROTLI_QUALITY</code>. Explicit arguments,
+including <code>0</code>, take precedence. An explicit <code>brotli_quality</code> outside 0–11
+raises <code>ValueError</code> at construction.
+The supported compression keys in <code>[limits]</code> are <code>compression_min_size</code> and
+<code>compression_executor_threshold</code>.</p>
 <p>The TLS keys (<code>[tls] cert</code>, <code>[tls] key</code>) are CLI-arg fallbacks
 applied to <code>--certfile</code> / <code>--keyfile</code> when those aren't
 specified on the command line.</p>

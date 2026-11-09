@@ -6365,7 +6365,7 @@ argued in <code>docs/about/security-model.md</code> (qualification 2).</p>
 
 
 <h3 id="blackbull.env.setting" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">setting</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">default</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">section</span><span class="p">,</span> <span class="n">doc</span><span class="p">,</span> <span class="n">minimum</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">parse</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">shown</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">setting</span><span class="p">(</span><span class="n">env</span><span class="p">,</span> <span class="n">default</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">section</span><span class="p">,</span> <span class="n">doc</span><span class="p">,</span> <span class="n">minimum</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">maximum</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">parse</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">shown</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.env.setting" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -6373,7 +6373,7 @@ argued in <code>docs/about/security-model.md</code> (qualification 2).</p>
     <div class="doc doc-contents ">
 
         <p>Declare one environment variable as a <code>Settings</code> field.</p>
-<p>A value that does not parse, or is below <em>minimum</em>, falls back to
+<p>A value that does not parse, or is outside <em>minimum</em>/<em>maximum</em>, falls back to
 <em>default</em>.  <em>parse</em> replaces that rule and also receives <code>None</code> when the
 variable is unset.  <em>config</em> is the <code>[section] key</code> that <code>blackbull run
 --config</code> maps onto <em>env</em>; <em>shown</em> is the default as the reference page
