@@ -20,6 +20,11 @@ DEFAULTS = Settings()
     ('BB_SOCKET_SNDBUF', '0', 'socket_sndbuf', 0),
     ('BB_SOCKET_SNDBUF', '-1', 'socket_sndbuf', DEFAULTS.socket_sndbuf),
     ('BB_SOCKET_SNDBUF', '1.5', 'socket_sndbuf', DEFAULTS.socket_sndbuf),
+    ('BB_BROTLI_QUALITY', '0', 'brotli_quality', 0),
+    ('BB_BROTLI_QUALITY', '11', 'brotli_quality', 11),
+    ('BB_BROTLI_QUALITY', '-1', 'brotli_quality', DEFAULTS.brotli_quality),
+    ('BB_BROTLI_QUALITY', '12', 'brotli_quality', DEFAULTS.brotli_quality),
+    ('BB_BROTLI_QUALITY', 'bad', 'brotli_quality', DEFAULTS.brotli_quality),
     # float with minimum 0
     ('BB_HEADER_TIMEOUT', '2.5', 'header_timeout', 2.5),
     ('BB_HEADER_TIMEOUT', '0', 'header_timeout', 0.0),

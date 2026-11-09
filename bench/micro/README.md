@@ -39,8 +39,11 @@ an unresolved control means the result cannot certify a small regression.
 | `loop_touches.py` | Event-loop interactions per request; `--check` is the CI budget. |
 | `parser_microbench.py` | Request-head parse cost against httptools / h11 / sanic, swept over a real browser's header count, after a correctness gate. |
 | `router_microbench.py` | `Router._resolve` and the route cache, per regime (fixed, param, miss). |
-| `middleware_stack.py` | Per-middleware cost: N no-op middleware; `--compression` compares compression shapes, `--responses` compares Response/JSON/redirect/stream/SSE construction and emission, both with `--base PATH --head PATH`, A/A+ABBA, CPU affinity, GC on/off, source proof and separate executed instructions. |
+| `middleware_stack.py` | Per-middleware cost: N no-op middleware; `--compression` compares response shapes, `--compression-init` compares middleware construction and settings-cache misses, `--responses` compares Response helpers. Use `--base PATH --head PATH` for A/A+ABBA, CPU affinity, GC on/off, source proof and separate executed instructions. |
 | `streams_vs_protocol.py` | asyncio streams against a raw `Protocol`, identical wire behaviour. |
 | `grpc_bridge.py` | The gRPC bridge's request path (see `grpc-request-verification.md`). |
 | `profile_under_load.sh` | py-spy flame graph (speedscope JSON) of the HTTP/2 app under k6 stress. |
+
+For compression comparisons, unset `BB_COMPRESSION_*` and `BB_BROTLI_QUALITY`
+so both arms use the declared defaults. Repeat `--case NAME` to rerun selected cases.
 | `hotpath/` | The header-line cache: hit rate on captured browser traffic, break-even, worst case. |

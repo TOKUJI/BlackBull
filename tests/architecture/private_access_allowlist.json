@@ -96,7 +96,7 @@
  "unit/test_cli.py": 8,
  "unit/test_cli_serve.py": 9,
  "unit/test_compression_backpressure.py": 44,
- "unit/test_compression_brotli_quality.py": 5,
+ "unit/test_compression_brotli_quality.py": 3,
  "unit/test_compression_vary.py": 3,
  "unit/test_conn_id.py": 1,
  "unit/test_connection.py": 14,
