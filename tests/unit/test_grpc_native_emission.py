@@ -85,6 +85,42 @@ async def test_unary_seam_is_native():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('content_type', [b'application/grpc', b'application/grpc+proto'])
+@pytest.mark.parametrize('gzip', [False, True])
+@pytest.mark.parametrize('metadata_count', [0, 1, 16])
+async def test_response_metadata_is_owned_by_each_rpc(content_type, gzip, metadata_count):
+    reg = GrpcServiceRegistry()
+    calls = 0
+
+    @reg.method('/echo.Echo/Echo')
+    async def echo(request, context):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await context.send_initial_metadata([(b'X-First', b'  first  ')] * metadata_count)
+            context.set_trailing_metadata([(b'X-End', b'  end  ')] * metadata_count)
+        return request
+
+    scope = _scope('/echo.Echo/Echo')
+    scope['headers'] = [(b'content-type', content_type)]
+    if gzip:
+        scope['headers'].append((b'grpc-accept-encoding', b'gzip'))
+    for _ in range(3):
+        seen, send = _seam_collector()
+        await serve_grpc(reg, Connection.from_scope(scope),
+                         _receive_with(encode_message(b'abc')), send)
+        wire = _as_wire(seen)
+        assert (b'content-type', content_type) in wire[0]['headers']
+        assert ((b'grpc-encoding', b'gzip') in wire[0]['headers']) == gzip
+        count = metadata_count if calls == 1 else 0
+        assert wire[0]['headers'].count((b'x-first', b'first')) == count
+        assert wire[-1]['headers'].count((b'x-end', b'end')) == count
+        assert not any(k == b'x-mutated' for e in wire for k, _ in e.get('headers', []))
+        seen[0].header.append(b'x-mutated', b'header')
+        seen[-1].trailers.append(b'x-mutated', b'trailer')
+
+
+@pytest.mark.asyncio
 async def test_trailers_only_error_seam_is_native():
     """An unimplemented method answers Trailers-Only — still native."""
     reg = GrpcServiceRegistry()

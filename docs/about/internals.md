@@ -75,6 +75,8 @@ trims edge SP/HTAB from its value, so middleware and senders read fields
 exactly and check nothing again. Its header and trailer
 lists are `_MinimalResponseHeaders`; change them only through `add`, `extend`
 and `discard`, which keep the located framing fields true.
+Framework-owned constant sections may be validated once and copied per response;
+never expose a shared mutable template to middleware or application code.
 
 A connection owns one read buffer, server or client. `BufferReader` owns receive policy,
 `ConnectionProtocol` performs transport callbacks and pauses, and

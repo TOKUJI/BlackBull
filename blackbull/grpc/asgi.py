@@ -11,6 +11,7 @@ import binascii
 import logging
 
 from ..connection import Connection
+from ..headers import _as_response_fields
 from ..protocol.field_grammar import list_members, media_type
 from ..native import NativeResponse
 from ..request import stream_body, ClientDisconnected
@@ -38,6 +39,14 @@ _GRPC_SUBTYPE_PREFIX = _GRPC_CONTENT_TYPE + b'+'
 # Advertised in ``grpc-accept-encoding`` so clients know which message
 # encodings the server can decode (``identity`` + ``gzip``).
 _GRPC_ACCEPT_ENCODING = compression.ACCEPT_ENCODING
+_RESPONSE_HEADERS = {
+    encoding: _as_response_fields([
+        (b'content-type', _GRPC_CONTENT_TYPE),
+        (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING),
+        *([(b'grpc-encoding', encoding)] if encoding else []),
+    ]) for encoding in (None, b'gzip')
+}
+_OK_TRAILERS = _as_response_fields([(b'grpc-status', b'0')])
 
 # Read at import; tests may monkeypatch these module attributes.
 MAX_MESSAGE_SIZE = read_setting('grpc_max_message_size')
@@ -387,6 +396,8 @@ def _encode_outbound_metadata(
 def _status_trailers(status: GrpcStatus, details: str,
                      extra: list[tuple[bytes, bytes]] | None = None
                      ) -> list[tuple[bytes, bytes]]:
+    if not extra and not details and status == GrpcStatus.OK:
+        return _OK_TRAILERS.copy()
     trailers = [(b'grpc-status', str(int(status)).encode('ascii'))]
     if details:
         trailers.append((b'grpc-message', _pct_encode_message(details)))
@@ -405,8 +416,7 @@ async def _send_trailers_only(send, status: GrpcStatus, details: str,
     """
     await send(NativeResponse(
         status=200,
-        header=[(b'content-type', content_type),
-                (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)],
+        header=_response_headers(content_type),
         expects_trailers=True))
     await send(NativeResponse(
         trailers=_status_trailers(status, details, trailing)))
@@ -504,6 +514,10 @@ def _response_headers(content_type: bytes,
                       response_encoding: bytes | None = None,
                       initial_metadata: list[tuple[bytes, bytes]] | None = None
                       ) -> list[tuple[bytes, bytes]]:
+    if not initial_metadata and content_type == _GRPC_CONTENT_TYPE:
+        known = _RESPONSE_HEADERS.get(response_encoding)
+        if known is not None:
+            return known.copy()
     headers = [(b'content-type', content_type),
                (b'grpc-accept-encoding', _GRPC_ACCEPT_ENCODING)]
     # Advertise the encoding used for any compressed response messages.  Present
