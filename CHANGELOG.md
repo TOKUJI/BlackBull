@@ -28,6 +28,11 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- TLS: `BB_WRITE_TIMEOUT` closes the connection of a peer that stops reading a
+  single large response; the TLS layer handed the whole write to TCP at once,
+  so the drain never waited and the response stayed buffered without bound
+  (BLA-522).
+
 - Docs: the TLS guide and `KNOWN_LIMITATIONS.md` state that mTLS does not
   expose an accepted client's certificate to the application (BLA-628).
 

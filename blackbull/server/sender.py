@@ -378,6 +378,59 @@ class AsyncioWriter(AbstractWriter):
         return sent
 
 
+#: The TLS layer hands all of one write's ciphertext to TCP before it can see
+#: TCP pause, so a stalled peer's backpressure never reaches ``drain()``.  A
+#: write up to this size stays unbounded, as cleartext leaves the kernel's send
+#: buffer; ``sendfile`` re-arms the bound at the same size.
+_TLS_WRITE_CHUNK = _SENDFILE_CHUNK
+
+
+class TLSWriter(AsyncioWriter):
+    """An ``AsyncioWriter`` for a TLS transport.
+
+    A write over ``_TLS_WRITE_CHUNK`` reaches the transport in pieces of at most
+    that size, all before the one drain: once TCP pauses, the next piece stays
+    in the TLS layer and pauses the protocol, so ``BB_WRITE_TIMEOUT`` bounds a
+    stalled peer as on cleartext.  Nothing suspends between pieces, so the
+    Send-path invariant's unsplit HTTP/2 sequences still hold.
+    """
+
+    async def write(self, data: bytes) -> None:
+        if len(data) > _TLS_WRITE_CHUNK:
+            self._enqueue((data,))
+        else:
+            self._sw.write(data)
+        await self._drain_with_timeout()
+
+    async def writelines(self, parts) -> None:
+        if sum(map(len, parts)) > _TLS_WRITE_CHUNK:
+            self._enqueue(parts)
+        else:
+            self._sw.writelines(parts)
+        await self._drain_with_timeout()
+
+    def _enqueue(self, parts) -> None:
+        write, writelines = self._sw.write, self._sw.writelines
+        batch: list = []
+        size = 0
+        for part in parts:
+            if len(part) > _TLS_WRITE_CHUNK:
+                if batch:
+                    writelines(batch)
+                    batch, size = [], 0
+                view = memoryview(part)
+                for start in range(0, len(view), _TLS_WRITE_CHUNK):
+                    write(view[start:start + _TLS_WRITE_CHUNK])
+                continue
+            batch.append(part)
+            size += len(part)
+            if size >= _TLS_WRITE_CHUNK:
+                writelines(batch)
+                batch, size = [], 0
+        if batch:
+            writelines(batch)
+
+
 # Byte-send conveniences are sender-specific; keep ASGI callable types unchanged.
 _SenderEvent = ASGISendEvent
 _SenderBody = _SenderEvent | bytes | NativeResponse

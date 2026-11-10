@@ -25,7 +25,7 @@ from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
 from .conn_id import new_connection_id
 from .connection_actor import ConnectionActor
 from .connection_protocol import ConnectionProtocol
-from .sender import AsyncioWriter
+from .sender import AsyncioWriter, TLSWriter
 from .recipient import (_HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .cap_log import CapHitCounter, log_cap_hit
 from ..asgi import ASGIEvent
@@ -668,7 +668,8 @@ class _ServedConnection(ConnectionProtocol):
         try:
             await server._serve_connection(
                 self.reader,
-                AsyncioWriter(self, write_timeout=write_timeout),
+                (TLSWriter if self.tls else AsyncioWriter)(
+                    self, write_timeout=write_timeout),
                 self.transport,
                 bound_binding=bound_binding,
             )
