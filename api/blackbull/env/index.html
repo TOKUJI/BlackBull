@@ -6374,7 +6374,8 @@ argued in <code>docs/about/security-model.md</code> (qualification 2).</p>
 
         <p>Declare one environment variable as a <code>Settings</code> field.</p>
 <p>A value that does not parse, or is outside <em>minimum</em>/<em>maximum</em>, falls back to
-<em>default</em>.  <em>parse</em> replaces that rule and also receives <code>None</code> when the
+<em>default</em>; a <code>bool</code> is false only for <code>0</code>/<code>false</code>/<code>no</code>/<code>off</code> and
+true for anything else.  <em>parse</em> replaces that rule and also receives <code>None</code> when the
 variable is unset.  <em>config</em> is the <code>[section] key</code> that <code>blackbull run
 --config</code> maps onto <em>env</em>; <em>shown</em> is the default as the reference page
 states it, when it is a rule rather than a value.</p>

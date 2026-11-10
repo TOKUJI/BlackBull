@@ -6132,7 +6132,9 @@
 See <a href="../../guide/configuration/">Configuration</a> for startup-setting precedence;
 BB_* runtime tuning is a separate namespace. Most settings are cached on first
 use, and import-time settings require a restart. A value that does not parse,
-or is outside a setting's range, falls back to its default.</p>
+or is outside a setting's range, falls back to its default. A boolean is false
+only for <code>0</code>, <code>false</code>, <code>no</code> or <code>off</code> (any case); every other value, a typo
+included, is true.</p>
 <h2 id="deployment">Deployment<a class="headerlink" href="#deployment" title="Permanent link">&para;</a></h2>
 <p>These resolve with <code>run()</code> precedence: an explicit argument, then the
 variable, then a <code>.env</code> entry, then <code>AppConfig</code>.</p>
