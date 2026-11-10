@@ -25,7 +25,6 @@ script from this branch, and set baseline `3025eb95`, calls `4000`, warmup `500`
 and sizes `16 4096 65536`. For the common-completion comparison, compare
 `76e432cf` with `06bbc515` using the defaults above. The original environment was
 CPython 3.14.6. Samples alternate ABBA/BAAB and pin to the minimum allowed CPU.
-Queued callbacks and cyclic garbage are cleared between samples, outside timing.
 
 ## HTTP/2 wire comparison
 
