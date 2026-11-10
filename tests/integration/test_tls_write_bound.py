@@ -67,12 +67,13 @@ def _frame(kind: int, flags: int, stream: int, payload: bytes) -> bytes:
     return struct.pack('>I', len(payload))[1:] + bytes((kind, flags)) + struct.pack('>I', stream) + payload
 
 
-#: Preface, SETTINGS(INITIAL_WINDOW_SIZE = 2^31-1), a connection WINDOW_UPDATE
-#: to the same, and HEADERS for ``GET https://x/`` (static-table HPACK):
-#: flow control never stops the server before TCP does.
+#: Preface, SETTINGS(INITIAL_WINDOW_SIZE = 2^31-1, MAX_FRAME_SIZE = 2^24-1), a
+#: connection WINDOW_UPDATE to the same window, and HEADERS for
+#: ``GET https://x/`` (static-table HPACK): flow control never stops the
+#: server before TCP does, and one DATA frame carries the whole body.
 H2_REQUEST = (
     b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
-    + _frame(0x4, 0, 0, struct.pack('>HI', 0x4, 2**31 - 1))
+    + _frame(0x4, 0, 0, struct.pack('>HIHI', 0x4, 2**31 - 1, 0x5, 2**24 - 1))
     + _frame(0x8, 0, 0, struct.pack('>I', 2**31 - 1 - 65535))
     + _frame(0x1, 0x5, 1, bytes((0x82, 0x87, 0x84, 0x41, 1)) + b'x'))
 H1_REQUEST = b'GET / HTTP/1.1\r\nHost: x\r\n\r\n'

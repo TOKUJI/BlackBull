@@ -378,21 +378,17 @@ class AsyncioWriter(AbstractWriter):
         return sent
 
 
-#: The TLS layer hands all of one write's ciphertext to TCP before it can see
-#: TCP pause, so a stalled peer's backpressure never reaches ``drain()``.  A
-#: write up to this size stays unbounded, as cleartext leaves the kernel's send
-#: buffer; ``sendfile`` re-arms the bound at the same size.
 _TLS_WRITE_CHUNK = _SENDFILE_CHUNK
 
 
 class TLSWriter(AsyncioWriter):
     """An ``AsyncioWriter`` for a TLS transport.
 
-    A write over ``_TLS_WRITE_CHUNK`` reaches the transport in pieces of at most
-    that size, all before the one drain: once TCP pauses, the next piece stays
-    in the TLS layer and pauses the protocol, so ``BB_WRITE_TIMEOUT`` bounds a
-    stalled peer as on cleartext.  Nothing suspends between pieces, so the
-    Send-path invariant's unsplit HTTP/2 sequences still hold.
+    The TLS layer passes a whole write's ciphertext to TCP before TCP can pause
+    it, so a write over ``_TLS_WRITE_CHUNK`` reaches the transport in pieces of
+    at most that size; only a later piece lets the pause reach ``drain()`` and
+    ``BB_WRITE_TIMEOUT``.  Every piece precedes the one drain: never suspend
+    between them (Send-path invariant).
     """
 
     async def write(self, data: bytes) -> None:
