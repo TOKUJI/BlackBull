@@ -6525,6 +6525,14 @@ secret resolution, and session-clearing semantics.</p>
 Captures the handler's response on the first hit, stores it under
 <code>(method, origin, path, query_string)</code>, and replays it directly on
 subsequent matching requests until the entry expires.</p>
+<div class="admonition warning">
+<p class="admonition-title">Shared between clients</p>
+<p><code>Cookie</code> is not an implicit cache key, and <code>Set-Cookie</code> does not prevent
+storage. A cached body and session cookie can be replayed to another client.
+<code>cache_authenticated=False</code> bypasses <code>Authorization</code>, not cookie-based
+sessions. Mark personalized or cookie-issuing responses
+<code>Cache-Control: private</code> or <code>no-store</code> (<a href="https://www.rfc-editor.org/rfc/rfc9111.html#section-7.3">RFC 9111 §7.3</a>).</p>
+</div>
 <p>The effective <strong>origin</strong> is the request's scheme, host and port, normalized
 according to <a href="https://www.rfc-editor.org/rfc/rfc9110.html#section-4.3.1">RFC 9110 §4.3.1</a>.
 HTTP and HTTPS, different hosts, and different non-default ports have separate
@@ -6542,17 +6550,18 @@ normally but neither reads nor writes the cache.</p>
 not interpret <code>Forwarded</code> or <code>X-Forwarded-*</code> itself and does not expand the
 proxy trust boundary. <code>TrustedProxy</code> applies its supported scheme rewrites;
 it does not infer a host rewrite from <code>Forwarded: host</code> or <code>X-Forwarded-Host</code>.</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware.cache</span><span class="w"> </span><span class="kn">import</span> <span class="n">Cache</span>
+<p>Apply the cache to public routes; keep personal responses out of shared caches:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">Response</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware</span><span class="w"> </span><span class="kn">import</span> <span class="n">Cache</span>
 
-<span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">Cache</span><span class="p">(</span><span class="n">max_age</span><span class="o">=</span><span class="mi">600</span><span class="p">))</span>   <span class="c1"># 10-minute TTL</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/feed'</span><span class="p">,</span> <span class="n">middlewares</span><span class="o">=</span><span class="p">[</span><span class="n">Cache</span><span class="p">(</span><span class="n">max_age</span><span class="o">=</span><span class="mi">600</span><span class="p">)])</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">feed</span><span class="p">(</span><span class="n">conn</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">Response</span><span class="p">(</span><span class="n">render</span><span class="p">(</span><span class="k">await</span> <span class="n">fetch_news</span><span class="p">()),</span> <span class="n">content_type</span><span class="o">=</span><span class="s1">'text/html'</span><span class="p">)</span>
 
-<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/feed'</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">feed</span><span class="p">(</span><span class="n">scope</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="n">items</span> <span class="o">=</span> <span class="k">await</span> <span class="n">fetch_news</span><span class="p">()</span>           <span class="c1"># expensive</span>
-    <span class="n">body</span> <span class="o">=</span> <span class="n">render</span><span class="p">(</span><span class="n">items</span><span class="p">)</span><span class="o">.</span><span class="n">encode</span><span class="p">()</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.start'</span><span class="p">,</span> <span class="s1">'status'</span><span class="p">:</span> <span class="mi">200</span><span class="p">,</span>
-                <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'text/html'</span><span class="p">)]})</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.body'</span><span class="p">,</span> <span class="s1">'body'</span><span class="p">:</span> <span class="n">body</span><span class="p">})</span>
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/account'</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">account</span><span class="p">(</span><span class="n">conn</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">Response</span><span class="p">(</span><span class="k">await</span> <span class="n">account_page</span><span class="p">(</span><span class="n">conn</span><span class="p">),</span>
+                    <span class="n">headers</span><span class="o">=</span><span class="p">[(</span><span class="sa">b</span><span class="s1">'cache-control'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'private, no-store'</span><span class="p">)])</span>
 </code></pre></div>
 <p>A weak ETag (<code>W/"&lt;sha256-prefix&gt;"</code>) is generated automatically when
 the handler doesn't supply one.  Subsequent requests with a
@@ -6580,6 +6589,8 @@ middleware), the varied request-header values are folded into the
 cache key, so a brotli variant is never replayed to an <code>identity</code>
 client.  A response with <code>Vary: *</code> is passed through unstored
 (RFC 9110 §12.5.5).</p>
+<p><code>Vary: Cookie</code> separates incoming cookie values; clients without <code>Cookie</code>
+still share one variant. It does not make a cookie-issuing response private.</p>
 <p>Constructor arguments:</p>
 <table>
 <thead>
