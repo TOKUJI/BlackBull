@@ -64,11 +64,6 @@ async def measure(module, registry, shape, native, size, count, send=send, timeo
     return (time.perf_counter_ns() - start) / count
 
 
-async def _settle_sample():
-    await asyncio.sleep(0)
-    gc.collect()
-
-
 async def main(args):
     source = (Path(head.__file__).read_bytes() if args.null else subprocess.check_output(
         ['git', 'show', args.baseline + ':blackbull/grpc/asgi.py'], timeout=10))
@@ -102,7 +97,6 @@ async def main(args):
         for native in (False, True):
             for size in args.sizes:
                 for module in (baseline, head):
-                    await _settle_sample()
                     status = None
                     body = bytearray()
 
@@ -121,17 +115,14 @@ async def main(args):
                     expected = args.messages if shape in ('Server', 'Bidi') else 1
                     if body != encode_message(b'ok') * expected:
                         raise RuntimeError(f'{shape}/{native}/{size}: response messages differ')
-                    await _settle_sample()
                     await measure(module, registry, shape, native, size, args.warmup,
                                   timeout=args.timeout, **measure_options)
                 for round_ in range(args.rounds):
                     for arm in ('ABBA' if round_ % 2 == 0 else 'BAAB'):
-                        await _settle_sample()
                         ns = await measure(baseline if arm == 'A' else head,
                                            registry, shape, native, size, args.calls,
                                            timeout=args.timeout, **measure_options)
                         writer.writerow([shape, native, size, round_, arm, ns])
-    await _settle_sample()
 
 
 if __name__ == '__main__':
