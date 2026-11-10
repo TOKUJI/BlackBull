@@ -126,6 +126,14 @@ an owner and is refused before the workers fork.  See
 [Workers](docs/deployment/workers.md) for the mechanics, including why
 `--reload` forces `workers=1` when a protocol port is bound.
 
+### mTLS does not expose the client certificate
+
+`configure_mtls()` rejects a client without a certificate from the trusted
+CA, but an accepted client's certificate, subject and issuer never reach the
+application — `Connection` has no accessor for them.  Authorize by identity
+behind a proxy that terminates mTLS and forwards it; see
+[TLS](docs/deployment/tls.md#mutual-tls-mtls).
+
 ### MQTT broker state is in-memory and lost on restart
 
 The MQTT 5 broker (`blackbull.mqtt`, opt-in via `blackbull[mqtt]`) rides the

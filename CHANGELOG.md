@@ -28,6 +28,9 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- Docs: the TLS guide and `KNOWN_LIMITATIONS.md` state that mTLS does not
+  expose an accepted client's certificate to the application (BLA-628).
+
 - Docs: the environment-variable reference no longer says a boolean `BB_*`
   value that does not parse falls back to its default; it is false only for
   `0`, `false`, `no` or `off`, and true otherwise (BLA-627).

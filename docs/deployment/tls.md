@@ -121,6 +121,12 @@ A client that doesn't present a valid certificate signed by the
 configured CA is rejected at the TLS handshake — your
 application code never sees the connection.
 
+An accepted client's certificate is **not** exposed to the application:
+`Connection` carries no peer certificate, subject or issuer, only the network
+peer address.  mTLS here authenticates the chain, nothing more; for
+identity-based authorization, terminate mTLS at a proxy that forwards the
+identity in a header you trust.
+
 ## When to terminate TLS upstream instead
 
 For most production deployments, terminating TLS at a reverse
