@@ -6142,9 +6142,7 @@ every way a field enters it (construction, <code>header</code>/<code>trailers</c
 trims edge SP/HTAB from its value, so middleware and senders read fields
 exactly and check nothing again. Its header and trailer
 lists are <code>_MinimalResponseHeaders</code>; change them only through <code>add</code>, <code>extend</code>
-and <code>discard</code>, which keep the located framing fields true.
-Framework-owned constant sections may be validated once and copied per response;
-never expose a shared mutable template to middleware or application code.</p>
+and <code>discard</code>, which keep the located framing fields true.</p>
 <p>A connection owns one read buffer, server or client. <code>BufferReader</code> owns receive policy,
 <code>ConnectionProtocol</code> performs transport callbacks and pauses, and
 <code>ReadBuffer</code> owns bytes and cursors. Detection must not consume the prefix;
