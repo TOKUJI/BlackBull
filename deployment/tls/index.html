@@ -6012,6 +6012,11 @@ openssl<span class="w"> </span>x509<span class="w"> </span>-req<span class="w"> 
 <p>A client that doesn't present a valid certificate signed by the
 configured CA is rejected at the TLS handshake — your
 application code never sees the connection.</p>
+<p>An accepted client's certificate is <strong>not</strong> exposed to the application:
+<code>Connection</code> carries no peer certificate, subject or issuer, only the network
+peer address.  mTLS here authenticates the chain, nothing more; for
+identity-based authorization, terminate mTLS at a proxy that forwards the
+identity in a header you trust.</p>
 <h2 id="when-to-terminate-tls-upstream-instead">When to terminate TLS upstream instead<a class="headerlink" href="#when-to-terminate-tls-upstream-instead" title="Permanent link">&para;</a></h2>
 <p>For most production deployments, terminating TLS at a reverse
 proxy (nginx, Caddy) is simpler:</p>
