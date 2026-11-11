@@ -18,7 +18,7 @@ import inspect
 import pytest
 
 from blackbull.server.connection_protocol import ConnectionProtocol
-from blackbull.server.sender import AsyncioWriter
+from blackbull.server.sender import AsyncioWriter, TLSWriter
 
 
 def _attributes_used_on(cls, backing_attr: str) -> set[str]:
@@ -48,15 +48,16 @@ def test_asyncio_writer_touches_something():
         f'contract test below is not testing anything')
 
 
-def test_connection_protocol_supplies_the_whole_backing_surface():
+@pytest.mark.parametrize('writer', [AsyncioWriter, TLSWriter])
+def test_connection_protocol_supplies_the_whole_backing_surface(writer):
     # Checked against an *instance*: ``transport`` is set in ``__init__``, and
     # a class-level ``hasattr`` would report it missing and send the reader
     # chasing a method that does not need to exist.
     proto = ConnectionProtocol()
-    used = _attributes_used_on(AsyncioWriter, '_sw')
+    used = _attributes_used_on(writer, '_sw')
     missing = sorted(n for n in used if not hasattr(proto, n))
     assert not missing, (
-        f'AsyncioWriter calls {missing} on its backing object, and '
+        f'{writer.__name__} calls {missing} on its backing object, and '
         f'ConnectionProtocol — what the server actually hands it — does not '
         f'provide them. Each one is a response shape that raises '
         f'AttributeError at runtime while every unit test passes, because '

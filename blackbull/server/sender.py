@@ -378,6 +378,55 @@ class AsyncioWriter(AbstractWriter):
         return sent
 
 
+_TLS_WRITE_CHUNK = _SENDFILE_CHUNK
+
+
+class TLSWriter(AsyncioWriter):
+    """An ``AsyncioWriter`` for a TLS transport.
+
+    The TLS layer passes a whole write's ciphertext to TCP before TCP can pause
+    it, so a write over ``_TLS_WRITE_CHUNK`` reaches the transport in pieces of
+    at most that size; only a later piece lets the pause reach ``drain()`` and
+    ``BB_WRITE_TIMEOUT``.  Every piece precedes the one drain: never suspend
+    between them (Send-path invariant).
+    """
+
+    async def write(self, data: bytes) -> None:
+        if len(data) > _TLS_WRITE_CHUNK:
+            self._enqueue((data,))
+        else:
+            self._sw.write(data)
+        await self._drain_with_timeout()
+
+    async def writelines(self, parts) -> None:
+        if sum(map(len, parts)) > _TLS_WRITE_CHUNK:
+            self._enqueue(parts)
+        else:
+            self._sw.writelines(parts)
+        await self._drain_with_timeout()
+
+    def _enqueue(self, parts) -> None:
+        write, writelines = self._sw.write, self._sw.writelines
+        batch: list = []
+        size = 0
+        for part in parts:
+            if len(part) > _TLS_WRITE_CHUNK:
+                if batch:
+                    writelines(batch)
+                    batch, size = [], 0
+                view = memoryview(part)
+                for start in range(0, len(view), _TLS_WRITE_CHUNK):
+                    write(view[start:start + _TLS_WRITE_CHUNK])
+                continue
+            batch.append(part)
+            size += len(part)
+            if size >= _TLS_WRITE_CHUNK:
+                writelines(batch)
+                batch, size = [], 0
+        if batch:
+            writelines(batch)
+
+
 # Byte-send conveniences are sender-specific; keep ASGI callable types unchanged.
 _SenderEvent = ASGISendEvent
 _SenderBody = _SenderEvent | bytes | NativeResponse

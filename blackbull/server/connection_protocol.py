@@ -312,8 +312,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         self._response_written = False
         self._arrived = False
         self._linger_decided = False
-        # Cleartext until connection_made says otherwise.
-        self._half_close_is_honoured = True
+        #: Whether the transport carries TLS; cleartext until connection_made.
+        self.tls = False
         #: The transport is not reading.  Written only by [`pause_reading`][]
         #: / [`resume_reading`][]; the reader polls it on the consuming path.
         self.reading_paused = False
@@ -351,10 +351,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
 
     def connection_made(self, transport) -> None:
         self.transport = transport
-        # Whether a half-close can leave the write half open, resolved once —
-        # see [`eof_received`][].
-        self._half_close_is_honoured = (
-            transport.get_extra_info('ssl_object') is None)
+        self.tls = transport.get_extra_info('ssl_object') is not None
 
     def get_buffer(self, sizehint: int) -> memoryview:
         # Read demand from the reader-owned published field, not the size hint.
@@ -378,7 +375,7 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
         self._wake()
         # Cleartext half-close keeps output open until the response is sent.
         # TLS transports close on EOF regardless of this return value.
-        return self._half_close_is_honoured
+        return not self.tls
 
     def connection_lost(self, exc: BaseException | None) -> None:
         self._eof = True

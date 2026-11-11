@@ -28,6 +28,9 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- TLS: `BB_WRITE_TIMEOUT` now closes the connection of a peer that stops
+  reading a large response, which stayed buffered without bound (BLA-522).
+
 - Docs: the TLS guide and `KNOWN_LIMITATIONS.md` state that mTLS does not
   expose an accepted client's certificate to the application (BLA-628).
 

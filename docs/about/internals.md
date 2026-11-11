@@ -154,6 +154,11 @@ Adapters must support both paths: testing only small responses misses the
 vectored backing contract.
 See `tests/architecture/test_writer_backing_contract.py`.
 
+On TLS the server's writer is `TLSWriter`. The TLS layer passes a whole
+write's ciphertext to TCP before TCP can pause it, so `TLSWriter` hands the
+transport a write over 1 MiB in 1 MiB pieces, all before its one drain; only a
+later piece lets the pause reach `drain()` and `BB_WRITE_TIMEOUT`.
+
 HTTP/2 encodes each field block once and fragments it to the connection's
 peer frame-size limit. Enqueue the complete HEADERS/PUSH_PROMISE and
 CONTINUATION sequence before awaiting drain; writers must not suspend between
