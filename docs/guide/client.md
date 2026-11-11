@@ -288,9 +288,8 @@ which question each knob answers:
 | how big may **one** thing be | `BB_CLIENT_HEAD_MAX_LINE`, `BB_CLIENT_WS_MAX_FRAME_PAYLOAD`, `BB_CLIENT_H2_MAX_FRAME_SIZE` |
 | how big may the **total** be | `BB_CLIENT_HEAD_MAX_TOTAL`, `BB_CLIENT_H2_MAX_HEADER_LIST_SIZE`, `BB_CLIENT_WS_MAX_MESSAGE_SIZE`, `BB_CLIENT_RAW_QUEUE_DEPTH`, `BB_CLIENT_BODY_MAX_TOTAL` *(off)* |
 | how **long** may it take | `BB_CLIENT_HEAD_TIMEOUT`, `BB_CLIENT_BODY_TIMEOUT`, `BB_CLIENT_WRITE_TIMEOUT`, `connect_timeout=` *(an argument, not a knob)* |
-| how **many** may there be | `BB_CLIENT_MAX_INTERIM_RESPONSES` |
+| how **many** may there be | `BB_CLIENT_MAX_INTERIM_RESPONSES`, `BB_FRAME_RATE_LIMIT` (shared with the server), `BB_CLIENT_H2_ENABLE_PUSH` *(off: no promised streams)* |
 | how **slowly** may it arrive | `BB_CLIENT_MIN_BODY_RATE` *(off)*, paced by `BB_CLIENT_MIN_BODY_RATE_GRACE` |
-| not a bound at all | `BB_CLIENT_H2_ENABLE_PUSH` — a conformance switch |
 
 Reading it that way makes the gaps visible, and the gaps are the point.
 
