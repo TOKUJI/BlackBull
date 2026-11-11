@@ -5133,6 +5133,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.TLSWriter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TLSWriter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.WebSocketSender" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6367,6 +6378,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.TLSWriter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TLSWriter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.WebSocketSender" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7193,6 +7215,59 @@ already parked inside this sender.</p>
 
 
         <p>Create protocol senders from an AbstractWriter or wrap an asyncio-compatible writer.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.sender.TLSWriter" class="doc doc-heading">
+            <code>TLSWriter</code>
+
+
+<a href="#blackbull.server.sender.TLSWriter" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="AsyncioWriter (blackbull.server.sender.AsyncioWriter)" href="#blackbull.server.sender.AsyncioWriter">AsyncioWriter</a></code></p>
+
+
+
+        <p>An <code>AsyncioWriter</code> for a TLS transport.</p>
+<p>The TLS layer passes a whole write's ciphertext to TCP before TCP can pause
+it, so a write over <code>_TLS_WRITE_CHUNK</code> reaches the transport in pieces of
+at most that size; only a later piece lets the pause reach <code>drain()</code> and
+<code>BB_WRITE_TIMEOUT</code>.  Every piece precedes the one drain: never suspend
+between them (Send-path invariant).</p>
 
 
 

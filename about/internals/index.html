@@ -6201,6 +6201,10 @@ that method chooses joining or vectored writes at the 32 KiB gate.
 Adapters must support both paths: testing only small responses misses the
 vectored backing contract.
 See <code>tests/architecture/test_writer_backing_contract.py</code>.</p>
+<p>On TLS the server's writer is <code>TLSWriter</code>. The TLS layer passes a whole
+write's ciphertext to TCP before TCP can pause it, so <code>TLSWriter</code> hands the
+transport a write over 1 MiB in 1 MiB pieces, all before its one drain; only a
+later piece lets the pause reach <code>drain()</code> and <code>BB_WRITE_TIMEOUT</code>.</p>
 <p>HTTP/2 encodes each field block once and fragments it to the connection's
 peer frame-size limit. Enqueue the complete HEADERS/PUSH_PROMISE and
 CONTINUATION sequence before awaiting drain; writers must not suspend between
