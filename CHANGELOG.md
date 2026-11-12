@@ -75,7 +75,7 @@ metadata; reinstall an editable checkout after changing that version.
   value that does not parse falls back to its default; it is false only for
   `0`, `false`, `no` or `off`, and true otherwise (BLA-627).
 
-- HTTP/2: a `HEAD` request is dispatched as `GET` with its body dropped, as
+- HTTP/2: ⚠️ **Behaviour change** — a `HEAD` request is dispatched as `GET` with its body dropped, as
   over HTTP/1.1, so a `GET` route answers it; it was answered `405`
   (BLA-606).
 
@@ -102,7 +102,7 @@ metadata; reinstall an editable checkout after changing that version.
 - `StreamingResponse` and `EventSourceResponse` close their generator when a
   send fails, so its `finally` runs; after an HTTP/2 flow-control stall reset
   the generator stayed suspended until the server stopped (BLA-641).
-- HTTP/1.1 and HTTP/2: after a write finds the connection gone, the
+- HTTP/1.1 and HTTP/2: ⚠️ **Behaviour change** — after a write finds the connection gone, the
   application's next `send` raises `ClientDisconnected`, as the streaming guide
   documents, so a streamed response stops and its generator closes; writes
   were dropped silently and the stream ran to its end. gRPC calls end without
