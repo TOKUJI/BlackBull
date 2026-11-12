@@ -7,6 +7,7 @@ dictionaries only at conversion boundaries.
 from __future__ import annotations
 
 from .headers import _MinimalResponseHeaders, _as_response_fields, _owned_response_fields
+from .deprecations import _warn_deprecated
 
 
 class _HeaderView:
@@ -425,17 +426,51 @@ def _native_from_asgi(event):
     return event
 
 
-def asgi_send_boundary(inner_send):
+class WarnedDict(dict):
+    """An event dict already reported as BBD010 on its way out; later
+    boundaries warn only for a plain ``dict``."""
+
+    __slots__ = ()
+
+
+def asgi_send_boundary(inner_send, *, warn_dicts: bool = False):
     """Expand native HTTP/WebSocket messages to ASGI dictionaries at a boundary.
 
     Use for external hosts and scope-declared middleware. Pass already-ASGI
-    values through unchanged.
+    values through unchanged; with *warn_dicts*, a dict passing through came
+    from native code and warns (BBD010).
     """
     async def _send(event):
         if isinstance(event, (NativeResponse, NativeWSMessage)):
             for ev in event.to_asgi():
                 await inner_send(ev)
         else:
+            if warn_dicts and type(event) is dict:
+                _warn_deprecated('BBD010')
             await inner_send(event)
 
     return _send
+
+
+class DictReceive:
+    """The receive channel native code is handed: calling it warns once (BBD011).
+
+    BlackBull's own readers take ``raw`` through [`raw_receive`][].
+    """
+
+    __slots__ = ('raw', '_warned')
+
+    def __init__(self, raw) -> None:
+        self.raw = raw
+        self._warned = False
+
+    async def __call__(self):
+        if not self._warned:
+            self._warned = True
+            _warn_deprecated('BBD011')
+        return await self.raw()
+
+
+def raw_receive(receive):
+    """The channel under a [`DictReceive`][], or *receive* itself."""
+    return receive.raw if type(receive) is DictReceive else receive

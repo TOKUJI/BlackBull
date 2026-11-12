@@ -26,6 +26,22 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Deprecated
+
+- The native ASGI-dict API now warns with `BlackBullDeprecationWarning`:
+  sending an event dict from a handler or middleware (BBD010), reading
+  `receive()` directly in one (BBD011), `@as_middleware` on a middleware
+  whose first parameter is `scope` (BBD012), and `WebSocketResponse`
+  (BBD013).  Use `Response`/`NativeResponse`, `conn.body()`/`conn.stream()`,
+  native middleware, and the `WebSocket` object; removal is no earlier than
+  2027-12-01.  Foreign ASGI apps, external hosts and BlackBull's own code do
+  not warn, and behaviour is unchanged (BLA-672).
+
+### Changed
+
+- The `websocket` middleware sends `NativeWSMessage`s instead of event dicts
+  (BLA-672).
+
 ## [0.82.1] — 2026-11-13
 
 ### Fixed

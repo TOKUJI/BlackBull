@@ -51,11 +51,13 @@ from blackbull import (
     BlackBull,
     JSONResponse,
     Response,
-    WebSocketResponse,
+    WebSocket,
+    WebSocketDisconnect,
     cookie_header,
     read_body,
 )
 from blackbull.middleware import Compression
+from blackbull.native import NativeResponse
 from blackbull.utils import Scheme
 
 import base64
@@ -285,17 +287,14 @@ async def auth_mw(conn, receive, send, call_next):
     ``conn.state['chat_session']`` for handlers — or rejects:
 
     HTTP:      sends 401 JSON response.
-    WebSocket: consumes the connect event, then closes with 4401.
+    WebSocket: rejects the handshake with close code 4401.
     """
     sid = conn.state.get('session', {}).get('id', '')
     chat_session = state.get(sid) if sid else None
 
     if conn.type == 'websocket':
-        event = await receive()
-        if event.get('type') != 'websocket.connect':
-            return
         if chat_session is None:
-            await send({'type': 'websocket.close', 'code': 4401})
+            await WebSocket(conn, receive, send).close(4401)
             return
     elif chat_session is None:
         await send(JSONResponse({'error': 'Unauthorized'}, status=HTTPStatus.UNAUTHORIZED))
@@ -379,9 +378,7 @@ async def handle_chat_page(conn, receive, send):
     # route is intentionally outside the `protected` group.
     sid = conn.state['session'].get('id', '')
     if not sid or state.get(sid) is None:
-        await send({'type': 'http.response.start', 'status': 302,
-                    'headers': [(b'location', b'/')]})
-        await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+        await send(Response(b'', status=HTTPStatus.FOUND, headers=[(b'location', b'/')]))
         return
     await send(Response(_load('chat.html')))
 
@@ -434,21 +431,17 @@ async def handle_sse(conn, receive, send):  # noqa: ARG001
 
     session: ChatSession = conn.state['chat_session']
 
-    await send({
-        'type': 'http.response.start',
-        'status': 200,
-        'headers': [
-            (b'content-type', b'text/event-stream'),
-            (b'cache-control', b'no-cache'),
-            (b'x-accel-buffering', b'no'),
-        ],
-    })
+    await send(NativeResponse(status=200, header=[
+        (b'content-type', b'text/event-stream'),
+        (b'cache-control', b'no-cache'),
+        (b'x-accel-buffering', b'no'),
+    ]))
 
     session.connected = True
     session.disconnect_time = None
 
     history = {'type': 'history', 'payload': list(state.messages)}
-    await send({'type': 'http.response.body', 'body': _sse_encode(history), 'more_body': True})
+    await send(NativeResponse(body=_sse_encode(history), more_body=True))
 
     join_event = {
         'type': 'user_join',
@@ -456,25 +449,16 @@ async def handle_sse(conn, receive, send):  # noqa: ARG001
     }
     await state.broadcast(join_event)
 
-    async def _watch_disconnect():
-        while True:
-            event = await receive()
-            if event.get('type') == 'http.disconnect':
-                session.connected = False  # unblock _push without waiting for its timeout
-                break
-
-    async def _push():
-        while session.connected:
-            try:
-                evt = await asyncio.wait_for(session.queue.get(), timeout=25)
-                await send({'type': 'http.response.body', 'body': _sse_encode(evt), 'more_body': True})
-            except asyncio.TimeoutError:
-                await send({'type': 'http.response.body', 'body': b': keepalive\n\n', 'more_body': True})
-            except Exception:
-                session.connected = False
-                break
-
-    await asyncio.gather(_watch_disconnect(), _push())
+    # A write to a departed client raises ClientDisconnected, which ends the loop.
+    while session.connected:
+        try:
+            evt = await asyncio.wait_for(session.queue.get(), timeout=25)
+            await send(NativeResponse(body=_sse_encode(evt), more_body=True))
+        except asyncio.TimeoutError:
+            await send(NativeResponse(body=b': keepalive\n\n', more_body=True))
+        except Exception:
+            session.connected = False
+            break
 
     session.connected = False
     session.disconnect_time = time.monotonic()
@@ -483,7 +467,7 @@ async def handle_sse(conn, receive, send):  # noqa: ARG001
         'payload': {'username': session.username, 'participants': state.participants()},
     }
     await state.broadcast(leave_event)
-    await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+    await send(NativeResponse(body=b''))
 
 
 @protected.route(methods=[HTTPMethod.GET], path='/poll')
@@ -524,12 +508,13 @@ async def handle_poll(conn, receive, send):  # noqa: ARG001
 @protected.route(methods=[HTTPMethod.GET], path='/ws', scheme=Scheme.websocket)
 async def handle_websocket(conn, receive, send):
     session: ChatSession = conn.state['chat_session']
-    await send({'type': 'websocket.accept'})
+    ws = WebSocket(conn, receive, send)
+    await ws.accept()
     session.connected = True
     session.disconnect_time = None
 
     history = {'type': 'history', 'payload': list(state.messages)}
-    await send(WebSocketResponse(history))
+    await ws.send_json(history)
 
     join_event = {
         'type': 'user_join',
@@ -541,21 +526,20 @@ async def handle_websocket(conn, receive, send):
         while session.connected:
             try:
                 evt = await asyncio.wait_for(session.queue.get(), timeout=30)
-                await send(WebSocketResponse(evt))
+                await ws.send_json(evt)
             except asyncio.TimeoutError:
                 pass  # idle keepalive tick → loop and wait for the next event.
             except Exception:
                 break
 
     async def _receiver():
-        while True:
-            evt = await receive()
-            if evt.get('type') == 'websocket.receive':
-                logger.info('WebSocket message user=%s text=%r bytes=%r',
-                            session.username, evt.get('text'), evt.get('bytes'))
-            elif evt.get('type', '') == 'websocket.disconnect':
-                session.connected = False   # unblock _sender immediately
-                break
+        try:
+            while True:
+                message = await ws.receive()
+                logger.info('WebSocket message user=%s message=%r',
+                            session.username, message)
+        except WebSocketDisconnect:
+            session.connected = False   # unblock _sender immediately
 
     try:
         await asyncio.gather(_sender(), _receiver())

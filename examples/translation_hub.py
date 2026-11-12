@@ -46,7 +46,8 @@ import json
 import logging
 from http import HTTPStatus
 
-from blackbull import BlackBull, EventSourceResponse, JSONResponse, Response
+from blackbull import (BlackBull, EventSourceResponse, JSONResponse, Response,
+                       WebSocket, WebSocketDisconnect)
 from blackbull.grpc import GrpcContext, GrpcError, GrpcServiceRegistry, GrpcStatus
 from blackbull.mqtt import Message, MQTTExtension
 from blackbull.utils import Scheme
@@ -105,27 +106,24 @@ async def on_temperature(msg: Message, room: str):
 # --- MQTT -> WebSocket -------------------------------------------------------
 
 @app.route(path='/ws', scheme=Scheme.websocket)
-async def ws_feed(conn, receive, send):
-    event = await receive()
-    if event['type'] != 'websocket.connect':
-        return
-    await send({'type': 'websocket.accept'})
+async def ws_feed(ws: WebSocket):
+    await ws.accept()
     q = hub.subscribe()
     # Two waits at once: hub items flow out; a client close ends the handler.
-    recv_task = asyncio.ensure_future(receive())
+    recv_task = asyncio.ensure_future(ws.receive())
     item_task = asyncio.ensure_future(q.get())
     try:
         while True:
             done, _ = await asyncio.wait({recv_task, item_task},
                                          return_when=asyncio.FIRST_COMPLETED)
             if recv_task in done:
-                event = recv_task.result()
-                if event['type'] == 'websocket.disconnect':
+                try:
+                    recv_task.result()
+                except WebSocketDisconnect:
                     return
-                recv_task = asyncio.ensure_future(receive())   # ignore client text
+                recv_task = asyncio.ensure_future(ws.receive())   # ignore client text
             if item_task in done:
-                await send({'type': 'websocket.send',
-                            'text': json.dumps(item_task.result())})
+                await ws.send_json(item_task.result())
                 item_task = asyncio.ensure_future(q.get())
     finally:
         hub.unsubscribe(q)

@@ -331,19 +331,15 @@ re-entered; create a new session for each connection. A standalone
 Failed handshakes also reclaim the application task and any owned loop.
 
 ```python
+from blackbull import WebSocket
 from blackbull.router import Scheme
 
 
 @app.route(path='/ws', scheme=Scheme.websocket)
-async def ws_echo(conn, receive, send):
-    await receive()                              # websocket.connect
-    await send({'type': 'websocket.accept'})
-    while True:
-        event = await receive()
-        if event['type'] == 'websocket.disconnect':
-            return
-        if event.get('text') is not None:
-            await send({'type': 'websocket.send', 'text': event['text']})
+async def ws_echo(ws: WebSocket):
+    await ws.accept()
+    async for message in ws:
+        await ws.send(message)
 
 
 def test_ws_echo():
@@ -363,9 +359,8 @@ from blackbull.testing import WebSocketDisconnect
 
 
 @app.route(path='/ws-auth', scheme=Scheme.websocket)
-async def ws_auth(conn, receive, send):
-    await receive()
-    await send({'type': 'websocket.close', 'code': 4401})
+async def ws_auth(ws: WebSocket):
+    await ws.close(4401)
 
 
 def test_ws_rejects_unauthenticated():
@@ -384,12 +379,11 @@ iterator termination so the test reads as a single `for` loop:
 
 ```python
 @app.route(path='/notifications', scheme=Scheme.websocket)
-async def notifications(conn, receive, send):
-    await receive()                              # websocket.connect
-    await send({'type': 'websocket.accept'})
+async def notifications(ws: WebSocket):
+    await ws.accept()
     for n in range(3):
-        await send({'type': 'websocket.send', 'text': f'event-{n}'})
-    await send({'type': 'websocket.close', 'code': 1000})
+        await ws.send_text(f'event-{n}')
+    await ws.close(1000)
 
 
 def test_notifications_stream():

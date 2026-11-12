@@ -309,11 +309,9 @@ response has been fully sent.  **Mutually exclusive** with
 `request_completed`: a request that disconnected does not also
 fire `request_completed`.
 
-The event fires when the server detects the disconnect via the
-application's `receive()` call — specifically when `receive()`
-returns `{'type': 'http.disconnect'}`.  Long-polling or SSE
-handlers that call `receive()` to watch for disconnect trigger
-this event the moment the client closes.
+The event fires when a read of the request body (`conn.body()`,
+`conn.stream()`, or the deprecated direct `receive()`) finds the
+client gone.
 
 For HTTP/2, when the underlying TCP connection closes while
 streams are still in flight (the common case for SSE), the

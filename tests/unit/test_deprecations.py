@@ -4,6 +4,7 @@
 published list cannot drift from the code.
 """
 import ast
+import asyncio
 import importlib
 import pathlib
 import sys
@@ -16,6 +17,8 @@ import blackbull.client
 import blackbull.middleware
 from blackbull import BlackBullDeprecationWarning
 from blackbull.deprecations import DEPRECATIONS, table
+from blackbull.native import DictReceive
+from blackbull.response import wrap_native_send
 from blackbull.fault_injection import scenario_h1, scenario_h1_server
 
 ROOT = pathlib.Path(blackbull.__file__).parent
@@ -68,6 +71,18 @@ def _fresh_import(name):
     return importlib.import_module(name)
 
 
+async def _discard(event):
+    pass
+
+
+async def _request():
+    return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+
+async def _scope_declared(scope, receive, send, call_next):
+    await call_next(scope, receive, send)
+
+
 #: entry -> an access that warns, and whether the warning names the caller's line.
 TRIGGERS = {
     'BBD001': (lambda: blackbull.middleware.CacheMiddleware, True),
@@ -78,6 +93,13 @@ TRIGGERS = {
     # beartype may wrap from_json, which moves a fixed stacklevel off the caller.
     'BBD006': (lambda: scenario_h1.Scenario.from_json('{"op": "ABORT"}'), False),
     'BBD007': (lambda: scenario_h1_server.encode_chunk, True),
+    # Driven by asyncio.run, so the awaiting frame is the event loop's.
+    'BBD010': (lambda: asyncio.run(wrap_native_send(_discard)(
+        {'type': 'http.response.start', 'status': 200})), False),
+    'BBD011': (lambda: asyncio.run(DictReceive(_request)()), False),
+    'BBD012': (lambda: blackbull.as_middleware(_scope_declared), True),
+    # As BBD006: beartype wraps the annotated WebSocketResponse.
+    'BBD013': (lambda: blackbull.WebSocketResponse('x'), False),
 }
 
 

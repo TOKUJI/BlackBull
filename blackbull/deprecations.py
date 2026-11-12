@@ -56,6 +56,22 @@ DEPRECATIONS: dict[str, Deprecation] = {
     'BBD009': Deprecation(
         'Python 3.11 support', 'Python 3.12 or later', 'v0.82.0',
         'in the first release from October 2027', 'BLA-586', warns=False),
+    'BBD010': Deprecation(
+        'sending ASGI event dicts from handlers and middleware',
+        'Response or NativeResponse for HTTP; the WebSocket object or '
+        'NativeWSMessage for WebSocket', 'v0.83.0', 'no earlier than 2027-12-01',
+        'BLA-672'),
+    'BBD011': Deprecation(
+        'reading ASGI event dicts from receive() in handlers and middleware',
+        'conn.body(), conn.stream() or read_body(); the WebSocket object',
+        'v0.83.0', 'no earlier than 2027-12-01', 'BLA-672'),
+    'BBD012': Deprecation(
+        'as_middleware on a middleware whose first parameter is scope',
+        'native (conn, receive, send, call_next) middleware; wrap the whole app '
+        'for ASGI middleware', 'v0.83.0', 'no earlier than 2027-12-01', 'BLA-672'),
+    'BBD013': Deprecation(
+        'WebSocketResponse', 'ws.send_text(), ws.send_bytes() or ws.send_json()',
+        'v0.83.0', 'no earlier than 2027-12-01', 'BLA-672'),
 }
 
 

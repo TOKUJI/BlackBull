@@ -37,15 +37,7 @@ async def echo_headers(conn, receive, send):   # full form: `conn` is a native C
     for name, value in conn.headers:
         lines.append(f"{name.decode('latin-1')}: {value.decode('latin-1')}")
     body = "\n".join(lines).encode()
-    await send({
-        'type': 'http.response.start',
-        'status': 200,
-        'headers': [(b'content-type', b'text/plain; charset=utf-8')],
-    })
-    await send({
-        'type': 'http.response.body',
-        'body': body,
-    })
+    await send(Response(body, content_type='text/plain; charset=utf-8'))
 
 
 # ── /cookie: echo parsed cookies ────────────────────────────────────────
@@ -58,15 +50,7 @@ async def cookie_echo(conn, receive, send):   # full form: `conn` is a native Co
     for name, value in cookies.items():
         lines.append(f"{name}={value}")
     body = "\n".join(lines).encode()
-    await send({
-        'type': 'http.response.start',
-        'status': 200,
-        'headers': [(b'content-type', b'text/plain; charset=utf-8')],
-    })
-    await send({
-        'type': 'http.response.body',
-        'body': body,
-    })
+    await send(Response(body, content_type='text/plain; charset=utf-8'))
 
 
 if __name__ == '__main__':

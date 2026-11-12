@@ -35,7 +35,7 @@ from .recipient import (AbstractReader, IncompleteReadError,
                         HTTP2Recipient, RecipientFactory,
                         _HTTP2_STREAM_QUEUE_DEPTH)
 from .http2_connection import SKIP, HTTP2Connection
-from .sender import AbstractWriter, FlowControlStalled, SenderFactory
+from .sender import AbstractWriter, FlowControlStalled, SenderFactory, warns_native_dicts
 from .access_log import (
     close_record as _close_record,
     close_ws_record as _close_ws_record,
@@ -660,6 +660,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         ))
         self._ws_over_h2_enabled = cfg.h2_enable_websocket
         self._force_asgi = cfg.force_asgi_scope
+        self._writer.warn_dicts = warns_native_dicts(self._app)
         logger.info(
             'HTTP/2 SETTINGS sent: initial_window_size=%d max_concurrent_streams=%d',
             cfg.h2_initial_window_size, self.max_concurrent_streams,

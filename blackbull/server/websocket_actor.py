@@ -3,6 +3,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from ..actor import Actor, Message
+from ..deprecations import _warn_deprecated
 from ..native import NativeWSMessage
 from ..connection import Connection
 from ..event_aggregator import EventAggregator
@@ -77,6 +78,9 @@ class WebSocketActor(Actor):
         self._writer = writer
         self._conn = conn
         self._app = app
+        # Not warns_native_dicts: this actor always passes a Connection, so
+        # BB_FORCE_ASGI_SCOPE adds no boundary that could produce a dict.
+        self._warn_dicts = getattr(app, '_warns_native_dicts', False)
         self._aggregator = aggregator
         self._peername = peername
         self._sockname = sockname
@@ -169,6 +173,8 @@ class WebSocketActor(Actor):
             offered = event.subprotocol
             extra = event.headers if is_accept else None
         else:
+            if self._warn_dicts and type(event) is dict:
+                _warn_deprecated('BBD010')
             is_accept = (isinstance(event, dict)
                          and event.get('type') == ASGIEvent.WS_ACCEPT)
             offered = event.get('subprotocol') if is_accept else None

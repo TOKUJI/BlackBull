@@ -107,8 +107,7 @@ precedence.
 
 ## The backpressure model
 
-Streaming handlers fire one `await send({'type': 'http.response.body', ...})`
-per chunk.  Both HTTP/1.1 and HTTP/2 paths apply transport-level
+Streaming handlers send one body chunk per `await send(...)`.  Both HTTP/1.1 and HTTP/2 paths apply transport-level
 backpressure inside that `await`, so a slow client never causes
 unbounded buffer growth in BlackBull.
 

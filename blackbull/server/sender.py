@@ -14,6 +14,7 @@ from email.utils import formatdate
 from typing import NoReturn
 
 from ..protocol import hpack_fastpath
+from ..deprecations import _warn_deprecated
 from ..env import get_settings
 from ..protocol.framing import (_CRLF, _LENGTHLESS_STATUSES,
                                 NO_CONTENT_GENERATED_STATUSES,
@@ -165,6 +166,10 @@ class AbstractWriter(ABC):
     MemorySendStream, curio socket, …).  ``BaseSender`` only depends on this
     interface, so switching the async runtime requires only a new subclass here.
     """
+
+    #: Set by the actor when a dict sent on this connection can only come
+    #: from a native app's code (BBD010).
+    warn_dicts = False
 
     def peer_is_gone(self) -> bool:
         """True when the transport has already recorded the loss.
@@ -433,6 +438,12 @@ _SenderBody = _SenderEvent | bytes | NativeResponse
 _WSSenderEvent = WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent
 
 
+def warns_native_dicts(app) -> bool:
+    """Whether a dict reaching *app*'s senders can only be from native code."""
+    return (getattr(app, '_warns_native_dicts', False)
+            and not get_settings().force_asgi_scope)
+
+
 class BaseSender(ABC):
     """Protocol senders accepting native messages, compatible ASGI events, or bytes.
 
@@ -592,6 +603,8 @@ class HTTP1Sender(BaseSender):
             return
 
         if isinstance(body, dict):
+            if self._writer.warn_dicts and type(body) is dict:
+                _warn_deprecated('BBD010')
             body = _native_from_asgi(body)
 
         if (isinstance(body, NativeResponse) and body._extension is not None
@@ -1614,6 +1627,8 @@ class HTTP2Sender(BaseSender):
             return
 
         if isinstance(body, dict):
+            if self._writer.warn_dicts and type(body) is dict:
+                _warn_deprecated('BBD010')
             body = _native_from_asgi(body)
 
         if isinstance(body, bytes):

@@ -1,4 +1,4 @@
-from blackbull import BlackBull
+from blackbull import BlackBull, Response
 
 app = BlackBull()
 
@@ -8,18 +8,7 @@ async def hello(conn, receive, send):   # full form: `conn` is a native Connecti
 
     response_body = b'Hello, world!'
 
-    await send({
-        'type': 'http.response.start',
-        'status': 200,
-        'headers': [
-            (b'content-type', b'text/plain'),
-        ],
-    })
-
-    await send({
-        'type': 'http.response.body',
-        'body': response_body,
-    })
+    await send(Response(response_body, content_type='text/plain'))
 
 if __name__ == '__main__':
     app.run(port=8000)

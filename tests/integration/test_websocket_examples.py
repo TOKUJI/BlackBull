@@ -9,11 +9,10 @@ Each example is driven through :class:`~blackbull.testing.TestClient`, so a
 break shows up here rather than in someone's first `python examples/…` run.
 The three cover the three distinct handshake shapes that exist in the tree:
 
-- ``websocket_object.py`` — the object form drives the handshake itself, and
-  its ``/raw-echo`` route drives it the old way in the same app.
-- ``translation_hub.py`` — a raw handler with unrelated middleware.
-- ``ChatServer`` — custom auth middleware consumes ``websocket.connect``
-  *without* accepting, keeping the option of rejecting with a close code.
+- ``websocket_object.py`` — the object form drives the handshake itself.
+- ``translation_hub.py`` — an object handler with unrelated middleware.
+- ``ChatServer`` — custom auth middleware rejects with a close code before
+  the handler, which accepts on its own channel.
 """
 import importlib.util
 import pathlib
@@ -96,16 +95,8 @@ def test_example_object_accepts_with_credentials(websocket_object_app):
             assert ws.receive_text() == 'welcome'
 
 
-def test_example_raw_form_still_works_in_the_same_app(websocket_object_app):
-    """Both forms shipped side by side in one example — both must run."""
-    with TestClient(websocket_object_app) as client:
-        with client.websocket_connect('/raw-echo') as ws:
-            ws.send_text('hello')
-            assert ws.receive_text() == 'hello'
-
-
 # ---------------------------------------------------------------------------
-# examples/translation_hub.py — raw handler
+# examples/translation_hub.py — object handler
 # ---------------------------------------------------------------------------
 
 def test_example_translation_hub_handshake_and_clean_close():
@@ -116,16 +107,11 @@ def test_example_translation_hub_handshake_and_clean_close():
 
 
 # ---------------------------------------------------------------------------
-# examples/ChatServer — middleware consumes connect without accepting
+# examples/ChatServer — middleware rejects before the handler accepts
 # ---------------------------------------------------------------------------
 
 def test_example_chatserver_rejects_an_unauthenticated_socket():
-    """`auth_mw` pops `websocket.connect` itself and closes with 4401.
-
-    This is the handshake shape that distinguishes "connect consumed" from
-    "handshake accepted"; if those two ever collapse, the authorized path of
-    this example stops sending its accept.
-    """
+    """`auth_mw` rejects the handshake with 4401 before the handler runs."""
     sys.path.insert(0, str(EXAMPLES / 'ChatServer'))
     try:
         app = _load('ChatServer/chatserver.py', '_ex_chatserver').app

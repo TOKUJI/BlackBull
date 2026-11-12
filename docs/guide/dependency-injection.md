@@ -23,7 +23,7 @@ async def get_item(id: int, db=Depends(get_db)):
 ```
 
 Use `Depends(provider)` as the parameter's **default value**.  Simplified
-handlers only — middleware and full `(scope, receive, send)` handlers are
+handlers only — middleware and full `(conn, receive, send)` handlers are
 unchanged, the same rule as every other simplified-model feature.
 
 ## Provider forms

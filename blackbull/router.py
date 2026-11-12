@@ -22,6 +22,7 @@ import uuid as _uuid
 import warnings
 from .di import Depends, _resolve_depends
 from .connection import refuse_scope, stashed_connection
+from .native import DictReceive
 from .response import (
     Response as _Response, JSONResponse as _JSONResponse,
     StreamingResponse as _StreamingResponse,
@@ -704,7 +705,7 @@ def _conn_of(target, receive):
         if seed:
             conn.path_params.update(seed)
     if conn._receive is None:
-        conn._receive = receive
+        conn._receive = receive.raw if type(receive) is DictReceive else receive
     return conn
 
 
@@ -1262,6 +1263,10 @@ class Router:
 
     _DEFAULT_CACHE_MAX: int = 2048
 
+    #: Set once a registration can hand ``receive`` to user code, which
+    #: makes the app wrap it (BBD011).
+    exposes_receive = False
+
     def __init__(self, cache_max: int = _DEFAULT_CACHE_MAX):
         self._route_info: list[_RouteInfo] = []
         self._named_routes: dict[str, tuple[str, dict[str, str]]] = {}
@@ -1512,6 +1517,7 @@ class Router:
         """*fn* adapted to ``(conn, receive, send)`` when it is a simplified
         handler: as a WebSocket handler on a WebSocket-only route."""
         if not _is_simplified_handler(fn):
+            self.exposes_receive = True
             return fn
         if _is_websocket_route(scheme):
             return _adapt_websocket_handler(fn, path)
@@ -1529,6 +1535,7 @@ class Router:
             raise TypeError(f'{functions} is not iterable.')
 
         fns = list(functions)
+        self.exposes_receive = True
         param = _middleware_param(fns[-1])
         if param is not None:
             inner_chain = partial(fns[-1], **{param: do_nothing})
@@ -1740,6 +1747,9 @@ class Router:
 class ErrorRouter:
     """Resolve error handlers by exception MRO, status, then default."""
 
+    #: As [`Router.exposes_receive`][], for a full-form error handler.
+    exposes_receive = False
+
     def __init__(self, default: Callable | None = None):
         self._status_handlers: dict[HTTPStatus, Callable] = {}
         self._exc_handlers: dict[Type[BaseException], Callable] = {}
@@ -1752,6 +1762,8 @@ class ErrorRouter:
         ``HTTPStatus``, but registering a handler for, say, ``200`` raises
         ``ValueError``.
         """
+        if not _is_simplified_handler(fn):
+            self.exposes_receive = True
         if isinstance(key, HTTPStatus):
             if not is_client_error(key) and not is_server_error(key):
                 raise ValueError(f"{key} is not an error status (4xx/5xx).")

@@ -8,6 +8,7 @@ import json
 from typing import Any, AsyncIterator
 
 from .asgi import ASGIEvent, ASGIReceiveCallable
+from .native import raw_receive
 
 
 class ClientDisconnected(Exception):
@@ -35,6 +36,7 @@ async def read_body(receive: ASGIReceiveCallable) -> bytes:
     returned as if whole.
     """
     chunks: list[bytes] = []
+    receive = raw_receive(receive)
     next_chunk = getattr(receive, 'next_chunk', None)
     if next_chunk is not None:
         # Native channel (BlackBull's own recipients): the chunk *is* the
@@ -80,6 +82,7 @@ async def stream_body(receive: ASGIReceiveCallable) -> AsyncIterator[bytes]:
     are the caller's to keep), so a truncated upload is never silently treated
     as complete.
     """
+    receive = raw_receive(receive)
     next_chunk = getattr(receive, 'next_chunk', None)
     if next_chunk is not None:
         # Native channel — see [`read_body`][].  ``None`` ends the body;

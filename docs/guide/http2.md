@@ -204,15 +204,13 @@ Send a `NativeResponse(push=...)` before completing the parent response. ASGI ap
 also send the equivalent `http.response.push` dictionary:
 
 ```python
+from blackbull import Response
 from blackbull.native import NativeResponse
 
 @app.route(path='/')
 async def index(conn, receive, send):
     await send(NativeResponse(push='/static/style.css'))
-    await send({'type': 'http.response.start', 'status': 200,
-                'headers': [(b'content-type', b'text/html')]})
-    await send({'type': 'http.response.body',
-                'body': b'<html>...</html>'})
+    await send(Response(b'<html>...</html>'))
 ```
 
 For a push, `header` contains the promised request's headers:

@@ -4,9 +4,6 @@ Declare a parameter annotated ``WebSocket`` (any name) — or a bare parameter
 named ``ws``/``websocket`` — and the router hands the handler the connection
 as an object instead of raw ASGI event dicts.
 
-The raw ``(conn, receive, send)`` form still works and is not deprecated;
-``/raw-echo`` below is the same echo server written that way, for comparison.
-
 Try it:
 
     python examples/websocket_object.py
@@ -73,22 +70,6 @@ async def private(ws: WebSocket):
     await ws.accept()
     await ws.send_text('welcome')
     await ws.close()
-
-
-@app.route(path='/raw-echo', scheme=Scheme.websocket)
-async def raw_echo(conn, receive, send):
-    """The same echo server in the raw event form — still fully supported."""
-    await receive()                                   # websocket.connect
-    await send({'type': 'websocket.accept'})
-    while True:
-        event = await receive()
-        if event['type'] == 'websocket.disconnect':
-            break
-        if event['type'] == 'websocket.receive':
-            if event.get('text') is not None:
-                await send({'type': 'websocket.send', 'text': event['text']})
-            else:
-                await send({'type': 'websocket.send', 'bytes': event['bytes']})
 
 
 if __name__ == '__main__':

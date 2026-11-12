@@ -117,9 +117,6 @@ _WS_DICT_ALLOWED: dict[str, str] = {
     'blackbull/response.py::WebSocketResponse':
         'boundary — the documented ASGI-event builder for the raw '
         '(conn, receive, send) WebSocket form',
-    'blackbull/middleware/websocket.py::<module>':
-        'boundary — the `websocket` middleware consumes the raw connect event '
-        'on behalf of a raw-form handler',
     'blackbull/server/recipient.py::WebSocketRecipient.__call__':
         'boundary — the ASGI receive channel, minted per call for the raw '
         '(conn, receive, send) form and the external host; the object form '
