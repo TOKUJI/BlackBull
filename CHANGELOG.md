@@ -26,6 +26,8 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+## [0.82.1] — 2026-11-13
+
 ### Fixed
 
 - HTTP/2 client: resets answering a server frame (for example a
