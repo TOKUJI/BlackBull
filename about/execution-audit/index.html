@@ -5714,8 +5714,9 @@ coverage/testing dependencies; BlackBull's supported Python floor is unchanged.
 Keep the generated report under <code>build/execution-audit/</code> until review is complete.</p>
 <p>The gate runs unit, architecture, properties, integration and conformance suites
 together, with integration enabled. Docker-dependent tests retain their normal
-skip conditions. Quantitative tests marked <code>no_audit(reason=...)</code> must first pass
-without instrumentation. Their exact JUnit identities are checked against the
+skip conditions. Tests incompatible with instrumentation use <code>no_audit(reason=...)</code>
+and must first pass without instrumentation, with integration enabled.
+Their exact JUnit identities are checked against the
 tests skipped during collection; a missing control fails the gate.</p>
 <p>The source inventory lists definitions; coverage records executed lines.
 <code>sys.monitoring</code> records function
