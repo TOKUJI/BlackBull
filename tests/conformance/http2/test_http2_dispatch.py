@@ -155,11 +155,7 @@ class TestHTTP2FlowControl:
 
     @staticmethod
     def _wu_increments(handler) -> list[int]:
-        # Stream-level WINDOW_UPDATEs (stream_id > 0) reflect per-stream
-        # DATA consumption.  Connection-level (stream_id == 0) is
-        # asserted separately via :meth:`_wu_increments_conn` — the
-        # server emits one of each per consumed DATA frame so both windows
-        # stay credited (RFC 9113 §6.9.1).
+        # A stream only needs more credit until the peer's END_STREAM.
         return [call.args[0].window_size
                 for call in handler.send_frame.call_args_list
                 if hasattr(call.args[0], 'FrameType')
@@ -197,7 +193,7 @@ class TestHTTP2FlowControl:
         handler.receive = AsyncMock(side_effect=[h_frame, d_frame, None])
         await handler.run()
 
-        increments = self._wu_increments(handler)
+        increments = self._wu_increments_conn(handler)
         assert increments, 'handler must send WINDOW_UPDATE after consuming DATA'
         assert any(inc == len(payload) for inc in increments), (
             f'WINDOW_UPDATE increment must equal payload size ({len(payload)}); '
@@ -221,7 +217,7 @@ class TestHTTP2FlowControl:
         handler.receive = AsyncMock(side_effect=[h_frame, d_frame1, d_frame2, None])
         await handler.run()
 
-        increments = self._wu_increments(handler)
+        increments = self._wu_increments_conn(handler)
         assert increments, 'handler must send at least one WINDOW_UPDATE'
         assert sum(increments) == total, (
             f'Sum of WINDOW_UPDATE increments must equal total bytes consumed '
@@ -314,12 +310,11 @@ class TestHTTP2FlowControl:
             f'at least the {total} bytes received; got '
             f'sum={sum(conn_increments)} from increments={conn_increments}'
         )
-        # Same byte count must also be credited stream-level (RFC 9113
-        # §6.9.1 — both windows are debited and must both be restored).
+        # The last frame carries END_STREAM and needs no stream credit.
         stream_increments = self._wu_increments(handler)
-        assert sum(stream_increments) >= total, (
+        assert sum(stream_increments) == total - chunk_size, (
             f'stream-level WINDOW_UPDATEs must also cumulatively credit '
-            f'at least {total}; got sum={sum(stream_increments)}'
+            f'{total - chunk_size}; got sum={sum(stream_increments)}'
         )
 
     async def test_zero_window_blocks_app_data_send(self):

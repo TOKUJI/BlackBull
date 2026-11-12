@@ -94,6 +94,9 @@ async def _emit(sender, mode, body=b'hello'):
         await sender({'type': 'http.response.body', 'body': body})
     elif mode == 'native':
         await sender(NativeResponse(status=200, header=[], body=body))
+    elif mode == 'native_with_trailers':
+        await sender(NativeResponse.with_trailers(
+            200, [], body, [(b'grpc-status', b'0')]))
     elif mode == 'ws':
         await HTTP2WSWriter(sender).write(body)
     else:
@@ -108,7 +111,7 @@ async def _emit(sender, mode, body=b'hello'):
 
 
 @pytest.mark.parametrize('mode', ['data', 'bytes', 'dict', 'native',
-                                 'trailers', 'auto_flush', 'ws'])
+                                 'trailers', 'native_with_trailers', 'auto_flush', 'ws'])
 async def test_concurrent_stream_cannot_reuse_credit_during_drain(mode):
     async with _rig() as (writer, window, senders, start):
         first = start(_emit(senders[0], mode))
@@ -131,7 +134,7 @@ async def test_concurrent_stream_cannot_reuse_credit_during_drain(mode):
 
 
 @pytest.mark.parametrize('mode', ['data', 'bytes', 'dict', 'native',
-                                 'trailers', 'auto_flush', 'ws'])
+                                 'trailers', 'native_with_trailers', 'auto_flush', 'ws'])
 async def test_sufficient_credit_allows_parallel_writes(mode):
     async with _rig(credit=10) as (writer, _, senders, start):
         first = start(_emit(senders[0], mode))

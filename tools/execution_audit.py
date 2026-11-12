@@ -275,7 +275,8 @@ def collect(package: Path, output: Path, command: list[str], untraced=False) -> 
         clean = {k: v for k, v in os.environ.items()
                  if not k.startswith(('COVERAGE_', 'BB_EXECUTION_AUDIT_'))}
         control = [sys.executable, '-m', 'pytest', *(f'tests/{s}' for s in SUITES),
-                   '-m', 'no_audit', '--timeout=120', '-q', '--junitxml', str(output / 'untraced.xml')]
+                   '--run-integration', '-m', 'no_audit', '--timeout=120', '-q',
+                   '--junitxml', str(output / 'untraced.xml')]
         result = subprocess.run(control, env=clean, timeout=300)
         if result.returncode:
             return result.returncode

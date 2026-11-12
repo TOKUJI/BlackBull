@@ -7,8 +7,9 @@ Keep the generated report under `build/execution-audit/` until review is complet
 
 The gate runs unit, architecture, properties, integration and conformance suites
 together, with integration enabled. Docker-dependent tests retain their normal
-skip conditions. Quantitative tests marked `no_audit(reason=...)` must first pass
-without instrumentation. Their exact JUnit identities are checked against the
+skip conditions. Tests incompatible with instrumentation use `no_audit(reason=...)`
+and must first pass without instrumentation, with integration enabled.
+Their exact JUnit identities are checked against the
 tests skipped during collection; a missing control fails the gate.
 
 The source inventory lists definitions; coverage records executed lines.

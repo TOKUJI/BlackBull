@@ -1431,7 +1431,8 @@ class HTTP2Sender(BaseSender):
         if delta > 0:
             self.wake_window()
 
-    async def _handle_body_content(self, payload: bytes, end_stream: bool) -> None:
+    async def _handle_body_content(self, payload: bytes, end_stream: bool,
+                                   response: NativeResponse) -> None:
         """Write one body chunk — shared by the dict and native H2 paths.
 
         ``payload`` is the chunk; ``end_stream`` is True for the **terminal**
@@ -1463,7 +1464,9 @@ class HTTP2Sender(BaseSender):
                     and len(payload) <= self.stream_window_size
                     and len(payload) <= self._conn_window.size):
                 self._buffered_body = payload
-                self._schedule_auto_flush()
+                # A combined response already owns its final trailer write.
+                if response._trailers is None or response.more_trailers:
+                    self._schedule_auto_flush()
             else:
                 # Take ownership first: the write can yield to auto-flush or
                 # stall on flow control, and the head is sent from then on.
@@ -1675,7 +1678,8 @@ class HTTP2Sender(BaseSender):
                             self._log_record.resp_content_encoding = hv
                     self._log_record.mark('start_arm_out')
             if body.body is not None:
-                await self._handle_body_content(body._body, not body.more_body)
+                await self._handle_body_content(
+                    body._body, not body.more_body, body)
             if body._trailers is not None and not self._end_stream_sent:
                 await self._handle_trailers(
                     body._trailers, body.more_trailers)
