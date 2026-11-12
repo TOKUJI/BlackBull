@@ -353,8 +353,8 @@ A time bound records only when **its own** deadline expired.  A
 the cap refusing, and is not filed under one.
 
 `BB_CLIENT_H2_ENABLE_PUSH` and `BB_CLIENT_MIN_BODY_RATE_GRACE` keep no
-record because neither is a cap: the first refuses a promise as a protocol
-error (`PROTOCOL_ERROR`), not as a bound, and the second is a grace-period modifier of
+record because neither is a cap: the first is a conformance switch that
+refuses nothing on its own, and the second is a grace-period modifier of
 `BB_CLIENT_MIN_BODY_RATE`, which owns both the refusal and the record.
 
 `BB_WS_QUEUE_DEPTH` is intentionally **not** logged — when read-ahead

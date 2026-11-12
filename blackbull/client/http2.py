@@ -1513,13 +1513,11 @@ class HTTP2Client(HTTP2Connection):
         after the decode, never instead of it.
         """
         if not self._push_forbidden():
-            # The promised stream's frames are read and dropped until it ends.
+            # Nothing consumes a push, so the promised stream is cancelled at
+            # once (§8.4): promises must not accumulate open streams.
             self._open_stream(frame.promised_stream_id)
             logger.debug('PUSH_PROMISE on stream %d dropped', frame.stream_id)
-            if self._no_push_generation is not None:
-                # Refused, not yet acknowledged: a server that never ACKs must
-                # not hold promised streams open (§8.4).
-                await self._reset(frame.promised_stream_id, ErrorCodes.CANCEL)
+            await self._reset(frame.promised_stream_id, ErrorCodes.CANCEL)
             return
         await self._connection_error(
             ErrorCodes.PROTOCOL_ERROR,
