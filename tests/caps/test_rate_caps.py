@@ -40,7 +40,8 @@ def _priority(sid: int, payload: bytes) -> bytes:
 _SELF_DEPENDENT = [_priority(sid, struct.pack('>IB', sid, 15)) for sid in (3, 5, 7)]
 _SHORT_PRIORITY = [_priority(sid, b'\0' * 4) for sid in (3, 5, 7)]
 _PROMISES = [_make_h2_frame(FrameTypes.PUSH_PROMISE, 0x4, 1,
-                                    struct.pack('>I', sid) + b'\x82\x84')
+                                    struct.pack('>I', sid)
+                             + b'\x82\x84\x87\x41\x09localhost')
                      for sid in (2, 4, 6)]
 _AFTER_PEER_RESET = [_make_h2_frame(FrameTypes.RST_STREAM, 0, 1, struct.pack('>I', 8)),
                      *(h2_data(1, b'x') for _ in range(3))]
