@@ -35,6 +35,35 @@ metadata; reinstall an editable checkout after changing that version.
   once instead of staying open, so a server pushing faster than that limit
   loses the connection (BLA-272).
 
+- `Compression()`: omitted arguments take `BB_COMPRESSION_MIN_SIZE`,
+  `BB_COMPRESSION_EXECUTOR_THRESHOLD`, `BB_COMPRESSION_MAX_INFLIGHT` and
+  `BB_BROTLI_QUALITY`, which were ignored; explicit arguments still win. A
+  `brotli_quality` outside 0–11 raises `ValueError`, and `BB_BROTLI_QUALITY`
+  outside it falls back to `4` (BLA-626).
+
+- `Compression()`: a `206 Partial Content` response, or one carrying
+  `Content-Range`, passes through unchanged; its byte range was compressed
+  (BLA-633).
+
+- `CORS`: with credentials enabled, `allow_headers='*'` answers a preflight
+  with the requested header names, since browsers read a credentialed `*` as
+  a literal name; configured header values are validated at construction
+  (BLA-599).
+
+- Responses: a `Content-Type` in `headers` replaces the helper's default or
+  its `content_type`/`media_type` argument; both were sent. Two explicit
+  `Content-Type` fields raise `ValueError` (BLA-615).
+
+- `--reload` re-executes with the original interpreter options and
+  invocation (`python -O -m blackbull.cli ...`); it dropped them (BLA-602).
+
+- `Server.stop()`: cancelling it raises `CancelledError`; the cancellation
+  was swallowed. Cleanup failures during it are logged (BLA-587).
+
+- Docs: the `Cache` guide warns that `Cookie` is not a cache key and
+  `Set-Cookie` does not prevent storage, so personalized responses need
+  `Cache-Control: private` or `no-store` (BLA-632).
+
 - TLS: `BB_WRITE_TIMEOUT` now closes the connection of a peer that stops
   reading a large response, which stayed buffered without bound (BLA-522).
 
@@ -81,6 +110,14 @@ metadata; reinstall an editable checkout after changing that version.
   `Proxy-Connection`, `TE`, `Transfer-Encoding` and `Upgrade` set by the
   application are dropped (RFC 9113 §8.2.2); they were sent, and conforming
   clients reject such a response as malformed (BLA-611).
+
+### Changed
+
+- HTTP/2: received-body credit is returned by one connection task instead of
+  a wait per consumed chunk, no stream `WINDOW_UPDATE` is sent after the
+  peer's `END_STREAM`, and a response whose body and trailers are ready
+  together skips its flush task, which raises unary gRPC throughput
+  (BLA-590).
 
 ### Security
 
