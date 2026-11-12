@@ -315,3 +315,35 @@ def test_failed_run_saves_a_diagnostic_report(tmp_path):
     assert result.returncode != 0
     report = json.loads((output / 'report.json').read_text())
     assert report['error']
+
+
+def test_untraced_phase_executes_integration_controls(tmp_path, monkeypatch):
+    from tools import execution_audit
+
+    tests = tmp_path / 'tests' / 'integration'
+    tests.mkdir(parents=True)
+    (tmp_path / 'conftest.py').write_text('''
+def pytest_addoption(parser):
+    parser.addoption('--run-integration', action='store_true')
+''')
+    (tests / 'test_control.py').write_text('''
+import sys
+from pathlib import Path
+import pytest
+
+@pytest.mark.no_audit(reason='Integration control')
+@pytest.mark.skipif('--run-integration' not in sys.argv, reason='Integration disabled')
+def test_control():
+    Path('control-passed').touch()
+''')
+    package = tmp_path / 'audit_subject'
+    package.mkdir()
+    (package / '__init__.py').write_text('VALUE = 1\n')
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(execution_audit, 'ROOT', tmp_path)
+    monkeypatch.setattr(execution_audit, 'SUITES', ('integration',))
+    monkeypatch.setenv('PYTHONPATH', str(ROOT))
+    assert execution_audit.collect(
+        package, tmp_path / 'audit', [sys.executable, '-c', 'import audit_subject'],
+        untraced=True) == 0
+    assert (tmp_path / 'control-passed').exists()
