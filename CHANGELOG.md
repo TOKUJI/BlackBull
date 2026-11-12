@@ -35,7 +35,8 @@ metadata; reinstall an editable checkout after changing that version.
   deadline and queue refusals are not counted. A pushed stream is now reset
   with `CANCEL` as soon as it is promised (counted the same way) instead of
   staying open until the server ends it, so a server cannot open promised
-  streams without bound (BLA-272).
+  streams without bound; a server pushing faster than `BB_FRAME_RATE_LIMIT`
+  now has its connection ended (BLA-272).
 
 - TLS: `BB_WRITE_TIMEOUT` now closes the connection of a peer that stops
   reading a large response, which stayed buffered without bound (BLA-522).

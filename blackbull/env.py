@@ -238,7 +238,7 @@ class Settings:
         doc='Decoded HTTP/2 bytes per field section, counted as name + value + 32 per field. Advertised as SETTINGS_MAX_HEADER_LIST_SIZE and enforced inside HPACK decoding; excess ends the connection with COMPRESSION_ERROR. `0` disables advertisement and opens the decoder limit. Separate from per-stream `BB_CLIENT_HEAD_MAX_TOTAL`.')
     client_h2_enable_push: bool = setting(
         'BB_CLIENT_H2_ENABLE_PUSH', True, section=_section,
-        doc='HTTP/2 push policy. `1` advertises nothing and accepts promises. `0` advertises ENABLE_PUSH=0 and refuses promises with connection PROTOCOL_ERROR after its SETTINGS acknowledgement; a promise before the ACK is legal. An accepted promise has its stream reset at once (CANCEL), counted against `BB_FRAME_RATE_LIMIT`. Promised blocks are always decoded to preserve shared HPACK state. No push-consuming API is provided.')
+        doc='HTTP/2 push policy. `1` advertises nothing and accepts promises. `0` advertises ENABLE_PUSH=0 and refuses promises with connection PROTOCOL_ERROR after its SETTINGS acknowledgement; a promise before the ACK is legal. An accepted promise has its stream reset at once (CANCEL), counted against `BB_FRAME_RATE_LIMIT`: a server pushing faster than that loses the connection. Promised blocks are always decoded to preserve shared HPACK state. No push-consuming API is provided.')
 
     _section = 'Fault injection'
     production: bool = setting(
