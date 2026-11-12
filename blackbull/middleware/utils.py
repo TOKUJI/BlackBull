@@ -38,7 +38,9 @@ def _to_asgi_send(inner_send):
     """
     from ..native import asgi_send_boundary  # noqa: PLC0415
 
-    return asgi_send_boundary(inner_send)
+    # Only code below sends a plain dict here; BlackBull's own messages are
+    # native until this boundary expands them.
+    return asgi_send_boundary(inner_send, warn_dicts=True)
 
 
 def _adapt(conn, send, wants_scope: bool):

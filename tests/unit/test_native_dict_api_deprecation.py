@@ -358,3 +358,48 @@ def test_sending_websocket_response_warns_once():
 
     assert reply == 'hi'
     assert _bbd(record) == ['BBD013']
+
+
+def _legacy_middleware():
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+
+        @as_middleware
+        async def legacy(scope, receive, send, call_next):
+            await call_next(scope, receive, send)
+    return legacy
+
+
+def test_a_raw_websocket_dict_below_scope_middleware_warns_once():
+    app = BlackBull()
+
+    @app.route(path='/ws', scheme=Scheme.websocket, middlewares=[_legacy_middleware()])
+    async def raw(conn, receive, send):
+        ws = WebSocket(conn, receive, send)
+        await ws.accept()
+        await send({'type': 'websocket.send', 'text': await ws.receive_text()})
+
+    reply, record = _ws_echo(app, '/ws', raw)
+
+    assert reply == 'hi'
+    assert _bbd(record) == ['BBD010']
+
+
+def test_a_middleware_dict_below_scope_middleware_warns_once():
+    app = BlackBull()
+    app.use(_legacy_middleware())
+
+    async def gate(conn, receive, send, call_next):
+        await send({'type': 'http.response.start', 'status': 403, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'no'})
+
+    app.use(gate)
+
+    @app.route(path='/')
+    async def handler(conn):
+        return 'unreached'
+
+    response, record = _record(lambda: _get(app))
+
+    assert response.status == 403
+    assert _bbd(record) == ['BBD010', 'BBD010']
