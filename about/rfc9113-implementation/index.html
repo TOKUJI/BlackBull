@@ -6043,7 +6043,8 @@ stream without changing siblings. Push metadata describes a request and
 bypasses response middleware.</p>
 <h2 id="resource-limits">Resource limits<a class="headerlink" href="#resource-limits" title="Permanent link">&para;</a></h2>
 <p>Byte, count and time limits answer different inputs. Meter empty/control
-frames and both inbound and server-emitted resets before their work occurs.
+frames and inbound resets before their work occurs, and emitted resets on
+the same budget; the client's deadline and queue refusals are not counted.
 Probe idle connections with PING rather than closing responsive idle peers.</p>
 <p>Use <a href="../../reference/env-vars/">Environment variables</a> for defaults and
 <a href="../security-model/">Security model</a> for scope. Passing h2spec does not

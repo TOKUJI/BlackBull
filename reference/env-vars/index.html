@@ -6438,7 +6438,7 @@ For failure types and buffered/streaming tradeoffs, see <a href="../../guide/cli
 <tr>
 <td><code>BB_CLIENT_H2_ENABLE_PUSH</code></td>
 <td><code>1</code></td>
-<td>HTTP/2 push policy. <code>1</code> decodes and discards promises without advertising a change. <code>0</code> advertises ENABLE_PUSH=0 and refuses promises with connection PROTOCOL_ERROR after its SETTINGS acknowledgement; in-flight promises before ACK remain legal. Promised blocks are always decoded to preserve shared HPACK state. No push-consuming API is provided.</td>
+<td>HTTP/2 push policy. <code>1</code> accepts promises. <code>0</code> advertises ENABLE_PUSH=0 and, once acknowledged, refuses promises with connection PROTOCOL_ERROR. An accepted promise is reset at once (CANCEL) and counted against <code>BB_FRAME_RATE_LIMIT</code>, so pushing faster than that ends the connection. Promised blocks are always decoded (shared HPACK state). No push-consuming API is provided.</td>
 </tr>
 </tbody>
 </table>
@@ -6667,7 +6667,7 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 <tr>
 <td><code>BB_FRAME_RATE_LIMIT</code></td>
 <td><code>20</code></td>
-<td>Control frames per type, per connection, per rolling window. Meters H2 RST_STREAM (inbound and server-emitted), PING, SETTINGS, empty CONTINUATION/DATA and WebSocket controls. Excess: H2 GOAWAY(ENHANCE_YOUR_CALM), WS close 1008, and frame_rate cap log. <code>0</code> disables.</td>
+<td>Control frames per type, per connection, per rolling window. Meters H2 RST_STREAM (inbound and emitted; client-emitted only when answering a server frame), PING, SETTINGS, empty CONTINUATION/DATA and WebSocket controls. Excess: H2 GOAWAY(ENHANCE_YOUR_CALM), WS close 1008, and frame_rate cap log. <code>0</code> disables.</td>
 </tr>
 <tr>
 <td><code>BB_FRAME_RATE_WINDOW</code></td>
