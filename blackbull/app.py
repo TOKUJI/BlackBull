@@ -267,7 +267,7 @@ class BlackBull:
         self._global_middlewares: list = []
         self._static_roots: list[tuple[str, Path]] = []
         self._chain = None
-        self._wraps_receive = False
+        self._wraps_receive: frozenset[str] = frozenset()
 
         self._warmup_hooks: list = []
         self.extensions: dict[str, object] = {}
@@ -656,9 +656,10 @@ class BlackBull:
         # Registration after the first request rebuilds no chain, so a
         # receive-exposing route added then is not wrapped (a missed BBD011
         # warning, never a behaviour change).
-        self._wraps_receive = bool(self._global_middlewares
-                                   or self._router.exposes_receive
-                                   or self._error_router.exposes_receive)
+        self._wraps_receive = (frozenset({'http', 'websocket'})
+                               if self._global_middlewares else
+                               self._router.exposes_receive
+                               | self._error_router.exposes_receive)
 
     async def __call__(self, conn: 'Connection | dict',
                        receive: ASGIReceiveCallable | None,
@@ -710,7 +711,8 @@ class BlackBull:
 
         if self._chain is None:
             self._build_chain()
-        if self._wraps_receive and receive is not None:
+        if (self._wraps_receive and receive is not None
+                and request.type in self._wraps_receive):
             receive = DictReceive(receive)
 
         # Emit terminal events after the whole middleware chain, including buffered responses.

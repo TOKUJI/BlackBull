@@ -338,10 +338,10 @@ def WebSocketResponse(content) -> dict:
     """
     _warn_deprecated('BBD013')
     if isinstance(content, str):
-        return {'type': 'websocket.send', 'text': content}
+        return WarnedDict({'type': 'websocket.send', 'text': content})
     if isinstance(content, bytes):
-        return {'type': 'websocket.send', 'bytes': content}
-    return {'type': 'websocket.send', 'text': json.dumps(content)}
+        return WarnedDict({'type': 'websocket.send', 'bytes': content})
+    return WarnedDict({'type': 'websocket.send', 'text': json.dumps(content)})
 
 
 def wrap_native_send(raw_send, *, warn_dicts: bool = True):
@@ -367,9 +367,11 @@ def wrap_native_send(raw_send, *, warn_dicts: bool = True):
                                           body=body))
         elif isinstance(event, dict):
             native = _native_from_asgi(event)
-            if warn_dicts and type(event) is dict:
-                _warn_deprecated('BBD010')
+            if type(event) is dict:
+                if warn_dicts:
+                    _warn_deprecated('BBD010')
                 if native is event:
+                    # Accounted for here, as BBD010 or as BBD012's own dicts.
                     native = WarnedDict(event)
             await raw_send(native)
         else:

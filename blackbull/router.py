@@ -755,6 +755,14 @@ def _truncate_close_reason(detail: str) -> str:
     return raw[:_WS_MAX_CLOSE_REASON].decode('utf-8', errors='ignore')
 
 
+def _scope_types(scheme) -> set[str]:
+    """The ``conn.type`` values a route registered for *scheme* can serve."""
+    if scheme is None or isinstance(scheme, _AnyScheme):
+        return {'http', 'websocket'}
+    schemes = (scheme,) if isinstance(scheme, str) else tuple(scheme)
+    return {'websocket' if s == Scheme.websocket else 'http' for s in schemes}
+
+
 def _is_websocket_route(scheme) -> bool:
     """True when *scheme* selects the WebSocket surface and nothing else.
 
@@ -1263,9 +1271,9 @@ class Router:
 
     _DEFAULT_CACHE_MAX: int = 2048
 
-    #: Set once a registration can hand ``receive`` to user code, which
-    #: makes the app wrap it (BBD011).
-    exposes_receive = False
+    #: The ``conn.type`` values whose registrations hand ``receive`` to user
+    #: code, which makes the app wrap it (BBD011).
+    exposes_receive: frozenset[str] = frozenset()
 
     def __init__(self, cache_max: int = _DEFAULT_CACHE_MAX):
         self._route_info: list[_RouteInfo] = []
@@ -1517,7 +1525,7 @@ class Router:
         """*fn* adapted to ``(conn, receive, send)`` when it is a simplified
         handler: as a WebSocket handler on a WebSocket-only route."""
         if not _is_simplified_handler(fn):
-            self.exposes_receive = True
+            self.exposes_receive |= _scope_types(scheme)
             return fn
         if _is_websocket_route(scheme):
             return _adapt_websocket_handler(fn, path)
@@ -1535,7 +1543,7 @@ class Router:
             raise TypeError(f'{functions} is not iterable.')
 
         fns = list(functions)
-        self.exposes_receive = True
+        self.exposes_receive |= _scope_types(scheme)
         param = _middleware_param(fns[-1])
         if param is not None:
             inner_chain = partial(fns[-1], **{param: do_nothing})
@@ -1748,7 +1756,7 @@ class ErrorRouter:
     """Resolve error handlers by exception MRO, status, then default."""
 
     #: As [`Router.exposes_receive`][], for a full-form error handler.
-    exposes_receive = False
+    exposes_receive: frozenset[str] = frozenset()
 
     def __init__(self, default: Callable | None = None):
         self._status_handlers: dict[HTTPStatus, Callable] = {}
@@ -1763,7 +1771,7 @@ class ErrorRouter:
         ``ValueError``.
         """
         if not _is_simplified_handler(fn):
-            self.exposes_receive = True
+            self.exposes_receive = frozenset({'http'})
         if isinstance(key, HTTPStatus):
             if not is_client_error(key) and not is_server_error(key):
                 raise ValueError(f"{key} is not an error status (4xx/5xx).")

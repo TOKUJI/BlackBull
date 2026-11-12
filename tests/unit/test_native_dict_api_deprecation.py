@@ -322,3 +322,39 @@ def test_a_websocket_dict_through_middleware_warns_once_on_the_handler_line():
     assert reply == 'hi'
     sent = [w for w in record if 'BBD010' in str(w.message)]
     assert [w.filename for w in sent] == [__file__]
+
+
+def test_a_native_websocket_handler_under_scope_middleware_warns_only_bbd012():
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+
+        @as_middleware
+        async def legacy(scope, receive, send, call_next):
+            await call_next(scope, receive, send)
+
+    app = BlackBull()
+
+    @app.route(path='/ws', scheme=Scheme.websocket, middlewares=[legacy])
+    async def obj(ws: WebSocket):
+        await ws.accept()
+        await ws.send_text(await ws.receive_text())
+
+    reply, record = _ws_echo(app, '/ws', obj)
+
+    assert reply == 'hi'
+    assert _bbd(record) == []
+
+
+def test_sending_websocket_response_warns_once():
+    app = BlackBull()
+
+    @app.route(path='/ws', scheme=Scheme.websocket)
+    async def raw(conn, receive, send):
+        ws = WebSocket(conn, receive, send)
+        await ws.accept()
+        await send(WebSocketResponse(await ws.receive_text()))
+
+    reply, record = _ws_echo(app, '/ws', raw)
+
+    assert reply == 'hi'
+    assert _bbd(record) == ['BBD013']
