@@ -1010,10 +1010,8 @@ class HTTP2Client(HTTP2Connection):
 
     async def _reset(self, stream_id: int, code: ErrorCodes, *,
                      additional_credit: int = 0) -> None:
-        # Called only in answer to a peer frame: those resets share the
-        # inbound RST budget.  Deadline and local-capacity refusals do not
-        # go through here, so a slow origin cannot make the client end its
-        # own connection.
+        # Only answers to a peer frame come here; local refusals bypass this
+        # meter so a slow origin cannot end the client's connection.
         if await self._meter(self._rst_meter, 'client-emitted RST_STREAM'):
             return
         await self._reject_stream(stream_id, code, f'stream error {code.name}')
@@ -1513,8 +1511,8 @@ class HTTP2Client(HTTP2Connection):
         after the decode, never instead of it.
         """
         if not self._push_forbidden():
-            # Nothing consumes a push, so the promised stream is cancelled at
-            # once (§8.4): promises must not accumulate open streams.
+            # Nothing consumes a push: cancel it so promises cannot accumulate
+            # open streams (§8.4).
             self._open_stream(frame.promised_stream_id)
             logger.debug('PUSH_PROMISE on stream %d dropped', frame.stream_id)
             await self._reset(frame.promised_stream_id, ErrorCodes.CANCEL)

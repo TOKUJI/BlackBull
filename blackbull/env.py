@@ -238,7 +238,7 @@ class Settings:
         doc='Decoded HTTP/2 bytes per field section, counted as name + value + 32 per field. Advertised as SETTINGS_MAX_HEADER_LIST_SIZE and enforced inside HPACK decoding; excess ends the connection with COMPRESSION_ERROR. `0` disables advertisement and opens the decoder limit. Separate from per-stream `BB_CLIENT_HEAD_MAX_TOTAL`.')
     client_h2_enable_push: bool = setting(
         'BB_CLIENT_H2_ENABLE_PUSH', True, section=_section,
-        doc='HTTP/2 push policy. `1` advertises nothing and accepts promises. `0` advertises ENABLE_PUSH=0 and refuses promises with connection PROTOCOL_ERROR after its SETTINGS acknowledgement; a promise before the ACK is legal. An accepted promise has its stream reset at once (CANCEL), counted against `BB_FRAME_RATE_LIMIT`: a server pushing faster than that loses the connection. Promised blocks are always decoded to preserve shared HPACK state. No push-consuming API is provided.')
+        doc='HTTP/2 push policy. `1` accepts promises. `0` advertises ENABLE_PUSH=0 and, once acknowledged, refuses promises with connection PROTOCOL_ERROR. An accepted promise is reset at once (CANCEL) and counted against `BB_FRAME_RATE_LIMIT`, so pushing faster than that ends the connection. Promised blocks are always decoded (shared HPACK state). No push-consuming API is provided.')
 
     _section = 'Fault injection'
     production: bool = setting(
@@ -331,7 +331,7 @@ class Settings:
         doc='Advertise ENABLE_CONNECT_PROTOCOL=1 for RFC 8441 WebSocket. Review `BB_MAX_CONNECTIONS` and `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` before exposing this path. A proxy forwarding HTTP/1.1 does not provide Extended CONNECT.')
     frame_rate_limit: int = setting(
         'BB_FRAME_RATE_LIMIT', 20, minimum=0, section=_section,
-        doc='Control frames per type, per connection, per rolling window. Meters H2 RST_STREAM (inbound, server-emitted, and client-emitted in answer to a server frame; client deadline and queue refusals are not counted), PING, SETTINGS, empty CONTINUATION/DATA and WebSocket controls. Excess: H2 GOAWAY(ENHANCE_YOUR_CALM), WS close 1008, and frame_rate cap log. `0` disables.')
+        doc='Control frames per type, per connection, per rolling window. Meters H2 RST_STREAM (inbound and emitted; client-emitted only when answering a server frame), PING, SETTINGS, empty CONTINUATION/DATA and WebSocket controls. Excess: H2 GOAWAY(ENHANCE_YOUR_CALM), WS close 1008, and frame_rate cap log. `0` disables.')
     frame_rate_window: float = setting(
         'BB_FRAME_RATE_WINDOW', 1.0, minimum=0, section=_section,
         doc='Width in seconds of the rolling window `BB_FRAME_RATE_LIMIT` counts within.')

@@ -28,15 +28,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
-- HTTP/2 client: a server can no longer make the client write one
-  `RST_STREAM` per cheap frame (a self-dependent or short `PRIORITY`, `DATA`
-  on a stream it reset); those resets count against `BB_FRAME_RATE_LIMIT`
-  and end the connection with `GOAWAY(ENHANCE_YOUR_CALM)`. The client's own
-  deadline and queue refusals are not counted. A pushed stream is now reset
-  with `CANCEL` as soon as it is promised (counted the same way) instead of
-  staying open until the server ends it, so a server cannot open promised
-  streams without bound; a server pushing faster than `BB_FRAME_RATE_LIMIT`
-  now has its connection ended (BLA-272).
+- HTTP/2 client: resets answering a server frame (for example a
+  self-dependent `PRIORITY`) now count against `BB_FRAME_RATE_LIMIT`, and
+  excess ends the connection with `GOAWAY(ENHANCE_YOUR_CALM)`; deadline and
+  queue refusals are not counted. A promised stream is reset with `CANCEL` at
+  once instead of staying open, so a server pushing faster than that limit
+  loses the connection (BLA-272).
 
 - TLS: `BB_WRITE_TIMEOUT` now closes the connection of a peer that stops
   reading a large response, which stayed buffered without bound (BLA-522).
