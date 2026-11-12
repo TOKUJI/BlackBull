@@ -239,7 +239,11 @@ def _write_app(script: Path, port: int, version: str) -> None:
 
 
 @pytest.mark.timeout(_HARD_TIMEOUT_SEC)
-@pytest.mark.parametrize('entry', ['script', 'module', 'module-options', 'console'])
+@pytest.mark.parametrize('entry', [
+    'script', 'module',
+    pytest.param('module-options', marks=pytest.mark.no_audit(
+        reason='The child runs with -O, which the execution audit cannot trace.')),
+    'console'])
 def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env, entry):
     port = _free_port()
     script = tmp_path / 'reload_app.py'
