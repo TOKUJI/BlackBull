@@ -311,11 +311,10 @@ class TestHeaderListSizeIsOneSetting:
 # ===========================================================================
 
 @pytest.mark.asyncio
-class TestEnablePushDefaultsToTodaysBehaviour:
-    """Advertising ``0`` without refusing a push is a MUST violation
-    (§6.5.2); refusing one against BlackBull's own server, which does not
-    yet read the peer's ENABLE_PUSH, breaks the pair.  So the mechanism
-    ships and the default is what the client does today."""
+class TestEnablePushDefault:
+    """With no push-consuming API, a promised stream is state the server
+    creates on the client for nothing: it is cancelled at once (§8.4), so
+    promises cannot accumulate open streams (BLA-272)."""
 
     async def test_nothing_is_advertised_by_default(self):
         assert getattr(_sent_settings(await _connected()),
@@ -328,6 +327,13 @@ class TestEnablePushDefaultsToTodaysBehaviour:
         assert not _written(c, FrameTypes.GOAWAY), (
             'a promise was refused although nothing was advertised')
         assert c._failure is None
+
+    async def test_the_promised_stream_is_reset_at_once_by_default(self):
+        block = Encoder().encode([(':method', 'GET'), (':path', '/pushed')])
+        c = await _connected(_settings_ack() + _push_promise(block, promised=2))
+
+        resets = _written(c, FrameTypes.RST_STREAM)
+        assert [(r.stream_id, r.error_code) for r in resets] == [(2, ErrorCodes.CANCEL)]
 
 
 @pytest.mark.asyncio
@@ -364,6 +370,15 @@ class TestEnablePushZero:
             'a promise was refused in the round-trip before our SETTINGS '
             'was acknowledged')
         assert c._failure is None
+
+    async def test_a_promise_before_the_ack_is_reset_at_once(self):
+        """A server that never acknowledges our SETTINGS keeps that window
+        open; the promised stream must not stay open in it (§8.4 CANCEL)."""
+        block = Encoder().encode([(':method', 'GET'), (':path', '/pushed')])
+        c = await _connected(_push_promise(block, promised=2))
+
+        resets = _written(c, FrameTypes.RST_STREAM)
+        assert [(r.stream_id, r.error_code) for r in resets] == [(2, ErrorCodes.CANCEL)]
 
     async def test_a_promise_after_the_ack_is_a_connection_error(self):
         block = Encoder().encode([(':method', 'GET'), (':path', '/pushed')])
