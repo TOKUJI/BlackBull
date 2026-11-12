@@ -57,8 +57,9 @@ metadata; reinstall an editable checkout after changing that version.
 - `--reload` re-executes with the original interpreter options and
   invocation (`python -O -m blackbull.cli ...`); it dropped them (BLA-602).
 
-- `Server.stop()`: cancelling it raises `CancelledError`; the cancellation
-  was swallowed. Cleanup failures during it are logged (BLA-587).
+- `Server.stop()`: cancelling it raises `CancelledError`; it was logged as
+  a drain failure and, with a concurrent cleanup failure, raised inside a
+  `BaseExceptionGroup` (BLA-587).
 
 - Docs: the `Cache` guide warns that `Cookie` is not a cache key and
   `Set-Cookie` does not prevent storage, so personalized responses need
