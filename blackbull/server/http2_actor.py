@@ -290,6 +290,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         self._inbound_stream_window: int = _cfg.h2_initial_window_size
         # Held so the loop's weak refs can't drop a pending credit replay.
         self._credit_flush_tasks: set[asyncio.Task] = set()
+        self._credit_pending = 0
 
         self._active_stream_count: int = 0
 
@@ -363,17 +364,19 @@ class HTTP2Actor(Actor, HTTP2Connection):
     def _make_consume_credit_callback(
         self, stream_id: int,
     ) -> Callable[[int], Awaitable[None]]:
-        """Return a callback that replays both levels of consumed credit."""
+        """Return consumed credit; a finished peer needs no stream window."""
 
         # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
         async def _credit(n):
             task = self._schedule_credit_replay(n)
             if task is None:
                 return
-            # Consumer cancellation must not revoke connection credit that
-            # was earned when the DATA left the recipient queue.
-            await asyncio.shield(task)
-            if self._goaway_sent or stream_id not in self._recipients:
+            # Connection-owned replay survives consumer cancellation without
+            # making a buffered body read wait for another task.
+            stream = self.root_stream.children.get(stream_id)
+            if (self._goaway_sent or stream is None
+                    or stream.state in (StreamState.HALF_CLOSED_REMOTE,
+                                        StreamState.CLOSED)):
                 return
             try:
                 # Stream credit remains stream-owned so RST cancellation can
@@ -387,16 +390,23 @@ class HTTP2Actor(Actor, HTTP2Connection):
         return _credit
 
     def _schedule_credit_replay(self, balance: int) -> asyncio.Task | None:
-        """Schedule stream-0 WINDOW_UPDATE replay owned by the connection."""
+        """Coalesce stream-0 credit in one connection-owned replay task."""
         if balance <= 0 or self._goaway_sent:
             return None
+        self._credit_pending += balance
+        for pending in self._credit_flush_tasks:
+            if not pending.done():
+                return pending
 
         # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
         async def _replay():
             if self._goaway_sent:
                 return
             try:
-                await self.send_frame(self.factory.window_update(0, balance))
+                while self._credit_pending and not self._goaway_sent:
+                    amount = min(self._credit_pending, 0x7fffffff)
+                    self._credit_pending -= amount
+                    await self.send_frame(self.factory.window_update(0, amount))
             except Exception:
                 if _DEBUG:
                     logger.debug('connection credit replay failed', exc_info=True)
@@ -601,6 +611,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             if not task.done():
                 task.cancel()
         self._credit_flush_tasks.clear()
+        self._credit_pending = 0
         stream_ids = (
             set(self.root_stream.children)
             | set(self._stream_tasks)

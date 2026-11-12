@@ -68,7 +68,9 @@ awaiting its write to avoid duplicate automatic flushes.
 
 Return receive credit on consumption, not enqueue. Connection credit must
 survive cancellation of the stream consumer; stream credit must not be
-emitted after retirement. Reset, refused DATA and late DATA must return
+emitted after retirement. The server coalesces pending connection credit in
+one replay task and skips stream credit after the peer's END_STREAM.
+Reset, refused DATA and late DATA must return
 the connection credit they consumed, including padding, without resurrecting
 stream ownership. Frame-count limits are still needed for empty DATA.
 WebSocket streams, in both roles, read through `HTTP2StreamReader`: octets a

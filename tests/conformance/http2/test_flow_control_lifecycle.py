@@ -368,7 +368,7 @@ async def test_over_queue_depth_burst_within_window_is_not_rst():
     all within the 65535-byte window, while the handler is stalled.  With
     consume-based crediting the burst is buffered (bounded by the window
     budget), never RST_STREAM(ENHANCE_YOUR_CALM); once the handler drains,
-    stream + connection credit is replayed in full."""
+    connection credit is replayed in full."""
     from hpack import Encoder
     all_delivered = asyncio.Event()
     consumed = []
@@ -412,7 +412,7 @@ async def test_over_queue_depth_burst_within_window_is_not_rst():
     assert not rsts, f'window-conformant burst must not be RST: {rsts}'
     assert sum(len(b) for b in consumed) == 6500
     wus = _window_updates(handler)
-    assert sum(n for sid, n in wus if sid == 1) == 6500
+    assert not [n for sid, n in wus if sid == 1]
     assert sum(n for sid, n in wus if sid == 0) == 6500
 
 
@@ -445,7 +445,7 @@ async def test_unread_body_balance_flushes_to_connection_window():
         await asyncio.sleep(0)
 
     wus = _window_updates(handler)
-    assert sum(n for sid, n in wus if sid == 1) == 3   # only the consumed frame
+    assert not [n for sid, n in wus if sid == 1]     # END_STREAM already arrived
     assert sum(n for sid, n in wus if sid == 0) == 7   # consumed + flushed balance
 
 

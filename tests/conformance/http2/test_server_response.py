@@ -176,13 +176,15 @@ async def test_http2_sender_auto_emits_date_on_asgi_event_path():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_http2_sender_auto_flushes_buffered_body_when_producer_parks():
+@pytest.mark.parametrize('combined_partial_trailers', [False, True])
+async def test_http2_sender_auto_flushes_buffered_body_when_producer_parks(combined_partial_trailers):
     """Deadlock-fix: a buffered first chunk flushes unprompted when the producer
     parks (no trailers arrive).  This collapsed the former
     ``call_soon`` → ``ensure_future`` two-hop to a single ``ensure_future``, so
     the flush now lands after exactly **one** event-loop turn."""
     from blackbull.server.sender import HTTP2Sender, AsyncioWriter
     from blackbull.asgi import ASGIEvent
+    from blackbull.native import NativeResponse
 
     written = bytearray()
     mock_writer = MagicMock()
@@ -192,11 +194,16 @@ async def test_http2_sender_auto_flushes_buffered_body_when_producer_parks():
     factory = FrameFactory()
     sender = HTTP2Sender(AsyncioWriter(mock_writer), factory, stream_id=1)
 
-    await sender({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
-                  'headers': [], 'trailers': True})
-    # One body chunk that fits the window; trailers pending → held, not written.
-    await sender({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'chunk',
-                  'more_body': True})
+    if combined_partial_trailers:
+        await sender(NativeResponse(
+            status=200, header=[], body=b'chunk', more_body=True,
+            expects_trailers=True, trailers=[(b'x-first', b'1')],
+            more_trailers=True))
+    else:
+        await sender({'type': ASGIEvent.HTTP_RESPONSE_START, 'status': 200,
+                      'headers': [], 'trailers': True})
+        await sender({'type': ASGIEvent.HTTP_RESPONSE_BODY, 'body': b'chunk',
+                      'more_body': True})
     assert not written, 'buffered body must not be on the wire before the flush'
     assert sender._buffered_body == b'chunk'
 

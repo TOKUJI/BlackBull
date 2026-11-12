@@ -1231,8 +1231,16 @@ async def test_a_rejected_replay_tolerates_an_already_closed_coroutine():
 
 
 @pytest.mark.asyncio
-async def test_an_accepted_replay_runs_once_and_is_joined_by_the_group():
+@pytest.mark.parametrize('balances,blocked,expected', [
+    ([5], False, [(0, 5)]),
+    ([5, 7, 9], False, [(0, 21)]),
+    ([0x7fffffff, 5], False, [(0, 0x7fffffff), (0, 5)]),
+    ([5, 7, 9], True, [(0, 5), (0, 16)]),
+])
+async def test_an_accepted_replay_runs_once_and_is_joined_by_the_group(balances, blocked, expected):
     sent: list = []
+    writing = asyncio.Event()
+    release = asyncio.Event()
     async with asyncio.TaskGroup() as tg:
         actor = _actor()
         actor._task_group = tg
@@ -1241,12 +1249,19 @@ async def test_an_accepted_replay_runs_once_and_is_joined_by_the_group():
         async def send_control(frame) -> None:
             if frame.FrameType() == FrameTypes.WINDOW_UPDATE:
                 sent.append((frame.stream_id, frame.window_size))
+                writing.set()
+                if blocked:
+                    await release.wait()
 
         actor._control_sender = send_control
-        task = actor._schedule_credit_replay(5)
-        assert task in actor._credit_flush_tasks
+        for index, balance in enumerate(balances):
+            if blocked and index:
+                await asyncio.wait_for(writing.wait(), 1)
+            task = actor._schedule_credit_replay(balance)
+            assert task in actor._credit_flush_tasks
+        release.set()
 
-    assert sent == [(0, 5)]
+    assert sent == expected
     assert not actor._credit_flush_tasks
 
 
