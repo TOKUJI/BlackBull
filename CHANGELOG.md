@@ -28,6 +28,13 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- HTTP/2 client: resets answering a server frame (for example a
+  self-dependent `PRIORITY`) now count against `BB_FRAME_RATE_LIMIT`, and
+  excess ends the connection with `GOAWAY(ENHANCE_YOUR_CALM)`; deadline and
+  queue refusals are not counted. A promised stream is reset with `CANCEL` at
+  once instead of staying open, so a server pushing faster than that limit
+  loses the connection (BLA-272).
+
 - TLS: `BB_WRITE_TIMEOUT` now closes the connection of a peer that stops
   reading a large response, which stayed buffered without bound (BLA-522).
 

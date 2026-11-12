@@ -449,7 +449,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             self._retire_stream(frame.stream_id, via_rst=True)
         await self._control_sender(frame)
         if terminal_reset:
-            await self._count_emitted_rst()
+            await self._meter(self._rst_meter, 'server-emitted RST_STREAM')
 
     # --- connection-core hooks ------------------------------------------
 
@@ -676,25 +676,6 @@ class HTTP2Actor(Actor, HTTP2Connection):
         finally:
             # Both refer back to this actor.
             self._task_group = self._liveness = None
-
-    async def _count_emitted_rst(self) -> None:
-        """Count a reset *this server* sent, on the inbound Rapid Reset meter.
-
-        Why ours count too, and why losing the connection is the intended
-        consequence for a client that keeps tripping a legitimate limit:
-        ``docs/about/rfc9113-implementation.md`` §6.4.
-        """
-        if not self._rst_meter.hit():
-            return
-        log_cap_hit('frame_rate',
-                    requested=self._rst_meter.count, limit=self._rst_meter.limit,
-                    protocol='http2')
-        logger.warning(
-            'server-emitted RST_STREAM rate limit exceeded (%d in %ss) — '
-            'the peer is provoking resets faster than the budget allows',
-            self._rst_meter.count, self._rst_meter.window)
-        await self._connection_error(
-            ErrorCodes.ENHANCE_YOUR_CALM, 'server-emitted RST_STREAM rate limit exceeded')
 
     def _check_liveness(self) -> None:
         """Enforce header, idle and PING deadlines by closing the writer.

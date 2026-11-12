@@ -266,9 +266,11 @@ async def client_http1(*response: bytes, hold: bool = False, pause: float = 0.0)
 async def client_h2(*frames: bytes, report: str = 'raised', pause: float = 0.0) -> str:
     """Against an origin that answers the client's first request with
     *frames*: the exception ``request`` raised, or with *report* 'sent', the
-    first RST_STREAM or GOAWAY the client sent back."""
+    first RST_STREAM or GOAWAY the client sent back, or with 'goaway', the
+    first GOAWAY."""
     sent: list[str] = []
     answered = asyncio.Event()
+    goaway = asyncio.Event()
 
     async def origin(reader, writer):
         await reader.readexactly(24)
@@ -291,6 +293,7 @@ async def client_h2(*frames: bytes, report: str = 'raised', pause: float = 0.0) 
                 elif kind == FrameTypes.GOAWAY.value[0]:
                     sent.append(f'GOAWAY {ErrorCodes(int.from_bytes(payload[4:8], "big")).name}')
                     answered.set()
+                    goaway.set()
 
     raised = 'ok'
     async with peer(origin) as port:
@@ -299,11 +302,14 @@ async def client_h2(*frames: bytes, report: str = 'raised', pause: float = 0.0) 
                 try:
                     await client.request('GET', '/')
                 finally:
-                    if report == 'sent':     # the frame may still be in flight
+                    if report != 'raised':   # the frame may still be in flight
                         with contextlib.suppress(TimeoutError):
-                            await asyncio.wait_for(answered.wait(), 2)
+                            await asyncio.wait_for(
+                                (goaway if report == 'goaway' else answered).wait(), 2)
         except Exception as exc:
             raised = type(exc).__name__
+    if report == 'goaway':
+        return next((s for s in sent if s.startswith('GOAWAY')), 'no GOAWAY')
     return sent[0] if report == 'sent' and sent else raised
 
 

@@ -146,7 +146,8 @@ bypasses response middleware.
 ## Resource limits
 
 Byte, count and time limits answer different inputs. Meter empty/control
-frames and both inbound and server-emitted resets before their work occurs.
+frames and inbound resets before their work occurs, and emitted resets on
+the same budget; the client's deadline and queue refusals are not counted.
 Probe idle connections with PING rather than closing responsive idle peers.
 
 Use [Environment variables](../reference/env-vars.md) for defaults and
