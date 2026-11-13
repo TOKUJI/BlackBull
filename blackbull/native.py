@@ -435,7 +435,7 @@ class WarnedDict(dict):
 
 def warns_app_dicts(app) -> bool:
     """Whether a dict from *app* is native code using the deprecated dict API."""
-    return getattr(app, '_warns_native_dicts', False)
+    return getattr(app, '_warns_native_dicts', False) is True
 
 
 def report_dict(event) -> None:
