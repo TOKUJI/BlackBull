@@ -77,6 +77,7 @@ def test_an_undecorated_middleware_sending_dicts_warns():
 
     assert response.status == 403
     assert 'BBD010' in _bbd(record)
+    assert {w.filename for w in record if 'BBD010' in str(w.message)} == {__file__}
 
 
 def test_a_dict_sent_through_the_host_boundary_warns():

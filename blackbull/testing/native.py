@@ -18,8 +18,7 @@ import httpx
 
 from ..connection import Connection, bind_receive_channel
 from ..headers import Headers
-from ..deprecations import _warn_deprecated
-from ..native import NativeResponse as _NativeResponse
+from ..native import NativeResponse as _NativeResponse, report_dict, warns_app_dicts
 from . import _InProcess, _LoopThread
 
 __all__ = [
@@ -197,12 +196,12 @@ async def request(
             with open(event['path'], 'rb') as fp:
                 chunks.append(fp.read())
 
-    warn_dicts = getattr(app, '_warns_native_dicts', False)
+    warn_dicts = warns_app_dicts(app)
 
     async def send(event: Any, status_arg: HTTPStatus = HTTPStatus.OK,
                    headers_arg: Any = ()) -> None:
-        if warn_dicts and type(event) is dict:
-            _warn_deprecated('BBD010')
+        if warn_dicts:
+            report_dict(event)
         if isinstance(event, _NativeResponse):
             # one native object may carry header + body + trailers — expand to
             # its ASGI event list and fold each event into the same capture.

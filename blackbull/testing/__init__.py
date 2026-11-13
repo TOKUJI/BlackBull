@@ -18,8 +18,7 @@ from typing import Any
 from weakref import WeakSet
 
 from ..asgi import ASGIReceiveEvent
-from ..deprecations import _warn_deprecated
-from ..native import NativeWSMessage
+from ..native import NativeWSMessage, report_dict, warns_app_dicts
 from ..websocket import WebSocketDisconnect
 
 import httpx
@@ -307,11 +306,11 @@ class WebSocketTestSession:
             async def receive():
                 return await self._client_to_server.get()
 
-            warn_dicts = getattr(self.app, '_warns_native_dicts', False)
+            warn_dicts = warns_app_dicts(self.app)
 
             async def send(event):
-                if warn_dicts and type(event) is dict:
-                    _warn_deprecated('BBD010')
+                if warn_dicts:
+                    report_dict(event)
                 self._server_to_client.put(event)
 
             self._client_to_server.put_nowait({'type': 'websocket.connect'})

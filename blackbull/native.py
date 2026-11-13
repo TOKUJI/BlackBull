@@ -433,6 +433,17 @@ class WarnedDict(dict):
     __slots__ = ()
 
 
+def warns_app_dicts(app) -> bool:
+    """Whether a dict from *app* is native code using the deprecated dict API."""
+    return getattr(app, '_warns_native_dicts', False)
+
+
+def report_dict(event) -> None:
+    """Warn BBD010, at the sink's caller, for a plain dict not yet reported."""
+    if type(event) is dict:
+        _warn_deprecated('BBD010', stacklevel=3)
+
+
 def asgi_send_boundary(inner_send, *, warn_dicts: bool = False):
     """Expand native HTTP/WebSocket messages to ASGI dictionaries at a boundary.
 
@@ -445,8 +456,8 @@ def asgi_send_boundary(inner_send, *, warn_dicts: bool = False):
             for ev in event.to_asgi():
                 await inner_send(ev)
         else:
-            if warn_dicts and type(event) is dict:
-                _warn_deprecated('BBD010')
+            if warn_dicts:
+                report_dict(event)
             await inner_send(event)
 
     return _send

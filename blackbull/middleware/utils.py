@@ -33,13 +33,11 @@ def _to_asgi_send(inner_send):
     an ASGI-written middleware inspects ``event['type']``, so what reaches it
     from below must be dicts — on the WebSocket path as much as the HTTP one.
     The dict form is created here and consumed again at the same middleware's
-    exit; a WebSocket dict leaves it as a ``WarnedDict``, so nothing further
-    out reports BlackBull's own message as BBD010.
+    exit; a WebSocket dict leaves it as a ``WarnedDict``.  A plain dict
+    arriving here came from code below and warns (BBD010).
     """
     from ..native import asgi_send_boundary  # noqa: PLC0415
 
-    # Only code below sends a plain dict here; BlackBull's own messages are
-    # native until this boundary expands them.
     return asgi_send_boundary(inner_send, warn_dicts=True)
 
 

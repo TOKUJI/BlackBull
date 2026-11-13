@@ -14,7 +14,6 @@ from email.utils import formatdate
 from typing import NoReturn
 
 from ..protocol import hpack_fastpath
-from ..deprecations import _warn_deprecated
 from ..env import get_settings
 from ..protocol.framing import (_CRLF, _LENGTHLESS_STATUSES,
                                 NO_CONTENT_GENERATED_STATUSES,
@@ -36,7 +35,8 @@ from ..asgi import (
 )
 from ..headers import (
     HeaderList, _CONNECTION_SPECIFIC, _MinimalResponseHeaders, _as_response_fields)
-from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
+from ..native import (NativeResponse, NativeWSMessage, _native_from_asgi, report_dict,
+                      warns_app_dicts)
 from ..request import ClientDisconnected
 
 
@@ -440,8 +440,7 @@ _WSSenderEvent = WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent
 
 def warns_native_dicts(app) -> bool:
     """Whether a dict reaching *app*'s senders can only be from native code."""
-    return (getattr(app, '_warns_native_dicts', False)
-            and not get_settings().force_asgi_scope)
+    return warns_app_dicts(app) and not get_settings().force_asgi_scope
 
 
 class BaseSender(ABC):
@@ -603,8 +602,8 @@ class HTTP1Sender(BaseSender):
             return
 
         if isinstance(body, dict):
-            if self._writer.warn_dicts and type(body) is dict:
-                _warn_deprecated('BBD010')
+            if self._writer.warn_dicts:
+                report_dict(body)
             body = _native_from_asgi(body)
 
         if (isinstance(body, NativeResponse) and body._extension is not None
@@ -1627,8 +1626,8 @@ class HTTP2Sender(BaseSender):
             return
 
         if isinstance(body, dict):
-            if self._writer.warn_dicts and type(body) is dict:
-                _warn_deprecated('BBD010')
+            if self._writer.warn_dicts:
+                report_dict(body)
             body = _native_from_asgi(body)
 
         if isinstance(body, bytes):
