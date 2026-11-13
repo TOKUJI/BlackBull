@@ -80,7 +80,7 @@ _TO_ASGI_SCOPE_ALLOWED: dict[str, str] = {
         'with" (inlined for the hot path) and is shared by H/1 and H/2, so a '
         'scope can come into existence here and nowhere else on either '
         'protocol path',
-    'blackbull/middleware/utils.py::_adapt':
+    'blackbull/middleware/utils.py::_scope_edge':
         'boundary — builds the scope a `scope`-declaring middleware asked for',
 }
 

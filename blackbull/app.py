@@ -19,7 +19,7 @@ from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNot
 from .request import ClientDisconnected
 from .connection import Connection, disconnected, refuse_scope, CONNECTION_STASH_KEY
 from .protocol.field_grammar import FieldError, media_type
-from .native import DictReceive, NativeResponse, raw_receive
+from .native import DictReceive, NativeResponse, asgi_send_boundary, raw_receive
 from .response import wrap_native_send
 from .asgi import ASGIReceiveCallable, ASGISendCallable
 from .config import AppConfig
@@ -36,11 +36,8 @@ _METHOD_BY_VALUE: dict[str, HTTPMethod] = {m.value: m for m in HTTPMethod}
 
 
 
-def _wrap_send_native(raw_send: ASGISendCallable):
-    """Install [`blackbull.response.wrap_native_send`][blackbull.response.wrap_native_send] at the handler
-    boundary, which is the innermost wrap.
-    """
-    return wrap_native_send(raw_send)
+#: The handler-boundary adapter, the innermost wrap of every HTTP send.
+_wrap_send_native = wrap_native_send
 
 
 def _to_asgi_boundary(send: ASGISendCallable):
@@ -48,8 +45,6 @@ def _to_asgi_boundary(send: ASGISendCallable):
 
     [`BlackBull.__call__`][BlackBull.__call__] decides when to install it.
     """
-    from .native import asgi_send_boundary  # noqa: PLC0415
-
     return asgi_send_boundary(send, warn_dicts=True)
 
 

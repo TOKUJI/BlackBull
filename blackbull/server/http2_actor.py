@@ -366,7 +366,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
     ) -> Callable[[int], Awaitable[None]]:
         """Return consumed credit; a finished peer needs no stream window."""
 
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
+        # Unannotated for the per-request-closure reason (see response.py::wrap_native_send).
         async def _credit(n):
             task = self._schedule_credit_replay(n)
             if task is None:
@@ -398,7 +398,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             if not pending.done():
                 return pending
 
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
+        # Unannotated for the per-request-closure reason (see response.py::wrap_native_send).
         async def _replay():
             if self._goaway_sent:
                 return
@@ -541,7 +541,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         over-admit.
         """
 
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
+        # Unannotated for the per-request-closure reason (see response.py::wrap_native_send).
         def _cb(_task):
             self._retire_stream(
                 stream_id, via_rst=False, finished_task=_task,

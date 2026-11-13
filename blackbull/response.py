@@ -352,7 +352,10 @@ def wrap_native_send(raw_send, *, warn_dicts: bool = True):
     every plain dict warns (BBD010). Unknown events, WebSocket dicts and
     native messages pass through.
     """
-    # Deliberately unannotated: rebuilt per request (see _wrap_send_native in app.py).
+    # Rebuilt per request, so unannotated: an annotation costs ~90 ns per
+    # creation (tests/architecture/test_per_request_closure_annotations.py).
+    # Accepted shape: event is a Response, StreamingResponse, bytes-like, dict
+    # or native message; status and headers apply to the bytes form only.
     async def _send(event, status=HTTPStatus.OK, headers=()):
         if isinstance(event, StreamingResponse):
             # The nested adapter closes over raw_send, not itself or stream;
