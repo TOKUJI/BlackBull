@@ -1,8 +1,8 @@
 """BlackBull application object — the user-facing ASGI 3.0 entry point.
 
-``RouteGroup``, the default error handler and the handler-boundary send
-adapter live here rather than in the modules they belong to: importing them
-from there would close an import cycle back to this one.
+``RouteGroup`` and the default error handler live here rather than in the
+modules they belong to: importing them from there would close an import cycle
+back to this one.
 """
 import functools
 from collections.abc import Awaitable, Callable, Iterable
