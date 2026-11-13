@@ -438,7 +438,8 @@ def warns_app_dicts(app) -> bool:
     return getattr(app, '_warns_native_dicts', False) is True
 
 
-def report_dict(event) -> None:
+# Unannotated, as _warn_deprecated: a beartype wrapper would shift the stacklevel.
+def report_dict(event):
     """Warn BBD010, at the sink's caller, for a plain dict not yet reported."""
     if type(event) is dict:
         _warn_deprecated('BBD010', stacklevel=3)
