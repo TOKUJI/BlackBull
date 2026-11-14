@@ -8,7 +8,7 @@ import ssl
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
-from blackbull import BlackBull
+from blackbull import ASGIApp, BlackBull
 from blackbull.server import Server
 from blackbull.server.connection_protocol import ConnectionProtocol
 from blackbull.server.listener import Listener, Tcp
@@ -163,7 +163,7 @@ async def served(app, *, tls: bool = False, **server_kwargs):
 
     A plain ASGI callable never sees the lifespan scope.
     """
-    if not isinstance(app, BlackBull):
+    if not isinstance(app, (BlackBull, ASGIApp)):
         app = _http_only(app)
     ctx = None
     if tls:

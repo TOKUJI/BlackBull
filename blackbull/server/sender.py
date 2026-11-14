@@ -35,8 +35,7 @@ from ..asgi import (
 )
 from ..headers import (
     HeaderList, _CONNECTION_SPECIFIC, _MinimalResponseHeaders, _as_response_fields)
-from ..native import (NativeResponse, NativeWSMessage, _native_from_asgi, report_dict,
-                      warns_app_dicts)
+from ..native import NativeResponse, NativeWSMessage, _native_from_asgi, report_dict
 from ..request import ClientDisconnected
 
 
@@ -436,11 +435,6 @@ class TLSWriter(AsyncioWriter):
 _SenderEvent = ASGISendEvent
 _SenderBody = _SenderEvent | bytes | NativeResponse
 _WSSenderEvent = WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent
-
-
-def warns_native_dicts(app) -> bool:
-    """Whether a dict reaching *app*'s senders can only be from native code."""
-    return warns_app_dicts(app) and not get_settings().force_asgi_scope
 
 
 class BaseSender(ABC):

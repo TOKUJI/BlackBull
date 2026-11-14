@@ -10,6 +10,13 @@ from tests.conformance.http2._harness import _make_h2_frame, h2_connect
 from tests.harness import read_h2_frame, served
 
 
+@pytest.fixture(autouse=True)
+def _native_lane(monkeypatch):
+    # The app is a bare native callable; BB_FORCE_ASGI_SCOPE=1 would serve it
+    # as a foreign ASGI app, whose WebSocket requests are refused (BLA-676).
+    monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', '0')
+
+
 async def _upgrade(server, transport):
     if transport == 'h1':
         wire = await server.wire()

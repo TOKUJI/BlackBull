@@ -26,6 +26,18 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Added
+
+- `ASGIApp(app)` serves a foreign ASGI 3.0 application on BlackBull's server;
+  `Server(app, asgi=True)`, `BB_FORCE_ASGI_SCOPE=1` and the `blackbull
+  module:attr` CLI (for an app that is not a `BlackBull`) wrap with it.
+  Register listeners with its `on()` and `intercept()`; the request events
+  fire once per request as for a BlackBull app.  It answers `500` when the
+  app raises or returns before starting a response, raises `RuntimeError` in
+  the app on an out-of-order message, and an `OSError` on a send after the
+  client disconnected.  A foreign WebSocket request is refused for now
+  (BLA-673).
+
 ### Deprecated
 
 - The native ASGI-dict API now warns with `BlackBullDeprecationWarning`:
@@ -38,6 +50,11 @@ metadata; reinstall an editable checkout after changing that version.
   not warn, and behaviour is unchanged (BLA-672).
 
 ### Changed
+
+- `Server()` raises `TypeError` for an unknown keyword argument, which it
+  used to ignore, and refuses `asgi=False` under `BB_FORCE_ASGI_SCOPE=1`.
+  Without `asgi=True` or that variable, an app is always called as a native
+  `(conn, receive, send)` callable (BLA-673).
 
 - The `websocket` middleware sends `NativeWSMessage`s instead of event dicts
   (BLA-672).

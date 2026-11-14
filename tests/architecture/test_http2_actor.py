@@ -693,7 +693,6 @@ async def test_http2_access_log_emitted_per_stream(caplog):
         await StreamActor(
             stream_id=1, conn=conn, receive=fake_receive, send=noop_send,
             app=app, aggregator=None, http2_actor=h2, log_record=record,
-            force_asgi=False,
         ).run()
 
     access_records = [r for r in caplog.records if r.name == 'blackbull.access']

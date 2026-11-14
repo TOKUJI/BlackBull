@@ -37,7 +37,7 @@ variable, then a `.env` entry, then `AppConfig`.
 | `BLACKBULL_ENV` | `development` | `production` \| `development` \| `test`.  In `production`, `StaticFiles` declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details; in `development` it shows them to a loopback peer without `Forwarded`/`X-Forwarded-For` only. |
 | `BB_WORKERS` | `1` | Pre-fork worker count.  `0` resolves to `os.cpu_count()`.  Combine with `BB_SOCKET_REUSEPORT=1`, except under `--reload` or on a port-bound non-ASGI protocol, which keep one listener.  See [Workers](../deployment/workers.md). |
 | `BB_UVLOOP` | `0` | Install `uvloop`'s asyncio policy at startup.  Requires `pip install 'blackbull[speed]'`; falls back to the standard loop with a warning when uvloop is missing. |
-| `BB_FORCE_ASGI_SCOPE` | `0` | Exercise the native-to-ASGI compatibility conversion on every request. Leave off for normal native serving. |
+| `BB_FORCE_ASGI_SCOPE` | `0` | Serve the app through `ASGIApp`, as `Server(app, asgi=True)` does: a foreign ASGI app, or the dual-path test lane for a BlackBull app. `Server(asgi=False)` refuses to start with it set. |
 | `BB_CPU_PINNING` | `auto` | Linux multi-worker event-loop CPU placement. `auto` assigns workers within the inherited CPU mask; `off` disables pinning; a taskset-style list intersects that mask (`0` means CPU 0). Executor threads keep the full mask. Single-worker servers are not pinned. Use `off` when placement is managed externally. |
 <!-- /generated -->
 

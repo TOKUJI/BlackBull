@@ -130,7 +130,7 @@ class Settings:
         doc="Install `uvloop`'s asyncio policy at startup.  Requires `pip install 'blackbull[speed]'`; falls back to the standard loop with a warning when uvloop is missing.")
     force_asgi_scope: bool = setting(
         'BB_FORCE_ASGI_SCOPE', False, section=_section,
-        doc='Exercise the native-to-ASGI compatibility conversion on every request. Leave off for normal native serving.')
+        doc='Serve the app through `ASGIApp`, as `Server(app, asgi=True)` does: a foreign ASGI app, or the dual-path test lane for a BlackBull app. `Server(asgi=False)` refuses to start with it set.')
     cpu_pinning: str = setting(
         'BB_CPU_PINNING', 'auto', section=_section,
         doc='Linux multi-worker event-loop CPU placement. `auto` assigns workers within the inherited CPU mask; `off` disables pinning; a taskset-style list intersects that mask (`0` means CPU 0). Executor threads keep the full mask. Single-worker servers are not pinned. Use `off` when placement is managed externally.')

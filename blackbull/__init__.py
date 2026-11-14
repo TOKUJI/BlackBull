@@ -20,6 +20,7 @@ except _PackageNotFoundError:
 
 from .deprecations import BlackBullDeprecationWarning, _warn_deprecated
 from .app import BlackBull, serve
+from .asgi_app import ASGIApp
 from .di import Depends
 from .router import RouteInfo, HTTPException, UnprocessableQuery, QUERY
 from .config import AppConfig
@@ -47,7 +48,7 @@ from .server.listener import InheritedFd, Listener, Tcp, Unix
 
 __all__ = [
     # application + entry points
-    'BlackBull', 'serve', 'AppConfig',
+    'BlackBull', 'serve', 'AppConfig', 'ASGIApp',
     # routing
     'RouteInfo', 'HTTPException', 'UnprocessableQuery', 'QUERY',
     # request side

@@ -386,7 +386,8 @@ def main(argv: list[str] | None = None) -> int:
 
     * ``blackbull serve [DIR] …`` — the zero-code static file server
       (see ``_serve_static``);
-    * ``blackbull module:attr …`` — run an ASGI 3.0 application.
+    * ``blackbull module:attr …`` — run a BlackBull app, or any other
+      ASGI 3.0 application through [`ASGIApp`][blackbull.ASGIApp].
 
     Returns a process exit code.  argparse handles ``--help`` and
     invalid-flag exits itself (status 2); application-level errors
@@ -444,6 +445,9 @@ def main(argv: list[str] | None = None) -> int:
     except (ImportError, AttributeError, ValueError) as exc:
         print(f'blackbull: {exc}', file=sys.stderr)
         return 1
+    from . import ASGIApp, BlackBull  # noqa: PLC0415
+    if not isinstance(app, (BlackBull, ASGIApp)):
+        app = ASGIApp(app)
 
     try:
         _serve(

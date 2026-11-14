@@ -5,6 +5,11 @@ request lifecycle.  Application code registers handlers with one
 of two decorators and the framework dispatches events at well-
 defined points in the application's lifetime.
 
+A foreign ASGI app served through `ASGIApp` gets the same request
+events; register on the adapter (`adapter = ASGIApp(app)`, then
+`@adapter.on(...)`) and serve `adapter`.  An interceptor that raises
+answers `500` without calling the app.
+
 ## Three hook kinds
 
 | Property | `@app.intercept(name)` | `@app.on(name, blocking=True)` | `@app.on(name)` |
