@@ -17,8 +17,6 @@ from .response import Response
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['ASGIApp']
-
 
 class SendAfterDisconnect(OSError):
     """``send()`` after the client went away; ending there is an ordinary close."""
