@@ -155,18 +155,26 @@ class FrameFactory:
         flags = SettingFrameFlags.ACK if ack else SettingFrameFlags.INIT
         if ack:
             return self.create(FrameTypes.SETTINGS, flags, 0, data=b'')
+        frame = self.create(FrameTypes.SETTINGS, flags, 0)
         data = b''
         if max_concurrent_streams is not None:
             data += b'\x00\x03' + max_concurrent_streams.to_bytes(4, 'big')
+            frame.max_concurrent_streams = max_concurrent_streams
         if enable_connect_protocol:
             data += b'\x00\x08\x00\x00\x00\x01'  # ENABLE_CONNECT_PROTOCOL = 1
+            frame.enable_connect_protocol = 1
         if initial_window_size is not None:
             data += b'\x00\x04' + initial_window_size.to_bytes(4, 'big')  # INITIAL_WINDOW_SIZE
+            frame.initial_window_size = initial_window_size
         if enable_push is not None:
             data += b'\x00\x02' + enable_push.to_bytes(4, 'big')  # ENABLE_PUSH
+            frame.enable_push = enable_push
         if max_header_list_size is not None:
             data += b'\x00\x06' + max_header_list_size.to_bytes(4, 'big')  # MAX_HEADER_LIST_SIZE
-        return self.create(FrameTypes.SETTINGS, flags, 0, data=data)
+            frame.max_header_list_size = max_header_list_size
+        frame._payload = data
+        frame.length = len(data)
+        return frame
 
     def push_promise(self, parent_stream_id: int, promised_stream_id: int,
                      pseudo_headers: dict, headers: list) -> PushPromise:
