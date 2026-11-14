@@ -159,3 +159,47 @@ def test_an_error_is_not_mistaken_for_a_break(repo):
 
     assert result.returncode == 2
     assert 'no-such-ref' in result.stdout
+
+
+SERVER_KWDS_REMOVAL = (
+    'blackbull.server.Server: blackbull.server.server.Server.__init__(kwds): '
+    'Parameter was removed')
+
+
+@pytest.mark.parametrize('pull_request,found,expected', [
+    (601, [SERVER_KWDS_REMOVAL], 0),
+    (602, [SERVER_KWDS_REMOVAL], 1),
+    (None, [SERVER_KWDS_REMOVAL], 1),
+    (601, [SERVER_KWDS_REMOVAL, 'blackbull.BlackBull: Public object was removed'], 1),
+    (601, [SERVER_KWDS_REMOVAL.replace('(kwds)', '(app)')], 1),
+])
+def test_only_the_approved_pr_and_api_change_pass(monkeypatch, capsys,
+                                                pull_request, found, expected):
+    from tools import api_surface
+
+    monkeypatch.setattr(api_surface, 'breaks', lambda *args: found)
+    argv = ['diff', 'base', 'head']
+    if pull_request is not None:
+        argv += ['--pull-request', str(pull_request)]
+    assert api_surface.main(argv) == expected
+    output = capsys.readouterr().out
+    assert all(line in output for line in found)
+    if expected == 0:
+        assert '0.83.0' in output and 'BLA-673' in output
+
+
+def test_an_approved_pr_still_fails_on_comparison_errors(monkeypatch, capsys):
+    from tools import api_surface
+
+    def fail(*args):
+        raise ValueError('cannot compare')
+
+    monkeypatch.setattr(api_surface, 'breaks', fail)
+    assert api_surface.main(['diff', 'base', 'head', '--pull-request', '601']) == 2
+    assert 'cannot compare' in capsys.readouterr().out
+
+
+def test_release_validation_cannot_use_pr_approval(repo):
+    commit(repo, BREAK, tag='v0.1.1')
+    result = api(repo, 'release', 'v0.1.1', '--pull-request', '601')
+    assert result.returncode == 2
