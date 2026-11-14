@@ -196,6 +196,33 @@ async def test_send_after_disconnect_raises_an_oserror_and_closes_quietly(caplog
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
 
 
+@CLIENTS
+async def test_a_disconnect_listener_does_not_cut_a_streaming_response(client_type):
+    """A receive() after the body waits for the client to go (Starlette's listener)."""
+    heard = []
+
+    async def foreign(scope, receive, send):
+        while (await receive()).get('more_body'):
+            pass
+
+        async def listen():
+            heard.append((await receive())['type'])
+
+        listener = asyncio.ensure_future(listen())
+        await asyncio.sleep(0)
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        for part in (b'a', b'b'):
+            await send({'type': 'http.response.body', 'body': part, 'more_body': True})
+            await asyncio.sleep(0.01)
+        await send({'type': 'http.response.body', 'body': b'c'})
+        await asyncio.wait_for(listener, 5)
+
+    reply = await _get(foreign, '/', client_type, asgi=True)
+
+    assert reply.body == b'abc'
+    assert heard == ['http.disconnect']
+
+
 # --- events ----------------------------------------------------------------
 
 def _listen(app, names):
@@ -306,9 +333,12 @@ async def test_a_foreign_websocket_request_is_closed_cleanly():
 
 
 async def test_a_wrapped_blackbull_app_keeps_its_websockets():
-    async with served(_blackbull_app(), asgi=True) as server:
+    bb = _blackbull_app()
+    bb.available_ws_protocols = ['chat']
+    async with served(bb, asgi=True) as server:
         async with WebSocketClient('127.0.0.1', server.server.port) as client:
-            ws = await client.connect('/ws')
+            ws = await client.connect('/ws', subprotocols=[b'chat'])
+            assert ws.subprotocol == b'chat'
             await ws.send_text('hi')
             reply = (await ws.receive())['text']
             await ws.close()

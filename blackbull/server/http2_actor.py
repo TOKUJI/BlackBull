@@ -1242,9 +1242,6 @@ class HTTP2Actor(Actor, HTTP2Connection):
         path = event.push.encode('utf-8')
 
         parent = parent_stream.conn
-        # Plain attribute reads, never ``.get()`` on a scope: under
-        # BB_FORCE_ASGI_SCOPE that reaches a header *list* and raises
-        # AttributeError for every push.
         if parent is not None:
             parent_headers = parent.headers
             parent_scheme = parent.scheme

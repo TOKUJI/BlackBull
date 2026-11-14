@@ -3,6 +3,7 @@
 [`ASGIApp`][] is the one place the server's native ``Connection`` and send
 become an ASGI scope and ASGI event dicts.
 """
+import asyncio
 import logging
 from http import HTTPStatus
 
@@ -40,7 +41,8 @@ _START, _BODY, _TRAILERS, _DONE, _REFUSED = range(5)
 class _Exchange:
     """One HTTP request's ASGI channels; ``send`` supervises a foreign app."""
 
-    __slots__ = ('conn', 'scope', '_receive', '_send', '_state', '_trailers', '_gone')
+    __slots__ = ('conn', 'scope', '_receive', '_send', '_state', '_trailers', '_gone',
+                 '_body_done', '_settled')
 
     def __init__(self, conn, receive, send) -> None:
         self.conn = conn
@@ -50,8 +52,29 @@ class _Exchange:
         self._state = _START
         self._trailers = False
         self._gone = False
+        self._body_done = False
+        self._settled: asyncio.Event | None = None
 
     async def receive(self):
+        """The foreign app's receive: after the body, ``http.disconnect`` only
+        once the client is gone or the response is complete.
+
+        HTTP/1.1 answers a read past the body at once and cannot see the peer
+        leave while responding, so there only a send can find it gone.
+        """
+        if self._body_done and self.conn.http_version != '2':
+            if self._settled is None:
+                self._settled = asyncio.Event()
+                if self._gone or self._state == _DONE:
+                    self._settled.set()
+            await self._settled.wait()
+            return {'type': 'http.disconnect'}
+        event = await self.relay_receive()
+        if event.get('type') == 'http.request' and not event.get('more_body', False):
+            self._body_done = True
+        return event
+
+    async def relay_receive(self):
         event = await self._receive()
         if event.get('type') == 'http.disconnect' and not self._gone:
             self._gone = True
@@ -73,11 +96,18 @@ class _Exchange:
             await self._send(_native_from_asgi(event))
         except ClientDisconnected:
             self._gone = True
+            self._settle()
             raise SendAfterDisconnect('the client disconnected') from None
         except Exception:
             self._state = _REFUSED
             raise
         self._state = state
+        if state == _DONE:
+            self._settle()
+
+    def _settle(self):
+        if self._settled is not None:
+            self._settled.set()
 
     def _next_state(self, event):
         kind = event.get('type')
@@ -109,6 +139,12 @@ class _Exchange:
         started, or a return before it completed, propagates: the transport
         then ends the exchange.
         """
+        try:
+            return await self._run(call)
+        finally:
+            self._settle()
+
+    async def _run(self, call):
         try:
             await call()
         except SendAfterDisconnect:
@@ -152,6 +188,11 @@ class ASGIApp(EventHooks):
     serving its own WebSockets natively.
     """
 
+    @property
+    def available_ws_protocols(self) -> list[bytes]:
+        """The wrapped BlackBull app's WebSocket subprotocols, else none."""
+        return self._inner.available_ws_protocols if self._inner is not None else []
+
     def __init__(self, app) -> None:
         self.app = app
         inner = _blackbull_in(app)
@@ -173,7 +214,7 @@ class ASGIApp(EventHooks):
             return
         exchange = _Exchange(conn, receive, send)
         if self._inner is not None:
-            await self.app(exchange.scope, exchange.receive, exchange.relay)
+            await self.app(exchange.scope, exchange.relay_receive, exchange.relay)
             return
         await self._serve(conn, exchange)
 
