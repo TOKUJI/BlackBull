@@ -26,6 +26,11 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Added
+
+- TOML `[limits] compression_max_inflight` and `brotli_quality` complete
+  configuration-file support for the four `Compression` controls (BLA-663).
+
 ### Removed
 
 - `blackbull.client.scenario` and `blackbull.client.scenario_oracle` (BBD003).

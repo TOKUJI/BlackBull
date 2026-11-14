@@ -396,10 +396,10 @@ class Settings:
         'BB_COMPRESSION_EXECUTOR_THRESHOLD', 65536, minimum=0, config=('limits', 'compression_executor_threshold'), section=_section,
         doc='Body size above which compression is offloaded to a thread-pool executor so the event loop stays responsive during the (CPU-bound) compress call.  `0` always compresses on the event loop.')
     compression_max_inflight: int = setting(
-        'BB_COMPRESSION_MAX_INFLIGHT', DEFAULT_COMPRESSION_MAX_INFLIGHT, minimum=0, shown='max(cpu_count() * 2, 4)', section=_section,
+        'BB_COMPRESSION_MAX_INFLIGHT', DEFAULT_COMPRESSION_MAX_INFLIGHT, minimum=0, config=('limits', 'compression_max_inflight'), shown='max(cpu_count() * 2, 4)', section=_section,
         doc='Maximum concurrent compression offloads. At the cap, serve eligible responses uncompressed rather than queue them. `0` disables admission limiting.')
     brotli_quality: int = setting(
-        'BB_BROTLI_QUALITY', 4, minimum=0, maximum=11, section=_section,
+        'BB_BROTLI_QUALITY', 4, minimum=0, maximum=11, config=('limits', 'brotli_quality'), section=_section,
         doc='Dynamic-response Brotli quality (0–11). Reserve the highest levels for build-time precompression, not request handling.')
 
     _section = 'Diagnostic timing'
