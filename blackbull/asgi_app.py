@@ -9,8 +9,7 @@ from http import HTTPStatus
 
 from .connection import Connection, disconnected, mark_disconnected
 from .event import EventDispatcher, EventHooks
-from .event_aggregator import (handler_event, request_completed_event,
-                               request_received_event, scope_completed_event)
+from .event_aggregator import emit_scope_end, handler_event, request_received_event
 from .native import NativeWSMessage, _native_from_asgi
 from .request import ClientDisconnected
 from .response import Response
@@ -54,12 +53,9 @@ class _Exchange:
         self._settled: asyncio.Event | None = None
 
     async def receive(self):
-        """The foreign app's receive: after the body, ``http.disconnect`` only
-        once the client is gone or the response is complete.
-
-        HTTP/1.1 answers a read past the body at once and cannot see the peer
-        leave while responding, so there only a send can find it gone.
-        """
+        """After the body, ``http.disconnect`` only once the client is gone or
+        the response is complete: HTTP/1.1 answers such a read at once and
+        sees the peer leave only through a failed send."""
         if self._body_done and self.conn.http_version != '2':
             if self._settled is None:
                 self._settled = asyncio.Event()
@@ -78,8 +74,6 @@ class _Exchange:
             self._gone = True
             # A BlackBull app reads the flag off the scope it was given.
             mark_disconnected(self.scope)
-            if not disconnected(self.conn):
-                mark_disconnected(self.conn)
         return event
 
     async def relay(self, event):
@@ -138,16 +132,6 @@ class _Exchange:
         then ends the exchange.
         """
         try:
-            return await self._run(call)
-        finally:
-            # Set even if never waited on: a receive() left running past the
-            # app (a detached listener) must not wait forever.
-            if self._settled is None:
-                self._settled = asyncio.Event()
-            self._settled.set()
-
-    async def _run(self, call):
-        try:
             await call()
         except SendAfterDisconnect:
             return None
@@ -161,6 +145,11 @@ class _Exchange:
             if self._state == _DONE:
                 return exc
             raise
+        finally:
+            # Even unwaited: a receive() outliving the app must not hang.
+            if self._settled is None:
+                self._settled = asyncio.Event()
+            self._settled.set()
         if self._gone or self._state in (_DONE, _REFUSED):
             return None
         if self._state == _START:
@@ -179,15 +168,12 @@ class _Exchange:
 class ASGIApp(EventHooks):
     """Serve the ASGI 3.0 application *app* as a native BlackBull callable.
 
-    ``Server(app, asgi=True)`` and ``BB_FORCE_ASGI_SCOPE=1`` wrap with this;
-    construct it directly to register listeners with ``on`` and ``intercept``.
-    Around a BlackBull app (directly or through ``__wrapped__``) it only
-    converts: that app's events are used, which it fires itself, and its
-    errors reach the server as when served natively.
+    Construct it directly to register listeners with ``on``/``intercept``.
+    Around a BlackBull app (also via ``__wrapped__``) it only converts; that
+    app fires its own events and errors as when served natively.
 
-    Until BLA-675 and BLA-676: the lifespan scope is forwarded unchanged, a
-    WebSocket request to a foreign app is refused, and a BlackBull app keeps
-    serving its own WebSockets natively.
+    Until BLA-675/BLA-676 the lifespan scope passes unchanged and a foreign
+    app's WebSocket requests are refused.
     """
 
     @property
@@ -212,7 +198,7 @@ class ASGIApp(EventHooks):
                 await self.app(conn, receive, send)
             else:
                 await send(NativeWSMessage.close())
-                await self._scope_completed(conn, None)
+                await emit_scope_end(self._dispatcher, conn, None, completed=False)
             return
         exchange = _Exchange(conn, receive, send)
         if self._inner is not None:
@@ -243,11 +229,6 @@ class ASGIApp(EventHooks):
         finally:
             if called and dispatcher.has_listeners('after_handler'):
                 await dispatcher.emit(handler_event('after_handler', conn, app, exc))
-            if (dispatcher.has_listeners('request_completed')
-                    and not disconnected(conn)):
-                await dispatcher.emit(request_completed_event(conn))
-            await self._scope_completed(conn, exc)
-
-    async def _scope_completed(self, conn, exc):
-        if self._dispatcher.has_listeners('scope_completed'):
-            await self._dispatcher.emit(scope_completed_event(conn, exc))
+            # As natively: only a disconnect seen by receive withholds request_completed.
+            await emit_scope_end(dispatcher, conn, exc,
+                                 completed=not disconnected(exchange.scope))

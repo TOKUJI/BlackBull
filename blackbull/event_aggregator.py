@@ -33,6 +33,14 @@ def handler_event(name: str, conn, handler, exception=None) -> Event:
     return Event(name, detail=detail)
 
 
+async def emit_scope_end(dispatcher, conn, exception, *, completed: bool) -> None:
+    """Fire ``request_completed`` when *completed*, then ``scope_completed``."""
+    if completed and dispatcher.has_listeners('request_completed'):
+        await dispatcher.emit(request_completed_event(conn))
+    if dispatcher.has_listeners('scope_completed'):
+        await dispatcher.emit(scope_completed_event(conn, exception))
+
+
 def request_completed_event(conn) -> Event:
     log = conn.state.get('access_log')
     client = conn.client or ('-',)

@@ -14,8 +14,7 @@ import traceback
 
 import logging
 from .event import Event, EventDispatcher, EventHooks
-from .event_aggregator import (handler_event, request_completed_event,
-                               request_received_event, scope_completed_event)
+from .event_aggregator import emit_scope_end, handler_event, request_received_event
 from .utils import Scheme, is_client_error, is_server_error
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
 from .request import ClientDisconnected
@@ -676,11 +675,9 @@ class BlackBull(EventHooks):
             exc = e
             raise
         finally:
-            if want_request_completed and not disconnected(target):
-                await dispatcher.emit(request_completed_event(request))
-            if dispatcher.has_listeners('scope_completed'):
-                await dispatcher.emit(scope_completed_event(
-                    request, exc or request.state.get('error_exception')))
+            await emit_scope_end(
+                dispatcher, request, exc or request.state.get('error_exception'),
+                completed=want_request_completed and not disconnected(target))
 
     def to_asgi(self):
         """Return the ASGI 3.0 callable to hand to an external host (uvicorn …).

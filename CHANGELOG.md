@@ -28,15 +28,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Added
 
-- `ASGIApp(app)` serves a foreign ASGI 3.0 application on BlackBull's server;
-  `Server(app, asgi=True)`, `BB_FORCE_ASGI_SCOPE=1` and the `blackbull
-  module:attr` CLI (for an app that is not a `BlackBull`) wrap with it.
-  Register listeners with its `on()` and `intercept()`; the request events
-  fire once per request as for a BlackBull app.  It answers `500` when the
-  app raises or returns before starting a response, raises `RuntimeError` in
-  the app on an out-of-order message, and an `OSError` on a send after the
-  client disconnected.  A foreign WebSocket request is refused for now
-  (BLA-673).
+- `ASGIApp(app)` serves a foreign ASGI 3.0 app on BlackBull's server;
+  `Server(app, asgi=True)`, `BB_FORCE_ASGI_SCOPE=1` and the CLI (for a
+  non-BlackBull app) wrap with it.  Listeners register with its `on()` and
+  `intercept()`.  A failure before the response starts answers `500`; an
+  out-of-order message raises `RuntimeError`, a send after disconnect an
+  `OSError`.  Foreign WebSocket requests are refused for now (BLA-673).
 
 ### Removed
 
