@@ -20,10 +20,12 @@ before, are the regression guards for that.
 from __future__ import annotations
 
 import asyncio
+import ssl
 
 import pytest
 from hpack import Encoder
 
+from blackbull import BlackBull
 from blackbull.client.http2 import HTTP2Client
 from blackbull.protocol.frame import FrameFactory
 from blackbull.protocol.frame_types import (ErrorCodes, FrameTypes,
@@ -31,6 +33,7 @@ from blackbull.protocol.frame_types import (ErrorCodes, FrameTypes,
                                             SettingFrameFlags)
 from blackbull.server.recipient import AbstractReader
 from blackbull.server.sender import AbstractWriter
+from tests.harness import served
 
 
 # ---------------------------------------------------------------------------
@@ -311,16 +314,38 @@ class TestHeaderListSizeIsOneSetting:
 # ===========================================================================
 
 @pytest.mark.asyncio
-class TestEnablePushDefault:
-    """With no push-consuming API, a promised stream is state the server
-    creates on the client for nothing: it is cancelled at once (§8.4), so
-    promises cannot accumulate open streams (BLA-272)."""
+@pytest.mark.parametrize('tls', [False, True])
+@pytest.mark.parametrize('setting', [None, '0', '1'], ids=['default', 'disabled', 'enabled'])
+async def test_push_policy_reaches_the_server(monkeypatch, tls, setting):
+    if setting is None:
+        monkeypatch.delenv('BB_CLIENT_H2_ENABLE_PUSH', raising=False)
+    else:
+        monkeypatch.setenv('BB_CLIENT_H2_ENABLE_PUSH', setting)
+    app = BlackBull()
 
-    async def test_nothing_is_advertised_by_default(self):
+    @app.route(path='/')
+    async def policy(conn):
+        return b'enabled' if 'http.response.push' in conn.extensions else b'disabled'
+
+    context = ssl.create_default_context(cafile='tests/cert.pem') if tls else None
+    async with served(app, tls=tls) as server:
+        async with HTTP2Client('127.0.0.1', server.server.port, ssl=context) as client:
+            response = await client.request('GET', '/')
+    assert response.status == 200
+    assert response.body == (b'enabled' if setting == '1' else b'disabled')
+
+
+@pytest.mark.asyncio
+class TestEnablePushOne:
+    @pytest.fixture(autouse=True)
+    def _push_permitted(self, monkeypatch):
+        monkeypatch.setenv('BB_CLIENT_H2_ENABLE_PUSH', '1')
+
+    async def test_nothing_is_advertised_when_enabled(self):
         assert getattr(_sent_settings(await _connected()),
                        'enable_push', None) is None
 
-    async def test_a_push_promise_is_accepted_by_default(self):
+    async def test_a_push_promise_is_accepted_when_enabled(self):
         block = Encoder().encode([(':method', 'GET'), (':path', '/pushed')])
         c = await _connected(_settings_ack() + _push_promise(block))
 
@@ -328,7 +353,7 @@ class TestEnablePushDefault:
             'a promise was refused although nothing was advertised')
         assert c._failure is None
 
-    async def test_the_promised_stream_is_reset_at_once_by_default(self):
+    async def test_the_promised_stream_is_reset_at_once_when_enabled(self):
         block = Encoder().encode([(':method', 'GET'), (':path', '/pushed')])
         c = await _connected(_settings_ack() + _push_promise(block, promised=2))
 
@@ -344,9 +369,12 @@ class TestEnablePushZero:
     conforming traffic, so the refusal is generation-tracked, not a flag
     flipped at send time."""
 
-    @pytest.fixture(autouse=True)
-    def _push_refused(self, monkeypatch):
-        monkeypatch.setenv('BB_CLIENT_H2_ENABLE_PUSH', '0')
+    @pytest.fixture(autouse=True, params=[None, '0'], ids=['default', 'explicit-zero'])
+    def _push_refused(self, monkeypatch, request):
+        if request.param is None:
+            monkeypatch.delenv('BB_CLIENT_H2_ENABLE_PUSH', raising=False)
+        else:
+            monkeypatch.setenv('BB_CLIENT_H2_ENABLE_PUSH', request.param)
 
     @staticmethod
     def _promise_and_reference() -> tuple[bytes, bytes]:

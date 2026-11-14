@@ -41,6 +41,9 @@ metadata; reinstall an editable checkout after changing that version.
 
 - The `websocket` middleware sends `NativeWSMessage`s instead of event dicts
   (BLA-672).
+- HTTP/2 client: `BB_CLIENT_H2_ENABLE_PUSH` defaults to `0`, so conforming
+  servers do not push responses the client cannot consume. Set it to `1`
+  to retain promise acceptance followed by immediate cancellation (BLA-680).
 
 ## [0.82.1] — 2026-11-13
 
