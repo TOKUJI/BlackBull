@@ -142,7 +142,11 @@ class _Exchange:
         try:
             return await self._run(call)
         finally:
-            self._settle()
+            # Set even if never waited on: a receive() left running past the
+            # app (a detached listener) must not wait forever.
+            if self._settled is None:
+                self._settled = asyncio.Event()
+            self._settled.set()
 
     async def _run(self, call):
         try:
