@@ -2175,62 +2175,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/blackbull/client/scenario/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    scenario
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../api/blackbull/client/scenario_oracle/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    scenario_oracle
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/blackbull/client/websocket/" class="md-nav__link">
         
   
@@ -6110,6 +6054,9 @@
 <p>BlackBull ships a deliberate-misbehaviour toolkit under
 <code>blackbull.fault_injection</code> for testing other HTTP implementations
 against bad-server / bad-client behaviour.</p>
+<p>The <code>blackbull.client.scenario</code> and <code>blackbull.client.scenario_oracle</code> modules
+were removed in 0.83.0. Import from <code>blackbull.fault_injection</code> instead;
+replace the old <code>scenario.SendBytes</code> with <code>H1CSendRawBytes</code>.</p>
 <h2 id="what-it-covers">What it covers<a class="headerlink" href="#what-it-covers" title="Permanent link">&para;</a></h2>
 <p>Both roles, on both HTTP protocols — the grid, rather than a count,
 because which cell you need depends on which side you are testing:</p>
