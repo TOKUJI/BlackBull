@@ -220,13 +220,3 @@ def test_the_replacements_import_silently():
         from blackbull.fault_injection import (  # noqa: F401
             H1CSendRawBytes, H2CSendRawBytes, SendRawBytes,
         )
-
-
-def test_the_deprecated_scenario_shim_keeps_its_export():
-    """``blackbull.client.scenario`` warns on import, so listing the name there
-    cannot make ``import *`` warn code that never asked for it."""
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore', DeprecationWarning)
-        import blackbull.client.scenario as shim
-    assert 'SendBytes' in shim.__all__
-    assert shim.SendBytes is scenario_h1.SendRawBytes

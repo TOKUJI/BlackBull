@@ -27,7 +27,7 @@ from blackbull.extension import Extension
     'blackbull.mqtt', 'blackbull.protocol.framing', 'blackbull.protocol.http1',
     'blackbull.server', 'blackbull.server.cap_log', 'blackbull.server.connection_protocol',
     'blackbull.server.listener', 'blackbull.server.read_buffer', 'blackbull.testing',
-    'blackbull.testing.native', 'blackbull.websocket', 'blackbull.client.scenario_oracle',
+    'blackbull.testing.native', 'blackbull.websocket', 'blackbull.fault_injection',
 ])
 def test_declared_star_exports_exist_and_preserve_identity(module_name):
     with warnings.catch_warnings():

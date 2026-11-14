@@ -32,9 +32,6 @@ DEPRECATIONS: dict[str, Deprecation] = {
         'the pre-built blackbull.middleware.compress instance',
         'an explicit Compression()', 'v0.28.0', 'no earlier than 2027-05-20',
         'BLA-581'),
-    'BBD003': Deprecation(
-        'blackbull.client.scenario and blackbull.client.scenario_oracle',
-        'blackbull.fault_injection', 'v0.42.0', 'in v0.83.0', 'BLA-578'),
     'BBD004': Deprecation(
         'blackbull.Request', 'blackbull.Connection, which has the same members',
         'v0.60.0', 'no earlier than 2027-08-01', 'BLA-582'),

@@ -26,6 +26,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Removed
+
+- `blackbull.client.scenario` and `blackbull.client.scenario_oracle` (BBD003).
+  Import from `blackbull.fault_injection` instead, using `H1CSendRawBytes`
+  in place of `scenario.SendBytes` (BLA-578).
+
 ### Deprecated
 
 - The native ASGI-dict API now warns with `BlackBullDeprecationWarning`:
