@@ -38,6 +38,12 @@ metadata; reinstall an editable checkout after changing that version.
   client disconnected.  A foreign WebSocket request is refused for now
   (BLA-673).
 
+### Removed
+
+- `blackbull.client.scenario` and `blackbull.client.scenario_oracle` (BBD003).
+  Import from `blackbull.fault_injection` instead, using `H1CSendRawBytes`
+  in place of `scenario.SendBytes` (BLA-578).
+
 ### Deprecated
 
 - The native ASGI-dict API now warns with `BlackBullDeprecationWarning`:
@@ -58,6 +64,9 @@ metadata; reinstall an editable checkout after changing that version.
 
 - The `websocket` middleware sends `NativeWSMessage`s instead of event dicts
   (BLA-672).
+- HTTP/2 client: `BB_CLIENT_H2_ENABLE_PUSH` defaults to `0`, so conforming
+  servers do not push responses the client cannot consume. Set it to `1`
+  to retain promise acceptance followed by immediate cancellation (BLA-680).
 
 ## [0.82.1] — 2026-11-13
 

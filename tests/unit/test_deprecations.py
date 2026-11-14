@@ -5,9 +5,7 @@ published list cannot drift from the code.
 """
 import ast
 import asyncio
-import importlib
 import pathlib
-import sys
 import warnings
 
 import pytest
@@ -66,11 +64,6 @@ def test_the_published_list_is_the_registry():
         f'what blackbull.deprecations.table() returns and the closing sentence:\n{table()}')
 
 
-def _fresh_import(name):
-    sys.modules.pop(name, None)
-    return importlib.import_module(name)
-
-
 async def _discard(event):
     pass
 
@@ -87,7 +80,6 @@ async def _scope_declared(scope, receive, send, call_next):
 TRIGGERS = {
     'BBD001': (lambda: blackbull.middleware.CacheMiddleware, True),
     'BBD002': (lambda: blackbull.middleware.compress, True),
-    'BBD003': (lambda: _fresh_import('blackbull.client.scenario'), False),
     'BBD004': (lambda: blackbull.Request, True),
     'BBD005': (lambda: blackbull.client.SendBytes, True),
     # beartype may wrap from_json, which moves a fixed stacklevel off the caller.

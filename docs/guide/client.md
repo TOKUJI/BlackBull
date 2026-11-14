@@ -294,6 +294,11 @@ which question each knob answers:
 
 Reading it that way makes the gaps visible, and the gaps are the point.
 
+HTTP/2 server push is disabled by default (`BB_CLIENT_H2_ENABLE_PUSH=0`).
+The client has no API for consuming pushed responses. Setting it to `1`
+permits promises, but each promised stream is immediately cancelled and
+counts against `BB_FRAME_RATE_LIMIT`.
+
 ### What is not bounded
 
 A client is not a server, and the defaults say so. **A server bounds what

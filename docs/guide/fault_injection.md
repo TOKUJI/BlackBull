@@ -4,6 +4,10 @@ BlackBull ships a deliberate-misbehaviour toolkit under
 `blackbull.fault_injection` for testing other HTTP implementations
 against bad-server / bad-client behaviour.
 
+The `blackbull.client.scenario` and `blackbull.client.scenario_oracle` modules
+were removed in 0.83.0. Import from `blackbull.fault_injection` instead;
+replace the old `scenario.SendBytes` with `H1CSendRawBytes`.
+
 ## What it covers
 
 Both roles, on both HTTP protocols — the grid, rather than a count,
