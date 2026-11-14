@@ -17,8 +17,9 @@ BlackBull uses [ZeroVer](https://0ver.org/): `0.MINOR.PATCH`.
 
 The public API is the `__all__` of the packages `pyproject.toml` lists under
 `[tool.blackbull] public-packages`, published as the API reference's *Public
-API* page; nothing else is covered by these rules. A pull request that breaks
-it fails its *Public API* check, which lists each break. Publishing refuses a
+API* page; nothing else is covered by these rules. The *Public API* check lists
+every break and fails unless that exact change is approved for the PR and its
+target MINOR release. Publishing refuses a
 tag that breaks it since the previous tag without raising MINOR.
 
 `pyproject.toml` owns the version. `blackbull.__version__` reads installed
@@ -36,6 +37,10 @@ metadata; reinstall an editable checkout after changing that version.
   `OSError`.  Foreign WebSocket requests are refused for now (BLA-673).
 
 ### Removed
+
+- `Server` no longer accepts ignored `**kwds`; unknown keywords raise
+  `TypeError`. This intentional public API break requires the 0.83.0 MINOR
+  release and is approved only for PR #601 (BLA-673).
 
 - `blackbull.client.scenario` and `blackbull.client.scenario_oracle` (BBD003).
   Import from `blackbull.fault_injection` instead, using `H1CSendRawBytes`
