@@ -33,7 +33,9 @@ def test_a_blackbull_app_gets_both():
     assert isinstance(server._cached_aggregator, EventAggregator)
 
 
-def test_a_foreign_app_gets_neither():
+def test_a_foreign_app_gets_neither(monkeypatch):
+    # Under BB_FORCE_ASGI_SCOPE=1 it is served through ASGIApp, which has one.
+    monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', '0')
     server = ASGIServer(_foreign_app)
 
     assert server._cached_dispatcher is None

@@ -16,8 +16,8 @@ runs unchanged under uvicorn, Hypercorn, or `httpx.ASGITransport`.
     separate adapters.  BlackBull apps are ASGI-callable, so any ASGI
     host can serve them.  The reverse direction — hosting a *foreign*
     ASGI app (Starlette, Quart, FastAPI) on BlackBull's own server —
-    needs `BB_FORCE_ASGI_SCOPE=1`, which makes the server emit a plain
-    ASGI `scope` dict instead of a `Connection`.
+    takes `Server(app, asgi=True)`, which hands the app a plain ASGI
+    `scope` dict instead of a `Connection`.
 
 !!! warning "Early Alpha"
     BlackBull is in **Early Alpha**.  The API may change between MINOR
@@ -34,8 +34,8 @@ runs unchanged under uvicorn, Hypercorn, or `httpx.ASGITransport`.
 - gRPC uses HTTP/2 on that listener. MQTT uses an extension and its own
   listener, with one worker owning broker state.
 - Native handlers and middleware use `Connection`. External-ASGI hosting
-  converts at the boundary; use `BB_FORCE_ASGI_SCOPE=1` to serve a foreign
-  ASGI app on BlackBull's server.
+  converts at the boundary; use `Server(app, asgi=True)` or `ASGIApp(app)`
+  to serve a foreign ASGI app on BlackBull's server.
 - See [Conformance](about/conformance.md) for coverage and
   [Security model](about/security-model.md) for default resource bounds.
 

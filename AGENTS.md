@@ -43,7 +43,8 @@ mutants.
   See `docs/about/internals.md`.
 - **Connection boundary:** the native server carries typed `Connection`
   objects end to end. ASGI scope dictionaries exist only for external ASGI
-  hosts and `BB_FORCE_ASGI_SCOPE=1`; `scope` always means such a dictionary.
+  hosts and `ASGIApp` (`Server(asgi=True)` or `BB_FORCE_ASGI_SCOPE=1`);
+  `scope` always means such a dictionary.
   See `docs/about/internals.md` (Read-path invariant).
 - **One runtime:** all protocols share one process and runtime. Attach non-HTTP
   protocols with `app.add_extension(...)`.

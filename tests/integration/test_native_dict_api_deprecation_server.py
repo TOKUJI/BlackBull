@@ -105,8 +105,6 @@ async def test_the_websocket_object_does_not_warn(lane, bbd):
 
 
 async def test_a_foreign_asgi_app_does_not_warn(lane, bbd):
-    if not lane:
-        pytest.skip('a foreign app is hosted only under BB_FORCE_ASGI_SCOPE (BLA-673)')
     async def foreign(scope, receive, send):
         if scope['type'] != 'http':
             return
@@ -114,7 +112,7 @@ async def test_a_foreign_asgi_app_does_not_warn(lane, bbd):
         await send({'type': 'http.response.start', 'status': 200, 'headers': []})
         await send({'type': 'http.response.body', 'body': b'ok'})
 
-    async with served(foreign) as server:
+    async with served(foreign, asgi=True) as server:
         async with HTTP1Client('127.0.0.1', server.server.port) as client:
             reply = await client.request('GET', '/')
 

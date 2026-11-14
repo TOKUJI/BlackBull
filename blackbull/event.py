@@ -175,3 +175,42 @@ class EventDispatcher:
                 task.cancel()
 
             await asyncio.gather(*still_pending, return_exceptions=True)
+
+
+class EventHooks:
+    """Event registration for an app that owns ``_dispatcher``."""
+
+    _dispatcher: EventDispatcher
+
+    def on(self, event_name: str, *, blocking: bool = False
+           ) -> Callable[[EventHandler], EventHandler]:
+        """Observe an event; the decorated coroutine is returned unchanged.
+
+        The default schedules a detached task. blocking=True awaits observers in
+        registration order; cancellation can still interrupt them. Ordinary observer
+        exceptions are logged and isolated. Use intercept for hooks that may change
+        the request, and see docs/guide/events.md for event lifetimes.
+        """
+        def decorator(handler):
+            self._dispatcher.on(event_name, handler, blocking=blocking)
+            return handler
+        return decorator
+
+    async def drain_events(self, timeout: float = 5.0) -> bool:
+        """Wait for detached (`@app.on`) observers to finish.  Returns success.
+
+        Only detached observers need waiting for; the events guide says which
+        do not.  ``False`` means *timeout* expired with work still outstanding.
+        Nothing is cancelled; call again with a longer budget.
+        """
+        return await self._dispatcher.drain(timeout)
+
+    def intercept(self, event_name: str) -> Callable[[EventHandler], EventHandler]:
+        """Await interceptors in registration order; return the handler unchanged.
+
+        Exceptions propagate and abort subsequent interceptors for that event.
+        """
+        def decorator(handler):
+            self._dispatcher.intercept(event_name, handler)
+            return handler
+        return decorator

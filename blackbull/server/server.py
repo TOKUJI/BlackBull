@@ -698,17 +698,29 @@ class Server:
     [`BlackBull.raw_handler`][BlackBull.raw_handler] get their own listening socket.
     When ssl_context or certfile is set, the HTTP listener runs as HTTPS.
 
+    *asgi* (or ``BB_FORCE_ASGI_SCOPE=1``) serves a foreign ASGI 3.0 app
+    through [`ASGIApp`][blackbull.ASGIApp]; without it the app is called as a
+    native ``(conn, receive, send)`` callable.
+
     ``ASGIServer`` is an alias of this class.
     """
     def __init__(self, app, *,
+                 asgi: bool | None = None,
                  ssl_context=None, certfile=None, keyfile=None, password=None,
                  max_connections: int = 0,
                  stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,
                  ws_queue_depth: int = _WS_READ_INLINE,
                  protocol_registry=None,
-                 listeners=None,
-                 **kwds):
-        self.app = app
+                 listeners=None):
+        if get_settings().force_asgi_scope:
+            if asgi is False:
+                from ..router import ConfigurationError  # noqa: PLC0415
+                raise ConfigurationError(
+                    'Server(asgi=False) contradicts BB_FORCE_ASGI_SCOPE=1; '
+                    'unset one of them')
+            asgi = True
+        from ..asgi_app import ASGIApp  # noqa: PLC0415
+        self.app = ASGIApp(app) if asgi and not isinstance(app, ASGIApp) else app
         # ``None`` = the caller said it the old way; ``open_socket`` builds
         # the one listener that stands for it.
         self._listeners = list(listeners) if listeners else None

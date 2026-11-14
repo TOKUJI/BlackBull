@@ -7,16 +7,63 @@ from blackbull.asgi import WebSocketReceiveEvent
 from blackbull.event import Event, EventDispatcher
 
 
-def _request_fields(conn):
-    """Read the common request identity fields for a Level B event detail from
-    either a native [`Connection`][blackbull.connection.Connection] (the ``app(conn, …)``
-    path) or an ASGI scope dict (only the ``BB_FORCE_ASGI_SCOPE`` / external-server
-    compat lane). Returns ``(client, method, path, http_version)``."""
-    from blackbull.connection import Connection  # noqa: PLC0415 — avoid import cycle
-    if isinstance(conn, Connection):
-        return conn.client, conn.method, conn.path, conn.http_version
-    return (conn.get('client'), conn.get('method', '-'),
-            conn.get('path', '-'), conn.get('http_version', '-'))
+def request_received_event(conn) -> Event:
+    client = conn.client or ('-',)
+    return Event('request_received', detail={
+        'conn':        conn,
+        'client_ip':    str(client[0]),
+        'method':       conn.method,
+        'path':         conn.path,
+        'http_version': conn.http_version,
+        'headers':      conn.headers,
+    })
+
+
+def handler_event(name: str, conn, handler, exception=None) -> Event:
+    """``before_handler``, or ``after_handler`` with *exception*."""
+    detail = {
+        'conn': conn,
+        'client_ip': conn.client[0] if conn.client else '',
+        'method': conn.method,
+        'path': conn.path,
+        'handler': getattr(handler, '__name__', type(handler).__name__),
+    }
+    if name == 'after_handler':
+        detail['exception'] = exception
+    return Event(name, detail=detail)
+
+
+async def emit_scope_end(dispatcher, conn, exception, *, completed: bool) -> None:
+    """Fire ``request_completed`` when *completed*, then ``scope_completed``."""
+    if completed and dispatcher.has_listeners('request_completed'):
+        await dispatcher.emit(request_completed_event(conn))
+    if dispatcher.has_listeners('scope_completed'):
+        await dispatcher.emit(scope_completed_event(conn, exception))
+
+
+def request_completed_event(conn) -> Event:
+    log = conn.state.get('access_log')
+    client = conn.client or ('-',)
+    return Event('request_completed', detail={
+        'conn':          conn,
+        'client_ip':      str(client[0]),
+        'method':         conn.method,
+        'path':           conn.path,
+        'http_version':   conn.http_version,
+        'status':         log.status if log else '-',
+        'response_bytes': log.response_bytes if log else 0,
+        'duration_ms':    log.duration_ms() if log else 0.0,
+    })
+
+
+def scope_completed_event(conn, exception) -> Event:
+    return Event('scope_completed', {
+        'conn':     conn,
+        'type':      conn.type,
+        'client_ip': str((conn.client or ['-'])[0]),
+        'path':      conn.path,
+        'exception': exception,
+    })
 
 
 def _ws_fields(conn):
@@ -46,7 +93,7 @@ class EventAggregator:
             await self._dispatcher.emit(Event(name, detail))
 
     async def on_error(self, conn, exception: BaseException) -> None:
-        """Fire ``error``; *conn* is a Connection, or a scope dict on the compat lane."""
+        """Fire ``error``; *conn* is ``{}`` for a failure outside any request."""
         await self._emit_if_listened('error', {'conn': conn, 'exception': exception})
 
     async def on_connection_accepted(self, peername, protocol: str = 'http') -> None:
@@ -82,18 +129,16 @@ class EventAggregator:
         return self._dispatcher.has_listeners('websocket_message')
 
     async def on_request_disconnected(self, conn) -> None:
-        """Fire Level B ``request_disconnected``; *conn* is a Connection, or a
-        scope dict on the compat lane."""
+        """Fire Level B ``request_disconnected``."""
         if not self._dispatcher.has_listeners('request_disconnected'):
             return
-        client, method, path, http_version = _request_fields(conn)
-        client = client or ['-']
+        client = conn.client or ['-']
         await self._dispatcher.emit(Event("request_disconnected", {
             'conn':        conn,
             'client_ip':    str(client[0]),
-            'method':       method,
-            'path':         path,
-            'http_version': http_version,
+            'method':       conn.method,
+            'path':         conn.path,
+            'http_version': conn.http_version,
         }))
 
     async def on_websocket_connected(

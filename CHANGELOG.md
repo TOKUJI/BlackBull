@@ -27,6 +27,15 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Added
+
+- `ASGIApp(app)` serves a foreign ASGI 3.0 app on BlackBull's server;
+  `Server(app, asgi=True)`, `BB_FORCE_ASGI_SCOPE=1` and the CLI (for a
+  non-BlackBull app) wrap with it.  Listeners register with its `on()` and
+  `intercept()`.  A failure before the response starts answers `500`; an
+  out-of-order message raises `RuntimeError`, a send after disconnect an
+  `OSError`.  Foreign WebSocket requests are refused for now (BLA-673).
+
 ### Removed
 
 - `Server` no longer accepts ignored `**kwds`; unknown keywords raise
@@ -49,6 +58,11 @@ metadata; reinstall an editable checkout after changing that version.
   not warn, and behaviour is unchanged (BLA-672).
 
 ### Changed
+
+- `Server()` raises `TypeError` for an unknown keyword argument, which it
+  used to ignore, and refuses `asgi=False` under `BB_FORCE_ASGI_SCOPE=1`.
+  Without `asgi=True` or that variable, an app is always called as a native
+  `(conn, receive, send)` callable (BLA-673).
 
 - The `websocket` middleware sends `NativeWSMessage`s instead of event dicts
   (BLA-672).

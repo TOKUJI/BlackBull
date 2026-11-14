@@ -51,7 +51,9 @@ accepted response work to drain. Read `blackbull/event_aggregator.py` and
 ## Read-path invariant
 
 The native server carries typed `Connection` objects end to end. `scope`
-means an ASGI dictionary for an external host or `BB_FORCE_ASGI_SCOPE=1`.
+means an ASGI dictionary: from an external host, or built by `ASGIApp`
+(`Server(asgi=True)` or `BB_FORCE_ASGI_SCOPE=1`), the only converter on
+BlackBull's server.
 Create it after pre-dispatch mutations; shared `state` and `extensions`
 remain live for late updates.
 

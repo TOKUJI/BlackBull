@@ -13,7 +13,8 @@ import re
 import traceback
 
 import logging
-from .event import Event, EventDispatcher, EventHandler
+from .event import Event, EventDispatcher, EventHooks
+from .event_aggregator import emit_scope_end, handler_event, request_received_event
 from .utils import Scheme, is_client_error, is_server_error
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
 from .request import ClientDisconnected
@@ -200,7 +201,7 @@ class RouteGroup:
         )
 
 
-class BlackBull:
+class BlackBull(EventHooks):
     """The application: a router, its error handlers, and the ASGI callable.
 
     Register routes with [`route`][blackbull.app.BlackBull.route], or with [`group`][blackbull.app.BlackBull.group] when several
@@ -383,39 +384,6 @@ class BlackBull:
             )
             await self(fresh, _receive, _send)
 
-    def on(self, event_name: str, *, blocking: bool = False
-           ) -> Callable[[EventHandler], EventHandler]:
-        """Observe an event; the decorated coroutine is returned unchanged.
-
-        The default schedules a detached task. blocking=True awaits observers in
-        registration order; cancellation can still interrupt them. Ordinary observer
-        exceptions are logged and isolated. Use intercept for hooks that may change
-        the request, and see docs/guide/events.md for event lifetimes.
-        """
-        def decorator(handler):
-            self._dispatcher.on(event_name, handler, blocking=blocking)
-            return handler
-        return decorator
-
-    async def drain_events(self, timeout: float = 5.0) -> bool:
-        """Wait for detached (`@app.on`) observers to finish.  Returns success.
-
-        Only detached observers need waiting for; the events guide says which
-        do not.  ``False`` means *timeout* expired with work still outstanding.
-        Nothing is cancelled; call again with a longer budget.
-        """
-        return await self._dispatcher.drain(timeout)
-
-    def intercept(self, event_name: str) -> Callable[[EventHandler], EventHandler]:
-        """Await interceptors in registration order; return the handler unchanged.
-
-        Exceptions propagate and abort subsequent interceptors for that event.
-        """
-        def decorator(handler):
-            self._dispatcher.intercept(event_name, handler)
-            return handler
-        return decorator
-
     async def _handle_lifespan(self, receive, send):
         # Driven entirely by ``receive``/``send``: the lifespan scope itself is
         # unused, so ``__call__`` does not pass it.
@@ -497,28 +465,8 @@ class BlackBull:
 
         dispatcher = self._dispatcher
         if dispatcher.has_listeners('request_received'):
-            client = conn.client or ('-',)
-            await dispatcher.emit(Event('request_received', detail={
-                'conn':        conn,
-                'client_ip':    str(client[0]),
-                'method':       conn.method,
-                'path':         conn.path,
-                'http_version': conn.http_version,
-                'headers':      conn.headers,
-            }))
+            await dispatcher.emit(request_received_event(conn))
         await self._dispatch_http(conn, receive, send, scheme)
-
-    def _handler_event(self, name, conn, handler, exception=None):
-        detail = {
-            'conn': conn,
-            'client_ip': conn.client[0] if conn.client else '',
-            'method': conn.method,
-            'path': conn.path,
-            'handler': handler.__name__,
-        }
-        if name == 'after_handler':
-            detail['exception'] = exception
-        return Event(name, detail=detail)
 
     async def _dispatch_http(self, conn, receive: ASGIReceiveCallable | None,
                              send: ASGISendCallable, scheme):
@@ -530,14 +478,14 @@ class BlackBull:
                 exc_caught = None
                 try:
                     if self._dispatcher.has_listeners('before_handler'):
-                        await self._dispatcher.emit(self._handler_event('before_handler', conn, serve_grpc))
+                        await self._dispatcher.emit(handler_event('before_handler', conn, serve_grpc))
                     await serve_grpc(self._grpc_registry, conn, raw_receive(receive), send)
                 except BaseException as exc:
                     exc_caught = exc
                     raise
                 finally:
                     if self._dispatcher.has_listeners('after_handler'):
-                        await self._dispatcher.emit(self._handler_event('after_handler', conn, serve_grpc, exc_caught))
+                        await self._dispatcher.emit(handler_event('after_handler', conn, serve_grpc, exc_caught))
                 return
 
         # ``raw_send`` is retained so a route with declared response headers can
@@ -605,7 +553,7 @@ class BlackBull:
         exc_caught: Exception | None = None
         try:
             if self._dispatcher.has_listeners('before_handler'):
-                await self._dispatcher.emit(self._handler_event('before_handler', conn, function))
+                await self._dispatcher.emit(handler_event('before_handler', conn, function))
             await function(conn, receive, send)
         except (ClientDisconnected, ConnectionResetError) as e:
             # Peer disconnect during body reads is an ordinary close, not a handler failure.
@@ -625,7 +573,7 @@ class BlackBull:
             self._logger.error(traceback.format_exc())
         finally:
             if self._dispatcher.has_listeners('after_handler'):
-                await self._dispatcher.emit(self._handler_event('after_handler', conn, function, exc_caught))
+                await self._dispatcher.emit(handler_event('after_handler', conn, function, exc_caught))
 
         if exc_caught is not None and not isinstance(exc_caught, ClientDisconnected):
             err_status = (exc_caught.status if isinstance(exc_caught, HTTPException)
@@ -727,31 +675,9 @@ class BlackBull:
             exc = e
             raise
         finally:
-            if want_request_completed and not disconnected(target):
-                conn = request
-                log = conn.state.get('access_log')
-                client = conn.client or ('-',)
-                await dispatcher.emit(Event('request_completed', detail={
-                    'conn':          conn,
-                    'client_ip':      str(client[0]),
-                    'method':         conn.method,
-                    'path':           conn.path,
-                    'http_version':   conn.http_version,
-                    'status':         log.status if log else '-',
-                    'response_bytes': log.response_bytes if log else 0,
-                    'duration_ms':    log.duration_ms() if log else 0.0,
-                }))
-            if dispatcher.has_listeners('scope_completed'):
-                st, rtype = request.state, request.type
-                client, rpath = request.client, request.path
-                err = exc or st.get('error_exception')
-                await dispatcher.emit(Event('scope_completed', {
-                    'conn':     request,
-                    'type':      rtype,
-                    'client_ip': str((client or ['-'])[0]),
-                    'path':      rpath,
-                    'exception': err,
-                }))
+            await emit_scope_end(
+                dispatcher, request, exc or request.state.get('error_exception'),
+                completed=want_request_completed and not disconnected(target))
 
     def to_asgi(self):
         """Return the ASGI 3.0 callable to hand to an external host (uvicorn …).

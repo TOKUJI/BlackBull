@@ -30,7 +30,8 @@ from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
                         AbstractReader, HTTP1Recipient, IncompleteReadError,
                         RecipientFactory, _WS_READ_INLINE)
-from .sender import AbstractWriter, SenderFactory, warns_native_dicts
+from .sender import AbstractWriter, SenderFactory
+from ..native import warns_app_dicts
 from .access_log import (AccessLogRecord as _AccessLogRecord,
                          _make_disconnect_detecting_receive,
                          close_ws_record as _close_ws_record,
@@ -120,10 +121,8 @@ class RequestActor(Actor):
     """Owns one request's app boundary: what the app is called with.
 
     Shared by both protocol actors — H/1 reuses one instance per connection
-    via [`bind`][]; H/2 builds one per stream.  Owns the app-facing
-    representation (the native [`Connection`][] on the default lane, the
-    materialized ASGI scope on ``BB_FORCE_ASGI_SCOPE=1``), binds the raw
-    recipient before any wrapper exists, and calls the app.
+    via [`bind`][]; H/2 builds one per stream.  Binds the raw recipient to
+    the [`Connection`][] before any wrapper exists, and calls the app with it.
 
     The request-lifecycle Level B events are emitted by the application
     layer (``BlackBull._dispatch`` / ``__call__``) —
@@ -141,7 +140,6 @@ class RequestActor(Actor):
         # ``None`` for a foreign ASGI app: the actor skips event emission
         # rather than the caller forking to a second dispatch path.
         aggregator: EventAggregator | None,
-        force_asgi: bool,
     ) -> None:
         super().__init__()
         self._conn = conn
@@ -149,7 +147,6 @@ class RequestActor(Actor):
         self._send = send
         self._app = app
         self._aggregator = aggregator
-        self._force_asgi = force_asgi
 
     def bind(self, conn: Connection, recipient: ASGIReceiveCallable,
              send: ASGISendCallable) -> 'RequestActor':
@@ -163,29 +160,25 @@ class RequestActor(Actor):
         return self
 
     async def run(self) -> None:  # override: single-shot, no inbox loop
-        # Keep the common validation branch inline on the per-request path.
-        if self._force_asgi:
-            target = self._conn.to_asgi_scope(force_asgi=True)
-        else:
-            target = self._conn
-        # Bind the raw recipient before wrappers to avoid a target/wrapper reference cycle.
-        bind_receive_channel(target, self._recipient)
+        conn = self._conn
+        # Bind the raw recipient before wrappers to avoid a conn/wrapper reference cycle.
+        bind_receive_channel(conn, self._recipient)
         # Only when a listener observes it — otherwise the raw recipient, and
-        # no per-request closure.  Body-level disconnect (``target.body()`` →
+        # no per-request closure.  Body-level disconnect (``conn.body()`` →
         # ClientDisconnected) is independent of this wrapper.
         if (self._aggregator is not None
                 and _disconnect_events_observed(self._aggregator)):
             receive = _make_disconnect_detecting_receive(
-                self._recipient, target, self._aggregator)
+                self._recipient, conn, self._aggregator)
         else:
             receive = self._recipient
         try:
-            await self._app(target, receive, self._send)
+            await self._app(conn, receive, self._send)
         except ClientDisconnected:
             pass  # an answer found the peer gone: an ordinary close
         except BaseException as e:
             if self._aggregator is not None:
-                await self._aggregator.on_error(target, e)
+                await self._aggregator.on_error(conn, e)
             raise
 
     async def _handle(self, msg: Message) -> None:  # never reached
@@ -256,7 +249,7 @@ class HTTP1Actor(Actor):
             self._deadline = Guard()
         dl = self._deadline
         max_body_size = cfg.max_body_size
-        self._writer.warn_dicts = warns_native_dicts(self._app)
+        self._writer.warn_dicts = warns_app_dicts(self._app)
         send = SenderFactory.http1(self._writer)
         # Quantifies the between-request gap (dispatch_done(N) →
         # loop_start(N+1)) on a keep-alive connection.
@@ -795,7 +788,7 @@ class HTTP1Actor(Actor):
         if request_actor is None:
             request_actor = self._request_actor = RequestActor(
                 conn, inner_receive, send,
-                self._app, self._aggregator, cfg.force_asgi_scope,
+                self._app, self._aggregator,
             )
         else:
             request_actor.bind(conn, inner_receive, send)
