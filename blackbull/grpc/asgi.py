@@ -604,7 +604,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     flush_lock = asyncio.Lock()
 
     # Unannotated for the per-request-closure reason (see
-    # app.py::_wrap_send_native); takes nothing, returns nothing.
+    # response.py::wrap_native_send); takes nothing, returns nothing.
     async def _flush():
         async with flush_lock:
             if not buf:
@@ -620,7 +620,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     finished = False
 
     # Unannotated for the per-request-closure reason (see
-    # app.py::_wrap_send_native); takes nothing, returns nothing.
+    # response.py::wrap_native_send); takes nothing, returns nothing.
     async def _idle_flusher():
         while not finished:
             await flush_wanted.wait()
@@ -638,7 +638,7 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     start_flusher = loop.call_soon(_start_idle_flusher)
 
     # Unannotated for the per-request-closure reason (see
-    # app.py::_wrap_send_native); takes nothing, returns nothing.
+    # response.py::wrap_native_send); takes nothing, returns nothing.
     async def _stop_idle_flusher():
         # Cancel blocked writes on expiry; otherwise finish committed flushes.
         nonlocal finished

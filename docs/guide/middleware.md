@@ -67,6 +67,13 @@ the decorator runs — a native middleware pays nothing for the feature.
 Undecorated middleware is not adapted either way and always receives the
 `Connection`.
 
+!!! warning "The `scope` form is deprecated (since v0.83.0)"
+    Decorating a middleware whose first parameter is `scope` warns
+    ([BBD012](../reference/deprecations.md)).  Write native middleware
+    instead; an ASGI middleware written for any framework wraps the whole
+    app at its boundary rather than one route.  Sending event dicts from
+    middleware is deprecated too ([BBD010](../reference/deprecations.md)).
+
 ## Typing the message channel
 
 The events crossing `receive` and `send` follow the ASGI 3.0 wire contract
@@ -78,41 +85,11 @@ combination of a header arm, body chunks, and trailers, and its *presence*
 semantics are `is not None` (never truthiness — an empty body is a real
 body).
 
-BlackBull also ships a set of `TypedDict` *declarations* for the ASGI event
-shapes, so a type checker can tell which keys are legal on which event:
-
-```python
-from blackbull import (ASGIReceiveCallable, ASGISendCallable, ASGISendEvent,
-                       as_middleware)
-
-@as_middleware                       # required — it is what adapts the edges
-async def add_header_mw(scope, receive: ASGIReceiveCallable,
-                        send: ASGISendCallable, call_next):
-    async def wrapped(event: ASGISendEvent) -> None:
-        if event['type'] == 'http.response.start':
-            # Narrowed here: pyright/mypy know `status` and `headers` exist
-            # on this branch, and that `body` does not.
-            event = {**event,
-                     'headers': list(event.get('headers', [])) + [(b'x-custom', b'1')]}
-        await send(event)
-    await call_next(scope, receive, wrapped)
-```
-
-These declarations describe the **ASGI** form, so they fit a middleware
-that asked for one — decorated and with its first parameter named
-`scope`.  Name it `conn` and the events are `NativeResponse` objects, for
-which `ASGISendEvent` is the wrong annotation.
-
-`ASGISendEvent` and `ASGIReceiveEvent` are unions discriminated on the
-`type` key, so comparing or `match`-ing against it narrows the union to a
-single member.  A checker then rejects the classic mistake this guards —
-passing a `Response` object where an event dict belongs, which fails at
-runtime on `event['type']`.
-
-The individual shapes (`HTTPResponseStartEvent`, `WebSocketReceiveEvent`, …)
-are importable from `blackbull.asgi` if you want to name one directly.
-Everything here is annotation-only: nothing is validated or converted at
-runtime, and unannotated middleware keeps working exactly as before.
+BlackBull also ships `TypedDict` *declarations* for the ASGI event shapes
+(`ASGISendEvent`, `ASGIReceiveEvent`, and the individual shapes in
+`blackbull.asgi`).  They describe the deprecated `scope` form and external
+hosts; on the native form the events are `NativeResponse` objects.  They are
+annotation-only: nothing is validated or converted at runtime.
 
 !!! note "Match the active send lane"
     Middleware declaring `conn` receives native HTTP responses even under an
@@ -141,16 +118,10 @@ from blackbull.native import NativeResponse
 @as_middleware
 async def add_header_mw(conn, receive, send, call_next):
     async def wrapped(event):
-        if isinstance(event, NativeResponse):
-            if event.push is None and event.header is not None:
-                # header arm — append zero-copy; visible to the sender
-                event.header.append(b'x-custom', b'1')
-        else:
-            # WebSocket / external-host lanes still carry ASGI dicts
-            if event['type'] == 'http.response.start':
-                event = {**event,
-                         'headers': list(event.get('headers', []))
-                         + [(b'x-custom', b'1')]}
+        if (isinstance(event, NativeResponse) and event.push is None
+                and event.header is not None):
+            # header arm — append zero-copy; visible to the sender
+            event.header.append(b'x-custom', b'1')
         await send(event)
     await call_next(conn, receive, wrapped)
 ```
@@ -163,11 +134,6 @@ On the native path a complete response is **one object, one `send`**
 (header + body together), while a streamed response is a header object
 followed by body-chunk objects.  Remember the presence contract: test
 `event.header is not None` / `event.body is not None`, never truthiness.
-
-If you would rather not branch at all, name the first parameter `scope`
-and every event is an ASGI dict — see
-[the parameter-name rule](#the-first-parameters-name-picks-the-request-form)
-above.
 
 `@as_middleware` also works on classes (it wraps `__call__`).  All
 of BlackBull's built-in middleware uses the class form:
@@ -200,7 +166,7 @@ handlers.
 
 ```python
 @app.route(path='/protected', middlewares=[auth_mw, logging_mw])
-async def handler(scope, receive, send):
+async def handler(conn):
     ...
 ```
 
@@ -251,25 +217,22 @@ to skip everything below it.
 
 ### `websocket`
 
-Consumes the initial `websocket.connect` event and sends
-`websocket.accept` so the inner handler can skip the boilerplate:
+Accepts the connection before the handler runs and closes it afterwards.
+It records the handshake on the connection, so a `WebSocket` handler adopts
+it:
 
 ```python
+from blackbull import WebSocket
 from blackbull.middleware import websocket
 from blackbull.utils import Scheme
 
 @app.route(path='/chat', scheme=Scheme.websocket, middlewares=[websocket])
-async def chat(scope, receive, send):
-    while True:
-        event = await receive()
-        if event['type'] == 'websocket.disconnect':
-            break
-        await send({'type': 'websocket.send', 'text': event.get('text', '')})
+async def chat(ws: WebSocket):
+    async for message in ws:        # already accepted
+        await ws.send(message)
 ```
 
-Works with the high-level `WebSocket` handler form too — it records the
-completed handshake on the connection, so the object adopts it rather than
-waiting for a `websocket.connect` that is already gone.  See
+See
 [WebSockets](websockets.md#the-websocket-middleware) for the exact
 semantics, including what happens if the handler also calls `accept()` or
 closes the connection itself.
@@ -286,12 +249,12 @@ from blackbull.middleware import compress
 from blackbull.middleware.compression import Compression
 
 @app.route(path='/data', middlewares=[compress])
-async def data_handler(scope, receive, send):
+async def data_handler(conn, receive, send):
     await send(Response(large_payload))
 
 # Or with a higher size threshold:
 @app.route(path='/large', middlewares=[Compression(min_size=4096)])
-async def large(scope, receive, send):
+async def large(conn):
     ...
 ```
 

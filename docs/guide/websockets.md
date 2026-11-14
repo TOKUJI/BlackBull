@@ -184,57 +184,35 @@ async def audited(ws: WebSocket):
         logger.info('closed: %s %s', exc.code, exc.reason)
 ```
 
-## The raw event form
+## The raw event form (deprecated)
 
-The `(conn, receive, send)` triplet keeps working exactly as before, and is
-**not deprecated** — it stays supported for at least a year past the release
-that introduced the object (v0.63.0), and there is no plan to remove it.
-Reach for it when you need to see the events themselves: writing middleware,
-driving the handshake in an unusual order, or handling an event the object
-does not model.
+A `(conn, receive, send)` handler reads and sends the ASGI event dicts
+itself.  Since v0.83.0 that warns: sending a dict is
+[BBD010](../reference/deprecations.md) and reading `receive()` is
+[BBD011](../reference/deprecations.md).  Both keep working until no earlier
+than 2027-12-01.  Each step has an object equivalent:
 
-```python
-@app.route(path='/ws-raw', scheme=Scheme.websocket)
-async def ws_raw(conn, receive, send):
-    await receive()                          # consume 'websocket.connect'
-    await send({'type': 'websocket.accept'})
-    while True:
-        event = await receive()
-        if event['type'] == 'websocket.disconnect':
-            break
-        text = event.get('text') or event.get('bytes', b'').decode()
-        await send({'type': 'websocket.send', 'text': text})
-```
+| Raw form | `WebSocket` object |
+|---|---|
+| `await receive()` for `websocket.connect`, then send `websocket.accept` | `await ws.accept()` |
+| send `websocket.close` | `await ws.close(code, reason)` |
+| `await receive()` for `websocket.receive` | `await ws.receive()`, or `async for message in ws` |
+| a `websocket.disconnect` event | `WebSocketDisconnect`, with its `code` |
+| send `websocket.send` | `ws.send_text()`, `ws.send_bytes()`, `ws.send_json()` |
 
-The two forms are the same connection seen at different levels: the object's
-methods emit exactly these events, so framing, fragmentation, and close
-semantics are identical either way.  A route is classified once, at
-registration, by whether its signature contains both `receive` and `send`.
+A handler that keeps the triplet signature can build the object on the
+same channel, `WebSocket(conn, receive, send)`, or send `NativeWSMessage`s
+from `blackbull.native`; neither warns.
 
 ## The `websocket` middleware
 
-The built-in `blackbull.middleware.websocket` consumes the initial
-`websocket.connect` event and sends `websocket.accept`, so the
-inner handler can skip that boilerplate:
+The built-in `blackbull.middleware.websocket` accepts the connection before
+the handler runs and closes it afterwards.  It records the completed
+handshake on the connection, and the `WebSocket` object adopts that state:
 
 ```python
 from blackbull.middleware import websocket
 
-@app.route(path='/chat', scheme=Scheme.websocket, middlewares=[websocket])
-async def chat(conn, receive, send):
-    # Connection already accepted; go straight to reading messages
-    while True:
-        event = await receive()
-        if event['type'] == 'websocket.disconnect':
-            break
-        await send({'type': 'websocket.send', 'text': event.get('text', '')})
-```
-
-It works with the `WebSocket` object too — it records the completed
-handshake on the connection, and the object adopts that state instead of
-waiting for a `websocket.connect` that has already been consumed:
-
-```python
 @app.route(path='/chat', scheme=Scheme.websocket, middlewares=[websocket])
 async def chat(ws: WebSocket):
     async for message in ws:        # already accepted
@@ -253,52 +231,17 @@ ws.accept()` is the one line it was removing.
 
 !!! note "Writing middleware that touches the handshake"
 
-    Middleware that takes the `websocket.connect` event off the receive
-    channel must record it, or a downstream `WebSocket` object will read the
-    client's first *message* expecting the handshake.  Which call depends on
-    how far the middleware went:
-
-    | Middleware did | Call | The object then |
-    |---|---|---|
-    | Read connect **and** sent `websocket.accept` | `mark_handshake_accepted(conn)` | Starts accepted; a bare `accept()` is a no-op |
-    | Read connect only, left accepting to the handler | `mark_connect_consumed(conn)` | Doesn't wait for connect, still sends the accept |
-
-    Both live in `blackbull.websocket`.  The second is the shape an auth
-    middleware wants — pop connect so you keep the option of rejecting with
-    a close code, then delegate; `examples/ChatServer/chatserver.py`'s
-    `auth_mw` does exactly that.  The distinction is not cosmetic: marking a
-    merely-consumed connection as *accepted* would make the handler skip its
-    own `accept()`, leaving the client hanging on a handshake nobody
-    completed.  Omit both and the object raises, naming each.
+    Build a `WebSocket` on the middleware's own channel: `await ws.accept()`
+    or `await ws.close(4401, 'unauthorized')` records what it did on the
+    connection, and a downstream `WebSocket` object adopts it.  Middleware
+    that only checks something and lets the handler accept needs no object
+    at all.
 
 ## Typed WebSocket events
 
-These apply to the raw form; the `WebSocket` object hides the events
-entirely, and constructs them itself against these same declarations.
-
-The events are plain ASGI dicts on the wire, but their shapes are declared
-as `TypedDict`s, so a type checker can narrow them on the `type` key:
-
-```python
-from blackbull import ASGIReceiveCallable, ASGISendCallable
-from blackbull.asgi import ASGIEvent
-
-async def chat(conn, receive: ASGIReceiveCallable, send: ASGISendCallable):
-    while True:
-        event = await receive()
-        if event['type'] == ASGIEvent.WS_DISCONNECT:
-            break
-        if event['type'] == ASGIEvent.WS_RECEIVE:
-            # Narrowed to WebSocketReceiveEvent: `text` and `bytes` are known
-            # keys here, and both are Optional — BlackBull always sets both,
-            # with one of them None.
-            await send({'type': 'websocket.send', 'text': event.get('text') or ''})
-```
-
-`FragmentAssembler` has already reassembled fragments by this point, so a
-`websocket.receive` event is always one complete message — which is why the
-declared type has `text: str | None` and `bytes: bytes | None` rather than
-modelling a partial frame.  The declarations change nothing at runtime.
+The raw form's events are declared as `TypedDict`s in `blackbull.asgi`, so a
+type checker can narrow them on the `type` key; the declarations change
+nothing at runtime.
 
 ## permessage-deflate (RFC 7692)
 
@@ -401,9 +344,8 @@ The list accepts `str` or `bytes` values.  Common protocol names:
 
 WebSocket clients may split a single logical message across
 multiple frames (RFC 6455 §5.4).  BlackBull reassembles fragments
-transparently — the app always receives one `websocket.receive`
-event containing the full payload, regardless of how many frames
-the client used.
+transparently — the handler always receives one complete message,
+regardless of how many frames the client used.
 
 A fragmented sequence on the wire:
 
@@ -413,14 +355,7 @@ FIN=0, opcode=0x0,   payload=b'lo'    ← continuation
 FIN=1, opcode=0x0,   payload=b''      ← final continuation
 ```
 
-The app sees a single event:
-
-```python
-{'type': 'websocket.receive', 'text': 'hello', 'bytes': None}
-```
-
-— or, through the `WebSocket` object, one iteration of `async for` yielding
-the `str` `'hello'`.
+The handler sees one iteration of `async for` yielding the `str` `'hello'`.
 
 Control frames (ping, pong, close) may legally appear between
 data fragments; BlackBull handles them immediately (responding

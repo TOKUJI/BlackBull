@@ -30,7 +30,7 @@ from .request_target import split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
                         AbstractReader, HTTP1Recipient, IncompleteReadError,
                         RecipientFactory, _WS_READ_INLINE)
-from .sender import AbstractWriter, SenderFactory
+from .sender import AbstractWriter, SenderFactory, warns_native_dicts
 from .access_log import (AccessLogRecord as _AccessLogRecord,
                          _make_disconnect_detecting_receive,
                          close_ws_record as _close_ws_record,
@@ -256,6 +256,7 @@ class HTTP1Actor(Actor):
             self._deadline = Guard()
         dl = self._deadline
         max_body_size = cfg.max_body_size
+        self._writer.warn_dicts = warns_native_dicts(self._app)
         send = SenderFactory.http1(self._writer)
         # Quantifies the between-request gap (dispatch_done(N) →
         # loop_start(N+1)) on a keep-alive connection.

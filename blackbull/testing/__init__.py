@@ -18,7 +18,7 @@ from typing import Any
 from weakref import WeakSet
 
 from ..asgi import ASGIReceiveEvent
-from ..native import NativeWSMessage
+from ..native import NativeWSMessage, report_dict, warns_app_dicts
 from ..websocket import WebSocketDisconnect
 
 import httpx
@@ -306,7 +306,11 @@ class WebSocketTestSession:
             async def receive():
                 return await self._client_to_server.get()
 
+            warn_dicts = warns_app_dicts(self.app)
+
             async def send(event):
+                if warn_dicts:
+                    report_dict(event)
                 self._server_to_client.put(event)
 
             self._client_to_server.put_nowait({'type': 'websocket.connect'})

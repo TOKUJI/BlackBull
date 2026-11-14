@@ -279,9 +279,9 @@ async def warm_caches():
     ...
 
 @app.intercept('request_received')
-async def auth(scope, receive, send, call_next):
+async def auth(conn, receive, send, call_next):
     # raise to abort, or skip call_next to short-circuit
-    await call_next(scope, receive, send)
+    await call_next(conn, receive, send)
 
 @app.on('request_completed')
 async def emit_metrics(event):

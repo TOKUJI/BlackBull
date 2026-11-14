@@ -45,7 +45,7 @@ Read-side surface:
 `body: bytes` (or a dataclass body parameter) receives the same
 cached bytes — the body is never read twice.  Handlers that don't
 declare a `Connection` pay nothing: injection is decided when the route
-is registered, and the raw `(scope, receive, send)` form is
+is registered, and the full `(conn, receive, send)` form is
 unaffected.
 
 !!! warning "`Request` is deprecated — use `Connection` (since v0.60.0)"
@@ -102,10 +102,9 @@ returns a single `bytes` object.  The stream is consumed — call
 at most once per request (typically inside a middleware, not the
 handler itself).
 
-For streaming uploads, call `receive()` directly — each call
-returns one chunk with `more_body=True` until the final chunk
-arrives with `more_body=False`.  `read_body` is a convenience
-wrapper that buffers all chunks before returning.
+For streaming uploads, iterate `conn.stream()`: it yields one chunk at a
+time, where `read_body` buffers them all.  Reading `receive()` directly is
+deprecated ([BBD011](../reference/deprecations.md)).
 
 ### The body has a ceiling, and it is not the handler's job
 
@@ -126,7 +125,7 @@ decision back to the application.  Both are documented in full under
 [environment variables](../reference/env-vars.md).
 
 A handler *can* still see a 413: when a chunked HTTP/1.1 body crosses
-the cap mid-stream, `receive()` raises `HTTPException(413)`, which the
+the cap mid-stream, reading the body raises `HTTPException(413)`, which the
 dispatcher answers like any other status-carrying error — so an
 `@app.on_error(413)` handler is honoured.
 
@@ -146,7 +145,7 @@ async def report(conn):
     return {'rows': rows}
 ```
 
-The flag goes true when the *server* notices — at the next `receive()` — not
+The flag goes true when the *server* notices — at the next body read — not
 the instant the peer's FIN arrives, so a handler that never reads the body
 and never streams will not see it change.  For a push-style notification
 instead of a poll, use the
@@ -496,40 +495,28 @@ Signature: `cookie_header(name, value, path='/', http_only=True)`.
 ## HTTP trailers
 
 HTTP/1.1 chunked responses can carry trailing headers after the
-body.  Use the `http.response.trailers` event after the last
-`http.response.body` chunk:
+body.  Send them as a `NativeResponse` with `trailers` after the last body:
 
 ```python
+from blackbull.native import NativeResponse
+
 @app.route(path='/chunked')
 async def chunked(conn, receive, send):
-    await send({
-        'type': 'http.response.start',
-        'status': 200,
-        'headers': [
-            (b'content-type',      b'text/plain'),
-            (b'trailer',           b'x-checksum'),
-        ],
-        'trailers': True,
-    })
-    await send({
-        'type': 'http.response.body',
-        'body': b'chunk data here',
-        'more_body': False,
-    })
-    await send({
-        'type': 'http.response.trailers',
-        'headers': [(b'x-checksum', b'abc123')],
-        'more_trailers': False,
-    })
+    await send(NativeResponse(status=200, header=[
+        (b'content-type', b'text/plain'),
+        (b'trailer', b'x-checksum'),
+    ], expects_trailers=True))
+    await send(NativeResponse(body=b'chunk data here'))
+    await send(NativeResponse(trailers=[(b'x-checksum', b'abc123')]))
 ```
 
-`trailers=True` transfers response-completion ownership from the last body
-event to the last trailer event.  BlackBull selects HTTP/1.1 chunked framing,
+`expects_trailers=True` transfers response-completion ownership from the last
+body to the last trailer section.  BlackBull selects HTTP/1.1 chunked framing,
 ignores a supplied `Content-Length`, and writes the zero chunk only when the
 trailer section begins; HTTP/2 keeps the length, and the content must match
 it.  A trailer section with no body event before it ends an empty body behind
-the head.  To split a trailer section across events, set
-`more_trailers=True` on every event except the last.  HTTP/2 collects those
+the head.  To split a trailer section across sends, set
+`more_trailers=True` on every one except the last.  HTTP/2 collects those
 parts into one trailing HEADERS block carrying `END_STREAM`.
 
 HEAD responses never carry content or a trailer section.  The response is
@@ -554,18 +541,18 @@ resets the stream (`PROTOCOL_ERROR`) on HTTP/2.
 
 ## WebSocket frames
 
-For WebSocket routes (`scheme=Scheme.websocket`), use
-`WebSocketResponse` to dispatch on payload type automatically:
+For WebSocket routes (`scheme=Scheme.websocket`), the `WebSocket` object
+picks the frame type:
 
 ```python
-from blackbull import WebSocketResponse
-
-await send(WebSocketResponse('hello'))           # str  → text frame
-await send(WebSocketResponse(b'\x00\x01'))       # bytes → binary frame
-await send(WebSocketResponse({'type': 'msg'}))   # other → JSON-serialised text frame
+await ws.send_text('hello')            # text frame
+await ws.send_bytes(b'\x00\x01')       # binary frame
+await ws.send_json({'type': 'msg'})    # JSON-serialised text frame
 ```
 
-See [WebSockets](websockets.md) for the full WebSocket surface.
+`WebSocketResponse`, which built the equivalent event dict, is deprecated
+([BBD013](../reference/deprecations.md)).  See [WebSockets](websockets.md)
+for the full WebSocket surface.
 
 ## Streaming responses
 
@@ -617,10 +604,9 @@ world\r\n
 ```
 
 The terminal `0\r\n\r\n` is written automatically when
-`more_body=False` arrives.  When `trailers=True` was set in
-`http.response.start`, the final body event remains unterminated and the last
-`http.response.trailers` event writes `0\r\n`, the trailer fields, and the
-final blank line.
+`more_body=False` arrives.  When the head set `expects_trailers=True`, the
+final body remains unterminated and the last trailer section writes `0\r\n`,
+the trailer fields, and the final blank line.
 
 A stream with a valid `Content-Length` keeps that single field and sends raw
 body bytes rather than chunk syntax.  BlackBull checks the accumulated body
@@ -644,38 +630,27 @@ native and ASGI send shapes.
 
 ## Detecting client disconnection
 
-When the remote side closes the connection, `receive()` returns
-`{'type': 'http.disconnect'}`.  This is useful for long-polling
-and server-sent events (SSE) — your handler can check whether
-the client is still there before writing more.
+Once a write finds the client gone, the next `send` raises
+`ClientDisconnected`.  A `StreamingResponse` or `EventSourceResponse` stops
+there and closes its generator, so its `finally` runs:
 
 ```python
+from blackbull import EventSourceResponse
+
 @app.route(path='/events')
-async def sse(conn, receive, send):
-    await send({
-        'type': 'http.response.start',
-        'status': 200,
-        'headers': [
-            (b'content-type',  b'text/event-stream'),
-            (b'cache-control', b'no-cache'),
-        ],
-    })
-    while True:
-        event = await receive()
-        if event['type'] == 'http.disconnect':
-            break
-        await send({
-            'type': 'http.response.body',
-            'body': b'data: ping\n\n',
-            'more_body': True,
-        })
-    await send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+async def sse(conn):
+    async def pings():
+        try:
+            while True:
+                yield 'ping'
+                await asyncio.sleep(1)
+        finally:
+            release_subscription()
+    return EventSourceResponse(pings())
 ```
 
-For most streaming use cases, prefer `StreamingResponse` (above)
-— it wraps an async generator and emits `more_body=True` on every
-chunk automatically.  The raw event pattern is convenient when
-each chunk needs custom shaping (e.g. SSE event framing).
+Work that does not send can poll `conn.disconnected`, which turns true once
+the server notices the peer has left.
 
 Passing `Response(b'')` to `send` ends the connection immediately
 with `Content-Length: 0` and cannot be followed by additional

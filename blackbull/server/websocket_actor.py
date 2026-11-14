@@ -3,7 +3,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from ..actor import Actor, Message
-from ..native import NativeWSMessage
+from ..native import NativeWSMessage, report_dict, warns_app_dicts
 from ..connection import Connection
 from ..event_aggregator import EventAggregator
 from ..asgi import (ASGIEvent, WebSocketAcceptEvent, WebSocketCloseEvent,
@@ -77,6 +77,9 @@ class WebSocketActor(Actor):
         self._writer = writer
         self._conn = conn
         self._app = app
+        # Not warns_native_dicts: this actor always passes a Connection, so
+        # BB_FORCE_ASGI_SCOPE adds no boundary that could produce a dict.
+        self._warn_dicts = warns_app_dicts(app)
         self._aggregator = aggregator
         self._peername = peername
         self._sockname = sockname
@@ -169,6 +172,8 @@ class WebSocketActor(Actor):
             offered = event.subprotocol
             extra = event.headers if is_accept else None
         else:
+            if self._warn_dicts:
+                report_dict(event)
             is_accept = (isinstance(event, dict)
                          and event.get('type') == ASGIEvent.WS_ACCEPT)
             offered = event.get('subprotocol') if is_accept else None

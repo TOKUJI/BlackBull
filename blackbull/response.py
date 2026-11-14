@@ -8,7 +8,8 @@ from collections.abc import AsyncIterator, Mapping
 from http import HTTPStatus
 
 from .headers import _as_response_fields
-from .native import NativeResponse, _native_from_asgi
+from .deprecations import _warn_deprecated
+from .native import NativeResponse, WarnedDict, _native_from_asgi
 
 logger = logging.getLogger(__name__)
 
@@ -335,26 +336,31 @@ def WebSocketResponse(content) -> dict:
 
         await send(WebSocketResponse('hello'))
     """
+    _warn_deprecated('BBD013')
     if isinstance(content, str):
-        return {'type': 'websocket.send', 'text': content}
+        return WarnedDict({'type': 'websocket.send', 'text': content})
     if isinstance(content, bytes):
-        return {'type': 'websocket.send', 'bytes': content}
-    return {'type': 'websocket.send', 'text': json.dumps(content)}
+        return WarnedDict({'type': 'websocket.send', 'bytes': content})
+    return WarnedDict({'type': 'websocket.send', 'text': json.dumps(content)})
 
 
-def wrap_native_send(raw_send):
+def wrap_native_send(raw_send, *, warn_dicts: bool = True):
     """Normalize handler and middleware emissions to native HTTP messages.
 
     Response objects and the ``(bytes, status, headers)`` form become a
-    ``NativeResponse``. Streaming responses use the same per-event converter
-    as ASGI dictionaries. Unknown events and native messages pass through.
+    ``NativeResponse``. HTTP event dicts are converted too; with *warn_dicts*,
+    every plain dict warns (BBD010). Unknown events, WebSocket dicts and
+    native messages pass through.
     """
-    # Deliberately unannotated: rebuilt per request (see _wrap_send_native in app.py).
+    # Rebuilt per request, so unannotated: an annotation costs ~90 ns per
+    # creation (tests/architecture/test_per_request_closure_annotations.py).
+    # Accepted shape: event is a Response, StreamingResponse, bytes-like, dict
+    # or native message; status and headers apply to the bytes form only.
     async def _send(event, status=HTTPStatus.OK, headers=()):
         if isinstance(event, StreamingResponse):
             # The nested adapter closes over raw_send, not itself or stream;
             # request adapters must remain reclaimable by refcounting alone.
-            await event(None, None, wrap_native_send(raw_send))
+            await event(None, None, wrap_native_send(raw_send, warn_dicts=warn_dicts))
         elif isinstance(event, Response):
             await raw_send(event.to_native())
         elif isinstance(event, (bytes, bytearray, memoryview)):
@@ -363,7 +369,14 @@ def wrap_native_send(raw_send):
                                           header=list(headers),
                                           body=body))
         elif isinstance(event, dict):
-            await raw_send(_native_from_asgi(event))
+            native = _native_from_asgi(event)
+            if type(event) is dict:
+                if warn_dicts:
+                    _warn_deprecated('BBD010')
+                if native is event:
+                    # Accounted for here, as BBD010 or as BBD012's own dicts.
+                    native = WarnedDict(event)
+            await raw_send(native)
         else:
             await raw_send(event)
 

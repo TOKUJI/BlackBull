@@ -12,7 +12,7 @@ from typing import Any
 from .asgi import ASGIEvent
 from .connection import Connection
 from .headers import Headers
-from .native import NativeWSMessage
+from .native import NativeWSMessage, raw_receive
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ class WebSocket:
                  receive: Callable[[], Awaitable[Any]],
                  send: Callable[..., Awaitable[None]]) -> None:
         self._conn = conn
-        self._receive = receive
+        self._receive = raw_receive(receive)
         self._send = send
         # Middleware may have got here first.  Two independent facts to
         # adopt: whether the connect event is already off the channel, and

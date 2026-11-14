@@ -35,7 +35,8 @@ from ..asgi import (
 )
 from ..headers import (
     HeaderList, _CONNECTION_SPECIFIC, _MinimalResponseHeaders, _as_response_fields)
-from ..native import NativeResponse, NativeWSMessage, _native_from_asgi
+from ..native import (NativeResponse, NativeWSMessage, _native_from_asgi, report_dict,
+                      warns_app_dicts)
 from ..request import ClientDisconnected
 
 
@@ -165,6 +166,10 @@ class AbstractWriter(ABC):
     MemorySendStream, curio socket, …).  ``BaseSender`` only depends on this
     interface, so switching the async runtime requires only a new subclass here.
     """
+
+    #: Set by the actor when a dict sent on this connection can only come
+    #: from a native app's code (BBD010).
+    warn_dicts = False
 
     def peer_is_gone(self) -> bool:
         """True when the transport has already recorded the loss.
@@ -433,6 +438,11 @@ _SenderBody = _SenderEvent | bytes | NativeResponse
 _WSSenderEvent = WebSocketSendEvent | WebSocketCloseEvent | WebSocketAcceptEvent
 
 
+def warns_native_dicts(app) -> bool:
+    """Whether a dict reaching *app*'s senders can only be from native code."""
+    return warns_app_dicts(app) and not get_settings().force_asgi_scope
+
+
 class BaseSender(ABC):
     """Protocol senders accepting native messages, compatible ASGI events, or bytes.
 
@@ -592,6 +602,8 @@ class HTTP1Sender(BaseSender):
             return
 
         if isinstance(body, dict):
+            if self._writer.warn_dicts:
+                report_dict(body)
             body = _native_from_asgi(body)
 
         if (isinstance(body, NativeResponse) and body._extension is not None
@@ -1614,6 +1626,8 @@ class HTTP2Sender(BaseSender):
             return
 
         if isinstance(body, dict):
+            if self._writer.warn_dicts:
+                report_dict(body)
             body = _native_from_asgi(body)
 
         if isinstance(body, bytes):

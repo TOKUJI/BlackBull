@@ -64,7 +64,7 @@ import argparse
 import json
 from http import HTTPMethod
 
-from blackbull import CORS, BlackBull, JSONResponse, TrustedProxy
+from blackbull import CORS, BlackBull, JSONResponse, Response, TrustedProxy
 from blackbull.request import read_body
 
 # ---------------------------------------------------------------------------
@@ -154,12 +154,7 @@ app = BlackBull()
 
 @app.route(path='/')
 async def index(conn, receive, send):
-    await send({
-        'type': 'http.response.start',
-        'status': 200,
-        'headers': [(b'content-type', b'text/html; charset=utf-8')],
-    })
-    await send({'type': 'http.response.body', 'body': _HTML})
+    await send(Response(_HTML))
 
 
 @app.route(path='/api/hello')

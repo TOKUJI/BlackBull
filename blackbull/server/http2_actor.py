@@ -35,7 +35,7 @@ from .recipient import (AbstractReader, IncompleteReadError,
                         HTTP2Recipient, RecipientFactory,
                         _HTTP2_STREAM_QUEUE_DEPTH)
 from .http2_connection import SKIP, HTTP2Connection
-from .sender import AbstractWriter, FlowControlStalled, SenderFactory
+from .sender import AbstractWriter, FlowControlStalled, SenderFactory, warns_native_dicts
 from .access_log import (
     close_record as _close_record,
     close_ws_record as _close_ws_record,
@@ -366,7 +366,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
     ) -> Callable[[int], Awaitable[None]]:
         """Return consumed credit; a finished peer needs no stream window."""
 
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
+        # Unannotated for the per-request-closure reason (see response.py::wrap_native_send).
         async def _credit(n):
             task = self._schedule_credit_replay(n)
             if task is None:
@@ -398,7 +398,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             if not pending.done():
                 return pending
 
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
+        # Unannotated for the per-request-closure reason (see response.py::wrap_native_send).
         async def _replay():
             if self._goaway_sent:
                 return
@@ -541,7 +541,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         over-admit.
         """
 
-        # Unannotated for the per-request-closure reason (see app.py::_wrap_send_native).
+        # Unannotated for the per-request-closure reason (see response.py::wrap_native_send).
         def _cb(_task):
             self._retire_stream(
                 stream_id, via_rst=False, finished_task=_task,
@@ -660,6 +660,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         ))
         self._ws_over_h2_enabled = cfg.h2_enable_websocket
         self._force_asgi = cfg.force_asgi_scope
+        self._writer.warn_dicts = warns_native_dicts(self._app)
         logger.info(
             'HTTP/2 SETTINGS sent: initial_window_size=%d max_concurrent_streams=%d',
             cfg.h2_initial_window_size, self.max_concurrent_streams,

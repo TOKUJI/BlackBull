@@ -6,7 +6,8 @@ are introduced only at compatibility boundaries, never raw Response objects.
 import inspect
 from functools import wraps
 
-from ..asgi import ASGISendCallable
+from ..deprecations import _warn_deprecated
+from ..native import asgi_send_boundary
 from ..response import wrap_native_send
 
 
@@ -32,31 +33,22 @@ def _to_asgi_send(inner_send):
     an ASGI-written middleware inspects ``event['type']``, so what reaches it
     from below must be dicts — on the WebSocket path as much as the HTTP one.
     The dict form is created here and consumed again at the same middleware's
-    exit — it never travels further in either direction.
+    exit; a WebSocket dict leaves it as a ``WarnedDict``.  A plain dict
+    arriving here came from code below and warns (BBD010).
     """
-    from ..native import asgi_send_boundary  # noqa: PLC0415
-
-    return asgi_send_boundary(inner_send)
+    return asgi_send_boundary(inner_send, warn_dicts=True)
 
 
-def _adapt(conn, send, wants_scope: bool):
-    """Return (request_arg, outward_send, inner_normalizer) for native or scope-declared middleware.
-    """
-    if not wants_scope:
-        return conn, send, _normalize_send
+def _scope_edge(conn, send):
+    """The scope dict and outward send a scope-declared middleware is given."""
     from ..connection import Connection  # noqa: PLC0415
     arg = conn.to_asgi_scope() if isinstance(conn, Connection) else conn
-    return arg, wrap_native_send(send), _to_asgi_send
+    return arg, wrap_native_send(send, warn_dicts=False)
 
 
-def _normalize_send(inner_send: ASGISendCallable | None):
-    """Normalize HTTP send shapes to NativeResponse using wrap_native_send.
-    """
-    # ``inner_send`` is Optional because a middleware may be driven with no
-    # send channel at all on pass-through paths (a websocket or lifespan
-    # scope a middleware declines to touch).  The wrapper is built either
-    # way; it is simply never invoked in that case.
-    return wrap_native_send(inner_send)
+#: A native middleware's inner normalizer: downstream HTTP sends become
+#: ``NativeResponse``.
+_normalize_send = wrap_native_send
 
 
 def as_middleware(target):
@@ -64,16 +56,22 @@ def as_middleware(target):
 
     Normalize downstream HTTP sends to NativeResponse before the middleware's
     send wrapper. A first request parameter named scope opts into ASGI scope
-    and event dictionaries at both edges, including WebSocket events.
+    and event dictionaries at both edges, including WebSocket events; that
+    form is deprecated (BBD012).
     Omit the decorator to handle raw downstream send arguments.
     """
     if isinstance(target, type):
         original_call = target.__call__
         wants_scope = _declares_asgi_scope(original_call, is_method=True)
+        if wants_scope:
+            _warn_deprecated('BBD012')
+        inner = _to_asgi_send if wants_scope else _normalize_send
 
         @wraps(original_call)
         async def wrapped_call(self, conn, receive, send, call_next):
-            arg, send, inner = _adapt(conn, send, wants_scope)
+            arg = conn
+            if wants_scope:
+                arg, send = _scope_edge(conn, send)
 
             async def normalizing_call_next(_arg, receive, inner_send):
                 # The native Connection always goes down, whatever the
@@ -90,10 +88,15 @@ def as_middleware(target):
         return target
 
     wants_scope = _declares_asgi_scope(target, is_method=False)
+    if wants_scope:
+        _warn_deprecated('BBD012')
+    inner = _to_asgi_send if wants_scope else _normalize_send
 
     @wraps(target)
     async def wrapper(conn, receive, send, call_next):
-        arg, send, inner = _adapt(conn, send, wants_scope)
+        arg = conn
+        if wants_scope:
+            arg, send = _scope_edge(conn, send)
 
         async def normalizing_call_next(_arg, receive, inner_send):
             return await call_next(conn, receive, inner(inner_send))

@@ -1,8 +1,8 @@
 """BlackBull application object — the user-facing ASGI 3.0 entry point.
 
-``RouteGroup``, the default error handler and the handler-boundary send
-adapter live here rather than in the modules they belong to: importing them
-from there would close an import cycle back to this one.
+``RouteGroup`` and the default error handler live here rather than in the
+modules they belong to: importing them from there would close an import cycle
+back to this one.
 """
 import functools
 from collections.abc import Awaitable, Callable, Iterable
@@ -19,7 +19,7 @@ from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNot
 from .request import ClientDisconnected
 from .connection import Connection, disconnected, refuse_scope, CONNECTION_STASH_KEY
 from .protocol.field_grammar import FieldError, media_type
-from .native import NativeResponse
+from .native import DictReceive, NativeResponse, asgi_send_boundary, raw_receive
 from .response import wrap_native_send
 from .asgi import ASGIReceiveCallable, ASGISendCallable
 from .config import AppConfig
@@ -36,11 +36,8 @@ _METHOD_BY_VALUE: dict[str, HTTPMethod] = {m.value: m for m in HTTPMethod}
 
 
 
-def _wrap_send_native(raw_send: ASGISendCallable):
-    """Install [`blackbull.response.wrap_native_send`][blackbull.response.wrap_native_send] at the handler
-    boundary, which is the innermost wrap.
-    """
-    return wrap_native_send(raw_send)
+#: The handler-boundary adapter, the innermost wrap of every HTTP send.
+_wrap_send_native = wrap_native_send
 
 
 def _to_asgi_boundary(send: ASGISendCallable):
@@ -48,9 +45,7 @@ def _to_asgi_boundary(send: ASGISendCallable):
 
     [`BlackBull.__call__`][BlackBull.__call__] decides when to install it.
     """
-    from .native import asgi_send_boundary  # noqa: PLC0415
-
-    return asgi_send_boundary(send)
+    return asgi_send_boundary(send, warn_dicts=True)
 
 
 def _inject_response_headers(raw_send, extra_headers):
@@ -253,6 +248,9 @@ class BlackBull:
                 boundary in both directions.
         """
         self._asgi = asgi
+        #: Read by the server's actors: on the native lane a dict reaching a
+        #: sender came from this app's code (BBD010).
+        self._warns_native_dicts = not asgi
         self._config = config
         self._router = Router() if cache_max is None else Router(cache_max=cache_max)
         self._logger = logger
@@ -264,6 +262,7 @@ class BlackBull:
         self._global_middlewares: list = []
         self._static_roots: list[tuple[str, Path]] = []
         self._chain = None
+        self._wraps_receive: frozenset[str] = frozenset()
 
         self._warmup_hooks: list = []
         self.extensions: dict[str, object] = {}
@@ -532,7 +531,7 @@ class BlackBull:
                 try:
                     if self._dispatcher.has_listeners('before_handler'):
                         await self._dispatcher.emit(self._handler_event('before_handler', conn, serve_grpc))
-                    await serve_grpc(self._grpc_registry, conn, receive, send)
+                    await serve_grpc(self._grpc_registry, conn, raw_receive(receive), send)
                 except BaseException as exc:
                     exc_caught = exc
                     raise
@@ -649,6 +648,13 @@ class BlackBull:
             # altitude has nothing to catch.
             chain = functools.partial(mw, call_next=chain)
         self._chain = chain
+        # Registration after the first request rebuilds no chain, so a
+        # receive-exposing route added then is not wrapped (a missed BBD011
+        # warning, never a behaviour change).
+        self._wraps_receive = (frozenset({'http', 'websocket'})
+                               if self._global_middlewares else
+                               self._router.exposes_receive
+                               | self._error_router.exposes_receive)
 
     async def __call__(self, conn: 'Connection | dict',
                        receive: ASGIReceiveCallable | None,
@@ -675,15 +681,16 @@ class BlackBull:
         # ``target`` is what the actor's disconnect-detecting receive wrapper
         # shares with us (the Connection natively, the scope dict in the compat
         # lanes); ``disconnected(target)`` reads the flag off whichever it is.
-        if self._asgi or not isinstance(conn, Connection):
-            send = _to_asgi_boundary(send)
         target = conn
         if isinstance(conn, Connection):
             request = conn
+            if self._asgi:
+                send = _to_asgi_boundary(send)
         elif conn.get('type') == 'lifespan':
             await self._handle_lifespan(receive, send)
             return
         else:
+            send = _to_asgi_boundary(send)
             # Reuse the stashed native Connection on compatibility scopes.
             # Do not rebind _receive to the disconnect wrapper: it captures conn and
             # would create a per-request reference cycle.  No WebSocket extra
@@ -699,6 +706,9 @@ class BlackBull:
 
         if self._chain is None:
             self._build_chain()
+        if (self._wraps_receive and receive is not None
+                and request.type in self._wraps_receive):
+            receive = DictReceive(receive)
 
         # Emit terminal events after the whole middleware chain, including buffered responses.
         dispatcher = self._dispatcher

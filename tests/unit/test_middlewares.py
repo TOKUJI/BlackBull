@@ -185,7 +185,7 @@ class TestWebsocketMiddleware:
         order = []
 
         async def tracking_send(event):
-            order.append(event.get('type'))
+            order.append(event.to_asgi()[0]['type'])
 
         async def inner(scope, receive, send):
             order.append('inner')
@@ -202,7 +202,7 @@ class TestWebsocketMiddleware:
         order = []
 
         async def tracking_send(event):
-            order.append(event.get('type'))
+            order.append(event.to_asgi()[0]['type'])
 
         async def inner(scope, receive, send):
             order.append('inner')

@@ -8,7 +8,7 @@ from typing import Any, AsyncIterator, Callable, NamedTuple
 from urllib.parse import parse_qsl
 
 from .headers import Headers
-from .native import NativeResponse, NativeWSMessage
+from .native import NativeResponse, NativeWSMessage, raw_receive
 from .protocol.field_grammar import host_field_value, media_type, normalized_fields
 from .request import (read_body, stream_body, cookies_from_headers,
                       ClientDisconnected, _json_or_none)
@@ -333,7 +333,7 @@ class Connection:
         if 'raw_path' not in kwargs:
             kwargs['raw_path'] = kwargs.get('path', '').encode('utf-8')
         conn = cls(**kwargs)
-        conn._receive = receive
+        conn._receive = raw_receive(receive)
         return conn
 
     def to_asgi_scope(self, *, force_asgi: bool = False) -> dict:
