@@ -55,6 +55,9 @@ max_connections = 1000
 request_timeout = 30
 header_timeout  = 10
 compression_min_size = 100
+compression_executor_threshold = 65536
+compression_max_inflight = 8
+brotli_quality = 4
 
 [logging]
 access_log    = true
@@ -80,8 +83,20 @@ at construction: `BB_COMPRESSION_MIN_SIZE`, `BB_COMPRESSION_EXECUTOR_THRESHOLD`,
 `BB_COMPRESSION_MAX_INFLIGHT`, and `BB_BROTLI_QUALITY`. Explicit arguments,
 including `0`, take precedence. An explicit `brotli_quality` outside 0–11
 raises `ValueError` at construction.
-The supported compression keys in `[limits]` are `compression_min_size` and
-`compression_executor_threshold`.
+All four controls are available in `[limits]`: `compression_min_size`,
+`compression_executor_threshold`, `compression_max_inflight`, and `brotli_quality`.
+Environment variables override TOML values. An invalid configured Brotli
+quality falls back to `4`.
+
+For optional application overrides, omit `None` values to inherit settings:
+
+```python
+from blackbull.middleware import Compression
+
+overrides = {"min_size": None, "brotli_quality": 1}
+kwargs = {name: value for name, value in overrides.items() if value is not None}
+app.use(Compression(**kwargs))
+```
 
 The TLS keys (`[tls] cert`, `[tls] key`) are CLI-arg fallbacks
 applied to `--certfile` / `--keyfile` when those aren't
