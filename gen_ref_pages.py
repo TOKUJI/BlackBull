@@ -60,7 +60,8 @@ with mkdocs_gen_files.open("api/public.md", "w") as f:
     f.write("# Public API\n\n"
             "These names are the public API. Removing one, or changing it\n"
             "incompatibly, raises MINOR (see the changelog's Versioning section);\n"
-            "a pull request that does so fails its *Public API* check.  Every other\n"
+            "the *Public API* check reports every break and permits only exact\n"
+            "changes explicitly approved for a PR and its target MINOR release. Every other\n"
             "module documented here may change in any release.\n")
     for package in public:
         names = ", ".join(f"`{name}`" for name in exported(package))

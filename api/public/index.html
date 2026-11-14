@@ -5896,7 +5896,8 @@
 <h1 id="public-api">Public API<a class="headerlink" href="#public-api" title="Permanent link">&para;</a></h1>
 <p>These names are the public API. Removing one, or changing it
 incompatibly, raises MINOR (see the changelog's Versioning section);
-a pull request that does so fails its <em>Public API</em> check.  Every other
+the <em>Public API</em> check reports every break and permits only exact
+changes explicitly approved for a PR and its target MINOR release. Every other
 module documented here may change in any release.</p>
 <h2 id="blackbull"><code>blackbull</code><a class="headerlink" href="#blackbull" title="Permanent link">&para;</a></h2>
 <p><code>BlackBull</code>, <code>serve</code>, <code>AppConfig</code>, <code>RouteInfo</code>, <code>HTTPException</code>, <code>UnprocessableQuery</code>, <code>QUERY</code>, <code>Connection</code>, <code>Headers</code>, <code>read_body</code>, <code>read_json</code>, <code>read_text</code>, <code>parse_cookies</code>, <code>cookies_from_headers</code>, <code>ClientDisconnected</code>, <code>Response</code>, <code>JSONResponse</code>, <code>RedirectResponse</code>, <code>StreamingResponse</code>, <code>EventSourceResponse</code>, <code>WebSocketResponse</code>, <code>cookie_header</code>, <code>WebSocket</code>, <code>WebSocketDisconnect</code>, <code>Depends</code>, <code>Event</code>, <code>EventHandler</code>, <code>ResponseStart</code>, <code>ResponseBody</code>, <code>parse_response_event</code>, <code>ASGIReceiveEvent</code>, <code>ASGISendEvent</code>, <code>ASGIReceiveCallable</code>, <code>ASGISendCallable</code>, <code>CORS</code>, <code>as_middleware</code>, <code>TrustedProxy</code>, <code>BlackBullDeprecationWarning</code>, <code>Listener</code>, <code>Tcp</code>, <code>Unix</code>, <code>InheritedFd</code></p>
