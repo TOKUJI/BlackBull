@@ -6365,6 +6365,10 @@ which question each knob answers:</p>
 </tbody>
 </table>
 <p>Reading it that way makes the gaps visible, and the gaps are the point.</p>
+<p>HTTP/2 server push is disabled by default (<code>BB_CLIENT_H2_ENABLE_PUSH=0</code>).
+The client has no API for consuming pushed responses. Setting it to <code>1</code>
+permits promises, but each promised stream is immediately cancelled and
+counts against <code>BB_FRAME_RATE_LIMIT</code>.</p>
 <h3 id="what-is-not-bounded">What is not bounded<a class="headerlink" href="#what-is-not-bounded" title="Permanent link">&para;</a></h3>
 <p>A client is not a server, and the defaults say so. <strong>A server bounds what
 strangers may push into your process; a client bounds what you went and asked

@@ -6437,8 +6437,8 @@ For failure types and buffered/streaming tradeoffs, see <a href="../../guide/cli
 </tr>
 <tr>
 <td><code>BB_CLIENT_H2_ENABLE_PUSH</code></td>
-<td><code>1</code></td>
-<td>HTTP/2 push policy. <code>1</code> accepts promises. <code>0</code> advertises ENABLE_PUSH=0 and, once acknowledged, refuses promises with connection PROTOCOL_ERROR. An accepted promise is reset at once (CANCEL) and counted against <code>BB_FRAME_RATE_LIMIT</code>, so pushing faster than that ends the connection. Promised blocks are always decoded (shared HPACK state). No push-consuming API is provided.</td>
+<td><code>0</code></td>
+<td>HTTP/2 push policy. Defaults to <code>0</code>: advertises ENABLE_PUSH=0 and, once acknowledged, refuses promises with connection PROTOCOL_ERROR. <code>1</code> permits promises but resets each promised stream at once (CANCEL), counted against <code>BB_FRAME_RATE_LIMIT</code>. Promised blocks are always decoded (shared HPACK state). No push-consuming API is provided.</td>
 </tr>
 </tbody>
 </table>
