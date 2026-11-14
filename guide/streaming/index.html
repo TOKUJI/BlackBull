@@ -6066,8 +6066,7 @@ stream.</p>
 — a caller-supplied <code>cache-control</code> or <code>content-type</code> takes
 precedence.</p>
 <h2 id="the-backpressure-model">The backpressure model<a class="headerlink" href="#the-backpressure-model" title="Permanent link">&para;</a></h2>
-<p>Streaming handlers fire one <code>await send({'type': 'http.response.body', ...})</code>
-per chunk.  Both HTTP/1.1 and HTTP/2 paths apply transport-level
+<p>Streaming handlers send one body chunk per <code>await send(...)</code>.  Both HTTP/1.1 and HTTP/2 paths apply transport-level
 backpressure inside that <code>await</code>, so a slow client never causes
 unbounded buffer growth in BlackBull.</p>
 <h3 id="http11">HTTP/1.1<a class="headerlink" href="#http11" title="Permanent link">&para;</a></h3>

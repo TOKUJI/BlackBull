@@ -5935,6 +5935,42 @@ pytest<span class="w"> </span>-W<span class="w"> </span>error::blackbull.BlackBu
 <td>no</td>
 <td>BLA-586</td>
 </tr>
+<tr>
+<td>BBD010</td>
+<td>sending ASGI event dicts from handlers and middleware</td>
+<td>Response or NativeResponse for HTTP; the WebSocket object or NativeWSMessage for WebSocket</td>
+<td>v0.83.0</td>
+<td>no earlier than 2027-12-01</td>
+<td>yes</td>
+<td>BLA-672</td>
+</tr>
+<tr>
+<td>BBD011</td>
+<td>reading ASGI event dicts from receive() in handlers and middleware</td>
+<td>conn.body(), conn.stream() or read_body(); the WebSocket object</td>
+<td>v0.83.0</td>
+<td>no earlier than 2027-12-01</td>
+<td>yes</td>
+<td>BLA-672</td>
+</tr>
+<tr>
+<td>BBD012</td>
+<td>as_middleware on a middleware whose first parameter is scope</td>
+<td>native (conn, receive, send, call_next) middleware; wrap the whole app for ASGI middleware</td>
+<td>v0.83.0</td>
+<td>no earlier than 2027-12-01</td>
+<td>yes</td>
+<td>BLA-672</td>
+</tr>
+<tr>
+<td>BBD013</td>
+<td>WebSocketResponse</td>
+<td>ws.send_text(), ws.send_bytes() or ws.send_json()</td>
+<td>v0.83.0</td>
+<td>no earlier than 2027-12-01</td>
+<td>yes</td>
+<td>BLA-672</td>
+</tr>
 </tbody>
 </table>
 <p>The table is generated from <code>blackbull/deprecations.py</code>; a test fails when

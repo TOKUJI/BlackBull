@@ -6382,15 +6382,13 @@ saving one round-trip.</p>
 <h3 id="triggering-a-push">Triggering a push<a class="headerlink" href="#triggering-a-push" title="Permanent link">&para;</a></h3>
 <p>Send a <code>NativeResponse(push=...)</code> before completing the parent response. ASGI apps may
 also send the equivalent <code>http.response.push</code> dictionary:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">Response</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
 
 <span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
     <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">NativeResponse</span><span class="p">(</span><span class="n">push</span><span class="o">=</span><span class="s1">'/static/style.css'</span><span class="p">))</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.start'</span><span class="p">,</span> <span class="s1">'status'</span><span class="p">:</span> <span class="mi">200</span><span class="p">,</span>
-                <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'text/html'</span><span class="p">)]})</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.body'</span><span class="p">,</span>
-                <span class="s1">'body'</span><span class="p">:</span> <span class="sa">b</span><span class="s1">'&lt;html&gt;...&lt;/html&gt;'</span><span class="p">})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">'&lt;html&gt;...&lt;/html&gt;'</span><span class="p">))</span>
 </code></pre></div>
 <p>For a push, <code>header</code> contains the promised request's headers:
 <code>NativeResponse(push='/static/style.css', header=[(b'accept', b'text/css')])</code>.

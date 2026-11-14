@@ -3682,6 +3682,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.native.DictReceive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DictReceive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.native.NativeResponse" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3826,10 +3837,54 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.native.WarnedDict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WarnedDict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.native.asgi_send_boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
         asgi_send_boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.raw_receive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        raw_receive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.report_dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        report_dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.warns_app_dicts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        warns_app_dicts
       
     </span>
   </a>
@@ -5921,6 +5976,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.native.DictReceive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DictReceive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.native.NativeResponse" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6065,10 +6131,54 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.native.WarnedDict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WarnedDict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.native.asgi_send_boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
         asgi_send_boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.raw_receive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        raw_receive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.report_dict" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        report_dict
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.warns_app_dicts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        warns_app_dicts
       
     </span>
   </a>
@@ -6138,6 +6248,53 @@ dictionaries only at conversion boundaries.</p>
 
 
 
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.native.DictReceive" class="doc doc-heading">
+            <code>DictReceive</code>
+
+
+<a href="#blackbull.native.DictReceive" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>The receive channel native code is handed: calling it warns once (BBD011).</p>
+<p>BlackBull's own readers take <code>raw</code> through <a class="autorefs autorefs-internal" title="raw_receive(receive)" href="#blackbull.native.raw_receive"><code>raw_receive</code></a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-class">
 
@@ -6474,12 +6631,61 @@ raw <code>(conn, receive, send)</code> compat surface — exactly like
 
 </div>
 
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.native.WarnedDict" class="doc doc-heading">
+            <code>WarnedDict</code>
+
+
+<a href="#blackbull.native.WarnedDict" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="dict">dict</span></code></p>
+
+
+
+        <p>An event dict already reported as BBD010 on its way out; later
+boundaries warn only for a plain <code>dict</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
 
 <div class="doc doc-object doc-function">
 
 
 <h3 id="blackbull.native.asgi_send_boundary" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">asgi_send_boundary</span><span class="p">(</span><span class="n">inner_send</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">asgi_send_boundary</span><span class="p">(</span><span class="n">inner_send</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">warn_dicts</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
 <a href="#blackbull.native.asgi_send_boundary" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -6488,7 +6694,62 @@ raw <code>(conn, receive, send)</code> compat surface — exactly like
 
         <p>Expand native HTTP/WebSocket messages to ASGI dictionaries at a boundary.</p>
 <p>Use for external hosts and scope-declared middleware. Pass already-ASGI
-values through unchanged.</p>
+values through unchanged; with <em>warn_dicts</em>, a dict passing through came
+from native code and warns (BBD010).</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.native.raw_receive" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">raw_receive</span><span class="p">(</span><span class="n">receive</span><span class="p">)</span></code>
+
+<a href="#blackbull.native.raw_receive" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The channel under a <a class="autorefs autorefs-internal" href="#blackbull.native.DictReceive"><code>DictReceive</code></a>, or <em>receive</em> itself.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.native.report_dict" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">report_dict</span><span class="p">(</span><span class="n">event</span><span class="p">)</span></code>
+
+<a href="#blackbull.native.report_dict" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Warn BBD010, at the sink's caller, for a plain dict not yet reported.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="blackbull.native.warns_app_dicts" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">warns_app_dicts</span><span class="p">(</span><span class="n">app</span><span class="p">)</span></code>
+
+<a href="#blackbull.native.warns_app_dicts" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Whether a dict from <em>app</em> is native code using the deprecated dict API.</p>
 
 
     </div>

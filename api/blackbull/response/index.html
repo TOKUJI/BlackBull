@@ -6396,7 +6396,7 @@ any field, when the NativeResponse carrying it is built.</p>
 
 
 <h3 id="blackbull.response.wrap_native_send" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">wrap_native_send</span><span class="p">(</span><span class="n">raw_send</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">wrap_native_send</span><span class="p">(</span><span class="n">raw_send</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">warn_dicts</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
 
 <a href="#blackbull.response.wrap_native_send" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -6405,8 +6405,9 @@ any field, when the NativeResponse carrying it is built.</p>
 
         <p>Normalize handler and middleware emissions to native HTTP messages.</p>
 <p>Response objects and the <code>(bytes, status, headers)</code> form become a
-<code>NativeResponse</code>. Streaming responses use the same per-event converter
-as ASGI dictionaries. Unknown events and native messages pass through.</p>
+<code>NativeResponse</code>. HTTP event dicts are converted too; with <em>warn_dicts</em>,
+every plain dict warns (BBD010). Unknown events, WebSocket dicts and
+native messages pass through.</p>
 
 
     </div>

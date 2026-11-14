@@ -6436,7 +6436,7 @@ params and <code>body</code>:</p>
 <code>body: bytes</code> (or a dataclass body parameter) receives the same
 cached bytes — the body is never read twice.  Handlers that don't
 declare a <code>Connection</code> pay nothing: injection is decided when the route
-is registered, and the raw <code>(scope, receive, send)</code> form is
+is registered, and the full <code>(conn, receive, send)</code> form is
 unaffected.</p>
 <div class="admonition warning">
 <p class="admonition-title"><code>Request</code> is deprecated — use <code>Connection</code> (since v0.60.0)</p>
@@ -6486,10 +6486,9 @@ streaming bodies chunk by chunk.</p>
 returns a single <code>bytes</code> object.  The stream is consumed — call
 at most once per request (typically inside a middleware, not the
 handler itself).</p>
-<p>For streaming uploads, call <code>receive()</code> directly — each call
-returns one chunk with <code>more_body=True</code> until the final chunk
-arrives with <code>more_body=False</code>.  <code>read_body</code> is a convenience
-wrapper that buffers all chunks before returning.</p>
+<p>For streaming uploads, iterate <code>conn.stream()</code>: it yields one chunk at a
+time, where <code>read_body</code> buffers them all.  Reading <code>receive()</code> directly is
+deprecated (<a href="../../reference/deprecations/">BBD011</a>).</p>
 <h3 id="the-body-has-a-ceiling-and-it-is-not-the-handlers-job">The body has a ceiling, and it is not the handler's job<a class="headerlink" href="#the-body-has-a-ceiling-and-it-is-not-the-handlers-job" title="Permanent link">&para;</a></h3>
 <p>Two limits apply before your handler sees a byte, on HTTP/1.1 and
 HTTP/2 alike:</p>
@@ -6507,7 +6506,7 @@ HTTP/2 alike:</p>
 decision back to the application.  Both are documented in full under
 <a href="../../reference/env-vars/">environment variables</a>.</p>
 <p>A handler <em>can</em> still see a 413: when a chunked HTTP/1.1 body crosses
-the cap mid-stream, <code>receive()</code> raises <code>HTTPException(413)</code>, which the
+the cap mid-stream, reading the body raises <code>HTTPException(413)</code>, which the
 dispatcher answers like any other status-carrying error — so an
 <code>@app.on_error(413)</code> handler is honoured.</p>
 <h3 id="noticing-that-the-client-left">Noticing that the client left<a class="headerlink" href="#noticing-that-the-client-left" title="Permanent link">&para;</a></h3>
@@ -6522,7 +6521,7 @@ worth checking in a loop whose result nobody is waiting for any more:</p>
         <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
     <span class="k">return</span> <span class="p">{</span><span class="s1">'rows'</span><span class="p">:</span> <span class="n">rows</span><span class="p">}</span>
 </code></pre></div>
-<p>The flag goes true when the <em>server</em> notices — at the next <code>receive()</code> — not
+<p>The flag goes true when the <em>server</em> notices — at the next body read — not
 the instant the peer's FIN arrives, so a handler that never reads the body
 and never streams will not see it change.  For a push-style notification
 instead of a poll, use the
@@ -6822,37 +6821,25 @@ raise <code>ValueError</code>.</p>
 <p>Signature: <code>cookie_header(name, value, path='/', http_only=True)</code>.</p>
 <h2 id="http-trailers">HTTP trailers<a class="headerlink" href="#http-trailers" title="Permanent link">&para;</a></h2>
 <p>HTTP/1.1 chunked responses can carry trailing headers after the
-body.  Use the <code>http.response.trailers</code> event after the last
-<code>http.response.body</code> chunk:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/chunked'</span><span class="p">)</span>
+body.  Send them as a <code>NativeResponse</code> with <code>trailers</code> after the last body:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.native</span><span class="w"> </span><span class="kn">import</span> <span class="n">NativeResponse</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/chunked'</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">chunked</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
-        <span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.start'</span><span class="p">,</span>
-        <span class="s1">'status'</span><span class="p">:</span> <span class="mi">200</span><span class="p">,</span>
-        <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[</span>
-            <span class="p">(</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">,</span>      <span class="sa">b</span><span class="s1">'text/plain'</span><span class="p">),</span>
-            <span class="p">(</span><span class="sa">b</span><span class="s1">'trailer'</span><span class="p">,</span>           <span class="sa">b</span><span class="s1">'x-checksum'</span><span class="p">),</span>
-        <span class="p">],</span>
-        <span class="s1">'trailers'</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
-    <span class="p">})</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
-        <span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.body'</span><span class="p">,</span>
-        <span class="s1">'body'</span><span class="p">:</span> <span class="sa">b</span><span class="s1">'chunk data here'</span><span class="p">,</span>
-        <span class="s1">'more_body'</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
-    <span class="p">})</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
-        <span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.trailers'</span><span class="p">,</span>
-        <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[(</span><span class="sa">b</span><span class="s1">'x-checksum'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'abc123'</span><span class="p">)],</span>
-        <span class="s1">'more_trailers'</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
-    <span class="p">})</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">NativeResponse</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="p">[</span>
+        <span class="p">(</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'text/plain'</span><span class="p">),</span>
+        <span class="p">(</span><span class="sa">b</span><span class="s1">'trailer'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'x-checksum'</span><span class="p">),</span>
+    <span class="p">],</span> <span class="n">expects_trailers</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">NativeResponse</span><span class="p">(</span><span class="n">body</span><span class="o">=</span><span class="sa">b</span><span class="s1">'chunk data here'</span><span class="p">))</span>
+    <span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">NativeResponse</span><span class="p">(</span><span class="n">trailers</span><span class="o">=</span><span class="p">[(</span><span class="sa">b</span><span class="s1">'x-checksum'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'abc123'</span><span class="p">)]))</span>
 </code></pre></div>
-<p><code>trailers=True</code> transfers response-completion ownership from the last body
-event to the last trailer event.  BlackBull selects HTTP/1.1 chunked framing,
+<p><code>expects_trailers=True</code> transfers response-completion ownership from the last
+body to the last trailer section.  BlackBull selects HTTP/1.1 chunked framing,
 ignores a supplied <code>Content-Length</code>, and writes the zero chunk only when the
 trailer section begins; HTTP/2 keeps the length, and the content must match
 it.  A trailer section with no body event before it ends an empty body behind
-the head.  To split a trailer section across events, set
-<code>more_trailers=True</code> on every event except the last.  HTTP/2 collects those
+the head.  To split a trailer section across sends, set
+<code>more_trailers=True</code> on every one except the last.  HTTP/2 collects those
 parts into one trailing HEADERS block carrying <code>END_STREAM</code>.</p>
 <p>HEAD responses never carry content or a trailer section.  The response is
 complete after its header section even if the application declared trailers;
@@ -6872,15 +6859,15 @@ not carry a field RFC 9110 §6.5.1 prohibits (framing, routing,
 authentication, content handling).  A violation answers 400 on HTTP/1.1 and
 resets the stream (<code>PROTOCOL_ERROR</code>) on HTTP/2.</p>
 <h2 id="websocket-frames">WebSocket frames<a class="headerlink" href="#websocket-frames" title="Permanent link">&para;</a></h2>
-<p>For WebSocket routes (<code>scheme=Scheme.websocket</code>), use
-<code>WebSocketResponse</code> to dispatch on payload type automatically:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">WebSocketResponse</span>
-
-<span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">WebSocketResponse</span><span class="p">(</span><span class="s1">'hello'</span><span class="p">))</span>           <span class="c1"># str  → text frame</span>
-<span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">WebSocketResponse</span><span class="p">(</span><span class="sa">b</span><span class="s1">'</span><span class="se">\x00\x01</span><span class="s1">'</span><span class="p">))</span>       <span class="c1"># bytes → binary frame</span>
-<span class="k">await</span> <span class="n">send</span><span class="p">(</span><span class="n">WebSocketResponse</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'msg'</span><span class="p">}))</span>   <span class="c1"># other → JSON-serialised text frame</span>
+<p>For WebSocket routes (<code>scheme=Scheme.websocket</code>), the <code>WebSocket</code> object
+picks the frame type:</p>
+<div class="highlight"><pre><span></span><code><span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_text</span><span class="p">(</span><span class="s1">'hello'</span><span class="p">)</span>            <span class="c1"># text frame</span>
+<span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_bytes</span><span class="p">(</span><span class="sa">b</span><span class="s1">'</span><span class="se">\x00\x01</span><span class="s1">'</span><span class="p">)</span>       <span class="c1"># binary frame</span>
+<span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">send_json</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'msg'</span><span class="p">})</span>    <span class="c1"># JSON-serialised text frame</span>
 </code></pre></div>
-<p>See <a href="../websockets/">WebSockets</a> for the full WebSocket surface.</p>
+<p><code>WebSocketResponse</code>, which built the equivalent event dict, is deprecated
+(<a href="../../reference/deprecations/">BBD013</a>).  See <a href="../websockets/">WebSockets</a>
+for the full WebSocket surface.</p>
 <h2 id="streaming-responses">Streaming responses<a class="headerlink" href="#streaming-responses" title="Permanent link">&para;</a></h2>
 <p>Use <code>StreamingResponse</code> to push an async generator to the client
 without buffering the whole body in memory.  The class calls
@@ -6945,10 +6932,9 @@ world\r\n
 \r\n
 </code></pre></div>
 <p>The terminal <code>0\r\n\r\n</code> is written automatically when
-<code>more_body=False</code> arrives.  When <code>trailers=True</code> was set in
-<code>http.response.start</code>, the final body event remains unterminated and the last
-<code>http.response.trailers</code> event writes <code>0\r\n</code>, the trailer fields, and the
-final blank line.</p>
+<code>more_body=False</code> arrives.  When the head set <code>expects_trailers=True</code>, the
+final body remains unterminated and the last trailer section writes <code>0\r\n</code>,
+the trailer fields, and the final blank line.</p>
 <p>A stream with a valid <code>Content-Length</code> keeps that single field and sends raw
 body bytes rather than chunk syntax.  BlackBull checks the accumulated body
 size: crossing the declared boundary or ending short raises an error and the
@@ -6966,35 +6952,24 @@ body is a complete response. If changing payload length, update or remove
 Content-Length before sending the head. See <a href="../middleware/">Middleware</a> for
 native and ASGI send shapes.</p>
 <h2 id="detecting-client-disconnection">Detecting client disconnection<a class="headerlink" href="#detecting-client-disconnection" title="Permanent link">&para;</a></h2>
-<p>When the remote side closes the connection, <code>receive()</code> returns
-<code>{'type': 'http.disconnect'}</code>.  This is useful for long-polling
-and server-sent events (SSE) — your handler can check whether
-the client is still there before writing more.</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/events'</span><span class="p">)</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">sse</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">):</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
-        <span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.start'</span><span class="p">,</span>
-        <span class="s1">'status'</span><span class="p">:</span> <span class="mi">200</span><span class="p">,</span>
-        <span class="s1">'headers'</span><span class="p">:</span> <span class="p">[</span>
-            <span class="p">(</span><span class="sa">b</span><span class="s1">'content-type'</span><span class="p">,</span>  <span class="sa">b</span><span class="s1">'text/event-stream'</span><span class="p">),</span>
-            <span class="p">(</span><span class="sa">b</span><span class="s1">'cache-control'</span><span class="p">,</span> <span class="sa">b</span><span class="s1">'no-cache'</span><span class="p">),</span>
-        <span class="p">],</span>
-    <span class="p">})</span>
-    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
-        <span class="n">event</span> <span class="o">=</span> <span class="k">await</span> <span class="n">receive</span><span class="p">()</span>
-        <span class="k">if</span> <span class="n">event</span><span class="p">[</span><span class="s1">'type'</span><span class="p">]</span> <span class="o">==</span> <span class="s1">'http.disconnect'</span><span class="p">:</span>
-            <span class="k">break</span>
-        <span class="k">await</span> <span class="n">send</span><span class="p">({</span>
-            <span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.body'</span><span class="p">,</span>
-            <span class="s1">'body'</span><span class="p">:</span> <span class="sa">b</span><span class="s1">'data: ping</span><span class="se">\n\n</span><span class="s1">'</span><span class="p">,</span>
-            <span class="s1">'more_body'</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
-        <span class="p">})</span>
-    <span class="k">await</span> <span class="n">send</span><span class="p">({</span><span class="s1">'type'</span><span class="p">:</span> <span class="s1">'http.response.body'</span><span class="p">,</span> <span class="s1">'body'</span><span class="p">:</span> <span class="sa">b</span><span class="s1">''</span><span class="p">,</span> <span class="s1">'more_body'</span><span class="p">:</span> <span class="kc">False</span><span class="p">})</span>
+<p>Once a write finds the client gone, the next <code>send</code> raises
+<code>ClientDisconnected</code>.  A <code>StreamingResponse</code> or <code>EventSourceResponse</code> stops
+there and closes its generator, so its <code>finally</code> runs:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">EventSourceResponse</span>
+
+<span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/events'</span><span class="p">)</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">sse</span><span class="p">(</span><span class="n">conn</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">pings</span><span class="p">():</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+                <span class="k">yield</span> <span class="s1">'ping'</span>
+                <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="n">release_subscription</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">EventSourceResponse</span><span class="p">(</span><span class="n">pings</span><span class="p">())</span>
 </code></pre></div>
-<p>For most streaming use cases, prefer <code>StreamingResponse</code> (above)
-— it wraps an async generator and emits <code>more_body=True</code> on every
-chunk automatically.  The raw event pattern is convenient when
-each chunk needs custom shaping (e.g. SSE event framing).</p>
+<p>Work that does not send can poll <code>conn.disconnected</code>, which turns true once
+the server notices the peer has left.</p>
 <p>Passing <code>Response(b'')</code> to <code>send</code> ends the connection immediately
 with <code>Content-Length: 0</code> and cannot be followed by additional
 chunks.</p>

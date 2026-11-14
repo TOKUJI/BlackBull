@@ -6566,11 +6566,9 @@ owns.</p>
 response has been fully sent.  <strong>Mutually exclusive</strong> with
 <code>request_completed</code>: a request that disconnected does not also
 fire <code>request_completed</code>.</p>
-<p>The event fires when the server detects the disconnect via the
-application's <code>receive()</code> call — specifically when <code>receive()</code>
-returns <code>{'type': 'http.disconnect'}</code>.  Long-polling or SSE
-handlers that call <code>receive()</code> to watch for disconnect trigger
-this event the moment the client closes.</p>
+<p>The event fires when a read of the request body (<code>conn.body()</code>,
+<code>conn.stream()</code>, or the deprecated direct <code>receive()</code>) finds the
+client gone.</p>
 <p>For HTTP/2, when the underlying TCP connection closes while
 streams are still in flight (the common case for SSE), the
 framework injects an <code>http.disconnect</code> event into every active

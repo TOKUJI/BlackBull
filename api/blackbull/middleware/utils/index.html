@@ -5867,7 +5867,8 @@ are introduced only at compatibility boundaries, never raw Response objects.</p>
         <p>Decorate a function or class with (conn, receive, send, call_next) middleware.</p>
 <p>Normalize downstream HTTP sends to NativeResponse before the middleware's
 send wrapper. A first request parameter named scope opts into ASGI scope
-and event dictionaries at both edges, including WebSocket events.
+and event dictionaries at both edges, including WebSocket events; that
+form is deprecated (BBD012).
 Omit the decorator to handle raw downstream send arguments.</p>
 
 

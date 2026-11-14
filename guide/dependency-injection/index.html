@@ -5873,7 +5873,7 @@ the response has been sent.</p>
     <span class="k">return</span> <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">fetch_item</span><span class="p">(</span><span class="nb">id</span><span class="p">)</span>
 </code></pre></div>
 <p>Use <code>Depends(provider)</code> as the parameter's <strong>default value</strong>.  Simplified
-handlers only — middleware and full <code>(scope, receive, send)</code> handlers are
+handlers only — middleware and full <code>(conn, receive, send)</code> handlers are
 unchanged, the same rule as every other simplified-model feature.</p>
 <h2 id="provider-forms">Provider forms<a class="headerlink" href="#provider-forms" title="Permanent link">&para;</a></h2>
 <table>
