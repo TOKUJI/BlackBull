@@ -199,7 +199,8 @@ class TestDefaultErrorHandler:
         assert b'Not Found' in send.body
 
     @pytest.mark.asyncio
-    async def test_default_handler_includes_exception_info(self):
+    async def test_default_handler_includes_exception_info(self, monkeypatch):
+        monkeypatch.setenv('BLACKBULL_ENV', 'development')
         scope = _make_scope()
         exc = ValueError("something went wrong")
         scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
@@ -233,55 +234,41 @@ class TestDevErrorPageTraceback:
         raise RuntimeError("kaboom")
 
     @pytest.mark.asyncio
-    async def test_dev_plain_text_includes_traceback(self):
-        from blackbull.env import reset_settings_cache
-        import os
-        os.environ['BLACKBULL_ENV'] = 'development'
-        reset_settings_cache()
+    async def test_dev_plain_text_includes_traceback(self, monkeypatch):
+        monkeypatch.setenv('BLACKBULL_ENV', 'development')
         try:
-            try:
-                self._raise()
-            except RuntimeError as e:
-                exc = e
-            scope = _make_scope()
-            scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
-            scope.state['error_exception'] = exc
-            send = _CaptureSend()
-            await _default_error_handler(scope, None, send)
-            assert send.status == 500
-            # Traceback frames are present, not just class/message.
-            assert b'Traceback' in send.body
-            assert b'kaboom' in send.body
-            assert b'_raise' in send.body
-        finally:
-            os.environ.pop('BLACKBULL_ENV', None)
-            reset_settings_cache()
+            self._raise()
+        except RuntimeError as e:
+            exc = e
+        scope = _make_scope()
+        scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
+        scope.state['error_exception'] = exc
+        send = _CaptureSend()
+        await _default_error_handler(scope, None, send)
+        assert send.status == 500
+        # Traceback frames are present, not just class/message.
+        assert b'Traceback' in send.body
+        assert b'kaboom' in send.body
+        assert b'_raise' in send.body
 
     @pytest.mark.asyncio
-    async def test_dev_html_for_browser_accept(self):
-        from blackbull.env import reset_settings_cache
-        import os
-        os.environ['BLACKBULL_ENV'] = 'development'
-        reset_settings_cache()
+    async def test_dev_html_for_browser_accept(self, monkeypatch):
+        monkeypatch.setenv('BLACKBULL_ENV', 'development')
         try:
-            try:
-                self._raise()
-            except RuntimeError as e:
-                exc = e
-            scope = _make_scope()
-            scope.headers = Headers([(b'accept', b'text/html,application/xhtml+xml')])
-            scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
-            scope.state['error_exception'] = exc
-            send = _CaptureSend()
-            await _default_error_handler(scope, None, send)
-            start = next(e for e in send.events if e['type'] == 'http.response.start')
-            ctype = dict(start['headers']).get(b'content-type', b'')
-            assert b'text/html' in ctype
-            assert b'<pre>' in send.body
-            assert b'RuntimeError' in send.body
-        finally:
-            os.environ.pop('BLACKBULL_ENV', None)
-            reset_settings_cache()
+            self._raise()
+        except RuntimeError as e:
+            exc = e
+        scope = _make_scope()
+        scope.headers = Headers([(b'accept', b'text/html,application/xhtml+xml')])
+        scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
+        scope.state['error_exception'] = exc
+        send = _CaptureSend()
+        await _default_error_handler(scope, None, send)
+        start = next(e for e in send.events if e['type'] == 'http.response.start')
+        ctype = dict(start['headers']).get(b'content-type', b'')
+        assert b'text/html' in ctype
+        assert b'<pre>' in send.body
+        assert b'RuntimeError' in send.body
 
 
 class TestDevClientErrorPage:
@@ -301,73 +288,53 @@ class TestDevClientErrorPage:
             return e
 
     @pytest.mark.asyncio
-    async def test_dev_4xx_shows_detail_but_no_traceback(self):
-        from blackbull.env import reset_settings_cache
-        import os
-        os.environ['BLACKBULL_ENV'] = 'development'
-        reset_settings_cache()
-        try:
-            exc = self._client_error()
-            scope = _make_scope()
-            scope.state['error_status'] = HTTPStatus.BAD_REQUEST
-            scope.state['error_exception'] = exc
-            send = _CaptureSend()
-            await _default_error_handler(scope, None, send)
-            assert send.status == 400
-            # The actionable diagnosis stays…
-            assert b'Bad Request' in send.body
-            assert b"missing required query parameter 'q'" in send.body
-            # …the server-internals noise goes.
-            assert b'Traceback' not in send.body
-            assert b'File "' not in send.body
-        finally:
-            os.environ.pop('BLACKBULL_ENV', None)
-            reset_settings_cache()
+    async def test_dev_4xx_shows_detail_but_no_traceback(self, monkeypatch):
+        monkeypatch.setenv('BLACKBULL_ENV', 'development')
+        exc = self._client_error()
+        scope = _make_scope()
+        scope.state['error_status'] = HTTPStatus.BAD_REQUEST
+        scope.state['error_exception'] = exc
+        send = _CaptureSend()
+        await _default_error_handler(scope, None, send)
+        assert send.status == 400
+        # The actionable diagnosis stays…
+        assert b'Bad Request' in send.body
+        assert b"missing required query parameter 'q'" in send.body
+        # …the server-internals noise goes.
+        assert b'Traceback' not in send.body
+        assert b'File "' not in send.body
 
     @pytest.mark.asyncio
-    async def test_dev_4xx_html_shows_detail_but_no_traceback(self):
-        from blackbull.env import reset_settings_cache
-        import os
-        os.environ['BLACKBULL_ENV'] = 'development'
-        reset_settings_cache()
-        try:
-            exc = self._client_error()
-            scope = _make_scope()
-            scope.headers = Headers([(b'accept', b'text/html,application/xhtml+xml')])
-            scope.state['error_status'] = HTTPStatus.BAD_REQUEST
-            scope.state['error_exception'] = exc
-            send = _CaptureSend()
-            await _default_error_handler(scope, None, send)
-            assert b"missing required query parameter" in send.body
-            assert b'<pre>' not in send.body       # the traceback block
-            assert b'Traceback' not in send.body
-        finally:
-            os.environ.pop('BLACKBULL_ENV', None)
-            reset_settings_cache()
+    async def test_dev_4xx_html_shows_detail_but_no_traceback(self, monkeypatch):
+        monkeypatch.setenv('BLACKBULL_ENV', 'development')
+        exc = self._client_error()
+        scope = _make_scope()
+        scope.headers = Headers([(b'accept', b'text/html,application/xhtml+xml')])
+        scope.state['error_status'] = HTTPStatus.BAD_REQUEST
+        scope.state['error_exception'] = exc
+        send = _CaptureSend()
+        await _default_error_handler(scope, None, send)
+        assert b"missing required query parameter" in send.body
+        assert b'<pre>' not in send.body       # the traceback block
+        assert b'Traceback' not in send.body
 
     @pytest.mark.asyncio
-    async def test_dev_5xx_httpexception_keeps_traceback(self):
+    async def test_dev_5xx_httpexception_keeps_traceback(self, monkeypatch):
         from blackbull.env import reset_settings_cache
         from blackbull.router import HTTPException
-        import os
-        os.environ['BLACKBULL_ENV'] = 'development'
-        reset_settings_cache()
+        monkeypatch.setenv('BLACKBULL_ENV', 'development')
         try:
-            try:
-                raise HTTPException(HTTPStatus.BAD_GATEWAY, 'upstream died')
-            except HTTPException as e:
-                exc = e
-            scope = _make_scope()
-            scope.state['error_status'] = HTTPStatus.BAD_GATEWAY
-            scope.state['error_exception'] = exc
-            send = _CaptureSend()
-            await _default_error_handler(scope, None, send)
-            assert send.status == 502
-            assert b'Traceback' in send.body
-            assert b'upstream died' in send.body
-        finally:
-            os.environ.pop('BLACKBULL_ENV', None)
-            reset_settings_cache()
+            raise HTTPException(HTTPStatus.BAD_GATEWAY, 'upstream died')
+        except HTTPException as e:
+            exc = e
+        scope = _make_scope()
+        scope.state['error_status'] = HTTPStatus.BAD_GATEWAY
+        scope.state['error_exception'] = exc
+        send = _CaptureSend()
+        await _default_error_handler(scope, None, send)
+        assert send.status == 502
+        assert b'Traceback' in send.body
+        assert b'upstream died' in send.body
 
 
 class TestDevDetailOnlyForLocalPeer:
@@ -449,26 +416,19 @@ class TestProductionErrorPage:
     message is leaked to the network."""
 
     @pytest.mark.asyncio
-    async def test_prod_omits_exception_details(self):
-        from blackbull.env import reset_settings_cache
-        import os
-        os.environ['BLACKBULL_ENV'] = 'production'
-        reset_settings_cache()
-        try:
-            exc = ValueError("secret-internal-detail")
-            scope = _make_scope()
-            scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
-            scope.state['error_exception'] = exc
-            send = _CaptureSend()
-            await _default_error_handler(scope, None, send)
-            assert send.status == 500
-            assert b'Internal Server Error' in send.body
-            assert b'ValueError' not in send.body
-            assert b'secret-internal-detail' not in send.body
-            assert b'Traceback' not in send.body
-        finally:
-            os.environ.pop('BLACKBULL_ENV', None)
-            reset_settings_cache()
+    async def test_prod_omits_exception_details(self, monkeypatch):
+        monkeypatch.setenv('BLACKBULL_ENV', 'production')
+        exc = ValueError("secret-internal-detail")
+        scope = _make_scope()
+        scope.state['error_status'] = HTTPStatus.INTERNAL_SERVER_ERROR
+        scope.state['error_exception'] = exc
+        send = _CaptureSend()
+        await _default_error_handler(scope, None, send)
+        assert send.status == 500
+        assert b'Internal Server Error' in send.body
+        assert b'ValueError' not in send.body
+        assert b'secret-internal-detail' not in send.body
+        assert b'Traceback' not in send.body
 
 
 class TestBlackBullErrorDispatch:

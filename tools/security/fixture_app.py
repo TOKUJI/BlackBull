@@ -10,11 +10,16 @@ committed); ``--health`` is the recipe's two-lane health oracle.
 from dataclasses import dataclass
 import gzip
 from http import HTTPStatus
+import os
 from pathlib import Path
 import shutil
 import ssl
 import sys
 from urllib.parse import parse_qs
+
+# Before blackbull caches settings: the probe targets development behaviour,
+# and an unset BLACKBULL_ENV (production) turns StaticFiles off.
+os.environ.setdefault('BLACKBULL_ENV', 'development')
 
 if __package__ in (None, ''):
     # By-path invocation: the project is non-packaged (see pyproject.toml),

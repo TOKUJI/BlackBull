@@ -16,7 +16,7 @@ would have meant five.
 
 Run::
 
-    python examples/fault_injection.py
+    BLACKBULL_ENV=test python examples/fault_injection.py
 
 Cells B and C need a real third-party client and TLS::
 

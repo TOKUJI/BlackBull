@@ -118,8 +118,8 @@ report a pass while exercising the keep-alive path.
 * **WebSocket** has none in either direction.
 
 This module is an opt-in testing instrument.  It refuses to start in a
-production context (`BLACKBULL_ENV=production`, or `BB_PRODUCTION` as an
-explicit override) so the deliberate-misbehaviour code path cannot
+production context (`BLACKBULL_ENV` unset or `production`, or
+`BB_PRODUCTION` as an explicit override; run it with `BLACKBULL_ENV=test`) so the deliberate-misbehaviour code path cannot
 accidentally fire on a production deployment, and both fault servers
 refuse a non-loopback bind without `allow_remote=True`.
 
@@ -469,7 +469,7 @@ with a deprecation warning until their removal
 Two locks ensure the deliberate-misbehaviour code path is unreachable
 from a production process:
 
-1. `BB_PRODUCTION=1` (or `BLACKBULL_ENV=production`) in the environment
+1. `BB_PRODUCTION=1`, or `BLACKBULL_ENV` unset or `production`, in the environment
    causes the constructor of `H2FaultServer` and of `H1FaultServer` to
    raise.
 2. Binding to a non-localhost interface raises unless

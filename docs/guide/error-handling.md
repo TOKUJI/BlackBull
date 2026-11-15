@@ -16,10 +16,10 @@ them with `@app.on_error(...)`.
 The default handler adapts its body to the `BLACKBULL_ENV`
 environment variable, the request's peer, and its `Accept` header.
 
-### `development` (default)
+### `development`
 
 ```bash
-# BLACKBULL_ENV=development  (or unset — development is the default)
+BLACKBULL_ENV=development python myapp.py
 ```
 
 The detail below is shown only to a loopback peer (`127.0.0.0/8`,
@@ -28,7 +28,7 @@ header; the in-process test clients count as local.  Any other
 client, including one reached over a Unix socket, gets the
 `production` body.  A same-host relay that adds neither
 header (a TCP-mode TLS terminator, an SSH tunnel, a sidecar) makes
-every client look local, so set `BLACKBULL_ENV=production` on any
+every client look local, so never set `development` on a
 deployment.
 
 For 500 errors with an exception:
@@ -55,11 +55,10 @@ omits the Python traceback.  The frames would only show framework
 internals; the detail line is the actionable part.  5xx
 `HTTPException`s and unexpected exceptions keep the full traceback.
 
-### `production`
+### `production` (default)
 
-```bash
-BLACKBULL_ENV=production python myapp.py
-```
+Unset, `production`, or an unrecognised value (which also logs a
+warning).
 
 Terse output — status code + phrase only.  Exception class and
 message are **not** leaked to the network.  Browsers get a

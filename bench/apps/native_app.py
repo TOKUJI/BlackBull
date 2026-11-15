@@ -8,6 +8,9 @@ Loaded by BlackBull's own server:
 """
 import os
 from http import HTTPMethod
+
+# Before blackbull caches settings: StaticFiles (PEER_MW=httparena) is off in production.
+os.environ.setdefault("BLACKBULL_ENV", "development")
 from urllib.parse import parse_qs
 
 from blackbull import BlackBull, Connection, Response
