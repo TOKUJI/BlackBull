@@ -384,54 +384,58 @@ class BlackBull(EventHooks):
             )
             await self(fresh, _receive, _send)
 
+    async def _lifespan_startup(self) -> None:
+        """Validate middleware and routes, then fire ``app_startup``; raise, logged, on failure."""
+        if _DEBUG:
+            self._logger.debug('lifespan startup')
+        mw_errors = [
+            f"Global middleware {mw!r} has no 'call_next' parameter"
+            for mw in self._global_middlewares
+            if not has_middleware_param(mw)
+        ]
+        if mw_errors:
+            exc = ConfigurationError('\n'.join(mw_errors))
+            self._logger.error('Middleware configuration error:\n%s', exc)
+            raise exc
+        try:
+            self._router.validate()
+        except ConfigurationError as exc:
+            self._logger.error('Route configuration error:\n%s', exc)
+            raise
+        try:
+            await self._dispatcher.emit(Event('app_startup'))
+        except Exception:
+            self._logger.error('app_startup hook failed:\n%s', traceback.format_exc())
+            raise
+
+    async def _lifespan_shutdown(self) -> None:
+        """Fire ``app_shutdown`` and close the dispatcher; raise, logged, on failure."""
+        if _DEBUG:
+            self._logger.debug('lifespan shutdown')
+        try:
+            await self._dispatcher.emit(Event('app_shutdown'))
+            await self._dispatcher.aclose()
+        except Exception:
+            self._logger.error('app_shutdown hook failed:\n%s', traceback.format_exc())
+            raise
+
     async def _handle_lifespan(self, receive, send):
-        # Driven entirely by ``receive``/``send``: the lifespan scope itself is
-        # unused, so ``__call__`` does not pass it.
+        """The ASGI lifespan protocol over the native hooks, for an external host."""
         while True:
             event = await receive()
             if event['type'] == 'lifespan.startup':
-                if _DEBUG:
-                    self._logger.debug('lifespan startup')
-                mw_errors = [
-                    f"Global middleware {mw!r} has no 'call_next' parameter"
-                    for mw in self._global_middlewares
-                    if not has_middleware_param(mw)
-                ]
-                if mw_errors:
-                    exc = ConfigurationError('\n'.join(mw_errors))
-                    self._logger.error('Middleware configuration error:\n%s', exc)
-                    await send({'type': 'lifespan.startup.failed', 'message': str(exc)})
-                    return
                 try:
-                    self._router.validate()
-                except ConfigurationError as exc:
-                    self._logger.error('Route configuration error:\n%s', exc)
-                    await send({'type': 'lifespan.startup.failed', 'message': str(exc)})
-                    return
-                try:
-                    await self._dispatcher.emit(Event('app_startup'))
+                    await self._lifespan_startup()
                 except Exception as exc:
-                    # A raising hook must answer with lifespan.*.failed rather
-                    # than unwind the task: an unacked startup leaves
-                    # LifespanManager.__aenter__ blocked forever, and .failed
-                    # is the signal external hosts act on.
-                    self._logger.error('app_startup hook failed:\n%s',
-                                       traceback.format_exc())
+                    # Answer, don't unwind: .failed is the signal hosts act on.
                     await send({'type': 'lifespan.startup.failed', 'message': str(exc)})
                     return
                 await send({'type': 'lifespan.startup.complete'})
             elif event['type'] == 'lifespan.shutdown':
-                if _DEBUG:
-                    self._logger.debug('lifespan shutdown')
                 try:
-                    await self._dispatcher.emit(Event('app_shutdown'))
-                    await self._dispatcher.aclose()
+                    await self._lifespan_shutdown()
                 except Exception as exc:
-                    # Answer, don't unwind — see the startup arm above.
-                    self._logger.error('app_shutdown hook failed:\n%s',
-                                       traceback.format_exc())
-                    await send({'type': 'lifespan.shutdown.failed',
-                                'message': str(exc)})
+                    await send({'type': 'lifespan.shutdown.failed', 'message': str(exc)})
                     return
                 await send({'type': 'lifespan.shutdown.complete'})
                 return

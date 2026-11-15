@@ -14,6 +14,7 @@ from dataclasses import replace
 from functools import partial
 from pathlib import Path
 import time
+import warnings
 
 from .._cleanup import combine_cleanup_errors
 from ..protocol.rsock import (
@@ -28,7 +29,6 @@ from .connection_protocol import ConnectionProtocol
 from .sender import AsyncioWriter, TLSWriter
 from .recipient import (_HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
 from .cap_log import CapHitCounter, log_cap_hit
-from ..asgi import ASGIEvent
 from ..env import FD_RESERVE, DerivedCap, get_settings
 from ..utils import _EAGER_TASKS, create_eager_task
 logger = logging.getLogger(__name__)
@@ -526,117 +526,88 @@ class _StartupAbandoned(Exception):
     """A stop arrived before the application answered startup.  Not a failure."""
 
 
-class LifespanManager:
-    """Drive ASGI startup and shutdown, raising RuntimeError on reported failure.
+def _lifespan_owner(app):
+    """What runs *app*'s startup and shutdown: *app* or what it wraps, else None."""
+    while app is not None:
+        if hasattr(app, '_lifespan_startup'):
+            return app
+        app = getattr(app, '__wrapped__', None)
+    return None
 
-    Startup and shutdown may be called separately; keep the lifespan task owned
-    until shutdown completes.
+
+class LifespanManager:
+    """Run the app's native startup and shutdown hooks; a failure raises RuntimeError.
+
+    Startup and shutdown may be called separately.  An app without hooks (also
+    through ``__wrapped__``) has no lifespan.
     """
 
     def __init__(self, app, cleanup_budget=None, *, cleanup_timeout=_CLEANUP_TIMEOUT,
                  abandon_on: asyncio.Event | None = None):
-        self._app = app
+        self._owner = _lifespan_owner(app)
         self._abandon_on = abandon_on
-        self._receive_q: asyncio.Queue = asyncio.Queue()
-        self._send_q:    asyncio.Queue = asyncio.Queue()
-        self._task = None
-        self._startup_acked = False
+        self._started = False
         self._cleanup_budget = (cleanup_budget
                                 or _AsyncCleanupBudget(cleanup_timeout))
 
     async def __aenter__(self):
-        scope = {'type': 'lifespan', 'asgi': {'version': '3.0'}}
+        if self._owner is None:
+            return self
+        startup = asyncio.ensure_future(self._owner._lifespan_startup())
+        abandoned = (asyncio.ensure_future(self._abandon_on.wait())
+                     if self._abandon_on is not None else None)
+        waiters = {startup} if abandoned is None else {startup, abandoned}
         try:
-            self._task = asyncio.create_task(
-                self._app(scope, self._receive_q.get, self._send_q.put))
-            await self._receive_q.put({'type': ASGIEvent.LIFESPAN_STARTUP})
-            getter = asyncio.ensure_future(self._send_q.get())
-            abandoned = (asyncio.ensure_future(self._abandon_on.wait())
-                         if self._abandon_on is not None else None)
-            waiters = {getter, self._task}
-            if abandoned is not None:
-                waiters.add(abandoned)
             try:
                 await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
             finally:
-                for waiter in (getter, abandoned):
-                    if waiter is not None and not waiter.done():
-                        waiter.cancel()
-                        await asyncio.gather(waiter, return_exceptions=True)
+                if abandoned is not None and not abandoned.done():
+                    abandoned.cancel()
+                    await asyncio.gather(abandoned, return_exceptions=True)
             # An answer wins over a simultaneous stop.
-            if getter.done() and not getter.cancelled():
-                event = getter.result()
-                if event.get('type') == ASGIEvent.LIFESPAN_STARTUP_FAILED:
-                    raise RuntimeError(
-                        event.get('message', 'Lifespan startup failed'))
-                self._startup_acked = True
-                # Attached at the ack so a task already dead schedules the
-                # report now; a create-time callback would miss it.
-                self._task.add_done_callback(self._lifespan_task_ended)
+            if startup.done():
+                failure = startup.exception()
+                if failure is not None:
+                    raise RuntimeError(f'Lifespan startup failed: {failure}') from failure
+                self._started = True
                 return self
-            if self._task.done():
-                exc = self._task.exception()
-                if exc is not None:
-                    raise RuntimeError(
-                        f'Lifespan startup failed: {exc!r}') from exc
-                return self
-            if abandoned is not None and abandoned.done():
-                raise _StartupAbandoned(
-                    'stop requested before the application answered '
-                    'lifespan.startup')
-            raise RuntimeError('Lifespan startup did not complete')
+            raise _StartupAbandoned(
+                'stop requested before the application answered lifespan.startup')
         except BaseException:
-            cleanup_error = await _cancel_tasks(
-                [self._task], self._cleanup_budget)
-            if cleanup_error is not None:
-                logger.error('Lifespan startup rollback failed: %s', cleanup_error)
+            if not startup.done():
+                cleanup_error = await _cancel_tasks([startup], self._cleanup_budget)
+                if cleanup_error is not None:
+                    logger.error('Lifespan startup rollback failed: %s', cleanup_error)
             raise
 
-    def _lifespan_task_ended(self, task: asyncio.Task) -> None:
-        # Report lifespan death while serving, not only during shutdown.
-        if (self._startup_acked and not task.cancelled()
-                and task.exception() is not None):
-            logger.error('Lifespan task failed after startup: %r',
-                         task.exception(), exc_info=task.exception())
-
-    @staticmethod
-    def _shutdown_failure(event) -> Exception | None:
-        if event.get('type') == ASGIEvent.LIFESPAN_SHUTDOWN_FAILED:
-            message = event.get('message') or 'no message'
-            # Logged too: raised, it reaches the operator only as an exit status.
-            logger.error('Lifespan shutdown failed: %s', message)
-            return RuntimeError(f'Lifespan shutdown failed: {message}')
-        return None
-
     async def __aexit__(self, exc_type, exc, traceback):
-        self._startup_acked = False
-        task = self._task
-        if task is None:
+        if not self._started:
             return False
-        # A lifespan task cancelled out from under us — asyncio.run()'s
-        # _cancel_all_tasks cancels every outstanding task at once — never
-        # emits lifespan.shutdown.complete, so an unconditional wait on the
-        # send queue would wedge teardown.  Handshake only while it is alive,
-        # and race the ack against the task itself.
-        errors = []
-        if not task.done():
-            await self._receive_q.put({'type': ASGIEvent.LIFESPAN_SHUTDOWN})
-            getter = asyncio.ensure_future(self._send_q.get())
-            done, pending = await asyncio.wait(
-                {getter, task}, timeout=self._cleanup_budget.remaining(),
-                return_when=asyncio.FIRST_COMPLETED)
-            if not done:
-                errors.append(TimeoutError(
-                    'lifespan shutdown did not finish before the deadline'))
-            elif getter in done and not getter.cancelled():
-                errors.append(self._shutdown_failure(getter.result()))
-            errors.append(await _cancel_tasks([getter], self._cleanup_budget))
-        errors.append(await _cancel_tasks([task], self._cleanup_budget))
-        cleanup_error = combine_cleanup_errors(*errors)
-        if cleanup_error is not None:
+        self._started = False
+        shutdown = asyncio.ensure_future(self._owner._lifespan_shutdown())
+        try:
+            done, _pending = await asyncio.wait(
+                {shutdown}, timeout=self._cleanup_budget.remaining())
+        except BaseException:
+            # The caller is cancelled: leave at once, the hook reclaims its own.
+            shutdown.cancel()
+            raise
+        if done:
+            failure = shutdown.exception()
+            error = None
+            if failure is not None:
+                # Logged too: raised, it reaches the operator only as an exit status.
+                logger.error('Lifespan shutdown failed: %s', failure)
+                error = RuntimeError(f'Lifespan shutdown failed: {failure}')
+                error.__cause__ = failure
+        else:
+            error = combine_cleanup_errors(
+                TimeoutError('lifespan shutdown did not finish before the deadline'),
+                await _cancel_tasks([shutdown], self._cleanup_budget))
+        if error is not None:
             if exc_type is None:
-                raise cleanup_error
-            logger.error('Lifespan cleanup failed: %s', cleanup_error)
+                raise error
+            logger.error('Lifespan cleanup failed: %s', error)
         return False
 
 
@@ -721,6 +692,12 @@ class Server:
             asgi = True
         from ..asgi_app import ASGIApp  # noqa: PLC0415
         self.app = ASGIApp(app) if asgi and not isinstance(app, ASGIApp) else app
+        if _lifespan_owner(self.app) is None:
+            warnings.warn(
+                f'No lifespan hook on {app!r}: its startup and shutdown will not run. '
+                'Serve a BlackBull app (on_startup/on_shutdown, app.use, app.on, '
+                'app.intercept), wrap a foreign ASGI app in ASGIApp, or set '
+                '__wrapped__ to the BlackBull app it wraps.', UserWarning, stacklevel=2)
         # ``None`` = the caller said it the old way; ``open_socket`` builds
         # the one listener that stands for it.
         self._listeners = list(listeners) if listeners else None
@@ -1108,20 +1085,14 @@ class Server:
         return listeners
 
     async def startup(self):
-        """Drive the ASGI lifespan startup handshake.
-
-        Launches the app's lifespan task, delivers 'lifespan.startup', and
-        waits for 'lifespan.startup.complete'.  Raises RuntimeError on
-        'lifespan.startup.failed'.  Stores the context manager so that
-        shutdown() can deliver 'lifespan.shutdown' to the same task.
-        """
+        """Run the app's lifespan startup; raise ``RuntimeError`` if it fails."""
         self._lifespan_cm = LifespanManager(self.app)
         await self._lifespan_cm.__aenter__()
 
     async def shutdown(self):
-        """Drive the ASGI lifespan shutdown handshake.
+        """Run the app's lifespan shutdown; raise ``RuntimeError`` if it fails.
 
-        Raises ``RuntimeError`` if ``startup()`` was never called.  After a
+        Also raises ``RuntimeError`` if ``startup()`` was never called.  After a
         failed ``startup()`` it cleans up quietly, so ``try``/``finally`` is safe.
         """
         if self._lifespan_cm is None:

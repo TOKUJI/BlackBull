@@ -133,8 +133,8 @@ recommended, not required.
 
 Override the optional async hooks for resources that must open and
 close with the application.  `add_extension` wires them into the
-`app_startup` / `app_shutdown` lifespan events, so they run under the
-ASGI lifespan **and** per worker in multi-worker mode:
+`app_startup` / `app_shutdown` lifespan events, so they run under any
+host's lifespan **and** per worker in multi-worker mode:
 
 ```python
 class PoolExtension(Extension):

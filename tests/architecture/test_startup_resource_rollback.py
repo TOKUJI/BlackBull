@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from blackbull import BlackBull
+from blackbull import ASGIApp, BlackBull
 from blackbull.app import serve
 from blackbull.protocol.rsock import adopt_inherited_sockets, close_sockets
 from blackbull.server.listener import InheritedFd, Listener, Tcp
@@ -274,35 +274,45 @@ def test_distinct_socket_close_failures_are_grouped():
 async def test_lifespan_startup_failure_reclaims_app_task():
     release = asyncio.Event()
 
-    async def app(_scope, receive, send):
-        await receive()
-        await send({"type": "lifespan.startup.failed", "message": "broken"})
-        await release.wait()
+    ended = asyncio.Event()
 
-    manager = LifespanManager(app, cleanup_timeout=0.05)
+    async def app(_scope, receive, send):
+        try:
+            await receive()
+            await send({"type": "lifespan.startup.failed", "message": "broken"})
+            await release.wait()
+        finally:
+            ended.set()
+
+    manager = LifespanManager(ASGIApp(app), cleanup_timeout=0.05)
     with pytest.raises(RuntimeError, match="broken"):
         await manager.__aenter__()
 
-    assert manager._task.done()
+    assert ended.is_set()
 
 
 @pytest.mark.asyncio
 async def test_lifespan_shutdown_stall_is_bounded_and_reclaimed():
     release = asyncio.Event()
 
-    async def app(_scope, receive, send):
-        await receive()
-        await send({"type": "lifespan.startup.complete"})
-        await receive()
-        await release.wait()
+    ended = asyncio.Event()
 
-    manager = LifespanManager(app, cleanup_timeout=0.05)
+    async def app(_scope, receive, send):
+        try:
+            await receive()
+            await send({"type": "lifespan.startup.complete"})
+            await receive()
+            await release.wait()
+        finally:
+            ended.set()
+
+    manager = LifespanManager(ASGIApp(app), cleanup_timeout=0.05)
     await manager.__aenter__()
 
     with pytest.raises(TimeoutError):
         await manager.__aexit__(None, None, None)
 
-    assert manager._task.done()
+    await asyncio.wait_for(ended.wait(), timeout=1.0)
 
 
 @pytest.mark.asyncio
@@ -315,13 +325,13 @@ async def test_lifespan_shutdown_task_exception_is_reported():
         await receive()
         raise failure
 
-    manager = LifespanManager(app, cleanup_timeout=0.05)
+    manager = LifespanManager(ASGIApp(app), cleanup_timeout=0.05)
     await manager.__aenter__()
 
-    with pytest.raises(RuntimeError) as raised:
+    with pytest.raises(RuntimeError, match="shutdown failed") as raised:
         await manager.__aexit__(None, None, None)
 
-    assert raised.value is failure
+    assert raised.value.__cause__ is failure
 
 
 @pytest.mark.asyncio
@@ -334,7 +344,7 @@ async def test_cancellation_before_startup_commit_propagates_and_closes_socket()
         startup_entered.set()
         await release.wait()
 
-    server = Server(app)
+    server = Server(app, asgi=True)
     server.open_socket(0)
     sockets = list(server.raw_sockets)
     runner = asyncio.create_task(server.run())
@@ -379,7 +389,7 @@ async def test_stop_close_failure_finishes_cleanup_and_is_reported_by_run():
         shutdown_seen.set()
         await send({"type": "lifespan.shutdown.complete"})
 
-    server = Server(app)
+    server = Server(app, asgi=True)
     server.open_socket(0)
     listening_sockets = list(server.raw_sockets)
     runner = asyncio.create_task(server.run())
@@ -458,7 +468,7 @@ async def test_run_waits_for_in_progress_stop_despite_repeated_cancellation(
         shutdown_seen.set()
         await send({"type": "lifespan.shutdown.complete"})
 
-    server = Server(app)
+    server = Server(app, asgi=True)
     server.open_socket(0)
     listening_sockets = list(server.raw_sockets)
     address = ("127.0.0.1", server.port)

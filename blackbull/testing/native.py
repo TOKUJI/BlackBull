@@ -414,7 +414,7 @@ class NativeTestServer:
                                           backlog=self._backlog)
         self.port = self._sock.getsockname()[1]
 
-        self._lifespan = LifespanManager(self.app)
+        self._lifespan = LifespanManager(self._bb_server.app)
         try:
             await self._lifespan.__aenter__()
         except BaseException:

@@ -400,7 +400,7 @@ class TestHTTP1_1BodyDecoding:
 
 @pytest.mark.asyncio
 class TestASGILifespan:
-    """ASGIServer must dispatch lifespan.startup and lifespan.shutdown.
+    """ASGIServer must dispatch lifespan.startup and lifespan.shutdown to an ASGI app.
 
     P2 item: the server must call the ASGI app with scope={'type': 'lifespan'}
     before accepting requests and with lifespan.shutdown after the server stops.
@@ -421,7 +421,7 @@ class TestASGILifespan:
                 received_events.append(event.get('type'))
                 await send({'type': 'lifespan.startup.complete'})
 
-        server = ASGIServer(app)
+        server = ASGIServer(app, asgi=True)
         await server.startup()
 
         assert 'lifespan.startup' in received_events, (
@@ -443,7 +443,7 @@ class TestASGILifespan:
                         await send({'type': 'lifespan.shutdown.complete'})
                         break
 
-        server = ASGIServer(app)
+        server = ASGIServer(app, asgi=True)
         await server.startup()
         await server.shutdown()
 
@@ -459,7 +459,7 @@ class TestASGILifespan:
                 await send({'type': 'lifespan.startup.failed',
                             'message': 'DB connection refused'})
 
-        server = ASGIServer(app)
+        server = ASGIServer(app, asgi=True)
         with pytest.raises(Exception, match='DB connection refused'):
             await server.startup()
 

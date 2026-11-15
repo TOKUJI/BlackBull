@@ -192,7 +192,7 @@ when required parameters are missing.
 
 ### Startup validation
 
-`app.run()` and the ASGI lifespan `startup` event both call
+`app.run()` and lifespan startup both call
 `Router.validate()` before accepting connections.  Validation
 checks:
 
@@ -201,8 +201,8 @@ checks:
 - The converter's output type matches the handler's annotation
   (e.g. `{id:int}` with `id: str` is flagged as an error).
 
-On failure, a `ConfigurationError` is raised (or sent as
-`lifespan.startup.failed`) listing every violated route.  On
+On failure, a `ConfigurationError` is raised (an external ASGI host
+receives it as `lifespan.startup.failed`) listing every violated route.  On
 success, the router is **frozen** — further route registration
 raises `RuntimeError`.
 
