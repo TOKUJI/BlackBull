@@ -329,6 +329,25 @@ async def test_the_hook_is_found_through_wrapped():
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(60)
+@pytest.mark.parametrize('adapted', [False, True], ids=['native', 'adapter'])
+async def test_a_blackbull_startup_failure_keeps_its_cause(adapted):
+    class Boom(Exception):
+        pass
+
+    app = BlackBull()
+
+    @app.on_startup
+    async def _boom():
+        raise Boom('db unreachable')
+
+    manager = LifespanManager(ASGIApp(app) if adapted else app)
+    with pytest.raises(RuntimeError, match='db unreachable') as raised:
+        await manager.__aenter__()
+    assert isinstance(raised.value.__cause__, Boom)
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(60)
 async def test_an_app_without_a_hook_is_warned_and_runs_no_lifespan(native_lane):
     calls = []
 

@@ -219,6 +219,10 @@ class ASGIApp(EventHooks):
     async def _lifespan_startup(self) -> None:
         if not self._lifespan or self._lifespan_task is not None:
             return
+        if self._inner is self.app:
+            # A BlackBull app runs its own lifespan, as when served natively.
+            await self.app._lifespan_startup()
+            return
         state: dict = {}
         inbox: asyncio.Queue = asyncio.Queue()
         outbox: asyncio.Queue = asyncio.Queue()
@@ -265,6 +269,9 @@ class ASGIApp(EventHooks):
                          task.exception(), exc_info=task.exception())
 
     async def _lifespan_shutdown(self) -> None:
+        if self._lifespan and self._inner is self.app:
+            await self.app._lifespan_shutdown()
+            return
         task = self._lifespan_task
         if task is None:
             return

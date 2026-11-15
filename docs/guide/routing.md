@@ -201,8 +201,9 @@ checks:
 - The converter's output type matches the handler's annotation
   (e.g. `{id:int}` with `id: str` is flagged as an error).
 
-On failure, a `ConfigurationError` is raised (an external ASGI host
-receives it as `lifespan.startup.failed`) listing every violated route.  On
+On failure, startup fails with a `ConfigurationError` listing every
+violated route: `app.run()` raises a `RuntimeError` caused by it, and an
+external ASGI host receives it as `lifespan.startup.failed`.  On
 success, the router is **frozen** — further route registration
 raises `RuntimeError`.
 
