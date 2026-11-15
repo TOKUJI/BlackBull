@@ -366,7 +366,8 @@ async def test_the_foreign_lifespan_runs():
     assert phases == ['lifespan.startup', 'lifespan.shutdown']
 
 
-async def test_each_request_sees_its_own_copy_of_the_lifespan_state():
+@CLIENTS
+async def test_each_request_sees_its_own_copy_of_the_lifespan_state(client_type):
     seen = []
 
     async def foreign(scope, receive, send):
@@ -383,7 +384,7 @@ async def test_each_request_sees_its_own_copy_of_the_lifespan_state():
         await _ok(scope, receive, send)
 
     async with served(ASGIApp(foreign)) as server:
-        async with HTTP1Client('127.0.0.1', server.server.port) as client:
+        async with client_type('127.0.0.1', server.server.port) as client:
             for _ in range(2):
                 await asyncio.wait_for(client.request('GET', '/'), 5)
 

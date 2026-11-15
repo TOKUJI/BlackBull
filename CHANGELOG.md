@@ -67,13 +67,13 @@ metadata; reinstall an editable checkout after changing that version.
   used to ignore, and refuses `asgi=False` under `BB_FORCE_ASGI_SCOPE=1`.
   Without `asgi=True` or that variable, an app is always called as a native
   `(conn, receive, send)` callable (BLA-673).
-- The server runs an app's startup and shutdown through the app itself, not
-  the ASGI lifespan protocol.  A bare native callable (neither a BlackBull
-  app nor an `ASGIApp`, also through `__wrapped__`) runs no lifespan and
-  `Server()` warns.  Lifespan failures read `Lifespan startup failed: …` /
-  `Lifespan shutdown failed: …`.  A foreign app's request `scope['state']`
-  is its lifespan state copy, no longer BlackBull's per-request state, and
-  an ASGI host can no longer drive an `ASGIApp` (`TypeError`) (BLA-675).
+- The server runs an app's startup and shutdown through the app's own hooks,
+  not the ASGI lifespan protocol; failures read `Lifespan startup failed: …`
+  / `Lifespan shutdown failed: …`.  A bare native callable (no BlackBull app
+  or `ASGIApp`, also through `__wrapped__`) runs no lifespan, and `Server()`
+  warns.  A foreign app's `scope['state']` no longer exposes BlackBull's
+  per-request state, and `ASGIApp` refuses an ASGI host (`TypeError`)
+  (BLA-675).
 
 - The `websocket` middleware sends `NativeWSMessage`s instead of event dicts
   (BLA-672).

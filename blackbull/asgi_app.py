@@ -165,15 +165,29 @@ class _Exchange:
                                   content_type='text/plain; charset=utf-8').to_native())
 
 
-async def _answer(task, outbox):
-    """The app's next lifespan message, or None once *task* ended without one."""
+async def _ask(task, inbox, outbox, phase):
+    """Send ``lifespan.<phase>``; the app's answer, or None once *task* ended without one."""
+    inbox.put_nowait({'type': f'lifespan.{phase}'})
     getter = asyncio.ensure_future(outbox.get())
     try:
         await asyncio.wait({getter, task}, return_when=asyncio.FIRST_COMPLETED)
+    except BaseException:
+        task.cancel()
+        raise
     finally:
         if not getter.done():
             getter.cancel()
     return getter.result() if getter.done() and not getter.cancelled() else None
+
+
+def _refusal(answer, phase) -> RuntimeError | None:
+    """The failure *answer* to ``lifespan.<phase>`` reports; None for ``.complete``."""
+    kind = answer.get('type')
+    if kind == f'lifespan.{phase}.complete':
+        return None
+    if kind == f'lifespan.{phase}.failed':
+        return RuntimeError(answer.get('message') or 'no message')
+    return RuntimeError(f'unexpected {kind!r} answering lifespan.{phase}')
 
 
 async def _reclaim(task) -> None:
@@ -236,12 +250,7 @@ class ASGIApp(EventHooks):
         scope = {'type': 'lifespan', 'asgi': {'version': '3.0', 'spec_version': '2.0'},
                  'state': state}
         task = asyncio.ensure_future(self.app(scope, receive, outbox.put))
-        inbox.put_nowait({'type': 'lifespan.startup'})
-        try:
-            answer = await _answer(task, outbox)
-        except BaseException:
-            task.cancel()
-            raise
+        answer = await _ask(task, inbox, outbox, 'startup')
         if answer is None:
             failure = None if task.cancelled() else task.exception()
             if read and task.cancelled():
@@ -251,11 +260,10 @@ class ASGIApp(EventHooks):
             logger.info('ASGI lifespan protocol appears unsupported by %r; '
                         'serving without it', self.app)
             return
-        if answer.get('type') != 'lifespan.startup.complete':
+        error = _refusal(answer, 'startup')
+        if error is not None:
             await _reclaim(task)
-            if answer.get('type') == 'lifespan.startup.failed':
-                raise RuntimeError(answer.get('message') or 'no message')
-            raise RuntimeError(f"unexpected {answer.get('type')!r} answering lifespan.startup")
+            raise error
         self._lifespan_state = state
         self._lifespan_task = task
         self._lifespan_queues = inbox, outbox
@@ -276,20 +284,10 @@ class ASGIApp(EventHooks):
         if task is None:
             return
         self._lifespan_task = None
-        inbox, outbox = self._lifespan_queues
-        answer = None
-        try:
-            if not task.done():
-                inbox.put_nowait({'type': 'lifespan.shutdown'})
-                answer = await _answer(task, outbox)
-        except BaseException:
-            task.cancel()
-            raise
+        answer = None if task.done() else await _ask(task, *self._lifespan_queues, 'shutdown')
         await _reclaim(task)
-        if answer is not None and answer.get('type') == 'lifespan.shutdown.failed':
-            raise RuntimeError(answer.get('message') or 'no message')
-        if answer is not None and answer.get('type') != 'lifespan.shutdown.complete':
-            raise RuntimeError(f"unexpected {answer.get('type')!r} answering lifespan.shutdown")
+        if answer is not None and (error := _refusal(answer, 'shutdown')) is not None:
+            raise error
         if task.done() and not task.cancelled() and task.exception() is not None:
             raise task.exception()
 
