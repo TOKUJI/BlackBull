@@ -6118,11 +6118,11 @@ behaviour:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>production</code></td>
+<td><code>production</code> (default)</td>
 <td>Always return 404 — static files are never served</td>
 </tr>
 <tr>
-<td><code>development</code> (default)</td>
+<td><code>development</code></td>
 <td>Serve files normally</td>
 </tr>
 <tr>
@@ -6131,9 +6131,10 @@ behaviour:</p>
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><span class="nv">BLACKBULL_ENV</span><span class="o">=</span>production<span class="w"> </span>python<span class="w"> </span>app.py<span class="w">   </span><span class="c1"># static routes return 404</span>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>app.py<span class="w">                            </span><span class="c1"># static routes return 404</span>
 <span class="nv">BLACKBULL_ENV</span><span class="o">=</span>development<span class="w"> </span>python<span class="w"> </span>app.py<span class="w">  </span><span class="c1"># static files served</span>
 </code></pre></div>
+<p><code>blackbull serve</code> runs as <code>development</code> unless <code>BLACKBULL_ENV</code> is set.</p>
 <p>The production-mode passthrough exists because production
 deployments typically front BlackBull with nginx or a CDN that
 serves static assets directly, and you don't want the framework

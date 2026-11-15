@@ -5988,7 +5988,7 @@ common form of configuration:</p>
 <p>The full table is in <a href="../../reference/env-vars/">Reference — Environment
 variables</a>.  Highlights:</p>
 <ul>
-<li><code>BLACKBULL_ENV</code> — <code>development</code> (default) / <code>production</code> /
+<li><code>BLACKBULL_ENV</code> — <code>production</code> (default) / <code>development</code> /
   <code>test</code>.  Controls the <a href="../error-handling/">error handler</a>
   posture and whether <a href="../static-files/">static files</a> are
   served.</li>
@@ -6181,7 +6181,8 @@ in-memory LRU for higher throughput at the cost of picking up
 on-disk edits only after the per-entry <code>stat</code> TTL.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p><code>blackbull serve</code> is a development / standalone convenience.
+<p><code>blackbull serve</code> is a development / standalone convenience and runs
+as <code>BLACKBULL_ENV=development</code> unless the variable is set.
 <code>StaticFiles</code> does not serve files when <code>BLACKBULL_ENV=production</code>
 (the expectation is a reverse proxy or CDN fronts static traffic
 there) — see <a href="../static-files/">Static files</a>.</p>
@@ -6198,11 +6199,6 @@ the knobs most worth a second look:</p>
 </tr>
 </thead>
 <tbody>
-<tr>
-<td><code>BLACKBULL_ENV</code></td>
-<td><code>development</code></td>
-<td>Set to <code>production</code>.  Tightens error responses and stops <code>StaticFiles</code> from competing with your reverse proxy.</td>
-</tr>
 <tr>
 <td><code>BB_WORKERS</code></td>
 <td><code>1</code></td>

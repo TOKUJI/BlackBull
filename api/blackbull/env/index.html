@@ -6089,10 +6089,8 @@ operator named; the server may lower it to the descriptors left.</p>
 
 
         <p>Which deployment the process thinks it is, read from <code>BLACKBULL_ENV</code>.</p>
-<p>Reachable as <code>get_settings().env</code>.  A value that is not one of these
-three resolves to <code>DEVELOPMENT</code> rather than raising, so a misspelled
-<code>production</code> gets the <em>looser</em> of the two behaviours and says nothing
-about it — worth asserting on at startup if it matters to you.</p>
+<p>Reachable as <code>get_settings().env</code>.  Unset means <code>PRODUCTION</code>, and so
+does a value that is not one of these three, with a warning.</p>
 <p>Two behaviours turn on it, and both tighten in <code>PRODUCTION</code>:
 <a class="autorefs autorefs-internal" href="../middleware/static/#blackbull.middleware.static.StaticFiles"><code>StaticFiles</code></a> declines to serve
 anything, and the default error handler answers without exception detail;

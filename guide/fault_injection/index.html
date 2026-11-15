@@ -6251,8 +6251,8 @@ report a pass while exercising the keep-alive path.</p>
 <li><strong>WebSocket</strong> has none in either direction.</li>
 </ul>
 <p>This module is an opt-in testing instrument.  It refuses to start in a
-production context (<code>BLACKBULL_ENV=production</code>, or <code>BB_PRODUCTION</code> as an
-explicit override) so the deliberate-misbehaviour code path cannot
+production context (<code>BLACKBULL_ENV</code> unset or <code>production</code>, or
+<code>BB_PRODUCTION</code> as an explicit override; run it with <code>BLACKBULL_ENV=test</code>) so the deliberate-misbehaviour code path cannot
 accidentally fire on a production deployment, and both fault servers
 refuse a non-loopback bind without <code>allow_remote=True</code>.</p>
 <h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
@@ -6615,7 +6615,7 @@ with a deprecation warning until their removal
 <p>Two locks ensure the deliberate-misbehaviour code path is unreachable
 from a production process:</p>
 <ol>
-<li><code>BB_PRODUCTION=1</code> (or <code>BLACKBULL_ENV=production</code>) in the environment
+<li><code>BB_PRODUCTION=1</code>, or <code>BLACKBULL_ENV</code> unset or <code>production</code>, in the environment
    causes the constructor of <code>H2FaultServer</code> and of <code>H1FaultServer</code> to
    raise.</li>
 <li>Binding to a non-localhost interface raises unless

@@ -6366,6 +6366,10 @@ and <strong>a defect on one layer is invisible to the others</strong>.</p>
 suite — so tests don't accidentally run in the wrong loop
 shape.  Tests written against the synchronous clients
 (<code>TestClient</code>, <code>NativeClient</code>) don't need this mark.</p>
+<p>Set <code>BLACKBULL_ENV=test</code> for the test run (for example in your
+<code>conftest.py</code>, before the app is imported).  Unset means <code>production</code>,
+where <code>StaticFiles</code> serves nothing; use <code>development</code> instead where a
+test asserts the default error handler's exception detail.</p>
 <h2 id="quick-start-with-native">Quick start with <code>native</code><a class="headerlink" href="#quick-start-with-native" title="Permanent link">&para;</a></h2>
 <p><code>blackbull.testing.native</code> builds a <code>Connection</code> and calls
 <code>app(conn, receive, send)</code> — the same call BlackBull's protocol
