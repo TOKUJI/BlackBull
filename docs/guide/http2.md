@@ -226,7 +226,7 @@ automatically — do not include them in `headers`.
 ### What the framework does
 
 1. Allocates the next even stream ID for the pushed resource
-   (RFC 7540 §5.1.1 — server-initiated streams are always even:
+   (RFC 9113 §5.1.1 (RFC 7540 §5.1.1) — server-initiated streams are always even:
    2, 4, 6, …).
 2. Sends a `PUSH_PROMISE` frame on the parent stream.  The frame
    contains the synthetic request headers (`GET /static/style.css`)

@@ -39,6 +39,14 @@ metadata; reinstall an editable checkout after changing that version.
   gives each request a shallow copy of the lifespan `state`.  An app that
   ends without answering startup, or raises before its first `receive()`, is
   served without a lifespan (BLA-675).
+- `blackbull.fault_injection.oracle_h2` compares two HTTP/2 servers'
+  answers to one broken-client scenario, reading frames with its own decoder
+  (`run_scenario`, `categorize`, `H2Outcome`).
+  `fault_injection.catalogue.h2_differential` holds the RFC 9113 broken
+  clients and broken servers, each tagged with its RFC 9113 section and the
+  matching h2spec check.  A new conformance job runs them against nginx,
+  nghttpd, httpx and curl; the h2spec job now names itself as RFC
+  7540-based (BLA-579).
 
 ### Removed
 
