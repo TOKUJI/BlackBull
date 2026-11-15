@@ -66,8 +66,9 @@ class H2Outcome:
     block the observer could not accept),
     ``connection_error`` (unanswered when a GOAWAY with an error arrived),
     ``timeout`` (a client that gave up), or ``open`` (no answer).
-    ``goaway`` is the first GOAWAY's code; ``teardown`` is ``closed`` (FIN),
-    ``aborted`` (reset) or ``open``; ``error`` is a harness failure.
+    ``goaway`` is the first GOAWAY's code; ``teardown`` is ``closed`` (by FIN
+    or reset: unread data turns one into the other, and asyncio reports them
+    differently across versions) or ``open``; ``error`` is a harness failure.
     """
     streams: tuple = ()
     goaway: str | None = None
@@ -121,8 +122,7 @@ def categorize(a: H2Outcome, b: H2Outcome) -> Category:
             return differ
     if a.goaway != b.goaway:
         return Category.ERROR_DIFFER
-    # FIN or reset is incidental (unread data turns a close into a reset).
-    if a.goaway in (None, 'NO_ERROR') and (a.teardown == 'open') != (b.teardown == 'open'):
+    if a.goaway in (None, 'NO_ERROR') and a.teardown != b.teardown:
         return Category.TEARDOWN_DIFFER
     if _ended(a) or any(k in _REJECTIONS for k, _ in sa.values()):
         return Category.BOTH_REJECTED
@@ -207,10 +207,8 @@ class _Observer:
                 self.last_frame = time.monotonic()
                 self._frame(header[3], header[4],
                             int.from_bytes(header[5:9], 'big') & 0x7fffffff, payload)
-        except asyncio.IncompleteReadError:
+        except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError):
             self.teardown = 'closed'
-        except (ConnectionResetError, BrokenPipeError):
-            self.teardown = 'aborted'
         except Exception as exc:  # noqa: BLE001 — the observer's own fault, not the peer's
             self.failure = repr(exc)
 
@@ -333,6 +331,8 @@ async def run_scenario(host: str, port: int, scenario, *, quiet: float = 1.0,
                 break
             await asyncio.wait({task}, timeout=min(quiet - idle, deadline - time.monotonic()))
     except (ConnectionResetError, BrokenPipeError):
+        # The server ended the connection mid-scenario; the observer has
+        # recorded that, and it is the outcome being measured.
         pass
     finally:
         task.cancel()

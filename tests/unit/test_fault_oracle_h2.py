@@ -153,7 +153,7 @@ _REQUEST = ScenarioH2Client(steps=(
     pytest.param((_frame(7, 0, 0, bytes(4) + (9).to_bytes(4, 'big')), True),
                  H2Outcome(streams=((1, 'connection_error', None),),
                            goaway='COMPRESSION_ERROR', teardown='closed'), id='goaway'),
-    pytest.param('abort', H2Outcome(streams=((1, 'open', None),), teardown='aborted'),
+    pytest.param('abort', H2Outcome(streams=((1, 'open', None),), teardown='closed'),
                  id='reset-connection'),
 ])
 async def test_the_observer_reads_what_the_peer_sent(reply, expected):
