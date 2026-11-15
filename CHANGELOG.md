@@ -63,6 +63,14 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Changed
 
+- `BLACKBULL_ENV` defaults to `production`, and an unrecognised value is
+  `production` with a warning.  Unset, `StaticFiles` serves nothing, the
+  default error handler shows no exception detail, and the fault-injection
+  servers refuse to start.  **Upgrade:** set `BLACKBULL_ENV=development` for
+  local development and `BLACKBULL_ENV=test` in test suites and where fault
+  injection runs.
+  `blackbull serve` runs as `development` unless the variable is set
+  (BLA-643).
 - `Server()` raises `TypeError` for an unknown keyword argument, which it
   used to ignore, and refuses `asgi=False` under `BB_FORCE_ASGI_SCOPE=1`.
   Without `asgi=True` or that variable, an app is always called as a native

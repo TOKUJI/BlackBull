@@ -552,11 +552,11 @@ class _FaultServer:
         if cfg.production or cfg.env == Environment.PRODUCTION:
             raise self.Error(
                 f'{name} refuses to run in a production context '
-                '(BLACKBULL_ENV=production or BB_PRODUCTION set).  This is a '
+                '(BLACKBULL_ENV unset or production, or BB_PRODUCTION set).  This is a '
                 f'testing-only instrument that deliberately emits wrong '
                 f'{self._wrong} responses; running it in a production process '
                 'would expose your service to the same misbehaviour.  Run it '
-                'only in a test harness.')
+                'only in a test harness, with BLACKBULL_ENV=test.')
         if not allow_remote and host not in ('127.0.0.1', '::1', 'localhost'):
             raise self.Error(
                 f'{name} refuses to bind to {host!r} without '

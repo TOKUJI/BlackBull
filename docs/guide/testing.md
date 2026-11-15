@@ -37,6 +37,11 @@ suite — so tests don't accidentally run in the wrong loop
 shape.  Tests written against the synchronous clients
 (`TestClient`, `NativeClient`) don't need this mark.
 
+Set `BLACKBULL_ENV=test` for the test run (for example in your
+`conftest.py`, before the app is imported).  Unset means `production`,
+where `StaticFiles` serves nothing; use `development` instead where a
+test asserts the default error handler's exception detail.
+
 ## Quick start with `native`
 
 `blackbull.testing.native` builds a `Connection` and calls

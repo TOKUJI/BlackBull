@@ -14,7 +14,7 @@ from typing import Any
 
 from .app import serve as _serve
 # Help shows field defaults, not live environment values.
-from .env import Settings
+from .env import Environment, Settings
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +352,9 @@ def _serve_static(argv: list[str]) -> int:
               'or unix:/path.', file=sys.stderr)
         return 1
 
+    # A development server: an unset environment would make StaticFiles refuse.
+    env = next(f for f in dataclasses.fields(Settings) if f.name == 'env')
+    os.environ.setdefault(env.metadata['env'], Environment.DEVELOPMENT)
     try:
         app = _build_static_app(
             args.directory, etag=args.etag, cache=args.cache, index=args.index)

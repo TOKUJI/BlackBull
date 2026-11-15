@@ -41,7 +41,7 @@ DEFAULTS = Settings()
     ('BB_LOG_FORMAT', ' json ', 'log_format', ' json '),
     # custom parsers
     ('BLACKBULL_ENV', 'PRODUCTION', 'env', Environment.PRODUCTION),
-    ('BLACKBULL_ENV', 'staging', 'env', Environment.DEVELOPMENT),
+    ('BLACKBULL_ENV', 'staging', 'env', Environment.PRODUCTION),
     ('BB_MAX_CONNECTIONS', '7', 'max_connections', 7),
     ('BB_MAX_CONNECTIONS', '0', 'max_connections', 0),
 ])
@@ -51,6 +51,20 @@ def test_a_setting_is_its_value_or_its_default(monkeypatch, env, raw, field, exp
     value = getattr(get_settings(), field)
     assert (value, type(value)) == (expected, type(expected))
     assert read_setting(field) == expected
+
+
+def test_an_unset_environment_is_production(monkeypatch):
+    monkeypatch.delenv('BLACKBULL_ENV', raising=False)
+    reset_settings_cache()
+    assert get_settings().env == Environment.PRODUCTION
+
+
+def test_an_unknown_environment_is_production_and_says_so(monkeypatch, caplog):
+    monkeypatch.setenv('BLACKBULL_ENV', 'prodution')
+    reset_settings_cache()
+    with caplog.at_level('WARNING', logger='blackbull.env'):
+        assert get_settings().env == Environment.PRODUCTION
+    assert "'prodution'" in caplog.text
 
 
 def test_an_unset_setting_is_its_default(monkeypatch):
