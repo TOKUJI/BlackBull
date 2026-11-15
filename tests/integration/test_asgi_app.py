@@ -316,7 +316,7 @@ async def test_around_a_blackbull_app_the_inner_events_fire_once(form):
     assert len(on_adapter['request_completed']) == 1
 
 
-# --- WebSocket and lifespan (interim) ---------------------------------------
+# --- WebSocket (interim) and lifespan ---------------------------------------
 
 async def test_a_foreign_websocket_request_is_closed_cleanly():
     called = []
@@ -346,7 +346,7 @@ async def test_a_wrapped_blackbull_app_keeps_its_websockets():
     assert reply == 'hi'
 
 
-async def test_the_foreign_lifespan_is_forwarded():
+async def test_the_foreign_lifespan_runs():
     phases = []
 
     async def foreign(scope, receive, send):
@@ -364,3 +364,46 @@ async def test_the_foreign_lifespan_is_forwarded():
     await server.shutdown()
 
     assert phases == ['lifespan.startup', 'lifespan.shutdown']
+
+
+@CLIENTS
+async def test_each_request_sees_its_own_copy_of_the_lifespan_state(client_type):
+    seen = []
+
+    async def foreign(scope, receive, send):
+        if scope['type'] == 'lifespan':
+            while True:
+                message = await receive()
+                if message['type'] == 'lifespan.startup':
+                    scope['state']['pool'] = 'db'
+                await send({'type': message['type'] + '.complete'})
+                if message['type'] == 'lifespan.shutdown':
+                    return
+        seen.append(dict(scope['state']))
+        scope['state']['written'] = True
+        await _ok(scope, receive, send)
+
+    async with served(ASGIApp(foreign)) as server:
+        async with client_type('127.0.0.1', server.server.port) as client:
+            for _ in range(2):
+                await asyncio.wait_for(client.request('GET', '/'), 5)
+
+    assert seen == [{'pool': 'db'}, {'pool': 'db'}]
+
+
+async def test_lifespan_false_never_runs_the_foreign_lifespan():
+    types = []
+
+    async def foreign(scope, receive, send):
+        types.append(scope['type'])
+
+    server = Server(ASGIApp(foreign, lifespan=False))
+    await server.startup()
+    await server.shutdown()
+
+    assert types == []
+
+
+async def test_an_asgi_host_cannot_drive_the_adapter():
+    with pytest.raises(TypeError, match='native'):
+        await ASGIApp(_ok)({'type': 'http'}, None, None)

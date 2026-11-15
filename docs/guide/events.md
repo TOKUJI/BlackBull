@@ -45,9 +45,9 @@ raised by an interceptor:
 - aborts the remaining interceptors for that event, and
 - propagates to the code that called `emit`.
 
-For lifespan events, an interceptor exception surfaces to the
-ASGI server driving the lifespan protocol — typically aborting
-startup.
+For lifespan events, an interceptor exception surfaces to whatever
+runs the lifespan — BlackBull's server or an external ASGI host —
+typically aborting startup.
 
 ## `@app.on` — fire-and-forget observation
 

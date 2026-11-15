@@ -35,6 +35,10 @@ metadata; reinstall an editable checkout after changing that version.
   `intercept()`.  A failure before the response starts answers `500`; an
   out-of-order message raises `RuntimeError`, a send after disconnect an
   `OSError`.  Foreign WebSocket requests are refused for now (BLA-673).
+- `ASGIApp` runs the foreign app's lifespan (`lifespan=False` skips it) and
+  gives each request a shallow copy of the lifespan `state`.  An app that
+  ends without answering startup, or raises before its first `receive()`, is
+  served without a lifespan (BLA-675).
 
 ### Removed
 
@@ -63,6 +67,13 @@ metadata; reinstall an editable checkout after changing that version.
   used to ignore, and refuses `asgi=False` under `BB_FORCE_ASGI_SCOPE=1`.
   Without `asgi=True` or that variable, an app is always called as a native
   `(conn, receive, send)` callable (BLA-673).
+- The server runs an app's startup and shutdown through the app's own hooks,
+  not the ASGI lifespan protocol; failures read `Lifespan startup failed: …`
+  / `Lifespan shutdown failed: …`.  A bare native callable (no BlackBull app
+  or `ASGIApp`, also through `__wrapped__`) runs no lifespan, and `Server()`
+  warns.  A foreign app's `scope['state']` no longer exposes BlackBull's
+  per-request state, and `ASGIApp` refuses an ASGI host (`TypeError`)
+  (BLA-675).
 
 - The `websocket` middleware sends `NativeWSMessage`s instead of event dicts
   (BLA-672).

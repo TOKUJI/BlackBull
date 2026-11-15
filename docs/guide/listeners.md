@@ -130,13 +130,20 @@ reclaims the lifespan task before the original startup exception is reported.
 
 ## A failing shutdown is a failing process
 
-`run()` reports what the application answered:
+`run()` reports how the application's lifespan ended:
 
 | the app … | `run()` … |
 |---|---|
-| sends `lifespan.startup.failed` | raises, carrying the app's message |
-| sends `lifespan.shutdown.failed` | raises on the way out, carrying the app's message |
-| never answers | waits at startup; at shutdown, ends at the cleanup budget |
+| fails startup: a raising `@app.on_startup` hook or `app_startup` interceptor, a route or middleware validation error | raises `RuntimeError`, carrying the app's message |
+| fails shutdown: a raising `@app.on_shutdown` hook | raises on the way out, carrying the app's message |
+| never finishes | waits at startup; at shutdown, ends at the cleanup budget |
+
+A foreign ASGI app served through `ASGIApp` fails the same way by sending
+`lifespan.startup.failed` / `lifespan.shutdown.failed`, or by raising after
+its first `receive()`.  One that ends without answering, or raises before its
+first `receive()`, is served without a lifespan.  A bare native callable,
+which is neither a BlackBull app nor an `ASGIApp` (also through
+`__wrapped__`), runs no lifespan, and `Server()` warns.
 
 A raising `@app.on_shutdown` hook therefore makes a single-worker process log
 the failure and exit `1`, so a supervisor can act on it.  With `workers > 1`

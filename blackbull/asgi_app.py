@@ -165,6 +165,40 @@ class _Exchange:
                                   content_type='text/plain; charset=utf-8').to_native())
 
 
+async def _ask(task, inbox, outbox, phase):
+    """Send ``lifespan.<phase>``; the app's answer, or None once *task* ended without one."""
+    inbox.put_nowait({'type': f'lifespan.{phase}'})
+    getter = asyncio.ensure_future(outbox.get())
+    try:
+        await asyncio.wait({getter, task}, return_when=asyncio.FIRST_COMPLETED)
+    except BaseException:
+        task.cancel()
+        raise
+    finally:
+        if not getter.done():
+            getter.cancel()
+    return getter.result() if getter.done() and not getter.cancelled() else None
+
+
+def _refusal(answer, phase) -> RuntimeError | None:
+    """The failure *answer* to ``lifespan.<phase>`` reports; None for ``.complete``."""
+    kind = answer.get('type')
+    if kind == f'lifespan.{phase}.complete':
+        return None
+    if kind == f'lifespan.{phase}.failed':
+        return RuntimeError(answer.get('message') or 'no message')
+    return RuntimeError(f'unexpected {kind!r} answering lifespan.{phase}')
+
+
+async def _reclaim(task) -> None:
+    from .server.server import _CLEANUP_TIMEOUT  # noqa: PLC0415 — server imports us
+    if not task.done():
+        task.cancel()
+        await asyncio.wait({task}, timeout=_CLEANUP_TIMEOUT)
+        if not task.done():
+            logger.error('ASGI lifespan task ignored cancellation; leaving it running')
+
+
 class ASGIApp(EventHooks):
     """Serve the ASGI 3.0 application *app* as a native BlackBull callable.
 
@@ -172,8 +206,12 @@ class ASGIApp(EventHooks):
     Around a BlackBull app (also via ``__wrapped__``) it only converts; that
     app fires its own events and errors as when served natively.
 
-    Until BLA-675/BLA-676 the lifespan scope passes unchanged and a foreign
-    app's WebSocket requests are refused.
+    The server runs *app*'s lifespan unless ``lifespan=False``.  An app that
+    ends without answering ``lifespan.startup``, or raises before its first
+    ``receive()``, is served without one.  Each request's ``scope['state']``
+    is a shallow copy of the lifespan state.
+
+    Until BLA-676 a foreign app's WebSocket requests are refused.
     """
 
     @property
@@ -181,18 +219,82 @@ class ASGIApp(EventHooks):
         """The wrapped BlackBull app's WebSocket subprotocols, else none."""
         return self._inner.available_ws_protocols if self._inner is not None else []
 
-    def __init__(self, app) -> None:
+    def __init__(self, app, *, lifespan: bool = True) -> None:
         self.app = app
+        self._lifespan = lifespan
+        self._lifespan_state: dict = {}
+        self._lifespan_task: asyncio.Task | None = None
         inner = _blackbull_in(app)
         self._inner = inner
         self._dispatcher = inner._dispatcher if inner is not None else EventDispatcher()
         # Its WebSocket sends reach the actor directly, as native code.
         self._warns_native_dicts = inner is not None and inner._warns_native_dicts
 
+    async def _lifespan_startup(self) -> None:
+        if not self._lifespan or self._lifespan_task is not None:
+            return
+        if self._inner is self.app:
+            # A BlackBull app runs its own lifespan, as when served natively.
+            await self.app._lifespan_startup()
+            return
+        state: dict = {}
+        inbox: asyncio.Queue = asyncio.Queue()
+        outbox: asyncio.Queue = asyncio.Queue()
+        read = False
+
+        async def receive():
+            nonlocal read
+            read = True
+            return await inbox.get()
+
+        scope = {'type': 'lifespan', 'asgi': {'version': '3.0', 'spec_version': '2.0'},
+                 'state': state}
+        task = asyncio.ensure_future(self.app(scope, receive, outbox.put))
+        answer = await _ask(task, inbox, outbox, 'startup')
+        if answer is None:
+            failure = None if task.cancelled() else task.exception()
+            if read and task.cancelled():
+                raise RuntimeError('the lifespan task was cancelled during startup')
+            if read and failure is not None:
+                raise failure
+            logger.info('ASGI lifespan protocol appears unsupported by %r; '
+                        'serving without it', self.app)
+            return
+        error = _refusal(answer, 'startup')
+        if error is not None:
+            await _reclaim(task)
+            raise error
+        self._lifespan_state = state
+        self._lifespan_task = task
+        self._lifespan_queues = inbox, outbox
+        task.add_done_callback(self._lifespan_ended)
+
+    def _lifespan_ended(self, task) -> None:
+        # Report lifespan death while serving, not only at shutdown.
+        if (task is self._lifespan_task and not task.cancelled()
+                and task.exception() is not None):
+            logger.error('Lifespan task failed after startup: %r',
+                         task.exception(), exc_info=task.exception())
+
+    async def _lifespan_shutdown(self) -> None:
+        if self._lifespan and self._inner is self.app:
+            await self.app._lifespan_shutdown()
+            return
+        task = self._lifespan_task
+        if task is None:
+            return
+        self._lifespan_task = None
+        answer = None if task.done() else await _ask(task, *self._lifespan_queues, 'shutdown')
+        await _reclaim(task)
+        if answer is not None and (error := _refusal(answer, 'shutdown')) is not None:
+            raise error
+        if task.done() and not task.cancelled() and task.exception() is not None:
+            raise task.exception()
+
     async def __call__(self, conn, receive, send):
         if not isinstance(conn, Connection):
-            await self.app(conn, receive, send)
-            return
+            raise TypeError('ASGIApp is a native callable: serve it with blackbull.Server, '
+                            'not from an ASGI host')
         if conn.type == 'websocket':
             if self._inner is not None:
                 await self.app(conn, receive, send)
@@ -210,6 +312,7 @@ class ASGIApp(EventHooks):
         dispatcher = self._dispatcher
         app = self.app
         called = False
+        exchange.scope['state'] = self._lifespan_state.copy()
 
         async def call():
             nonlocal called
