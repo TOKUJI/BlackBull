@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from hpack import Decoder
 
 from ._scenario import Abort, HalfClose, Sleep, half_close
+from .scenario_h2 import frame_bytes
 from .scenario_h2_client import CLIENT_PREFACE, SendFrame, SendHeaders, SendPreface, SendRawBytes
 
 __all__ = [
@@ -151,8 +152,8 @@ def _opened_streams(scenario) -> set[int]:
             or (isinstance(step, SendFrame) and step.frame_type[0] == _HEADERS)}
 
 
-def _window_update(sid: int, increment: int) -> bytes:
-    return b'\x00\x00\x04\x08\x00' + sid.to_bytes(4, 'big') + increment.to_bytes(4, 'big')
+def _frame(kind: int, flags: int, sid: int, payload: bytes = b'') -> bytes:
+    return frame_bytes(len(payload), bytes([kind]), flags, sid, payload)
 
 
 def _at_frame_boundary(wire: bytes) -> bool:
@@ -229,9 +230,9 @@ class _Observer:
                                   (self.block[0], 'reset', 'INTERLEAVED_FIELD_BLOCK'))
             self.block = None
         if kind == _SETTINGS and not flags & 0x1:
-            self._send(b'\x00\x00\x00\x04\x01\x00\x00\x00\x00')
+            self._send(_frame(_SETTINGS, 0x1, 0))
         elif kind == _PING and not flags & 0x1:
-            self._send(b'\x00\x00\x08\x06\x01\x00\x00\x00\x00' + payload)
+            self._send(_frame(_PING, 0x1, 0, payload))
         elif kind == _GOAWAY and self.goaway is None:
             self.goaway = _error_name(int.from_bytes(payload[4:8], 'big'))
         elif kind == _RST and sid not in self.final:
@@ -247,8 +248,9 @@ class _Observer:
         elif kind == _DATA:
             if payload:   # padding counts against the window too (§6.9.1)
                 # A stream that just ended needs no more credit; only the connection does.
-                self._send(_window_update(0, len(payload))
-                           + (b'' if flags & 0x1 else _window_update(sid, len(payload))))
+                credit = len(payload).to_bytes(4, 'big')
+                self._send(_frame(_WINDOW_UPDATE, 0, 0, credit)
+                           + (b'' if flags & 0x1 else _frame(_WINDOW_UPDATE, 0, sid, credit)))
             self.bodies.setdefault(sid, bytearray()).extend(_unpad(flags, payload))
             if flags & 0x1:
                 self._finish(sid)

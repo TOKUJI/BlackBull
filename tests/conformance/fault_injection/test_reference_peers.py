@@ -41,13 +41,17 @@ async def test_the_nghttpd_image_is_prepared():
     assert NGHTTPD.present(), f'{NGHTTPD.image} missing after a build that reported success'
 
 
-async def test_the_preparers_are_this_modules_first_tests(request):
-    """A serial run reaching a peer first would wait out the build budget."""
-    here = [item.name for item in request.session.items if item.path == request.node.path]
+async def test_the_preparers_run_before_any_peer_is_used(request):
+    """A peer waits for its preparer's build, so a preparer queued after one
+    on the same worker would wait out the build budget (seen in CI)."""
+    items = request.session.items
+    names = [item.name for item in items]
     preparers = [peer.preparer for peer in PEERS]
-    if not set(preparers) <= set(here):
+    if not set(preparers) <= set(names):
         pytest.skip('the preparers are not selected')
-    assert here[:2] == preparers, here[:3]
+    users = [i for i, item in enumerate(items)
+             if {'nginx_peer', 'nghttpd_peer'} & set(getattr(item, 'fixturenames', ()))]
+    assert max(names.index(p) for p in preparers) < min(users, default=len(items))
 
 
 def test_each_preparer_is_named_after_a_test_here():
