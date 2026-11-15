@@ -6254,8 +6254,8 @@ recommended, not required.</p>
 <h3 id="lifecycle-startup-shutdown">Lifecycle: <code>startup</code> / <code>shutdown</code><a class="headerlink" href="#lifecycle-startup-shutdown" title="Permanent link">&para;</a></h3>
 <p>Override the optional async hooks for resources that must open and
 close with the application.  <code>add_extension</code> wires them into the
-<code>app_startup</code> / <code>app_shutdown</code> lifespan events, so they run under the
-ASGI lifespan <strong>and</strong> per worker in multi-worker mode:</p>
+<code>app_startup</code> / <code>app_shutdown</code> lifespan events, so they run under any
+host's lifespan <strong>and</strong> per worker in multi-worker mode:</p>
 <div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">PoolExtension</span><span class="p">(</span><span class="n">Extension</span><span class="p">):</span>
     <span class="n">extension_key</span> <span class="o">=</span> <span class="s1">'pool'</span>
 

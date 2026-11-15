@@ -6234,8 +6234,8 @@ between "the server's" and "its own".</p>
 
     <div class="doc doc-contents ">
 
-        <p>Drive the ASGI lifespan shutdown handshake.</p>
-<p>Raises <code>RuntimeError</code> if <code>startup()</code> was never called.  After a
+        <p>Run the app's lifespan shutdown; raise <code>RuntimeError</code> if it fails.</p>
+<p>Also raises <code>RuntimeError</code> if <code>startup()</code> was never called.  After a
 failed <code>startup()</code> it cleans up quietly, so <code>try</code>/<code>finally</code> is safe.</p>
 
 
@@ -6258,11 +6258,7 @@ failed <code>startup()</code> it cleans up quietly, so <code>try</code>/<code>fi
 
     <div class="doc doc-contents ">
 
-        <p>Drive the ASGI lifespan startup handshake.</p>
-<p>Launches the app's lifespan task, delivers 'lifespan.startup', and
-waits for 'lifespan.startup.complete'.  Raises RuntimeError on
-'lifespan.startup.failed'.  Stores the context manager so that
-shutdown() can deliver 'lifespan.shutdown' to the same task.</p>
+        <p>Run the app's lifespan startup; raise <code>RuntimeError</code> if it fails.</p>
 
 
     </div>

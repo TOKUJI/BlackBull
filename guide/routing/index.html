@@ -6213,7 +6213,7 @@ parameters:</p>
 <p><code>url_path_for</code> raises <code>KeyError</code> for unknown names and <code>ValueError</code>
 when required parameters are missing.</p>
 <h3 id="startup-validation">Startup validation<a class="headerlink" href="#startup-validation" title="Permanent link">&para;</a></h3>
-<p><code>app.run()</code> and the ASGI lifespan <code>startup</code> event both call
+<p><code>app.run()</code> and lifespan startup both call
 <code>Router.validate()</code> before accepting connections.  Validation
 checks:</p>
 <ul>
@@ -6222,8 +6222,9 @@ checks:</p>
 <li>The converter's output type matches the handler's annotation
   (e.g. <code>{id:int}</code> with <code>id: str</code> is flagged as an error).</li>
 </ul>
-<p>On failure, a <code>ConfigurationError</code> is raised (or sent as
-<code>lifespan.startup.failed</code>) listing every violated route.  On
+<p>On failure, startup fails with a <code>ConfigurationError</code> listing every
+violated route: <code>app.run()</code> raises a <code>RuntimeError</code> caused by it, and an
+external ASGI host receives it as <code>lifespan.startup.failed</code>.  On
 success, the router is <strong>frozen</strong> — further route registration
 raises <code>RuntimeError</code>.</p>
 <p>A passing example:</p>

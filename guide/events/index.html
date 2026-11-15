@@ -6199,9 +6199,9 @@ raised by an interceptor:</p>
 <li>aborts the remaining interceptors for that event, and</li>
 <li>propagates to the code that called <code>emit</code>.</li>
 </ul>
-<p>For lifespan events, an interceptor exception surfaces to the
-ASGI server driving the lifespan protocol — typically aborting
-startup.</p>
+<p>For lifespan events, an interceptor exception surfaces to whatever
+runs the lifespan — BlackBull's server or an external ASGI host —
+typically aborting startup.</p>
 <h2 id="appon-fire-and-forget-observation"><code>@app.on</code> — fire-and-forget observation<a class="headerlink" href="#appon-fire-and-forget-observation" title="Permanent link">&para;</a></h2>
 <p>Register an observer for a named event:</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">on</span><span class="p">(</span><span class="s1">'app_shutdown'</span><span class="p">)</span>

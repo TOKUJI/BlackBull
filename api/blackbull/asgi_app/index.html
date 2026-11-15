@@ -5899,8 +5899,11 @@ become an ASGI scope and ASGI event dicts.</p>
 <p>Construct it directly to register listeners with <code>on</code>/<code>intercept</code>.
 Around a BlackBull app (also via <code>__wrapped__</code>) it only converts; that
 app fires its own events and errors as when served natively.</p>
-<p>Until BLA-675/BLA-676 the lifespan scope passes unchanged and a foreign
-app's WebSocket requests are refused.</p>
+<p>The server runs <em>app</em>'s lifespan unless <code>lifespan=False</code>.  An app that
+ends without answering <code>lifespan.startup</code>, or raises before its first
+<code>receive()</code>, is served without one.  Each request's <code>scope['state']</code>
+is a shallow copy of the lifespan state.</p>
+<p>Until BLA-676 a foreign app's WebSocket requests are refused.</p>
 
 
 

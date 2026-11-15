@@ -5995,7 +5995,7 @@ startup to complete. A failure while grouping listeners by TLS context, during
 lifespan startup, or while starting acceptance closes every earlier group and
 reclaims the lifespan task before the original startup exception is reported.</p>
 <h2 id="a-failing-shutdown-is-a-failing-process">A failing shutdown is a failing process<a class="headerlink" href="#a-failing-shutdown-is-a-failing-process" title="Permanent link">&para;</a></h2>
-<p><code>run()</code> reports what the application answered:</p>
+<p><code>run()</code> reports how the application's lifespan ended:</p>
 <table>
 <thead>
 <tr>
@@ -6005,19 +6005,25 @@ reclaims the lifespan task before the original startup exception is reported.</p
 </thead>
 <tbody>
 <tr>
-<td>sends <code>lifespan.startup.failed</code></td>
-<td>raises, carrying the app's message</td>
+<td>fails startup: a raising <code>@app.on_startup</code> hook or <code>app_startup</code> interceptor, a route or middleware validation error</td>
+<td>raises <code>RuntimeError</code>, carrying the app's message</td>
 </tr>
 <tr>
-<td>sends <code>lifespan.shutdown.failed</code></td>
+<td>fails shutdown: a raising <code>@app.on_shutdown</code> hook</td>
 <td>raises on the way out, carrying the app's message</td>
 </tr>
 <tr>
-<td>never answers</td>
+<td>never finishes</td>
 <td>waits at startup; at shutdown, ends at the cleanup budget</td>
 </tr>
 </tbody>
 </table>
+<p>A foreign ASGI app served through <code>ASGIApp</code> fails the same way by sending
+<code>lifespan.startup.failed</code> / <code>lifespan.shutdown.failed</code>, or by raising after
+its first <code>receive()</code>.  One that ends without answering, or raises before its
+first <code>receive()</code>, is served without a lifespan.  A bare native callable,
+which is neither a BlackBull app nor an <code>ASGIApp</code> (also through
+<code>__wrapped__</code>), runs no lifespan, and <code>Server()</code> warns.</p>
 <p>A raising <code>@app.on_shutdown</code> hook therefore makes a single-worker process log
 the failure and exit <code>1</code>, so a supervisor can act on it.  With <code>workers &gt; 1</code>
 or <code>--reload</code>, failed worker cleanup also makes the master exit non-zero;
