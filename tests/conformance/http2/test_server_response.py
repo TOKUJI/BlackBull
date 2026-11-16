@@ -393,12 +393,12 @@ async def test_priority_update_new_stream_precreated():
 
 
 # ---------------------------------------------------------------------------
-# RFC 7540 §6.5.2 — SettingsResponder must not mutate our HPACK decoder
+# RFC 9113 §6.5.2 (RFC 7540 §6.5.2) — SettingsResponder must not mutate our HPACK decoder
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_settings_responder_does_not_mutate_decoder_table_size():
-    """Per RFC 7540 §6.5.2, peer's SETTINGS_HEADER_TABLE_SIZE bounds OUR encoder only.
+    """Per RFC 9113 §6.5.2 (RFC 7540 §6.5.2), peer's SETTINGS_HEADER_TABLE_SIZE bounds OUR encoder only.
 
     Regression: the old SettingsResponder set handler.factory.header_table_size,
     which mutated the decoder via FrameFactory.__setattr__.  Subsequent HEADERS
@@ -462,7 +462,7 @@ async def test_invalid_enable_push_retains_state_and_connection_error():
 
 
 # ---------------------------------------------------------------------------
-# DATA frame splitting — RFC 7540 §6.9 and §4.2
+# DATA frame splitting — RFC 9113 §6.9 (RFC 7540 §6.9) and §4.2
 # ---------------------------------------------------------------------------
 
 def _collect_data_frames(written: bytearray, factory: FrameFactory) -> list:
@@ -486,7 +486,7 @@ def _collect_data_frames(written: bytearray, factory: FrameFactory) -> list:
 async def test_large_body_split_into_multiple_data_frames():
     """Bodies larger than max_frame_size must be split into multiple DATA frames.
 
-    Regression for the RFC 7540 §4.2 max-frame-size violation: the old
+    Regression for the RFC 9113 §4.2 (RFC 7540 §4.2) max-frame-size violation: the old
     _write_data() sent the entire body as a single DATA frame, which exceeds
     SETTINGS_MAX_FRAME_SIZE (16384) for large responses.
     """
@@ -517,7 +517,7 @@ async def test_large_body_split_into_multiple_data_frames():
 async def test_body_exceeding_flow_control_window_is_chunked():
     """Bodies larger than the flow-control window must wait for WINDOW_UPDATE.
 
-    Regression for the RFC 7540 §6.9 flow-control deadlock: the old
+    Regression for the RFC 9113 §6.9 (RFC 7540 §6.9) flow-control deadlock: the old
     _write_data() blocked forever trying to send a body larger than the
     connection window, because no data ever reached the client to trigger
     a WINDOW_UPDATE.

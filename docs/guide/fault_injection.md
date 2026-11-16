@@ -16,7 +16,7 @@ because which cell you need depends on which side you are testing:
 | | Broken **client** → your server | Broken **server** → your client |
 |---|---|---|
 | **HTTP/1.1** | ✅ `HTTP1Client.execute_scenario` + catalogue + `oracle_h1` | ✅ `H1FaultServer` + catalogue |
-| **HTTP/2** | ✅ `HTTP2Client.execute_scenario` + catalogue | ✅ `H2FaultServer` + catalogue |
+| **HTTP/2** | ✅ `HTTP2Client.execute_scenario` + catalogue + `oracle_h2` | ✅ `H2FaultServer` + catalogue |
 | **WebSocket** | ✗ not implemented | ✗ not implemented |
 | **gRPC** | — | ⚠ transport only, via `H2FaultServer` |
 | **MQTT** | — | — out of scope |
@@ -26,8 +26,9 @@ because which cell you need depends on which side you are testing:
   headers, mid-request idle, abrupt RST; on HTTP/2 a preface that never
   arrives, a Rapid Reset burst, a PING or SETTINGS flood, a header block
   opened and abandoned, a frame header that lies about its length.  The
-  `oracle_h1` half compares two servers' responses to the same scenario, so
-  you can diff your server against a reference such as nginx.
+  `oracle_h1` and `oracle_h2` halves compare two servers' responses to the
+  same scenario, so you can diff your server against a reference such as
+  nginx (see [Comparing two HTTP/2 servers](#comparing-two-http2-servers)).
 * **Broken server → your client** emits misbehaviour at a connected
   client: on HTTP/1.1 a trickled status line, a `Content-Length` that
   lies, a chunked body that stops mid-chunk; on HTTP/2 half-closed
@@ -442,6 +443,33 @@ names line up with the defences that answer them: `rapid_reset_burst`
 
 Three of them end with a long `Sleep` because *holding* the connection is
 the fault they stage; what ends those is your server's own deadline.
+
+## Comparing two HTTP/2 servers
+
+`oracle_h2.run_scenario` runs a broken-client scenario and returns what the
+server did, normalised to an `H2Outcome`: each stream's final answer, the
+GOAWAY code, and whether the connection ended.  It reads frames and decodes
+field blocks itself, never through BlackBull's parser, and acknowledges
+SETTINGS and PING as a well-behaved peer would; so it runs write steps,
+`Sleep`, `HalfClose` and `Abort` only.  `categorize` compares two outcomes:
+
+```python
+from blackbull.fault_injection.catalogue.h2_differential import BROKEN_CLIENTS
+from blackbull.fault_injection.oracle_h2 import ACCEPTED_CATEGORIES, categorize, run_scenario
+
+scenario = BROKEN_CLIENTS['connection_header'].build()
+mine = await run_scenario('127.0.0.1', 8000, scenario)
+reference = await run_scenario('127.0.0.1', 8080, scenario)
+assert categorize(reference, mine) in ACCEPTED_CATEGORIES
+```
+
+A 4xx answer and `RST_STREAM(PROTOCOL_ERROR)` count as the same rejection
+(RFC 9113 §8.1.1 allows either), and under one shared connection error a
+stream answered on one side but not the other is not a difference
+(RFC 9113 §5.4.1).  `catalogue.h2_differential` holds the broken clients
+(`BROKEN_CLIENTS`) and broken servers (`BROKEN_SERVERS`) that CI runs
+against nginx, nghttpd, httpx and curl, each tagged with its RFC 9113
+section and the matching h2spec check, if any.
 
 ## Saving scenarios as JSON Lines
 

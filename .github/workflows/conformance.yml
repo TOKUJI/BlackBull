@@ -4,7 +4,11 @@ name: RFC conformance
 # fresh ubuntu-latest runner.  Three independent jobs so a single
 # tool's flake doesn't take the whole workflow down:
 #
-#   h2spec         — RFC 7540 + RFC 7541 (HTTP/2 + HPACK)
+#   h2spec         — h2spec v2.6.0: RFC 7540-numbered HTTP/2 checks + RFC 7541
+#                     (HPACK).  HTTP/2 is now RFC 9113; h2spec is frozen at 7540.
+#   h2-differential — RFC 9113 two-axis differential: BlackBull's server
+#                     against nginx and nghttpd, BlackBull's client against
+#                     httpx and curl (Docker for the reference servers)
 #   autobahn       — RFC 6455 (WebSocket)
 #   corpus-replay  — docker-free regression replay of the curated
 #                     fuzz/user-corpus/ diff entries
@@ -19,7 +23,7 @@ name: RFC conformance
 #
 # The workflow's pass/fail status becomes the badge linked from the
 # README.  An individual job failure surfaces in the badge as a red
-# "failure" — the per-job artefacts (JUnit XML for h2spec,
+# "failure" — the per-job artefacts (JUnit XML for h2spec and h2-differential,
 # index.json for Autobahn, pytest output for corpus-replay) carry
 # the detail.
 #
@@ -72,7 +76,7 @@ jobs:
         uses: ./.github/actions/skip-ci-check
 
   h2spec:
-    name: h2spec (RFC 7540 + 7541)
+    name: h2spec v2.6.0 (RFC 7540-based checks; HTTP/2 is now RFC 9113)
     needs: skip-check
     if: needs.skip-check.outputs.skip == 'false'
     runs-on: ubuntu-latest
@@ -151,6 +155,49 @@ jobs:
           path: |
             bench/results/h2spec/
             /tmp/h2spec_server.log
+          retention-days: 30
+          if-no-files-found: warn
+
+  h2-differential:
+    # The checks h2spec cannot make: RFC 9113 deltas, transport faults,
+    # stateful sequences, and the client axis.  A divergence fails unless it is
+    # listed, with its rule, in tests/conformance/fault_injection/test_h2_differential.py.
+    name: HTTP/2 two-axis differential (RFC 9113)
+    needs: skip-check
+    if: needs.skip-check.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0   # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Install BlackBull (with test extras)
+        run: pip install -e '.[testing,fault-injection]'
+
+      - name: Run the differential
+        # The preparation tests in test_reference_peers.py build the nginx and
+        # nghttpd images; the differential waits for them.  Without a peer the
+        # differential fails here instead of skipping to a green run.
+        env:
+          BB_REQUIRE_REFERENCE_PEERS: '1'
+        run: |
+          mkdir -p bench/results/h2_differential
+          python -m pytest tests/conformance/fault_injection/test_reference_peers.py \
+            tests/conformance/fault_injection/test_h2_differential.py \
+            --run-integration --timeout=960 -q \
+            --junitxml=bench/results/h2_differential/junit.xml
+
+      - name: Upload differential results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
+        with:
+          name: h2-differential-results
+          path: bench/results/h2_differential/
           retention-days: 30
           if-no-files-found: warn
 

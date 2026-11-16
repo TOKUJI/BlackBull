@@ -1,6 +1,6 @@
 """HTTP/2 protocol compliance tests (flow control, concurrency, GOAWAY, push, priority).
 
-Each class protects a specific RFC 7540 / RFC 9218 contract.
+Each class protects a specific RFC 9113 (RFC 7540) / RFC 9218 contract.
 Tests drive HTTP2Actor end-to-end using in-process fakes so no live sockets
 are needed, but the full actor loop executes.
 """
@@ -101,7 +101,7 @@ def _make_h2_actor(app=None):
 
 
 # ---------------------------------------------------------------------------
-# RFC 7540 §6.9 — Flow control
+# RFC 9113 §6.9 (RFC 7540 §6.9) — Flow control
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -182,7 +182,7 @@ class TestHTTP2FlowControl:
     async def test_single_data_frame_window_update_increment(self):
         """One DATA frame, once consumed by the app, must produce
         WINDOW_UPDATE with increment equal to that frame's payload size
-        (RFC 7540 §6.9; credit is replayed at consume-time)."""
+        (RFC 9113 §6.9 (RFC 7540 §6.9); credit is replayed at consume-time)."""
         payload = b'hello'
         stream_id = 1
         h_frame = _make_headers_frame(stream_id=stream_id, end_stream=False)
@@ -353,7 +353,7 @@ class TestHTTP2FlowControl:
         assert payload in bytes(written), 'DATA not written after window_update()'
 
     async def test_zero_window_does_not_block_headers_send(self):
-        """RFC 7540 §6.9.1 — only DATA frames are flow-controlled.
+        """RFC 9113 §6.9.1 (RFC 7540 §6.9.1) — only DATA frames are flow-controlled.
 
         HEADERS must be written immediately even when the stream window is 0.
         Regression: the old _write() gated all frame types on flow control,
@@ -394,7 +394,7 @@ class TestHTTP2FlowControl:
 
 
 # ---------------------------------------------------------------------------
-# RFC 7540 §5.1.2 — MAX_CONCURRENT_STREAMS
+# RFC 9113 §5.1.2 (RFC 7540 §5.1.2) — MAX_CONCURRENT_STREAMS
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -540,7 +540,7 @@ class TestHTTP2MaxConcurrentStreams:
 
 
 # ---------------------------------------------------------------------------
-# RFC 7540 §6.8 — GOAWAY
+# RFC 9113 §6.8 (RFC 7540 §6.8) — GOAWAY
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -616,7 +616,7 @@ class TestHTTP2GoAway:
 
 
 # ---------------------------------------------------------------------------
-# RFC 7540 §8.2 — Server push (PUSH_PROMISE)
+# RFC 9113 §8.4 (RFC 7540 §8.2) — Server push (PUSH_PROMISE)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -650,7 +650,7 @@ class TestHTTP2ServerPush:
         )
 
     async def test_push_promise_has_even_stream_id(self):
-        """The promised stream ID in PUSH_PROMISE must be even (RFC 7540 §5.1.1)."""
+        """The promised stream ID in PUSH_PROMISE must be even (RFC 9113 §5.1.1 (RFC 7540 §5.1.1))."""
         h_frame = _make_headers_frame(stream_id=1, end_stream=True)
 
         async def app(scope, receive, send):
@@ -884,7 +884,7 @@ class TestHTTP2ServerPush:
 
 
 # ---------------------------------------------------------------------------
-# RFC 7540 §5.1 — Stream state machine
+# RFC 9113 §5.1 (RFC 7540 §5.1) — Stream state machine
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -989,7 +989,7 @@ class TestHTTP2StreamStateMachine:
 
 
 # ---------------------------------------------------------------------------
-# RFC 7540 §5.3 / §6.3 — PRIORITY frames
+# RFC 9113 §5.3 (RFC 7540 §5.3) / §6.3 — PRIORITY frames
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -1342,14 +1342,14 @@ class TestSettingsMaxHeaderListSize:
 
 
 # ---------------------------------------------------------------------------
-# RFC 7540 §6.5.2 — SETTINGS_HEADER_TABLE_SIZE must not mutate our decoder
+# RFC 9113 §6.5.2 (RFC 7540 §6.5.2) — SETTINGS_HEADER_TABLE_SIZE must not mutate our decoder
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 class TestSettingsHeaderTableSize:
     """SETTINGS_HEADER_TABLE_SIZE from the peer must NOT mutate our HPACK decoder.
 
-    RFC 7540 §6.5.2: the peer's HEADER_TABLE_SIZE value bounds OUR encoder's
+    RFC 9113 §6.5.2 (RFC 7540 §6.5.2): the peer's HEADER_TABLE_SIZE value bounds OUR encoder's
     table, not our decoder's.  Mutating the decoder causes hpack to raise
     InvalidTableSizeError on the next HEADERS frame unless the peer's encoder
     also sends a Dynamic Table Size Update instruction — which browsers never do.

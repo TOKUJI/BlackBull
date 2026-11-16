@@ -2,7 +2,7 @@
 Tests for HTTP/2 CONTINUATION frame support (P1 item 6)
 ========================================================
 
-RFC 7540 §6.10 — CONTINUATION
+RFC 9113 §6.10 (RFC 7540 §6.10) — CONTINUATION
 ------------------------------
 A CONTINUATION frame is used to continue a sequence of header block fragments
 (§4.3).  Any number of CONTINUATION frames can be sent, as long as the

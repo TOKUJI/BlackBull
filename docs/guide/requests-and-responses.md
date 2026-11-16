@@ -235,7 +235,7 @@ for headers that may repeat:
 |---|---|
 | `accept`, `accept-encoding` | Clients may send multiple preference lines |
 | `set-cookie` | Servers send one `Set-Cookie` field per cookie |
-| `cookie` (HTTP/2) | RFC 7540 §8.1.2.5 requires one field per cookie pair |
+| `cookie` (HTTP/2) | RFC 9113 §8.2.3 (RFC 7540 §8.1.2.5) requires one field per cookie pair |
 
 `.getlist` returns `list[tuple[bytes, bytes]]` — the full
 `(name, value)` pairs in insertion order, or `[]` if the header
