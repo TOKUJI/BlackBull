@@ -24,6 +24,7 @@ __all__ = [
     'Category',
     'H2Outcome',
     'PER_SCENARIO_TIMEOUT_S',
+    'STEPS',
     'categorize',
     'run_scenario',
 ]
@@ -140,7 +141,8 @@ def categorize(a: H2Outcome, b: H2Outcome) -> Category:
 PER_SCENARIO_TIMEOUT_S = 15.0
 
 _WRITES = (SendPreface, SendFrame, SendHeaders, SendRawBytes)
-_STEPS = _WRITES + (Sleep, HalfClose, Abort)
+#: The step types ``run_scenario`` runs.
+STEPS = _WRITES + (Sleep, HalfClose, Abort)
 _DATA, _HEADERS, _RST, _SETTINGS, _PING, _GOAWAY, _WINDOW_UPDATE, _CONTINUATION = (
     0, 1, 3, 4, 6, 7, 8, 9)
 
@@ -285,7 +287,7 @@ class _Observer:
 
 async def run_scenario(host: str, port: int, scenario, *, quiet: float = 1.0,
                        budget: float = PER_SCENARIO_TIMEOUT_S,
-                       connect_timeout: float = 2.0) -> H2Outcome:
+                       connect_timeout: float = 2.0, ssl=None) -> H2Outcome:
     """Run *scenario* (a ``ScenarioH2Client``) and return what the server did.
 
     Only write steps, ``Sleep``, ``HalfClose`` and ``Abort`` run here: the
@@ -293,12 +295,12 @@ async def run_scenario(host: str, port: int, scenario, *, quiet: float = 1.0,
     *quiet* seconds after the last frame, at end of stream, or at *budget*.
     """
     for step in scenario.steps:
-        if not isinstance(step, _STEPS):
+        if not isinstance(step, STEPS):
             raise TypeError(f'{type(step).__name__} is not run by the oracle: '
                             'it observes every frame itself')
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port), connect_timeout)
+            asyncio.open_connection(host, port, ssl=ssl), connect_timeout)
     except (OSError, TimeoutError) as exc:
         return H2Outcome(error=repr(exc))
     observer = _Observer(reader, writer)

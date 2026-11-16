@@ -72,6 +72,7 @@ Issues = "https://github.com/TOKUJI/BlackBull/issues"
 
 [project.scripts]
 blackbull = "blackbull.cli:main"
+blackbull-client = "blackbull.fault_injection.cli:main"
 
 [project.optional-dependencies]
 compression = [

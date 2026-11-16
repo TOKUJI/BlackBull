@@ -8,7 +8,8 @@ name: RFC conformance
 #                     (HPACK).  HTTP/2 is now RFC 9113; h2spec is frozen at 7540.
 #   h2-differential — RFC 9113 two-axis differential: BlackBull's server
 #                     against nginx and nghttpd, BlackBull's client against
-#                     httpx and curl (Docker for the reference servers)
+#                     httpx and curl (Docker for the reference servers), and
+#                     blackbull-client run/oracle against the same servers
 #   autobahn       — RFC 6455 (WebSocket)
 #   corpus-replay  — docker-free regression replay of the curated
 #                     fuzz/user-corpus/ diff entries
@@ -185,10 +186,12 @@ jobs:
         # differential fails here instead of skipping to a green run.
         env:
           BB_REQUIRE_REFERENCE_PEERS: '1'
+          BB_CLIENT_CLI_REPORTS: bench/results/h2_differential/blackbull-client
         run: |
           mkdir -p bench/results/h2_differential
           python -m pytest tests/conformance/fault_injection/test_reference_peers.py \
             tests/conformance/fault_injection/test_h2_differential.py \
+            tests/conformance/fault_injection/test_client_cli.py \
             --run-integration --timeout=960 -q \
             --junitxml=bench/results/h2_differential/junit.xml
 

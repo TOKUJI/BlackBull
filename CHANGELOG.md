@@ -47,6 +47,12 @@ metadata; reinstall an editable checkout after changing that version.
   matching h2spec check.  A new conformance job runs them against nginx,
   nghttpd, httpx and curl; the h2spec job now names itself as RFC
   7540-based (BLA-579).
+- `blackbull-client` runs a saved client scenario against a target (`run`)
+  or compares two targets with `oracle_h1` / `oracle_h2` (`oracle`), writing
+  JSON and JUnit; exit codes separate divergence (1), usage (2) and
+  transport failure (3).  It refuses a production context and a remote
+  target without `--allow-remote`, as the fault servers do.  Both oracles'
+  `run_scenario` take `ssl=` (BLA-580).
 
 ### Removed
 

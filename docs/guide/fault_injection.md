@@ -463,7 +463,7 @@ reference = await run_scenario('127.0.0.1', 8080, scenario)
 assert categorize(reference, mine) in ACCEPTED_CATEGORIES
 ```
 
-A 4xx answer and `RST_STREAM(PROTOCOL_ERROR)` count as the same rejection
+A 400 answer and `RST_STREAM(PROTOCOL_ERROR)` count as the same rejection
 (RFC 9113 §8.1.1 allows either), and under one shared connection error a
 stream answered on one side but not the other is not a difference
 (RFC 9113 §5.4.1).  `catalogue.h2_differential` holds the broken clients
@@ -492,6 +492,36 @@ with a deprecation warning until their removal
 ([BBD006](../reference/deprecations.md)); rewrite one with
 `to_json(from_json(text))`.
 
+## Running scenarios from the command line
+
+`blackbull-client` runs a saved client scenario without writing Python.
+`--protocol` says which vocabulary the file is (`h1` for `Scenario`, `h2`
+for `ScenarioH2Client`); the JSON does not record it.
+
+```bash
+export BLACKBULL_ENV=test          # the safety locks below apply here too
+blackbull-client run get.jsonl --protocol h1 --target 127.0.0.1:8000 \
+    --json run.json --junit run.xml
+blackbull-client oracle te_gzip.jsonl --protocol h2 \
+    --target 127.0.0.1:8000 --reference 127.0.0.1:8080 --junit oracle.xml
+```
+
+`run` executes every step and records, per step, the bytes it wrote and
+whether it completed, plus what the target sent.  `oracle` runs the
+scenario against both and reports the `oracle_h1` / `oracle_h2` category;
+an HTTP/2 scenario for it must not contain read steps.
+
+| Exit | Meaning |
+|---|---|
+| 0 | completed; the oracle's category is accepted |
+| 1 | divergence: a category outside the accepted ones, or a `run` whose `Expect…` step did not match |
+| 2 | usage: bad arguments, an unreadable scenario or `--cafile`, an unwritable report path, or a refused production context or remote target |
+| 3 | transport or harness failure, such as a refused connection or a failed TLS handshake |
+
+With `--tls` the certificate is verified against the system CAs; add
+`--cafile` for a private CA or `--insecure` to skip verification.  A
+non-loopback target needs `--allow-remote`.
+
 ## Safety locks
 
 Two locks ensure the deliberate-misbehaviour code path is unreachable
@@ -504,8 +534,9 @@ from a production process:
    `allow_remote=True` is passed.  The misbehaviour mode is for
    local-loop tests.
 
-Both locks are on both fault *servers*.  The two client-side scenario
-models are benign by construction — they are clients, not a server-side
+Both locks are on both fault *servers* and on `blackbull-client`, which
+checks them before it connects.  The client-side scenario models used from
+Python are benign by construction — they are clients, not a server-side
 code path — and carry no equivalent lock.
 
 ## Examples

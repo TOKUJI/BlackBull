@@ -528,6 +528,27 @@ class _Accepted(asyncio.StreamReaderProtocol):
             super().connection_lost(exc)
 
 
+_LOOPBACK = ('127.0.0.1', '::1', 'localhost')
+
+
+def unsafe_reason(name: str, wrong: str, host: str, allow_remote: bool, *,
+                  action: str) -> str | None:
+    """Why *name* must not run here, or None: a production context, or a
+    non-loopback *host* without *allow_remote*."""
+    from ..env import Environment, get_settings  # noqa: PLC0415
+    cfg = get_settings()
+    if cfg.production or cfg.env == Environment.PRODUCTION:
+        return (f'{name} refuses to run in a production context '
+                '(BLACKBULL_ENV unset or production, or BB_PRODUCTION set).  This is a '
+                f'testing-only instrument that deliberately emits wrong {wrong}; running '
+                'it in a production process would expose your service to the same '
+                'misbehaviour.  Run it only in a test harness, with BLACKBULL_ENV=test.')
+    if not allow_remote and host not in _LOOPBACK:
+        return (f'{name} refuses to {action} {host!r} without allow_remote.  '
+                'Deliberate-misbehaviour mode is intended for local-loop tests only.')
+    return None
+
+
 class _FaultServer:
     """Serve one scenario to every client that connects.
 
@@ -546,22 +567,10 @@ class _FaultServer:
     def __init__(self, scenario, *, host: str = '127.0.0.1', port: int = 0,
                  allow_remote: bool = False,
                  ssl_context: ssl.SSLContext | None = None):
-        from ..env import Environment, get_settings  # noqa: PLC0415
-        name = type(self).__name__
-        cfg = get_settings()
-        if cfg.production or cfg.env == Environment.PRODUCTION:
-            raise self.Error(
-                f'{name} refuses to run in a production context '
-                '(BLACKBULL_ENV unset or production, or BB_PRODUCTION set).  This is a '
-                f'testing-only instrument that deliberately emits wrong '
-                f'{self._wrong} responses; running it in a production process '
-                'would expose your service to the same misbehaviour.  Run it '
-                'only in a test harness, with BLACKBULL_ENV=test.')
-        if not allow_remote and host not in ('127.0.0.1', '::1', 'localhost'):
-            raise self.Error(
-                f'{name} refuses to bind to {host!r} without '
-                'allow_remote=True.  Deliberate-misbehaviour mode is '
-                'intended for local-loop tests only.')
+        reason = unsafe_reason(type(self).__name__, f'{self._wrong} responses', host,
+                               allow_remote, action='bind to')
+        if reason is not None:
+            raise self.Error(reason)
         _check_vocabulary(scenario)
         self.scenario = scenario
         self.host = host
