@@ -224,24 +224,36 @@ def test_load_config_maps_server_workers(tmp_path, content, key, value):
     assert result[key] == value
 
 
-def test_future_compression_config_keys_are_not_enabled(tmp_path):
+def test_load_config_maps_all_compression_controls(tmp_path):
     config = tmp_path / 'bb.toml'
     config.write_text('[limits]\ncompression_max_inflight = 0\nbrotli_quality = 1\n')
-    assert _load_config(str(config)) == {}
+    assert _load_config(str(config)) == {
+        'BB_COMPRESSION_MAX_INFLIGHT': '0', 'BB_BROTLI_QUALITY': '1'}
 
 
 @pytest.mark.asyncio
-async def test_config_compression_threshold_reaches_middleware(monkeypatch, tmp_path):
+@pytest.mark.parametrize('quality,expected', [
+    ('0', 0), ('1', 1), ('11', 11), ('-1', 4), ('12', 4), ('"bad"', 4),
+])
+async def test_config_compression_threshold_reaches_middleware(monkeypatch, tmp_path,
+                                                               quality, expected):
+    brotli = pytest.importorskip('brotli')
+    from blackbull.env import get_settings
     from blackbull.middleware import Compression
     from tests.unit.test_compression_settings import BODY, reply
 
     config = tmp_path / 'bb.toml'
-    config.write_text('[limits]\ncompression_min_size = 1000\n')
+    config.write_text('[limits]\ncompression_min_size = 1\n'
+                      'compression_executor_threshold = 0\n'
+                      f'compression_max_inflight = 0\nbrotli_quality = {quality}\n')
     for key, value in _load_config(str(config)).items():
         monkeypatch.setenv(key, value)
-    response = await reply(Compression())
-    assert b'content-encoding' not in response.header
-    assert response.body == BODY
+    cfg = get_settings()
+    assert (cfg.compression_min_size, cfg.compression_executor_threshold,
+            cfg.compression_max_inflight, cfg.brotli_quality) == (1, 0, 0, expected)
+    response = await reply(Compression(), b'br')
+    assert response.header.get(b'content-encoding') == b'br'
+    assert response.body == brotli.compress(BODY, quality=expected)
 
 
 @pytest.mark.parametrize('content,expected', [
@@ -329,20 +341,28 @@ def test_main_config_file_sets_env_var(tmp_path, monkeypatch, capsys):
     assert called['BB_WORKERS'] == '3'
 
 
-def test_main_env_var_takes_precedence_over_config(tmp_path, monkeypatch):
+@pytest.mark.parametrize('section,key,env,value', [
+    ('server', 'workers', 'BB_WORKERS', '1'),
+    ('limits', 'compression_min_size', 'BB_COMPRESSION_MIN_SIZE', '100'),
+    ('limits', 'compression_executor_threshold', 'BB_COMPRESSION_EXECUTOR_THRESHOLD', '0'),
+    ('limits', 'compression_max_inflight', 'BB_COMPRESSION_MAX_INFLIGHT', '0'),
+    ('limits', 'brotli_quality', 'BB_BROTLI_QUALITY', '0'),
+])
+def test_main_env_var_takes_precedence_over_config(tmp_path, monkeypatch,
+                                                   section, key, env, value):
     """An env var already set must not be overwritten by the config file."""
     from blackbull import cli
     import types, sys as _sys
 
     cfg_file = tmp_path / 'bb.toml'
-    cfg_file.write_text('[server]\nworkers = 99\n')
+    cfg_file.write_text(f'[{section}]\n{key} = 3\n')
 
     called = {}
     def _fake_serve(app, **kwargs):
         import os
-        called['BB_WORKERS'] = os.environ.get('BB_WORKERS')
+        called[env] = os.environ.get(env)
     monkeypatch.setattr(cli, '_serve', _fake_serve)
-    monkeypatch.setenv('BB_WORKERS', '1')  # env var wins
+    monkeypatch.setenv(env, value)
 
     mod = types.ModuleType('dummy_cfg_precedence_app')
     mod.app = object()
@@ -353,7 +373,7 @@ def test_main_env_var_takes_precedence_over_config(tmp_path, monkeypatch):
         del _sys.modules['dummy_cfg_precedence_app']
 
     assert rc == 0
-    assert called['BB_WORKERS'] == '1'  # env var was not overwritten
+    assert called[env] == value
 
 
 def test_main_config_tls_fallback(tmp_path, monkeypatch):

@@ -29,6 +29,8 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Added
 
+- TOML `[limits] compression_max_inflight` and `brotli_quality` complete
+  configuration-file support for the four `Compression` controls (BLA-663).
 - `ASGIApp(app)` serves a foreign ASGI 3.0 app on BlackBull's server;
   `Server(app, asgi=True)`, `BB_FORCE_ASGI_SCOPE=1` and the CLI (for a
   non-BlackBull app) wrap with it.  Listeners register with its `on()` and

@@ -43,6 +43,18 @@ def test_constructor_keeps_numeric_public_defaults():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('min_size,compressed', [(None, False), (0, True), (100, True)])
+async def test_optional_overrides_omit_inherited_values(monkeypatch, min_size, compressed):
+    monkeypatch.setenv('BB_COMPRESSION_MIN_SIZE', '1000')
+    overrides = {'min_size': min_size, 'executor_threshold': None,
+                 'executor_max_inflight': None, 'brotli_quality': None}
+    kwargs = {name: value for name, value in overrides.items() if value is not None}
+    response = await reply(Compression(**kwargs))
+    assert (response.header.get(b'content-encoding') == b'gzip') is compressed
+    assert (gzip.decompress(response.body) if compressed else response.body) == BODY
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('explicit', [0, Settings.compression_min_size])
 async def test_min_size_defaults_to_settings(monkeypatch, explicit):
     monkeypatch.setenv('BB_COMPRESSION_MIN_SIZE', '1000')
