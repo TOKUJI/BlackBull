@@ -6070,6 +6070,9 @@ variables</a>.  Highlights:</p>
 <span class="n">request_timeout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">30</span>
 <span class="n">header_timeout</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span>
 <span class="n">compression_min_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span>
+<span class="n">compression_executor_threshold</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">65536</span>
+<span class="n">compression_max_inflight</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8</span>
+<span class="n">brotli_quality</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span>
 
 <span class="k">[logging]</span>
 <span class="n">access_log</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
@@ -6093,8 +6096,17 @@ at construction: <code>BB_COMPRESSION_MIN_SIZE</code>, <code>BB_COMPRESSION_EXEC
 <code>BB_COMPRESSION_MAX_INFLIGHT</code>, and <code>BB_BROTLI_QUALITY</code>. Explicit arguments,
 including <code>0</code>, take precedence. An explicit <code>brotli_quality</code> outside 0–11
 raises <code>ValueError</code> at construction.
-The supported compression keys in <code>[limits]</code> are <code>compression_min_size</code> and
-<code>compression_executor_threshold</code>.</p>
+All four controls are available in <code>[limits]</code>: <code>compression_min_size</code>,
+<code>compression_executor_threshold</code>, <code>compression_max_inflight</code>, and <code>brotli_quality</code>.
+Environment variables override TOML values. An invalid configured Brotli
+quality falls back to <code>4</code>.</p>
+<p>For optional application overrides, omit <code>None</code> values to inherit settings:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware</span><span class="w"> </span><span class="kn">import</span> <span class="n">Compression</span>
+
+<span class="n">overrides</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"min_size"</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">"brotli_quality"</span><span class="p">:</span> <span class="mi">1</span><span class="p">}</span>
+<span class="n">kwargs</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">value</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">overrides</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">}</span>
+<span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">Compression</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">))</span>
+</code></pre></div>
 <p>The TLS keys (<code>[tls] cert</code>, <code>[tls] key</code>) are CLI-arg fallbacks
 applied to <code>--certfile</code> / <code>--keyfile</code> when those aren't
 specified on the command line.</p>
