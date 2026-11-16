@@ -63,9 +63,9 @@ def _parser() -> argparse.ArgumentParser:
 
 def _address(text: str, option: str) -> tuple[str, int]:
     try:
-        address = _split_bind(text, option)
-    except ValueError as exc:
-        raise _Usage(str(exc)) from exc
+        address = _split_bind(text)
+    except ValueError as exc:   # its messages name --bind, the server's option
+        raise _Usage(str(exc).replace('--bind', option, 1)) from exc
     if address[0] != 'tcp' or not address[1]:
         raise _Usage(f'{option} {text!r} — expected host:port')
     return address[1], address[2]
