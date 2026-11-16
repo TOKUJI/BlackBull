@@ -1346,6 +1346,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#comparing-two-http2-servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing two HTTP/2 servers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#saving-scenarios-as-json-lines" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2746,6 +2757,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h2_differential/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h2_differential
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2825,6 +2864,34 @@
     
   
     oracle_h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/oracle_h2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    oracle_h2
   
 
     
@@ -6026,6 +6093,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#comparing-two-http2-servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing two HTTP/2 servers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#saving-scenarios-as-json-lines" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6104,7 +6182,7 @@ because which cell you need depends on which side you are testing:</p>
 </tr>
 <tr>
 <td><strong>HTTP/2</strong></td>
-<td>✅ <code>HTTP2Client.execute_scenario</code> + catalogue</td>
+<td>✅ <code>HTTP2Client.execute_scenario</code> + catalogue + <code>oracle_h2</code></td>
 <td>✅ <code>H2FaultServer</code> + catalogue</td>
 </tr>
 <tr>
@@ -6130,8 +6208,9 @@ because which cell you need depends on which side you are testing:</p>
   headers, mid-request idle, abrupt RST; on HTTP/2 a preface that never
   arrives, a Rapid Reset burst, a PING or SETTINGS flood, a header block
   opened and abandoned, a frame header that lies about its length.  The
-  <code>oracle_h1</code> half compares two servers' responses to the same scenario, so
-  you can diff your server against a reference such as nginx.</li>
+  <code>oracle_h1</code> and <code>oracle_h2</code> halves compare two servers' responses to the
+  same scenario, so you can diff your server against a reference such as
+  nginx (see <a href="#comparing-two-http2-servers">Comparing two HTTP/2 servers</a>).</li>
 <li><strong>Broken server → your client</strong> emits misbehaviour at a connected
   client: on HTTP/1.1 a trickled status line, a <code>Content-Length</code> that
   lies, a chunked body that stops mid-chunk; on HTTP/2 half-closed
@@ -6595,6 +6674,28 @@ names line up with the defences that answer them: <code>rapid_reset_burst</code>
 <code>preface_trickled</code>, <code>abort_mid_header_block</code>.</p>
 <p>Three of them end with a long <code>Sleep</code> because <em>holding</em> the connection is
 the fault they stage; what ends those is your server's own deadline.</p>
+<h2 id="comparing-two-http2-servers">Comparing two HTTP/2 servers<a class="headerlink" href="#comparing-two-http2-servers" title="Permanent link">&para;</a></h2>
+<p><code>oracle_h2.run_scenario</code> runs a broken-client scenario and returns what the
+server did, normalised to an <code>H2Outcome</code>: each stream's final answer, the
+GOAWAY code, and whether the connection ended.  It reads frames and decodes
+field blocks itself, never through BlackBull's parser, and acknowledges
+SETTINGS and PING as a well-behaved peer would; so it runs write steps,
+<code>Sleep</code>, <code>HalfClose</code> and <code>Abort</code> only.  <code>categorize</code> compares two outcomes:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.fault_injection.catalogue.h2_differential</span><span class="w"> </span><span class="kn">import</span> <span class="n">BROKEN_CLIENTS</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.fault_injection.oracle_h2</span><span class="w"> </span><span class="kn">import</span> <span class="n">ACCEPTED_CATEGORIES</span><span class="p">,</span> <span class="n">categorize</span><span class="p">,</span> <span class="n">run_scenario</span>
+
+<span class="n">scenario</span> <span class="o">=</span> <span class="n">BROKEN_CLIENTS</span><span class="p">[</span><span class="s1">'connection_header'</span><span class="p">]</span><span class="o">.</span><span class="n">build</span><span class="p">()</span>
+<span class="n">mine</span> <span class="o">=</span> <span class="k">await</span> <span class="n">run_scenario</span><span class="p">(</span><span class="s1">'127.0.0.1'</span><span class="p">,</span> <span class="mi">8000</span><span class="p">,</span> <span class="n">scenario</span><span class="p">)</span>
+<span class="n">reference</span> <span class="o">=</span> <span class="k">await</span> <span class="n">run_scenario</span><span class="p">(</span><span class="s1">'127.0.0.1'</span><span class="p">,</span> <span class="mi">8080</span><span class="p">,</span> <span class="n">scenario</span><span class="p">)</span>
+<span class="k">assert</span> <span class="n">categorize</span><span class="p">(</span><span class="n">reference</span><span class="p">,</span> <span class="n">mine</span><span class="p">)</span> <span class="ow">in</span> <span class="n">ACCEPTED_CATEGORIES</span>
+</code></pre></div>
+<p>A 4xx answer and <code>RST_STREAM(PROTOCOL_ERROR)</code> count as the same rejection
+(RFC 9113 §8.1.1 allows either), and under one shared connection error a
+stream answered on one side but not the other is not a difference
+(RFC 9113 §5.4.1).  <code>catalogue.h2_differential</code> holds the broken clients
+(<code>BROKEN_CLIENTS</code>) and broken servers (<code>BROKEN_SERVERS</code>) that CI runs
+against nginx, nghttpd, httpx and curl, each tagged with its RFC 9113
+section and the matching h2spec check, if any.</p>
 <h2 id="saving-scenarios-as-json-lines">Saving scenarios as JSON Lines<a class="headerlink" href="#saving-scenarios-as-json-lines" title="Permanent link">&para;</a></h2>
 <p>Every vocabulary writes the same format: a <code>HEADER</code> line carrying the
 format version and the scenario's own fields, then one line per step named

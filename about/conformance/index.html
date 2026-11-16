@@ -2520,6 +2520,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/catalogue/h2_differential/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    h2_differential
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2599,6 +2627,34 @@
     
   
     oracle_h1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/oracle_h2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    oracle_h2
   
 
     
@@ -5876,8 +5932,8 @@ conformance or absence of defects.</p>
 </tr>
 <tr>
 <td>HTTP/2 + HPACK</td>
-<td>h2spec plus tests/conformance/http2/</td>
-<td>h2spec's RFC 7540/7541 cases; in-tree RFC 9113 behavior</td>
+<td>h2spec, the HTTP/2 differential, and tests/conformance/http2/</td>
+<td>h2spec's RFC 7540/7541 cases; RFC 9113 deltas, transport faults and stateful sequences against nginx and nghttpd; in-tree RFC 9113 behavior</td>
 </tr>
 <tr>
 <td>WebSocket</td>
@@ -5891,8 +5947,8 @@ conformance or absence of defects.</p>
 </tr>
 <tr>
 <td>Client validation</td>
-<td>In-tree client tests</td>
-<td>Focused malformed-response and error-scope checks; server h2spec results do not validate clients</td>
+<td>In-tree client tests and the HTTP/2 differential</td>
+<td>Focused malformed-response and error-scope checks; HTTP/2 responses compared with httpx and curl; server h2spec results do not validate clients</td>
 </tr>
 </tbody>
 </table>
@@ -5908,6 +5964,11 @@ nginx differential test requires Docker/testcontainers and skips when they
 are unavailable. For a changed recorded status, decide whether it is a
 regression before regenerating the corpus under Docker; do not update the
 expectation merely to make a test pass.</p>
+<p>The HTTP/2 differential (<code>tests/conformance/fault_injection/test_h2_differential.py</code>)
+needs Docker for nginx and nghttpd and runs in its own workflow job. A
+divergence fails unless the module lists it with the rule behind it; a listed
+divergence that stops happening fails too, so remove its entry rather than
+widening it.</p>
 <h2 id="http11-http11probe">HTTP/1.1 — Http11Probe<a class="headerlink" href="#http11-http11probe" title="Permanent link">&para;</a></h2>
 <p>With the .NET SDK available, run:</p>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
