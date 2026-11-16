@@ -24,7 +24,7 @@ BB_WORKERS=4 BB_UVLOOP=1 BB_ACCESS_LOG=1 \
 The full table is in [Reference — Environment
 variables](../reference/env-vars.md).  Highlights:
 
-- `BLACKBULL_ENV` — `development` (default) / `production` /
+- `BLACKBULL_ENV` — `production` (default) / `development` /
   `test`.  Controls the [error handler](error-handling.md)
   posture and whether [static files](static-files.md) are
   served.
@@ -275,7 +275,8 @@ in-memory LRU for higher throughput at the cost of picking up
 on-disk edits only after the per-entry `stat` TTL.
 
 !!! note
-    `blackbull serve` is a development / standalone convenience.
+    `blackbull serve` is a development / standalone convenience and runs
+    as `BLACKBULL_ENV=development` unless the variable is set.
     `StaticFiles` does not serve files when `BLACKBULL_ENV=production`
     (the expectation is a reverse proxy or CDN fronts static traffic
     there) — see [Static files](static-files.md).
@@ -287,7 +288,6 @@ the knobs most worth a second look:
 
 | Variable | Dev default | Production guidance |
 |---|---|---|
-| `BLACKBULL_ENV` | `development` | Set to `production`.  Tightens error responses and stops `StaticFiles` from competing with your reverse proxy. |
 | `BB_WORKERS` | `1` | Set to `0` (= `cpu_count()`) or a fixed integer matching your CPU budget. |
 | `BB_REQUEST_TIMEOUT` | `0` (off) | Set to a positive value (e.g. `30`) to cancel stalled HTTP/1.1 or HTTP/2 handlers. |
 | `BB_MAX_CONNECTIONS` | `auto` | Tune for the worker's memory budget; set `0` only if some upstream caps connection counts. |

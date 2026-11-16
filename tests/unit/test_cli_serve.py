@@ -92,7 +92,11 @@ def test_no_etag_omits_etag_header(site):
 # main() dispatch + exit codes
 # ---------------------------------------------------------------------------
 
-def test_main_dispatches_serve_to_static(site, monkeypatch):
+@pytest.mark.parametrize('env,status', [
+    pytest.param(None, 200, id='unset-is-development'),
+    pytest.param('production', 404, id='explicit-production-kept'),
+])
+def test_main_dispatches_serve_to_static(site, monkeypatch, env, status):
     captured: dict = {}
 
     def _fake_serve(app, **kwargs):
@@ -100,12 +104,18 @@ def test_main_dispatches_serve_to_static(site, monkeypatch):
         captured.update(kwargs)
 
     monkeypatch.setattr(cli, '_serve', _fake_serve)
+    if env is None:
+        monkeypatch.delenv('BLACKBULL_ENV', raising=False)
+    else:
+        monkeypatch.setenv('BLACKBULL_ENV', env)
     rc = cli.main(['serve', str(site), '--bind', '127.0.0.1:8123'])
     assert rc == 0
     assert captured['port'] == 8123
     # The dispatched app is a BlackBull instance serving the directory.
     from blackbull import BlackBull
     assert isinstance(captured['app'], BlackBull)
+    with TestClient(captured['app']) as c:
+        assert c.get('/a.txt').status_code == status
 
 
 def test_main_serve_missing_dir_returns_1(tmp_path, capsys):

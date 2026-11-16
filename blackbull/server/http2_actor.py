@@ -35,7 +35,8 @@ from .recipient import (AbstractReader, IncompleteReadError,
                         HTTP2Recipient, RecipientFactory,
                         _HTTP2_STREAM_QUEUE_DEPTH)
 from .http2_connection import SKIP, HTTP2Connection
-from .sender import AbstractWriter, FlowControlStalled, SenderFactory, warns_native_dicts
+from .sender import AbstractWriter, FlowControlStalled, SenderFactory
+from ..native import warns_app_dicts
 from .access_log import (
     close_record as _close_record,
     close_ws_record as _close_ws_record,
@@ -168,7 +169,6 @@ class StreamActor(Actor):
         aggregator: EventAggregator | None,
         http2_actor: 'HTTP2Actor',
         log_record,
-        force_asgi: bool,
     ) -> None:
         super().__init__()
         self._stream_id = stream_id
@@ -179,13 +179,12 @@ class StreamActor(Actor):
         self._aggregator = aggregator
         self._http2_actor = http2_actor
         self._log_record = log_record
-        self._force_asgi = force_asgi
 
     async def run(self) -> None:
         try:
             await RequestActor(
                 self._conn, self._receive, self._send,
-                self._app, self._aggregator, self._force_asgi,
+                self._app, self._aggregator,
             ).run()
         except FlowControlStalled:
             # CANCEL, not INTERNAL_ERROR: the peer's missing credit, not a
@@ -306,7 +305,6 @@ class HTTP2Actor(Actor, HTTP2Connection):
         # RFC 8441; run() sets both of these from the environment.  The
         # defaults here are for tests that drive the frame handlers directly.
         self._ws_over_h2_enabled: bool = False
-        self._force_asgi: bool = False
 
         # RFC 8441 stream-exhaustion guard, capped at
         # ``cfg.h2_ws_max_streams_per_connection``.  The id set makes common
@@ -659,8 +657,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
                                   if self._field_block_max else None),
         ))
         self._ws_over_h2_enabled = cfg.h2_enable_websocket
-        self._force_asgi = cfg.force_asgi_scope
-        self._writer.warn_dicts = warns_native_dicts(self._app)
+        self._writer.warn_dicts = warns_app_dicts(self._app)
         logger.info(
             'HTTP/2 SETTINGS sent: initial_window_size=%d max_concurrent_streams=%d',
             cfg.h2_initial_window_size, self.max_concurrent_streams,
@@ -829,8 +826,8 @@ class HTTP2Actor(Actor, HTTP2Connection):
     ) -> None:
         """Spawn the StreamActor that runs one stream's app dispatch.
 
-        *conn* is always the native [`Connection`][]; the compat lane's ASGI
-        scope is derived beyond here, at the app boundary, and nowhere else.
+        *conn* is always the native [`Connection`][]; only
+        [`ASGIApp`][blackbull.ASGIApp] derives an ASGI scope from it.
 
         Registers the task and increments ``_active_stream_count`` only after
         task creation succeeds.  The common done-callback retirement reverses
@@ -850,7 +847,6 @@ class HTTP2Actor(Actor, HTTP2Connection):
                 aggregator=self._aggregator,
                 http2_actor=self,
                 log_record=log_record,
-                force_asgi=self._force_asgi,
             ).run()
 
         timeout = self._request_timeout
@@ -1246,9 +1242,6 @@ class HTTP2Actor(Actor, HTTP2Connection):
         path = event.push.encode('utf-8')
 
         parent = parent_stream.conn
-        # Plain attribute reads, never ``.get()`` on a scope: under
-        # BB_FORCE_ASGI_SCOPE that reaches a header *list* and raises
-        # AttributeError for every push.
         if parent is not None:
             parent_headers = parent.headers
             parent_scheme = parent.scheme

@@ -8,20 +8,21 @@ reset_settings_cache().
 """
 import dataclasses
 import functools as _functools
+import logging
 import os
 import resource
 from collections.abc import Callable
 from enum import StrEnum
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 
 class Environment(StrEnum):
     """Which deployment the process thinks it is, read from ``BLACKBULL_ENV``.
 
-    Reachable as ``get_settings().env``.  A value that is not one of these
-    three resolves to ``DEVELOPMENT`` rather than raising, so a misspelled
-    ``production`` gets the *looser* of the two behaviours and says nothing
-    about it — worth asserting on at startup if it matters to you.
+    Reachable as ``get_settings().env``.  Unset means ``PRODUCTION``, and so
+    does a value that is not one of these three, with a warning.
 
     Two behaviours turn on it, and both tighten in ``PRODUCTION``:
     [`StaticFiles`][blackbull.middleware.static.StaticFiles] declines to serve
@@ -84,9 +85,11 @@ def resolve_max_connections(raw: str | None) -> int:
 
 def _environment(raw: str | None) -> 'Environment':
     try:
-        return Environment((raw or Environment.DEVELOPMENT).lower())
+        return Environment((raw or Environment.PRODUCTION).lower())
     except ValueError:
-        return Environment.DEVELOPMENT
+        logger.warning('BLACKBULL_ENV=%r is not production, development or test; '
+                       'running as production', raw)
+        return Environment.PRODUCTION
 
 
 def setting(env: str, default: Any, *, section: str, doc: str,
@@ -120,8 +123,8 @@ class Settings:
 
     _section = 'Runtime and processes'
     env: Environment = setting(
-        'BLACKBULL_ENV', Environment.DEVELOPMENT, parse=_environment, section=_section,
-        doc='`production` | `development` | `test`.  In `production`, `StaticFiles` declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details; in `development` it shows them to a loopback peer without `Forwarded`/`X-Forwarded-For` only.')
+        'BLACKBULL_ENV', Environment.PRODUCTION, parse=_environment, section=_section,
+        doc='`production` | `development` | `test`; an unrecognised value is `production`, with a warning.  Set `development` for local development.  In `production`, `StaticFiles` declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details; in `development` it shows them to a loopback peer without `Forwarded`/`X-Forwarded-For` only.')
     workers: int = setting(
         'BB_WORKERS', 1, minimum=1, config=('server', 'workers'), section=_section,
         doc='Pre-fork worker count.  `0` resolves to `os.cpu_count()`.  Combine with `BB_SOCKET_REUSEPORT=1`, except under `--reload` or on a port-bound non-ASGI protocol, which keep one listener.  See [Workers](../deployment/workers.md).')
@@ -130,7 +133,7 @@ class Settings:
         doc="Install `uvloop`'s asyncio policy at startup.  Requires `pip install 'blackbull[speed]'`; falls back to the standard loop with a warning when uvloop is missing.")
     force_asgi_scope: bool = setting(
         'BB_FORCE_ASGI_SCOPE', False, section=_section,
-        doc='Exercise the native-to-ASGI compatibility conversion on every request. Leave off for normal native serving.')
+        doc='Serve the app through `ASGIApp`, as `Server(app, asgi=True)` does: a foreign ASGI app, or the dual-path test lane for a BlackBull app. `Server(asgi=False)` refuses to start with it set.')
     cpu_pinning: str = setting(
         'BB_CPU_PINNING', 'auto', section=_section,
         doc='Linux multi-worker event-loop CPU placement. `auto` assigns workers within the inherited CPU mask; `off` disables pinning; a taskset-style list intersects that mask (`0` means CPU 0). Executor threads keep the full mask. Single-worker servers are not pinned. Use `off` when placement is managed externally.')

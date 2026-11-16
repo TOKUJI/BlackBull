@@ -106,26 +106,26 @@ async def test_native_test_server_exit(cancel):
         writer.close()
 
 
-async def _slow_shutdown_app(scope, receive, send):
-    if scope['type'] != 'lifespan':
-        return
-    assert (await receive())['type'] == 'lifespan.startup'
-    await send({'type': 'lifespan.startup.complete'})
-    assert (await receive())['type'] == 'lifespan.shutdown'
-    # A shutdown that finishes its work even when cancelled, as a drain does.
-    loop = asyncio.get_running_loop()
-    end = loop.time() + 2.0
-    while (left := end - loop.time()) > 0:
-        try:
-            await asyncio.sleep(left)
-        except asyncio.CancelledError:
-            pass
-    await send({'type': 'lifespan.shutdown.complete'})
+def _slow_shutdown_app():
+    app = BlackBull()
+
+    @app.on_shutdown
+    async def _drain():
+        # A shutdown that finishes its work even when cancelled, as a drain does.
+        loop = asyncio.get_running_loop()
+        end = loop.time() + 2.0
+        while (left := end - loop.time()) > 0:
+            try:
+                await asyncio.sleep(left)
+            except asyncio.CancelledError:
+                pass
+
+    return app
 
 
 @pytest.mark.parametrize('cancel', [True, False], ids=['cancelled', 'control'])
 async def test_grpc_test_server_exit(cancel):
-    server = GrpcTestServer(_slow_shutdown_app)
+    server = GrpcTestServer(_slow_shutdown_app())
     await server.__aenter__()
     if not cancel:
         await server.__aexit__(None, None, None)

@@ -17,8 +17,9 @@ BlackBull uses [ZeroVer](https://0ver.org/): `0.MINOR.PATCH`.
 
 The public API is the `__all__` of the packages `pyproject.toml` lists under
 `[tool.blackbull] public-packages`, published as the API reference's *Public
-API* page; nothing else is covered by these rules. A pull request that breaks
-it fails its *Public API* check, which lists each break. Publishing refuses a
+API* page; nothing else is covered by these rules. The *Public API* check lists
+every break and fails unless that exact change is approved for the PR and its
+target MINOR release. Publishing refuses a
 tag that breaks it since the previous tag without raising MINOR.
 
 `pyproject.toml` owns the version. `blackbull.__version__` reads installed
@@ -30,8 +31,30 @@ metadata; reinstall an editable checkout after changing that version.
 
 - TOML `[limits] compression_max_inflight` and `brotli_quality` complete
   configuration-file support for the four `Compression` controls (BLA-663).
+- `ASGIApp(app)` serves a foreign ASGI 3.0 app on BlackBull's server;
+  `Server(app, asgi=True)`, `BB_FORCE_ASGI_SCOPE=1` and the CLI (for a
+  non-BlackBull app) wrap with it.  Listeners register with its `on()` and
+  `intercept()`.  A failure before the response starts answers `500`; an
+  out-of-order message raises `RuntimeError`, a send after disconnect an
+  `OSError`.  Foreign WebSocket requests are refused for now (BLA-673).
+- `ASGIApp` runs the foreign app's lifespan (`lifespan=False` skips it) and
+  gives each request a shallow copy of the lifespan `state`.  An app that
+  ends without answering startup, or raises before its first `receive()`, is
+  served without a lifespan (BLA-675).
+- `blackbull.fault_injection.oracle_h2` compares two HTTP/2 servers'
+  answers to one broken-client scenario, reading frames with its own decoder
+  (`run_scenario`, `categorize`, `H2Outcome`).
+  `fault_injection.catalogue.h2_differential` holds the RFC 9113 broken
+  clients and broken servers, each tagged with its RFC 9113 section and the
+  matching h2spec check.  A new conformance job runs them against nginx,
+  nghttpd, httpx and curl; the h2spec job now names itself as RFC
+  7540-based (BLA-579).
 
 ### Removed
+
+- `Server` no longer accepts ignored `**kwds`; unknown keywords raise
+  `TypeError`. This intentional public API break requires the 0.83.0 MINOR
+  release and is approved only for PR #601 (BLA-673).
 
 - `blackbull.client.scenario` and `blackbull.client.scenario_oracle` (BBD003).
   Import from `blackbull.fault_injection` instead, using `H1CSendRawBytes`
@@ -49,6 +72,26 @@ metadata; reinstall an editable checkout after changing that version.
   not warn, and behaviour is unchanged (BLA-672).
 
 ### Changed
+
+- `BLACKBULL_ENV` defaults to `production`, and an unrecognised value is
+  `production` with a warning.  Unset, `StaticFiles` serves nothing, the
+  default error handler shows no exception detail, and the fault-injection
+  servers refuse to start.  **Upgrade:** set `BLACKBULL_ENV=development` for
+  local development and `BLACKBULL_ENV=test` in test suites and where fault
+  injection runs.
+  `blackbull serve` runs as `development` unless the variable is set
+  (BLA-643).
+- `Server()` raises `TypeError` for an unknown keyword argument, which it
+  used to ignore, and refuses `asgi=False` under `BB_FORCE_ASGI_SCOPE=1`.
+  Without `asgi=True` or that variable, an app is always called as a native
+  `(conn, receive, send)` callable (BLA-673).
+- The server runs an app's startup and shutdown through the app's own hooks,
+  not the ASGI lifespan protocol; failures read `Lifespan startup failed: …`
+  / `Lifespan shutdown failed: …`.  A bare native callable (no BlackBull app
+  or `ASGIApp`, also through `__wrapped__`) runs no lifespan, and `Server()`
+  warns.  A foreign app's `scope['state']` no longer exposes BlackBull's
+  per-request state, and `ASGIApp` refuses an ASGI host (`TypeError`)
+  (BLA-675).
 
 - The `websocket` middleware sends `NativeWSMessage`s instead of event dicts
   (BLA-672).

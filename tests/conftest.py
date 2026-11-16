@@ -24,6 +24,10 @@ if os.environ.get("BB_MUTATE_TESTS"):
 # were written against instead of restating it at each call site.
 multiprocessing.set_start_method('fork', force=True)
 
+# Unset means production, which disables StaticFiles and the fault servers;
+# tests of that default unset it themselves.
+os.environ.setdefault('BLACKBULL_ENV', 'test')
+
 
 DEFAULT_SKIPPED_MARKERS = {
     "integration": "--run-integration",

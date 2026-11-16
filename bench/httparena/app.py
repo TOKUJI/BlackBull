@@ -9,6 +9,10 @@ import argparse
 import json
 import os
 import sys
+
+# Before blackbull caches settings: the static profile needs StaticFiles,
+# which an unset BLACKBULL_ENV (production) disables.
+os.environ.setdefault('BLACKBULL_ENV', 'development')
 from http import HTTPMethod
 from urllib.parse import parse_qs
 

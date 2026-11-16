@@ -8,10 +8,10 @@ conformance or absence of defects.
 | Surface | Check | Scope |
 |---|---|---|
 | HTTP/1.1 | Http11Probe plus tests/conformance/http1/ | RFC 9110/9112 framing, dispatch and resource refusals |
-| HTTP/2 + HPACK | h2spec plus tests/conformance/http2/ | h2spec's RFC 7540/7541 cases; in-tree RFC 9113 behavior |
+| HTTP/2 + HPACK | h2spec, the HTTP/2 differential, and tests/conformance/http2/ | h2spec's RFC 7540/7541 cases; RFC 9113 deltas, transport faults and stateful sequences against nginx and nghttpd; in-tree RFC 9113 behavior |
 | WebSocket | Autobahn plus in-tree tests | RFC 6455/7692 framing, compression and limits |
 | WebSocket over HTTP/2 | tests/conformance/http2/test_rfc8441.py | Opt-in RFC 8441 transport |
-| Client validation | In-tree client tests | Focused malformed-response and error-scope checks; server h2spec results do not validate clients |
+| Client validation | In-tree client tests and the HTTP/2 differential | Focused malformed-response and error-scope checks; HTTP/2 responses compared with httpx and curl; server h2spec results do not validate clients |
 
 [The conformance workflow](https://github.com/TOKUJI/BlackBull/blob/master/.github/workflows/conformance.yml)
 owns external-suite versions, case partitions, budgets and artifact retention.
@@ -29,6 +29,12 @@ nginx differential test requires Docker/testcontainers and skips when they
 are unavailable. For a changed recorded status, decide whether it is a
 regression before regenerating the corpus under Docker; do not update the
 expectation merely to make a test pass.
+
+The HTTP/2 differential (`tests/conformance/fault_injection/test_h2_differential.py`)
+needs Docker for nginx and nghttpd and runs in its own workflow job. A
+divergence fails unless the module lists it with the rule behind it; a listed
+divergence that stops happening fails too, so remove its entry rather than
+widening it.
 
 ## HTTP/1.1 — Http11Probe
 

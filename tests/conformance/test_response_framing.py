@@ -94,7 +94,8 @@ def _app(status, lengths, body, trailers, form, refusals):
     async def app(conn, receive, send):
         calls.append(1)
         if len(calls) > 1:
-            await send(NativeResponse(header=[], body=b'next'))
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b'next'})
             return
         try:
             if form == 'native':
@@ -176,6 +177,8 @@ async def _http2(server, method):
 @pytest.mark.parametrize('method,status,lengths,body,trailers,form', _rows())
 async def test_a_generated_response_keeps_its_length_rule(
         monkeypatch, protocol, lane, method, status, lengths, body, trailers, form):
+    if lane == '1' and form == 'native':
+        pytest.skip('a foreign ASGI app sends event dicts')
     monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', lane)
     outcome, length, content, tail = _expected(method, status, lengths, body, trailers,
                                                protocol)

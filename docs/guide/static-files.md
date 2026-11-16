@@ -87,14 +87,16 @@ behaviour:
 
 | Value | Effect |
 |---|---|
-| `production` | Always return 404 — static files are never served |
-| `development` (default) | Serve files normally |
+| `production` (default) | Always return 404 — static files are never served |
+| `development` | Serve files normally |
 | `test` | Serve files normally |
 
 ```bash
-BLACKBULL_ENV=production python app.py   # static routes return 404
+python app.py                            # static routes return 404
 BLACKBULL_ENV=development python app.py  # static files served
 ```
+
+`blackbull serve` runs as `development` unless `BLACKBULL_ENV` is set.
 
 The production-mode passthrough exists because production
 deployments typically front BlackBull with nginx or a CDN that

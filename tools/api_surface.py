@@ -6,7 +6,7 @@ its own ``__all__``.  The code and the declaration are both read from git at
 each ref, and what BASE declares is what is compared, so a change cannot
 narrow the surface it is judged by.
 
-    python -m tools.api_surface diff BASE [HEAD]   # exit 1 on any break
+    python -m tools.api_surface diff BASE [HEAD]   # exit 1 on unapproved breaks
     python -m tools.api_surface release TAG        # exit 1 when TAG keeps MINOR over a break
 
 Exit 2 is an error, never a verdict.
@@ -24,6 +24,16 @@ import griffe
 # find_breaking_changes compares only an object's members; this compares the
 # exported object itself, so a changed function signature is seen too.
 from griffe._internal.diff import _type_based_yield
+
+
+# Exact PR-scoped approvals; release validation never consults them.
+_PR_APPROVALS = {
+    601: {
+        'blackbull.server.Server: blackbull.server.server.Server.__init__(kwds): '
+        'Parameter was removed':
+        '0.83.0 (BLA-673): reject unknown Server keywords instead of ignoring them',
+    },
+}
 
 
 def declaration(pyproject: str) -> list[str] | None:
@@ -119,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser('diff')
     d.add_argument('base')
     d.add_argument('head', nargs='?', default='HEAD')
+    d.add_argument('--pull-request', type=int,
+                   help='Apply exact approvals for this PR from the trusted base checkout')
     r = sub.add_parser('release')
     r.add_argument('tag')
     args = parser.parse_args(argv)
@@ -137,7 +149,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if found:
         print(heading, *(f'- {line}' for line in found), sep='\n')
-        return 1
+        approved = _PR_APPROVALS.get(args.pull_request, {}) if args.command == 'diff' else {}
+        for line in found:
+            if line in approved:
+                print(f'Approved for MINOR {approved[line]} (PR #{args.pull_request}).')
+        return int(any(line not in approved for line in found))
     print('No public API break.')
     return 0
 

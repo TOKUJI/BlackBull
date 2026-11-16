@@ -22,7 +22,9 @@ from blackbull.extension import Extension
 @pytest.mark.parametrize('module_name', [
     'blackbull.connection', 'blackbull.di', 'blackbull.fault_injection._tls',
     'blackbull.fault_injection.catalogue', 'blackbull.fault_injection.catalogue.h1_client',
+    'blackbull.fault_injection.catalogue.h2_differential',
     'blackbull.fault_injection.h2_server', 'blackbull.fault_injection.oracle_h1',
+    'blackbull.fault_injection.oracle_h2',
     'blackbull.fault_injection.scenario_h2', 'blackbull.grpc', 'blackbull.middleware',
     'blackbull.mqtt', 'blackbull.protocol.framing', 'blackbull.protocol.http1',
     'blackbull.server', 'blackbull.server.cap_log', 'blackbull.server.connection_protocol',

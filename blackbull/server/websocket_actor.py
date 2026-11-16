@@ -77,8 +77,6 @@ class WebSocketActor(Actor):
         self._writer = writer
         self._conn = conn
         self._app = app
-        # Not warns_native_dicts: this actor always passes a Connection, so
-        # BB_FORCE_ASGI_SCOPE adds no boundary that could produce a dict.
         self._warn_dicts = warns_app_dicts(app)
         self._aggregator = aggregator
         self._peername = peername

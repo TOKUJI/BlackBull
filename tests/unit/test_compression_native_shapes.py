@@ -45,14 +45,17 @@ def count_objects(monkeypatch):
     * natively, objects reach ``HTTP1Sender`` as ``NativeResponse``;
     * under ``BB_FORCE_ASGI_SCOPE=1`` the app is handed a scope dict, which
       installs ``_to_asgi_boundary`` above the sender and converts each object
-      to dicts — so the sender sees dicts and ``to_asgi()`` sees the objects.
+      to dicts — so ``to_asgi()`` sees the objects, and the sender sees what
+      ``ASGIApp`` rebuilt from the dicts, which is not counted.
 
     Either way the total is the number of objects emitted, which is the
     property these tests are about.
     """
+    from blackbull.env import get_settings
     from blackbull.server import sender as _sender
 
     calls = {'n': 0}
+    native_lane = not get_settings().force_asgi_scope
     original_to_asgi = _native.NativeResponse.to_asgi
     original_send = _sender.HTTP1Sender.__call__
 
@@ -61,7 +64,7 @@ def count_objects(monkeypatch):
         return original_to_asgi(self)
 
     async def counting_send(self, body, status=HTTPStatus.OK, headers=()):
-        if isinstance(body, _native.NativeResponse):
+        if native_lane and isinstance(body, _native.NativeResponse):
             calls['n'] += 1
         return await original_send(self, body, status, headers)
 

@@ -163,9 +163,11 @@ jobs:
         # --run-integration (not --run-all): the `docker` marker stays skipped,
         # so no daemon is needed here and the docker-dependent modules
         # importorskip out.  Measured at ~98s locally for 3526 tests, which is
-        # what made this lane cheap enough to gate every PR.
+        # what made this lane cheap enough to gate every PR.  The HTTP/2
+        # differential has its own job in conformance.yml.
         run: |
           python -m pytest tests/integration tests/conformance \
+            --ignore=tests/conformance/fault_injection/test_h2_differential.py \
             --run-integration --timeout=120 -q --beartype-packages=blackbull
 
   execution-audit:

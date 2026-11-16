@@ -226,11 +226,6 @@ def test_cli_serves_raw_asgi_callable(tmp_path: Path, child_env):
     env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'}, cwd=str(tmp_path))
     blackbull = shutil.which('blackbull', path=env['PATH'])
     assert blackbull, 'the harness must provide the blackbull executable'
-    # BlackBull is a native-Connection framework — its server hands
-    # the app a typed ``Connection`` by default. A *raw* ASGI callable (no
-    # BlackBull instance) reads ``scope['type']``/``scope['path']``, so it must
-    # opt into the ASGI-scope compat lane via ``BB_FORCE_ASGI_SCOPE=1``.
-    env['BB_FORCE_ASGI_SCOPE'] = '1'
 
     log_path = tmp_path / 'subprocess.log'
     log_fh = open(log_path, 'w', buffering=1)

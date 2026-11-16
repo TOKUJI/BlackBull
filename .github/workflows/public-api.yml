@@ -1,7 +1,7 @@
 name: Public API
 
-# Fails a pull request that breaks the public API (tools/api_surface.py) and
-# lists each break: the next release must then raise MINOR.
+# Reports every public API break and fails unless the trusted base explicitly
+# approves that exact change for this PR and its target MINOR release.
 #
 # pull_request_target runs the base branch's copy of this workflow and of the
 # gate, so a pull request cannot change how it is judged.  The pull request's
@@ -46,4 +46,4 @@ jobs:
             [ "$attempt" = 6 ] && { echo "Error: the merge ref is not up to date with $HEAD_SHA; re-run." | tee -a "$GITHUB_STEP_SUMMARY"; exit 2; }
             sleep 10
           done
-          python -m tools.api_surface diff pr/merge^1 pr/merge 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          python -m tools.api_surface diff pr/merge^1 pr/merge --pull-request "$PR" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"

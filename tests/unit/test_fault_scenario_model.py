@@ -591,20 +591,23 @@ _SERVERS = [pytest.param(H1FaultServer, h1s.ScenarioH1Server, id='h1'),
 
 @pytest.mark.parametrize('server_cls,scenario_cls', _SERVERS)
 @pytest.mark.parametrize('env,refused', [
+    ({}, True),
     ({'BLACKBULL_ENV': 'production'}, True),
     ({'BLACKBULL_ENV': 'development', 'BB_PRODUCTION': '1'}, True),
     ({'BLACKBULL_ENV': 'development'}, False),
+    ({'BLACKBULL_ENV': 'test'}, False),
 ])
 def test_a_fault_server_refuses_a_production_context(
         monkeypatch, server_cls, scenario_cls, env, refused):
     from blackbull.env import reset_settings_cache
     monkeypatch.delenv('BB_PRODUCTION', raising=False)
+    monkeypatch.delenv('BLACKBULL_ENV', raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     reset_settings_cache()
     try:
         if refused:
-            with pytest.raises(server_cls.Error, match='production'):
+            with pytest.raises(server_cls.Error, match='BLACKBULL_ENV=test'):
                 server_cls(scenario_cls(steps=()))
         else:
             server_cls(scenario_cls(steps=()))
