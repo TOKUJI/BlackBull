@@ -1,11 +1,16 @@
-"""``blackbull-client``: run a client fault scenario, or compare two targets.
+"""blackbull-client: run a client fault scenario, or compare two targets.
 
-``run`` executes one scenario JSON file against ``--target``; ``oracle`` runs
-it against ``--target`` and ``--reference`` and compares the outcomes with
-``oracle_h1`` or ``oracle_h2``.  Exit codes: 0 ok, 1 divergence (a category
-outside the accepted ones, or a run whose ``Expect…`` step did not match),
-2 usage (including a refused production context or remote target), 3 a
-transport or harness failure.  Nothing is sent before the checks pass.
+run executes one scenario JSON file against --target; oracle runs it against
+--target and --reference and compares the outcomes (oracle_h1 / oracle_h2).
+Nothing is sent before the checks pass.
+
+exit codes:
+  0  ok
+  1  divergence: a category outside the accepted ones, or an Expect step that
+     did not match
+  2  usage: bad arguments, an unreadable file, an unwritable report, or a
+     refused production context or remote target
+  3  transport or harness failure
 """
 from __future__ import annotations
 
@@ -17,6 +22,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from ..cli import _split_bind
 from . import oracle_h1, oracle_h2
 from ._scenario import unsafe_reason
 from .scenario_h1 import Scenario
@@ -33,7 +39,8 @@ class _Usage(Exception):
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog='blackbull-client', description=__doc__.split('\n')[0])
+    parser = argparse.ArgumentParser(prog='blackbull-client', description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest='command', required=True)
     for name in ('run', 'oracle'):
         sub = commands.add_parser(name)
@@ -54,11 +61,14 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _address(text: str) -> tuple[str, int]:
-    host, sep, port = text.rpartition(':')
-    if not sep or not host or not port.isdigit():
-        raise _Usage(f'{text!r} is not host:port')
-    return host.strip('[]'), int(port)
+def _address(text: str, option: str) -> tuple[str, int]:
+    try:
+        address = _split_bind(text, option)
+    except ValueError as exc:
+        raise _Usage(str(exc)) from exc
+    if address[0] != 'tcp' or not address[1]:
+        raise _Usage(f'{option} {text!r} — expected host:port')
+    return address[1], address[2]
 
 
 def _tls(args) -> _ssl.SSLContext | None:
@@ -84,9 +94,9 @@ def _prepare(args):
         scenario = _LOADERS[args.protocol](args.scenario.read_text())
     except (OSError, ValueError, TypeError, KeyError) as exc:
         raise _Usage(f'cannot read {args.scenario} as an {args.protocol} scenario: {exc}') from exc
-    addresses = [_address(args.target)]
+    addresses = [_address(args.target, '--target')]
     if args.command == 'oracle':
-        addresses.append(_address(args.reference))
+        addresses.append(_address(args.reference, '--reference'))
         if args.protocol == 'h2':
             for step in scenario.steps:
                 if not isinstance(step, oracle_h2.STEPS):

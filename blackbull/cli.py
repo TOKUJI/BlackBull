@@ -87,7 +87,7 @@ def _load_config(path: str) -> dict[str, str]:
 _DEFAULT_BIND = '127.0.0.1:8000'
 
 
-def _split_bind(spec: str):
+def _split_bind(spec: str, option: str = '--bind'):
     """Parse a ``--bind`` value into a tagged address tuple.
 
     Recognised schemes:
@@ -102,46 +102,46 @@ def _split_bind(spec: str):
       socket on file descriptor *N* (systemd-style activation; see
       [`blackbull.protocol.rsock.adopt_listening_fd`][blackbull.protocol.rsock.adopt_listening_fd]).
 
-    Raises ``ValueError`` with a focused message on syntactic
-    problems.
+    Raises ``ValueError`` with a focused message, naming *option*, on
+    syntactic problems.
     """
     if spec.startswith('fd://'):
         n = spec[len('fd://'):]
         if not n:
-            raise ValueError(f"--bind {spec!r} — fd:// requires an fd number")
+            raise ValueError(f"{option} {spec!r} — fd:// requires an fd number")
         try:
             fd = int(n)
         except ValueError:
             raise ValueError(
-                f"--bind {spec!r} — fd {n!r} is not an integer"
+                f"{option} {spec!r} — fd {n!r} is not an integer"
             ) from None
         if fd < 0:
-            raise ValueError(f"--bind {spec!r} — fd {fd} cannot be negative")
+            raise ValueError(f"{option} {spec!r} — fd {fd} cannot be negative")
         return ('fd', fd)
 
     if spec.startswith('unix:'):
         path = spec[len('unix:'):]
         if not path:
-            raise ValueError(f"--bind {spec!r} — unix: requires a path")
+            raise ValueError(f"{option} {spec!r} — unix: requires a path")
         return ('unix', path)
 
     if spec.startswith('['):
         # IPv6 literal: [::]:port
         end = spec.find(']')
         if end == -1 or not spec[end + 1:].startswith(':'):
-            raise ValueError(f"--bind {spec!r} — bracketed IPv6 must be [host]:port")
+            raise ValueError(f"{option} {spec!r} — bracketed IPv6 must be [host]:port")
         host = spec[1:end]
         port_s = spec[end + 2:]
     else:
         if ':' not in spec:
-            raise ValueError(f"--bind {spec!r} — expected host:port")
+            raise ValueError(f"{option} {spec!r} — expected host:port")
         host, _, port_s = spec.rpartition(':')
     try:
         port = int(port_s)
     except ValueError:
-        raise ValueError(f"--bind {spec!r} — port {port_s!r} is not an integer") from None
+        raise ValueError(f"{option} {spec!r} — port {port_s!r} is not an integer") from None
     if not 0 <= port <= 65535:
-        raise ValueError(f"--bind {spec!r} — port {port} out of range")
+        raise ValueError(f"{option} {spec!r} — port {port} out of range")
     return ('tcp', host, port)
 
 
