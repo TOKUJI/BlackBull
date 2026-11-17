@@ -6190,13 +6190,9 @@ might also match <code>/assets/...</code>.  The 404 goes through the normal
 error path, so <code>@app.on_error(HTTPStatus.NOT_FOUND)</code> still applies.</p>
 </div>
 <h2 id="standalone-usage">Standalone usage<a class="headerlink" href="#standalone-usage" title="Permanent link">&para;</a></h2>
-<p><code>StaticFiles</code> is also a standalone ASGI app — useful in tests
-or when mounting without BlackBull:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull.middleware.static</span><span class="w"> </span><span class="kn">import</span> <span class="n">StaticFiles</span>
-
-<span class="n">app</span> <span class="o">=</span> <span class="n">StaticFiles</span><span class="p">(</span><span class="n">directory</span><span class="o">=</span><span class="s1">'public'</span><span class="p">)</span>
-<span class="c1"># app(scope, receive, send)  — 3-argument ASGI</span>
-</code></pre></div>
+<p>Serve files through <code>app.static()</code> on a BlackBull app.  Calling
+<code>StaticFiles</code> directly as an ASGI app is deprecated
+(<a href="../../reference/deprecations/">BBD014</a>) and answers 404.</p>
 <h2 id="directory-index">Directory index<a class="headerlink" href="#directory-index" title="Permanent link">&para;</a></h2>
 <p>By default <code>StaticFiles</code> serves files by their exact path only.
 Pass <code>index</code> to serve a named file when a request resolves to a

@@ -6046,6 +6046,24 @@ pytest<span class="w"> </span>-W<span class="w"> </span>error::blackbull.BlackBu
 <td>yes</td>
 <td>BLA-672</td>
 </tr>
+<tr>
+<td>BBD014</td>
+<td>StaticFiles called as a standalone ASGI app</td>
+<td>app.static() on a BlackBull app</td>
+<td>v0.83.0</td>
+<td>no earlier than 2027-12-01</td>
+<td>yes</td>
+<td>BLA-588</td>
+</tr>
+<tr>
+<td>BBD015</td>
+<td>calling CORS, Compression, TrustedProxy or StaticFiles with a scope dict</td>
+<td>register them with app.use() or app.static() on a BlackBull app</td>
+<td>v0.83.0</td>
+<td>no earlier than 2027-12-01</td>
+<td>yes</td>
+<td>BLA-588</td>
+</tr>
 </tbody>
 </table>
 <p>The table is generated from <code>blackbull/deprecations.py</code>; a test fails when
