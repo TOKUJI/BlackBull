@@ -393,15 +393,19 @@ class TestWriteSide:
 
 
 class TestLingerClose:
-    """Whether a connection lingers is decided by the connection, once.
+    """Repeated close calls must not open a second discard window."""
 
-    The refusal path calls ``linger_close`` twice — the refusal itself, then the
-    serving task's teardown.  On a socket the second call finds the EOF that
-    ``connection_lost`` has already set, so the socket-level pins cannot tell a
-    guarded second call from an unguarded one; ``_FakeTransport`` never reports
-    loss, which is what makes the guard observable.  Without this pin the next
-    reduction pass would delete it as dead code.
-    """
+    async def test_cancelled_discard_still_closes_transport(self, wired):
+        proto, transport = wired
+        proto.write(b'HTTP/1.1 503 Service Unavailable\r\n\r\n')
+        task = asyncio.create_task(proto.linger_close(timeout=10.0))
+        await asyncio.sleep(0)
+        assert transport.eofs == 1
+        assert not transport.closed
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert transport.closed
 
     async def test_the_linger_decision_is_taken_once_per_connection(self, wired):
         proto, transport = wired

@@ -780,7 +780,7 @@ async def _serve_with_deadline(call, context):
 
 
 async def serve_grpc(registry: GrpcServiceRegistry, conn: Connection,
-                     receive, send) -> None:
+                     receive, send, *, _validated_content_type: bytes | None = None) -> None:
     """Serve any of the four gRPC call shapes for *conn*.
 
     Report handler and protocol failures as gRPC status.
@@ -789,7 +789,10 @@ async def serve_grpc(registry: GrpcServiceRegistry, conn: Connection,
     context = GrpcContext(conn)
     # Echo the request's content-type subtype (application/grpc+proto, +json, …)
     # back on the response, defaulting to bare application/grpc.
-    content_type = _resolve_content_type(context.metadata(b'content-type'))
+    content_type = context.metadata(b'content-type')
+    # before_handler may replace the field after dispatch classified it.
+    if content_type != _validated_content_type:
+        content_type = _resolve_content_type(content_type)
 
     method = registry.lookup_method(path)
     if method is None:

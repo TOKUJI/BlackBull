@@ -487,12 +487,14 @@ class BlackBull(EventHooks):
         # gRPC rides the HTTP/2 path; see enable_grpc.
         if self._grpc_registry is not None and scheme == Scheme.http:
             is_grpc, serve_grpc = self._grpc_dispatch
-            if is_grpc(conn.headers.get(b'content-type', b'')):
+            content_type = conn.headers.get(b'content-type', b'')
+            if is_grpc(content_type):
                 exc_caught = None
                 try:
                     if self._dispatcher.has_listeners('before_handler'):
                         await self._dispatcher.emit(handler_event('before_handler', conn, serve_grpc))
-                    await serve_grpc(self._grpc_registry, conn, raw_receive(receive), send)
+                    await serve_grpc(self._grpc_registry, conn, raw_receive(receive), send,
+                                     _validated_content_type=content_type)
                 except BaseException as exc:
                     exc_caught = exc
                     raise
