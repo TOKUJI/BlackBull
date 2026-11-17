@@ -39,15 +39,9 @@ path you already claimed.
 
 ## Standalone usage
 
-`StaticFiles` is also a standalone ASGI app — useful in tests
-or when mounting without BlackBull:
-
-```python
-from blackbull.middleware.static import StaticFiles
-
-app = StaticFiles(directory='public')
-# app(scope, receive, send)  — 3-argument ASGI
-```
+Serve files through `app.static()` on a BlackBull app.  Calling
+`StaticFiles` directly as an ASGI app is deprecated
+([BBD014](../reference/deprecations.md)) and answers 404.
 
 ## Directory index
 

@@ -7,6 +7,7 @@ import ipaddress
 import re
 
 from ..connection import CONNECTION_STASH_KEY, Connection
+from ..deprecations import _warn_deprecated
 from ..headers import Headers
 from ..protocol.field_grammar import (
     FIELD_VALUE_ALLOWED_OCTETS, TCHAR_OCTETS, URI_SCHEME_RE,
@@ -158,11 +159,14 @@ class TrustedProxy:
         return False
 
     async def __call__(self, conn, receive, send, call_next) -> None:
-        # HTTP and WebSocket both arrive as a native [`Connection`][]; the
-        # dict branch is defensive against a raw ASGI scope dict (only reachable
-        # outside BlackBull's own dispatch). Read/write off whichever we got.
+        # HTTP and WebSocket both arrive as a native [`Connection`][]; a raw
+        # ASGI scope dict is reachable only outside BlackBull's own dispatch.
         is_conn = isinstance(conn, Connection)
-        rtype = conn.type if is_conn else conn.get('type')
+        if is_conn:
+            rtype = conn.type
+        else:
+            _warn_deprecated('BBD015', 'calling TrustedProxy with a scope dict', stacklevel=None)
+            rtype = conn.get('type')
         if rtype not in ('http', 'websocket'):
             await call_next(conn, receive, send)
             return
