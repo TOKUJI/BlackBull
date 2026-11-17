@@ -765,6 +765,7 @@ class HTTP1Actor(Actor):
         send._log_record = log_record
         send._head_mode = method_is(conn.method, 'HEAD')
         if send._head_mode:
+            conn.state['_original_method'] = conn.method
             conn.method = 'GET'
 
         # Reusable: reader, body timeout and deadline are all connection

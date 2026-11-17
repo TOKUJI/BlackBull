@@ -29,6 +29,9 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Added
 
+- `BlackBull.mount(prefix, ASGIApp(foreign, mounted=True))` hosts foreign apps
+  under a native app with host middleware/events and one lifespan per adapter.
+  This public API addition targets the 0.83.0 MINOR release (BLA-674).
 - Foreign ASGI hosting compatibility guide and real-socket H1/H2/TLS tests
   covering lifespan, response extensions and current limitations (BLA-678).
 - TOML `[limits] compression_max_inflight` and `brotli_quality` complete

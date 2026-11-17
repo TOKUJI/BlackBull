@@ -302,6 +302,24 @@ class ConfigurationError(Exception):
     """Raised by Router.validate() when route definitions are inconsistent."""
 
 
+class _HandledResponseError(Exception):
+    """The handler answered for an error; never render a second response."""
+
+    def __init__(self, error: Exception, *, abort: bool = False):
+        self.error = error
+        self.abort = abort
+
+
+class _AllMethods(tuple):
+    """A mount delegates method policy to its application."""
+
+    def __new__(cls):
+        return super().__new__(cls, ('*',))
+
+    def __contains__(self, value):
+        return True
+
+
 class HTTPException(Exception):
     """An exception carrying the HTTP status the dispatcher should report.
 
@@ -1159,6 +1177,8 @@ def _to_tuple(value: Any) -> tuple:
     Strings and other non-iterables are wrapped in a single-element tuple.
     Any other iterable is converted with tuple().
     """
+    if isinstance(value, tuple):
+        return value
     if isinstance(value, Iterable) and not isinstance(value, str):
         return tuple(value)
     return (value,)
@@ -1363,11 +1383,11 @@ class Router:
                     f"placeholders). Pass a compiled re.Pattern for custom "
                     f"regex routes.")
 
-            self._trie.insert(path, tuple(methods), scheme_key, value)
+            self._trie.insert(path, methods, scheme_key, value)
             self._string_paths.add(path)
 
         elif isinstance(path, re.Pattern):
-            self._raw_regex[(path, tuple(methods), scheme_key)] = value
+            self._raw_regex[(path, methods, scheme_key)] = value
 
         else:
             logger.error(f"Unexpected type for path: {key!r}")

@@ -1021,6 +1021,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         send._log_record = log_record
         if head:
             # Dispatched as GET, like HTTP/1.1; the record keeps HEAD.
+            conn.state['_original_method'] = conn.method
             conn.method = 'GET'
         self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, send, log_record)
         return True

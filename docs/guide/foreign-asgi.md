@@ -28,6 +28,36 @@ host. `Server(foreign_app)` alone does not infer ASGI from its signature.
 `BB_FORCE_ASGI_SCOPE=1` also selects the adapter; combining it with
 `Server(..., asgi=False)` raises `ConfigurationError`.
 
+## Mounting inside BlackBull
+
+```python
+from blackbull import ASGIApp, BlackBull
+
+app = BlackBull()
+foreign = ASGIApp(foreign_app, mounted=True)
+app.mount('/api', foreign)
+```
+
+Register before startup. The mounted adapter belongs to one host; it cannot
+be served directly or registered with `route()`. It must wrap a foreign ASGI
+app, rather than BlackBull or a wrapper exposing BlackBull via `__wrapped__`.
+
+The prefix and its descendants accept every HTTP method, including extension
+methods. More specific host routes take precedence. The foreign scope keeps
+the original `path`, `raw_path` and query string; `root_path` adds the prefix
+(`/api` above). Mounting at `/` adds an empty prefix. The host `Connection`
+is not rewritten, including on exceptions or cancellation.
+
+Host middleware applies and host listeners own the request events; listeners
+on the mounted adapter do not fire. Registering the same adapter at several
+prefixes runs its lifespan once per host lifecycle and shares its lifespan
+state. Startup failure reclaims already-started mounted lifespans.
+
+`enable_grpc()` intercepts gRPC requests before HTTP routing, including mounts.
+To serve gRPC from a foreign app, let that app own gRPC instead of enabling
+the host's registry. The foreign app supplies its own API schema; host OpenAPI
+generation does not enumerate it.
+
 ## Current compatibility
 
 These are transport capabilities, not certification of every ASGI framework
@@ -52,8 +82,7 @@ supports it.
 
 Foreign WebSocket requests end without calling the foreign app; a specific
 HTTP rejection status is not guaranteed. WebSocket support and pre-upgrade
-HTTP responses are tracked in BLA-676. Mounting an `ASGIApp` under a BlackBull
-route is tracked in BLA-674. Neither is a currently supported integration.
+HTTP responses are tracked in BLA-676. This restriction also applies to mounts.
 The native [WebSocket API](websockets.md) is a separate supported path.
 
 ## Lifespan and request state
