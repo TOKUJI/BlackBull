@@ -45,6 +45,7 @@ async def test_mount_routing_lifespan_and_event_ownership(transport):
     async def native():
         return 'native'
 
+    assert [route.path for route in host.get_routes()] == ['/native']
     events = _listen(host, EVENTS)
     adapter_events = _listen(adapter, EVENTS)
     urls = ['/foreign', '/foreign/', '/foreign/deep%20path?q=1', '/alias/child']
@@ -65,6 +66,7 @@ async def test_mount_routing_lifespan_and_event_ownership(transport):
     assert all(len(events[name]) == (6 if name != 'before_handler' and name != 'after_handler' else 5)
                for name in EVENTS)
     assert all(details == [] for details in adapter_events.values())
+    assert all(not detail['conn'].path_params for detail in events['scope_completed'])
     assert len(native_connections) == 6
 
 

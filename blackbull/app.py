@@ -769,7 +769,7 @@ class BlackBull(EventHooks):
         schemes = (Scheme.http, Scheme.websocket)
         paths = [f'{prefix}/{{mounted_path:path}}', prefix or '/']
         for path in paths:
-            self._router.route(methods=methods, path=path, scheme=schemes)(handler)
+            self._router._register((path, methods, schemes), handler, capture_path=False)
         if app._mount_owner is None:
             app._mount_owner = self
             if not hasattr(self, '_mounted_asgi_apps'):

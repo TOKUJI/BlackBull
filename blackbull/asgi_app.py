@@ -261,7 +261,6 @@ class ASGIApp(EventHooks):
             if exc is not None:
                 conn.state['error_exception'] = exc
                 raise _HandledResponseError(exc) from exc
-        mounted.__blackbull_openapi_internal__ = True
         return mounted
 
     async def _lifespan_startup(self) -> None:

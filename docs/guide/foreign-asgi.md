@@ -55,8 +55,8 @@ state. Startup failure reclaims already-started mounted lifespans.
 
 `enable_grpc()` intercepts gRPC requests before HTTP routing, including mounts.
 To serve gRPC from a foreign app, let that app own gRPC instead of enabling
-the host's registry. The foreign app supplies its own API schema; host OpenAPI
-generation does not enumerate it.
+the host's registry. The foreign app supplies its own API schema; host
+`get_routes()` and OpenAPI generation do not enumerate its internal routes.
 
 ## Current compatibility
 
