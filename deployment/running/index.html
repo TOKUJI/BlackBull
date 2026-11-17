@@ -1028,6 +1028,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guide/foreign-asgi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hosting foreign ASGI apps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../guide/extensions/" class="md-nav__link">
         
   
@@ -6025,7 +6053,9 @@ blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--bind<span cl
 attribute may be a <code>BlackBull</code> instance <em>or</em> a plain ASGI
 callable.  See <code>blackbull --help</code> for the full flag list and
 <a href="../../guide/configuration/">Configuration</a> for how flags compose
-with environment variables and TOML config files.</p>
+with environment variables and TOML config files.
+For supported transports, extensions and limitations of foreign apps, see
+<a href="../../guide/foreign-asgi/">Hosting a foreign ASGI app</a>.</p>
 <h3 id="blackbull-serve-zero-code-static-files"><code>blackbull serve</code> — zero-code static files<a class="headerlink" href="#blackbull-serve-zero-code-static-files" title="Permanent link">&para;</a></h3>
 <p>To serve a directory of static files without writing any
 application code — a drop-in upgrade over <code>python -m
