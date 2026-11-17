@@ -5,6 +5,7 @@ pass through without granting cross-origin access.
 """
 from ..native import NativeResponse
 from ..connection import Connection
+from ..deprecations import _warn_deprecated
 from ..headers import Headers, _MinimalResponseHeaders, _as_response_fields
 from .utils import as_middleware
 
@@ -122,6 +123,7 @@ class CORS:
 
     async def __call__(self, conn, receive, send, call_next) -> None:
         if not isinstance(conn, Connection):
+            _warn_deprecated('BBD015', 'calling CORS with a scope dict', stacklevel=None)
             await call_next(conn, receive, send)
             return
 

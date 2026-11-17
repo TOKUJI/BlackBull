@@ -5,8 +5,14 @@ and this registry equal.
 """
 from __future__ import annotations
 
+import os
+import sys
 import warnings
 from typing import NamedTuple
+
+#: Frames to look past for ``stacklevel=None``: BlackBull's own (unresolved, as
+#: co_filename is), and beartype's.
+_INTERNAL = (os.path.dirname(__file__) + os.sep, '<@beartype')
 
 
 class BlackBullDeprecationWarning(DeprecationWarning):
@@ -69,6 +75,13 @@ DEPRECATIONS: dict[str, Deprecation] = {
     'BBD013': Deprecation(
         'WebSocketResponse', 'ws.send_text(), ws.send_bytes() or ws.send_json()',
         'v0.83.0', 'no earlier than 2027-12-01', 'BLA-672'),
+    'BBD014': Deprecation(
+        'StaticFiles called as a standalone ASGI app', 'app.static() on a BlackBull app',
+        'v0.83.0', 'no earlier than 2027-12-01', 'BLA-588'),
+    'BBD015': Deprecation(
+        'calling CORS, Compression, TrustedProxy or StaticFiles with a scope dict',
+        'register them with app.use() or app.static() on a BlackBull app',
+        'v0.83.0', 'no earlier than 2027-12-01', 'BLA-588'),
 }
 
 
@@ -76,9 +89,15 @@ DEPRECATIONS: dict[str, Deprecation] = {
 def _warn_deprecated(key, what=None, instead=None, stacklevel=2):
     """Warn about entry *key*; *stacklevel* counts from the caller, as in ``warnings.warn``.
 
-    *what* and *instead* name the spelling the caller reached, when it is
-    narrower than the entry.
+    ``stacklevel=None`` names the first frame outside BlackBull and any
+    beartype wrapper, for a warning raised below a decorator.  *what* and
+    *instead* name the spelling the caller reached, when it is narrower than
+    the entry.
     """
+    if stacklevel is None:
+        stacklevel, frame = 1, sys._getframe(1)
+        while frame is not None and frame.f_code.co_filename.startswith(_INTERNAL):
+            stacklevel, frame = stacklevel + 1, frame.f_back
     entry = DEPRECATIONS[key]
     warnings.warn(
         f'{what or entry.subject} is deprecated; use {instead or entry.replacement}. '

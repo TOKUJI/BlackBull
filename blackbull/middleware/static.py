@@ -18,6 +18,7 @@ from blackbull.connection import Connection
 from blackbull.native import NativeResponse
 from ._accept_encoding import acceptable_encodings
 from ..protocol.field_grammar import if_none_match_hit
+from ..deprecations import _warn_deprecated
 from ..env import Environment, get_settings, read_setting
 
 
@@ -194,9 +195,14 @@ class StaticFiles:
         return Path(self._root_str)
 
     async def __call__(self, conn, receive, send, call_next=None):
-        # Retain HTTP/method guards for standalone ASGI use outside the route table.
         if (not isinstance(conn, Connection) or conn.type != 'http'
                 or conn.method not in ('GET', 'HEAD')):
+            if not isinstance(conn, Connection):
+                if call_next:
+                    _warn_deprecated('BBD015', 'calling StaticFiles with a scope dict',
+                                     stacklevel=None)
+                else:
+                    _warn_deprecated('BBD014', stacklevel=None)
             if call_next:
                 await call_next(conn, receive, send)
             else:

@@ -76,6 +76,12 @@ metadata; reinstall an editable checkout after changing that version.
   native middleware, and the `WebSocket` object; removal is no earlier than
   2027-12-01.  Foreign ASGI apps, external hosts and BlackBull's own code do
   not warn, and behaviour is unchanged (BLA-672).
+- `StaticFiles` called as a standalone ASGI app warns (BBD014); it has
+  answered every such call with 404 since v0.61.0, and the guide no longer
+  offers it.  Calling `CORS`, `Compression`, `TrustedProxy` or `StaticFiles`
+  with a scope dict warns (BBD015).  Register them with `app.use()` /
+  `app.static()`; behaviour is unchanged until removal, no earlier than
+  2027-12-01 (BLA-588).
 
 ### Changed
 

@@ -15,6 +15,8 @@ import blackbull.client
 import blackbull.middleware
 from blackbull import BlackBullDeprecationWarning
 from blackbull.deprecations import DEPRECATIONS, table
+from blackbull.middleware import CORS
+from blackbull.middleware.static import StaticFiles
 from blackbull.native import DictReceive
 from blackbull.response import wrap_native_send
 from blackbull.fault_injection import scenario_h1, scenario_h1_server
@@ -76,6 +78,10 @@ async def _scope_declared(scope, receive, send, call_next):
     await call_next(scope, receive, send)
 
 
+async def _downstream(conn, receive, send):
+    pass
+
+
 #: entry -> an access that warns, and whether the warning names the caller's line.
 TRIGGERS = {
     'BBD001': (lambda: blackbull.middleware.CacheMiddleware, True),
@@ -92,6 +98,10 @@ TRIGGERS = {
     'BBD012': (lambda: blackbull.as_middleware(_scope_declared), True),
     # As BBD006: beartype wraps the annotated WebSocketResponse.
     'BBD013': (lambda: blackbull.WebSocketResponse('x'), False),
+    'BBD014': (lambda: asyncio.run(StaticFiles(directory='.')({'type': 'http'}, _request,
+                                                               _discard)), False),
+    'BBD015': (lambda: asyncio.run(CORS()({'type': 'http'}, _request, _discard,
+                                          _downstream)), False),
 }
 
 

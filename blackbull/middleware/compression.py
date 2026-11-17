@@ -9,6 +9,7 @@ import gzip
 import threading
 from collections.abc import Callable
 from ..connection import Connection
+from ..deprecations import _warn_deprecated
 from ..env import Settings, get_settings
 from ..headers import _MinimalResponseHeaders
 from ..native import NativeResponse
@@ -266,6 +267,7 @@ class Compression:
 
     async def __call__(self, conn, receive, send, call_next):
         if not isinstance(conn, Connection):
+            _warn_deprecated('BBD015', 'calling Compression with a scope dict', stacklevel=None)
             await call_next(conn, receive, send)
             return
 
