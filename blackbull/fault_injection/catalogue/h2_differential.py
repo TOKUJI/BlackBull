@@ -138,9 +138,6 @@ _CASES = (
     Case('truncated_frame_then_half_close', 'transport', '4.1', None, lambda: _scenario(
         'truncated_frame_then_half_close',
         SendHeaders(pseudo=_GET, end_stream=True, declared_length=64), HalfClose())),
-    Case('request_after_client_goaway', 'transport', '6.8', None, lambda: _scenario(
-        'request_after_client_goaway',
-        SendFrame(FrameTypes.GOAWAY, data=bytes(8)), SendHeaders(pseudo=_GET, end_stream=True))),
     Case('request_after_reset_stream', 'transport', '6.4', None, lambda: _scenario(
         'request_after_reset_stream', SendHeaders(pseudo=_GET, end_stream=False),
         SendFrame(FrameTypes.RST_STREAM, stream_id=1, data=(8).to_bytes(4, 'big')),

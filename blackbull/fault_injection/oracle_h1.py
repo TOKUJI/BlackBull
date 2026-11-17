@@ -190,8 +190,8 @@ def _observed(result: ScenarioResult) -> Observed:
     return Observed.RESPONSE if result.received else Observed.NO_READ
 
 
-async def run_scenario(host: str, port: int,
-                       scenario: Scenario) -> tuple[SideOutcome, bytes]:
+async def run_scenario(host: str, port: int, scenario: Scenario, *,
+                       ssl=None) -> tuple[SideOutcome, bytes]:
     """Execute *scenario* against (host, port) and return (outcome, wire_bytes).
 
     Returns the captured wire bytes (both servers receive identical
@@ -202,7 +202,7 @@ async def run_scenario(host: str, port: int,
     t0 = time.monotonic()
     wire = b''
     try:
-        async with HTTP1Client(host, port,
+        async with HTTP1Client(host, port, ssl=ssl,
                                record_wire_bytes=True,
                                connect_timeout=2.0) as c:
             try:

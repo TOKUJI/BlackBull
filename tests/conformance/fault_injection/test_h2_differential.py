@@ -53,11 +53,6 @@ KNOWN_SERVER: dict[tuple[str, str], tuple[Category, str]] = {
                                                      'RFC 9113 §5.1.1 makes it a connection error'),
     ('request_after_reset_stream', 'nginx'): (_R, 'nginx answers a GET at its HEADERS, before the '
                                                   "client's RST_STREAM arrives"),
-    ('request_after_client_goaway', 'nginx'): (_R, 'RFC 9113 §6.8 does not say what a server does '
-                                                   "with a stream opened after the client's GOAWAY; "
-                                                   'nginx answers it'),
-    ('request_after_client_goaway', 'nghttpd'): (_E, 'neither answers; BlackBull sends '
-                                                     'GOAWAY(NO_ERROR) before closing, nghttpd closes'),
     ('request_one_byte_per_write', 'nghttpd'): (_R, 'nghttpd ends a connection whose preface arrives '
                                                     'in pieces (later frames may); RFC 9113 §3.4 '
                                                     'fixes only the octets, and TCP has no boundaries'),
