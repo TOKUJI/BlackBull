@@ -62,6 +62,8 @@ attribute may be a `BlackBull` instance *or* a plain ASGI
 callable.  See `blackbull --help` for the full flag list and
 [Configuration](../guide/configuration.md) for how flags compose
 with environment variables and TOML config files.
+For supported transports, extensions and limitations of foreign apps, see
+[Hosting a foreign ASGI app](../guide/foreign-asgi.md).
 
 ### `blackbull serve` — zero-code static files
 
