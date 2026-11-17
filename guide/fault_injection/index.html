@@ -1368,6 +1368,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#running-scenarios-from-the-command-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running scenarios from the command line
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#safety-locks" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2788,6 +2799,34 @@
           </ul>
         </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/fault_injection/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cli
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -6115,6 +6154,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#running-scenarios-from-the-command-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running scenarios from the command line
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#safety-locks" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6689,7 +6739,7 @@ SETTINGS and PING as a well-behaved peer would; so it runs write steps,
 <span class="n">reference</span> <span class="o">=</span> <span class="k">await</span> <span class="n">run_scenario</span><span class="p">(</span><span class="s1">'127.0.0.1'</span><span class="p">,</span> <span class="mi">8080</span><span class="p">,</span> <span class="n">scenario</span><span class="p">)</span>
 <span class="k">assert</span> <span class="n">categorize</span><span class="p">(</span><span class="n">reference</span><span class="p">,</span> <span class="n">mine</span><span class="p">)</span> <span class="ow">in</span> <span class="n">ACCEPTED_CATEGORIES</span>
 </code></pre></div>
-<p>A 4xx answer and <code>RST_STREAM(PROTOCOL_ERROR)</code> count as the same rejection
+<p>A 400 answer and <code>RST_STREAM(PROTOCOL_ERROR)</code> count as the same rejection
 (RFC 9113 §8.1.1 allows either), and under one shared connection error a
 stream answered on one side but not the other is not a difference
 (RFC 9113 §5.4.1).  <code>catalogue.h2_differential</code> holds the broken clients
@@ -6712,6 +6762,49 @@ Files in the earlier per-vocabulary format (no <code>format</code> key) still re
 with a deprecation warning until their removal
 (<a href="../../reference/deprecations/">BBD006</a>); rewrite one with
 <code>to_json(from_json(text))</code>.</p>
+<h2 id="running-scenarios-from-the-command-line">Running scenarios from the command line<a class="headerlink" href="#running-scenarios-from-the-command-line" title="Permanent link">&para;</a></h2>
+<p><code>blackbull-client</code> runs a saved client scenario without writing Python.
+<code>--protocol</code> says which vocabulary the file is (<code>h1</code> for <code>Scenario</code>, <code>h2</code>
+for <code>ScenarioH2Client</code>); the JSON does not record it.</p>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">BLACKBULL_ENV</span><span class="o">=</span><span class="nb">test</span><span class="w">          </span><span class="c1"># the safety locks below apply here too</span>
+blackbull-client<span class="w"> </span>run<span class="w"> </span>get.jsonl<span class="w"> </span>--protocol<span class="w"> </span>h1<span class="w"> </span>--target<span class="w"> </span><span class="m">127</span>.0.0.1:8000<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--json<span class="w"> </span>run.json<span class="w"> </span>--junit<span class="w"> </span>run.xml
+blackbull-client<span class="w"> </span>oracle<span class="w"> </span>te_gzip.jsonl<span class="w"> </span>--protocol<span class="w"> </span>h2<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--target<span class="w"> </span><span class="m">127</span>.0.0.1:8000<span class="w"> </span>--reference<span class="w"> </span><span class="m">127</span>.0.0.1:8080<span class="w"> </span>--junit<span class="w"> </span>oracle.xml
+</code></pre></div>
+<p><code>run</code> executes every step and records, per step, the bytes it wrote and
+whether it completed, plus what the target sent.  <code>oracle</code> runs the
+scenario against both and reports the <code>oracle_h1</code> / <code>oracle_h2</code> category;
+an HTTP/2 scenario for it must not contain read steps.</p>
+<table>
+<thead>
+<tr>
+<th>Exit</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>completed; the oracle's category is accepted</td>
+</tr>
+<tr>
+<td>1</td>
+<td>divergence: a category outside the accepted ones, or a <code>run</code> whose <code>Expect…</code> step did not match</td>
+</tr>
+<tr>
+<td>2</td>
+<td>usage: bad arguments, an unreadable scenario or <code>--cafile</code>, an unwritable report path, or a refused production context or remote target</td>
+</tr>
+<tr>
+<td>3</td>
+<td>transport or harness failure, such as a refused connection or a failed TLS handshake</td>
+</tr>
+</tbody>
+</table>
+<p>With <code>--tls</code> the certificate is verified against the system CAs; add
+<code>--cafile</code> for a private CA or <code>--insecure</code> to skip verification.  A
+non-loopback target needs <code>--allow-remote</code>.</p>
 <h2 id="safety-locks">Safety locks<a class="headerlink" href="#safety-locks" title="Permanent link">&para;</a></h2>
 <p>Two locks ensure the deliberate-misbehaviour code path is unreachable
 from a production process:</p>
@@ -6723,8 +6816,9 @@ from a production process:</p>
    <code>allow_remote=True</code> is passed.  The misbehaviour mode is for
    local-loop tests.</li>
 </ol>
-<p>Both locks are on both fault <em>servers</em>.  The two client-side scenario
-models are benign by construction — they are clients, not a server-side
+<p>Both locks are on both fault <em>servers</em> and on <code>blackbull-client</code>, which
+checks them before it connects.  The client-side scenario models used from
+Python are benign by construction — they are clients, not a server-side
 code path — and carry no equivalent lock.</p>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <p>One walkthrough ships with the framework and covers the whole grid:</p>
