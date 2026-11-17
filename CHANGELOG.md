@@ -29,6 +29,8 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Added
 
+- Foreign ASGI hosting compatibility guide and real-socket H1/H2/TLS tests
+  covering lifespan, response extensions and current limitations (BLA-678).
 - TOML `[limits] compression_max_inflight` and `brotli_quality` complete
   configuration-file support for the four `Compression` controls (BLA-663).
 - `ASGIApp(app)` serves a foreign ASGI 3.0 app on BlackBull's server;
