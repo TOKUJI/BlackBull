@@ -142,9 +142,12 @@ are the difference between the label and the whole truth:
    `auto` subtracts 64 reserved descriptors and those already open from
    `RLIMIT_NOFILE`. Set an explicit cap for the worker's memory and CPU budget,
    allowing for descriptors the application opens after acceptance starts.
-   TLS handshakes count from accept. Excess connections wait in the accept
-   queue; HTTP/1.1 and prior-knowledge h2c get best-effort 503, while ALPN-h2
-   and raw connections close silently.
+   The total FD limit is the service cap plus 16 slots for TLS preparation
+   and refusals. It counts from accept through physical close and pauses
+   acceptance when full. The service cap separately refuses new work with
+   best-effort 503 on HTTP/1.1 and prior-knowledge h2c; ALPN-h2 and raw
+   connections close silently. Existing service work is not evicted by either
+   cap. See [connection limits](../deployment/workers.md#connection-limits).
 
 3. **An MQTT session that never expires is bounded by the total, not by the
    clock.** §3.1.2.11.2 defines a Session Expiry Interval of `0xFFFFFFFF` as

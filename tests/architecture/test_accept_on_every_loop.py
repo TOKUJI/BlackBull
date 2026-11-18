@@ -75,6 +75,49 @@ async def _served(port: int, timeout: float = 5.0) -> None:
         await asyncio.sleep(0.02)
 
 
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize('loop', LOOPS)
+def test_tls_peer_without_close_notify_cannot_hold_a_descriptor(loop, monkeypatch):
+    from blackbull.env import reset_settings_cache
+
+    monkeypatch.setenv('BB_WRITE_TIMEOUT', '0.1')
+    reset_settings_cache()
+
+    async def main():
+        server = Server(_app(), max_connections=1,
+                        ssl_context=_anonymous_tls(server=True, alpn=['http/1.1']))
+        server.open_socket(0)
+        runner = asyncio.create_task(server.run())
+        peer = None
+        try:
+            await asyncio.sleep(0.05)
+
+            def request():
+                raw = socket.create_connection(('127.0.0.1', server.port), timeout=2)
+                peer = _anonymous_tls(server=False, alpn=['http/1.1']).wrap_socket(
+                    raw, server_hostname='localhost')
+                peer.sendall(REQUEST)
+                response = bytearray()
+                while chunk := peer.recv(4096):
+                    response.extend(chunk)
+                assert response.startswith(b'HTTP/1.1 200')
+                return peer
+
+            peer = await asyncio.to_thread(request)
+            await _until(lambda: server.held_connections == 0, timeout=2)
+            assert server.active_connections == 0
+        finally:
+            if peer is not None:
+                peer.close()
+            await server.stop(drain_timeout=1.0)
+            await runner
+
+    try:
+        _run(loop, main)
+    finally:
+        reset_settings_cache()
+
+
 # ---------------------------------------------------------------------------
 # stop() and connections still in their TLS handshake
 # ---------------------------------------------------------------------------
@@ -97,13 +140,13 @@ def test_stop_closes_connections_still_in_their_tls_handshake(loop):
             started = asyncio.get_running_loop().time()
             await asyncio.wait_for(server.stop(drain_timeout=5.0), 5)
             assert asyncio.get_running_loop().time() - started < 1.0
-            assert server._accept_gate._descriptors_held == 0
+            assert server._accept_gate.held == 0
             await asyncio.wait_for(runner, 5)
 
             for sock in silent:
                 sock.settimeout(2)
                 assert sock.recv(1) == b'', 'the server kept a handshake open'
-            assert server._accept_gate._descriptors_held == 0
+            assert server._accept_gate.held == 0
         finally:
             for sock in silent:
                 sock.close()
@@ -242,7 +285,7 @@ def test_a_cancelled_run_leaves_no_reader_on_a_reused_descriptor(loop, state):
         await _served(port)
         if state == 'paused':
             limit = server._accept_gate._limit
-            while server._accept_gate._descriptors_held < limit:
+            while server._accept_gate.held < limit:
                 idle.append(socket.create_connection(('127.0.0.1', port)))
                 await asyncio.sleep(0.01)
             assert server._accept_gate._paused
@@ -533,7 +576,7 @@ def test_a_refusal_at_the_cap_logs_one_warning(caplog):
         try:
             await _until(lambda: getattr(server, '_running_servers', None))
             holder = socket.create_connection(('127.0.0.1', server.port))
-            await _until(lambda: server._active_connections == 1)
+            await _until(lambda: server.active_connections == 1)
             with caplog.at_level(logging.WARNING, logger='blackbull'):
                 reader, writer = await asyncio.open_connection(
                     '127.0.0.1', server.port)

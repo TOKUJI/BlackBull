@@ -78,8 +78,8 @@ def _fds():
 def _report(server) -> str:
     return json.dumps({
         **record,
-        'active': server._active_connections,
-        'held': server._accept_gate._descriptors_held,
+        'active': server.active_connections,
+        'held': server.held_connections,
         'fds': _fds(),
         'loop': type(asyncio.get_running_loop()).__name__,
     })

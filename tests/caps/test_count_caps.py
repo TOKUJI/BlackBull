@@ -31,6 +31,28 @@ async def _past_max_connections() -> str:
         return (await (await s.wire()).recv_all()).split(b' ', 2)[1].decode()
 
 
+async def _past_held_connections() -> str:
+    async with served(make_app(), max_connections=1, tls=True) as s:
+        clients = await asyncio.gather(*(
+            asyncio.open_connection('127.0.0.1', s.server.port) for _ in range(32)))
+        try:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(s.wire(), 0.1)
+            return 'queued'
+        finally:
+            for _, writer in clients:
+                writer.close()
+            await asyncio.gather(*(w.wait_closed() for _, w in clients),
+                                 return_exceptions=True)
+
+
+async def _under_held_connections() -> str:
+    async with served(make_app(), max_connections=1, tls=True) as s:
+        wire = await s.wire()
+        await wire.send(head())
+        return str((await wire.response()).status)
+
+
 async def _past_compression_inflight() -> str:
     """The first offload is held in the executor while the second response is
     produced, so the second meets the admission cap."""
@@ -146,6 +168,10 @@ async def _past_socket_backlog() -> str:
 ROWS = [
     Row('max_connections', 'tcp', '503', setting='max_connections',
         env={'BB_MAX_CONNECTIONS': '1'}, provoke=_past_max_connections),
+    Row('max_held_connections', 'tcp', 'queued',
+        env={'BB_MAX_CONNECTIONS': '1', 'BB_HEADER_TIMEOUT': '2'},
+        provoke=_past_held_connections,
+        under=_under_held_connections, under_answer='200'),
     Row('stream_queue_depth', 'http2', 'RST_STREAM ENHANCE_YOUR_CALM',
         setting='stream_queue_depth', documented='ENHANCE_YOUR_CALM',
         provoke=lambda: h2(h2_request(1, path=b'/hold'), *(h2_data(1, b'x') for _ in range(17)),

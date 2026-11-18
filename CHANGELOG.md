@@ -98,6 +98,12 @@ metadata; reinstall an editable checkout after changing that version.
   injection runs.
   `blackbull serve` runs as `development` unless the variable is set
   (BLA-643).
+- Connection admission has one state owner for service and descriptor limits.
+  `BB_MAX_CONNECTIONS` limits service work; the derived held-FD limit adds
+  16 TLS/refusal slots. `max_held_connections` records accept pauses separately
+  from service refusals. Closing connections are aborted after
+  `BB_WRITE_TIMEOUT` (8 seconds when zero); `Server.active_connections` and
+  `held_connections` expose the two gauges (BLA-453).
 - `Server()` raises `TypeError` for an unknown keyword argument, which it
   used to ignore, and refuses `asgi=False` under `BB_FORCE_ASGI_SCOPE=1`.
   Without `asgi=True` or that variable, an app is always called as a native
