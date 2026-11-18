@@ -10,6 +10,12 @@ from typing import Final, Literal, NotRequired, TypedDict
 from .headers import HeaderList, Headers
 
 
+class _ASGIAppAdapter:
+    """Identify an ASGIApp without importing its implementation."""
+
+    __slots__ = ()
+
+
 class ASGIEvent:
     """Namespace for ASGI protocol event type strings (ASGI 3.0 spec)."""
 

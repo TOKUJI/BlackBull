@@ -22,7 +22,7 @@ from .connection import Connection, disconnected, refuse_scope, CONNECTION_STASH
 from .protocol.field_grammar import FieldError, media_type
 from .native import DictReceive, NativeResponse, asgi_send_boundary, raw_receive
 from .response import wrap_native_send
-from .asgi import ASGIReceiveCallable, ASGISendCallable
+from .asgi import ASGIReceiveCallable, ASGISendCallable, _ASGIAppAdapter
 from .config import AppConfig
 from .logger import debug_gate  # noqa: E402
 from .server.protocol_registry import RawBinding
@@ -404,7 +404,7 @@ class BlackBull(EventHooks):
             raise
         try:
             await self._dispatcher.emit(Event('app_startup'))
-        except BaseException:
+        except (Exception, asyncio.CancelledError):
             self._logger.error('app_startup hook failed:\n%s', traceback.format_exc())
             await self._rollback_mounted_lifespans()
             raise
@@ -413,7 +413,7 @@ class BlackBull(EventHooks):
         for adapter in reversed(getattr(self, '_mounted_asgi_apps', ())):
             try:
                 await adapter._lifespan_shutdown()
-            except BaseException:
+            except (Exception, asyncio.CancelledError):
                 self._logger.error('Mounted lifespan rollback failed', exc_info=True)
 
     async def _lifespan_shutdown(self) -> None:
@@ -423,7 +423,7 @@ class BlackBull(EventHooks):
         try:
             await self._dispatcher.emit(Event('app_shutdown'))
             await self._dispatcher.aclose()
-        except BaseException:
+        except (Exception, asyncio.CancelledError):
             self._logger.error('app_shutdown hook failed:\n%s', traceback.format_exc())
             await self._rollback_mounted_lifespans()
             raise
@@ -757,8 +757,7 @@ class BlackBull(EventHooks):
         events apply; the foreign scope retains path and adds the mount to
         root_path. Register before startup.
         """
-        from .asgi_app import ASGIApp  # noqa: PLC0415
-        if not isinstance(app, ASGIApp) or not app._mounted:
+        if not isinstance(app, _ASGIAppAdapter) or not app._mounted:
             raise ValueError('mount requires ASGIApp(foreign, mounted=True)')
         if app._mount_owner is not None and app._mount_owner is not self:
             raise ValueError('a mounted ASGIApp belongs to one host')
