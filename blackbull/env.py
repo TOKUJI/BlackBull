@@ -149,7 +149,7 @@ class Settings:
     _section = 'Connection limits and timeouts'
     max_connections: int = setting(
         'BB_MAX_CONNECTIONS', 0, parse=resolve_max_connections, shown='auto', config=('limits', 'max_connections'), section=_section,
-        doc='Concurrent TCP connections **per worker**. `auto` subtracts a 64-descriptor reserve and already-open descriptors from `RLIMIT_NOFILE`; `0` disables the cap. Explicit numbers are not clamped to the descriptor budget. Counted from accept, including TLS handshakes. Excess connections wait in the accept queue; HTTP/1.1 and prior-knowledge h2c receive best-effort `503` with `Retry-After: 1`; ALPN-h2 and raw connections close silently. During lifespan startup the backlog applies instead. Set an explicit cap if the application opens descriptors later. See [startup admission](../deployment/unix-and-fd.md#the-startup-window).')
+        doc='Service connections **per worker**, including keep-alive and WebSocket. `auto` subtracts 64 reserved and already-open descriptors from `RLIMIT_NOFILE`; explicit numbers are not clamped. Held descriptors (including TLS preparation and closing) have a separate derived limit of service cap + 16; reaching it pauses accept. Service excess receives best-effort `503` with `Retry-After: 1` on HTTP/1.1 and prior-knowledge h2c; ALPN-h2 and raw connections close silently. `0` disables both caps. During lifespan startup the backlog applies. See [connection limits](../deployment/workers.md#connection-limits).')
     request_timeout: float = setting(
         'BB_REQUEST_TIMEOUT', 0.0, minimum=0, config=('limits', 'request_timeout'), section=_section,
         doc='Seconds allowed for HTTP/1.1 handler dispatch or an HTTP/2 stream handler. A breach cancels the handler; HTTP/1.1 answers 408 and closes, HTTP/2 sends RST_STREAM(CANCEL) while sibling streams survive. `0` disables. Choose a budget compatible with intentional long-lived requests.')
@@ -161,7 +161,7 @@ class Settings:
         doc="Seconds per HTTP/1.1 request-body read after the head. A breach surfaces `http.disconnect` and tears down the connection; `0` disables. Does not bound an HTTP/2 stream's body reads: use its request deadline and body rate/size bounds.")
     write_timeout: float = setting(
         'BB_WRITE_TIMEOUT', 30.0, minimum=0, section=_section,
-        doc='Seconds the server will wait for a single response socket drain, `sendfile` chunk, or HTTP/2 flow-control wait.  This is per progress wait, not a whole response total; an HTTP/2 stream that waits past it is reset with `RST_STREAM(CANCEL)`, after at most the one response head already sent.  `0` disables.')
+        doc='Seconds the server will wait for a single response socket drain, `sendfile` chunk, or HTTP/2 flow-control wait; `0` disables those progress deadlines. An HTTP/2 stream that waits past it is reset with `RST_STREAM(CANCEL)`, after at most the one response head already sent. Also bounds a connection awaiting FD closure after service or refusal; `0` uses an 8-second closing budget.')
     keep_alive_timeout: float = setting(
         'BB_KEEP_ALIVE_TIMEOUT', 5.0, minimum=0, config=('server', 'keep_alive_timeout'), section=_section,
         doc='Seconds an idle HTTP/1.1 keep-alive connection is held open after a complete response.  Lower for high-fan-in deployments; higher for chatty clients on slow links.')

@@ -440,6 +440,9 @@ class HTTP1Actor(Actor):
 
                 self._request = b''
                 keep_alive = True
+                # The sender is fresh for every request, error replies before
+                # dispatch included: __init__ for the first, this for the rest.
+                send.reset_per_request_state()
 
         except (IncompleteReadError, ClientDisconnected):
             # Safety net for a lost peer that escaped the explicit catches
@@ -635,7 +638,6 @@ class HTTP1Actor(Actor):
         log_record = _start_record(conn)
         log_record.status = 101
 
-        send.reset_per_request_state()
         if not await self._do_ws_handshake(conn, send):
             return  # 400 already sent
         # One id per TCP connection: reuse the accept-time id; mint one only
@@ -751,9 +753,6 @@ class HTTP1Actor(Actor):
             conn.state['access_log'] = log_record
         else:
             log_record = None
-
-        # Reset all per-request sender state before dispatch or interim responses.
-        send.reset_per_request_state()
 
         # Ignore Expect on HTTP/1.0. Reset before sending 100; attach capture after it
         # so the final response record excludes the interim status.

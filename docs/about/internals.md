@@ -123,11 +123,15 @@ when the peer does not read.
 New TCP listeners carry `IPPROTO_TCP` so asyncio enables `TCP_NODELAY`
 on accepted connections, as uvloop does.
 
-Count descriptors from `accept()` to close on every supported loop,
-including TLS handshakes and refusals. `connection_made` misses handshakes.
-Pause acceptance at the cap plus refusal reserve; do not consume the
-process's descriptor budget to manufacture refusal replies.
-Read `_AcceptGate` in `blackbull/server/server.py`.
+The accept gate owns both connection counts. Service completion releases
+the service slot, and `connection_lost` releases the descriptor slot.
+If the descriptor closes first, the service slot remains until its actor ends.
+Repeated notifications do not release either slot twice.
+
+The gate's timer bounds refusal cleanup and pending plain-text output.
+TLS shutdown uses the event loop's timeout. See
+[connection limits](../deployment/workers.md#connection-limits) for the
+effective limits, deadlines and log records.
 
 ## Receive-path invariant
 

@@ -5,6 +5,33 @@ standard asyncio event loop.  This page covers how to scale to
 multiple workers, what `uvloop` buys you, and the abuse defences
 that protect each worker.
 
+## Connection limits
+
+Each worker applies two limits across all its listeners:
+
+| Quantity | Limit | When its slot is released |
+|---|---|---|
+| Service work, including keep-alive and WebSocket | `BB_MAX_CONNECTIONS` | The connection actor finishes |
+| Held descriptors, including TLS preparation and closing | Service limit + 16 | The transport reports connection loss |
+
+`auto` derives the service limit from `RLIMIT_NOFILE` and the descriptors
+already open. The 16 preparation/refusal slots come from the separate
+64-descriptor reserve. `0` disables both limits. Neither limit evicts existing
+service work. A freed service slot can admit new work while refused
+connections are still closing, provided the held limit has room.
+
+At the service limit, HTTP/1.1 and prior-knowledge h2c receive best-effort 503;
+ALPN-h2 and raw connections close silently. At the held limit, accept pauses
+and arrivals wait in the OS backlog. These produce distinct `blackbull.caps`
+records: `max_connections` and `max_held_connections`. Startup logs show both
+effective limits; `Server.active_connections` and `Server.held_connections`
+are read-only gauges. Active work can outlive its FD while its actor unwinds.
+
+TLS preparation is bounded by `BB_HEADER_TIMEOUT`, or the event loop's TLS
+handshake timeout when zero. Closing after service or refusal is bounded by
+`BB_WRITE_TIMEOUT`, with an 8-second closing budget when zero. The transport
+is aborted at that deadline; its held slot remains until connection loss.
+
 ## Pre-fork multi-worker
 
 ```bash

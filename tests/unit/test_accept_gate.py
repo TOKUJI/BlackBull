@@ -56,14 +56,121 @@ async def _settle(gate: _AcceptGate) -> None:
 def test_an_admission_releases_once():
     gate = _AcceptGate()
     admission = _Admission(gate)
-    assert gate._descriptors_held == 1
+    assert gate.held == 1
     admission.release()
     admission.release()
-    assert gate._descriptors_held == 0
+    assert gate.held == 0
 
 
 @pytest.mark.asyncio
-async def test_the_admission_pause_logs_one_max_connections_cap_hit(caplog):
+async def test_service_recovery_does_not_wait_for_refused_descriptors():
+    gate = _AcceptGate()
+    gate.arm([], 1, 16)
+    first, refused, next_ = (_Admission(gate) for _ in range(3))
+    try:
+        assert gate.service_limit == 1
+        assert gate.held_limit > gate.service_limit
+        assert gate.admit(first)
+        assert not gate.admit(refused)
+        assert (gate.active, gate.held) == (1, 3)
+        gate.finish(first)
+        assert (gate.active, gate.held) == (0, 3)
+        assert not gate.admit(refused)
+        assert not gate.admit(first)
+        assert gate.admit(next_)
+        gate.finish(first)
+        assert (gate.active, gate.held) == (1, 3)
+    finally:
+        for admission in (first, refused, next_):
+            admission.release()
+            gate.finish(admission)
+        gate.close()
+    assert (gate.active, gate.held) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_connection_loss_and_service_end_release_once():
+    gate = _AcceptGate()
+    gate.arm([], 1, 16)
+    admission = _Admission(gate)
+    try:
+        assert gate.admit(admission)
+        assert gate.admit(admission)
+        assert gate.active == 1
+        admission.release()
+        assert (gate.active, gate.held) == (1, 0)
+        gate.finish(admission)
+        admission.release()
+        assert not gate.admit(admission)
+        assert (gate.active, gate.held) == (0, 0)
+    finally:
+        gate.close()
+
+
+def test_a_failed_preparation_cannot_be_admitted_or_watched():
+    gate = _AcceptGate()
+    admission = _Admission(gate)
+    admission.release()
+    assert not gate.admit(admission)
+    gate.finish(admission)
+    gate.watch_close(admission)
+    assert (gate.active, gate.held) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_stalled_closure_is_aborted_without_releasing_early():
+    gate = _AcceptGate()
+    gate.arm([], 1, 16, closing_timeout=0.01)
+    admission = _Admission(gate)
+    aborted = asyncio.Event()
+
+    class Transport:
+        def abort(self):
+            aborted.set()
+
+    admission.transport = Transport()
+    try:
+        assert gate.admit(admission)
+        gate.finish(admission)
+        gate.watch_close(admission)
+        assert (gate.active, gate.held) == (0, 1)
+        await asyncio.wait_for(aborted.wait(), 1)
+        assert gate.held == 1
+        admission.release()
+        assert gate.held == 0
+    finally:
+        admission.release()
+        gate.close()
+
+
+@pytest.mark.asyncio
+async def test_service_finishing_during_stop_does_not_restart_close_watch():
+    gate = _AcceptGate()
+    gate.arm([], 1, 16, closing_timeout=0.01)
+    admission = _Admission(gate)
+    aborted = asyncio.Event()
+
+    class Transport:
+        def abort(self):
+            aborted.set()
+
+    admission.transport = Transport()
+    try:
+        assert gate.admit(admission)
+        gate.close()
+        gate.finish(admission)
+        gate.watch_close(admission)
+        await asyncio.sleep(0.03)
+        assert not aborted.is_set()
+        gate.abort()
+        assert aborted.is_set()
+    finally:
+        admission.release()
+        gate.close()
+
+
+@pytest.mark.asyncio
+async def test_the_admission_pause_logs_one_held_connections_cap_hit(caplog):
     gate = _AcceptGate()
     gate._limit = 2
 
@@ -75,7 +182,7 @@ async def test_the_admission_pause_logs_one_max_connections_cap_hit(caplog):
 
     records = [record for record in caplog.records
                if record.name == 'blackbull.caps'
-               and getattr(record, 'cap', None) == 'max_connections']
+               and getattr(record, 'cap', None) == 'max_held_connections']
     assert len(records) == 1, [record.getMessage() for record in records]
     assert records[0].limit == 2, records[0].limit
     # The arrival that exceeded, as at every other cap site.
@@ -94,16 +201,16 @@ async def test_accepting_pauses_at_the_limit_and_resumes_below_it(listener):
         held = [_Admission(gate) for _ in range(limit - 1)]
         clients.append(socket.create_connection(('127.0.0.1', port)))
         await asyncio.sleep(0.2)
-        assert gate._descriptors_held == limit, 'the arrival up to the limit'
+        assert gate.held == limit, 'the arrival up to the limit'
         assert gate._paused
 
         clients.append(socket.create_connection(('127.0.0.1', port)))
         await asyncio.sleep(0.2)
-        assert gate._descriptors_held == limit, 'accepted while paused'
+        assert gate.held == limit, 'accepted while paused'
 
         held.pop().release()
         await asyncio.sleep(0.2)
-        assert gate._descriptors_held == limit, 'did not resume below the limit'
+        assert gate.held == limit, 'did not resume below the limit'
     finally:
         for client in clients:
             client.close()
@@ -128,7 +235,7 @@ async def test_a_cleartext_connect_cancelled_after_connection_made_releases_once
         task.cancel()
         await _settle(gate)
         await asyncio.sleep(0.05)
-        assert gate._descriptors_held == 0
+        assert gate.held == 0
         assert conn.fileno() == -1
         # Cancellation propagates: stop() and callers can tell it from success.
         assert task.cancelled()
@@ -148,10 +255,10 @@ async def test_a_failed_tls_handshake_releases_without_connection_lost(
     conn, _ = listener.accept()
     try:
         gate.connect(conn, _Quiet, ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER))
-        assert gate._descriptors_held == 1
+        assert gate.held == 1
         await asyncio.sleep(0.5)
         await _settle(gate)
-        assert gate._descriptors_held == 0
+        assert gate.held == 0
         assert (_Quiet.made, _Quiet.lost) == (0, 0)
         assert conn.fileno() == -1
         assert not gate._connecting, 'a finished connect is still tracked'
@@ -201,10 +308,10 @@ async def _accept_through(listener, failures, monkeypatch):
     client = socket.create_connection(listener.getsockname())
     try:
         for _ in range(100):
-            if gate._descriptors_held:
+            if gate.held:
                 break
             await asyncio.sleep(0.01)
-        return seen, gate._descriptors_held
+        return seen, gate.held
     finally:
         client.close()
         gate.close()
@@ -333,7 +440,7 @@ async def test_one_accept_tick_stops_at_the_limit(listener):
         held = [_Admission(gate) for _ in range(limit - 2)]
         accepting = gate.arm([((_Quiet, None), listener)], 1, 16)
         await asyncio.sleep(0.2)
-        assert gate._descriptors_held == limit
+        assert gate.held == limit
     finally:
         for client in clients:
             client.close()
@@ -359,7 +466,7 @@ async def test_a_connect_that_fails_before_a_transport_closes_the_socket(
         gate.connect(conn, _Quiet, None)
         await _settle(gate)
         assert conn.fileno() == -1
-        assert gate._descriptors_held == 0
+        assert gate.held == 0
     finally:
         client.close()
 
@@ -404,10 +511,10 @@ async def _backed_off_then_paused(two_listeners, monkeypatch):
     accepting = gate.arm([((_Idle, None), flaky), ((_Idle, None), real_b)], 1, 16)
     clients = [socket.create_connection(real_a.getsockname())]
     await asyncio.sleep(0.05)
-    assert gate._descriptors_held == limit - 1, 'A accepted through EMFILE'
+    assert gate.held == limit - 1, 'A accepted through EMFILE'
     clients.append(socket.create_connection(real_b.getsockname()))
     await asyncio.sleep(0.05)
-    assert gate._descriptors_held == limit and gate._paused
+    assert gate.held == limit and gate._paused
     return gate, accepting, held, clients
 
 
@@ -429,7 +536,7 @@ async def test_a_retry_after_emfile_does_not_read_while_paused(
         two_listeners, monkeypatch)
     try:
         await asyncio.sleep(0.8)          # past A's retry, still paused
-        assert gate._descriptors_held == gate._limit, (
+        assert gate.held == gate._limit, (
             "A's retry accepted past the limit")
     finally:
         await _teardown(gate, accepting, clients)
@@ -444,10 +551,10 @@ async def test_a_resume_during_the_back_off_waits_for_the_retry(
     try:
         held.pop().release()              # resume, inside A's back-off
         await asyncio.sleep(0.1)
-        assert gate._descriptors_held == gate._limit - 1, (
+        assert gate.held == gate._limit - 1, (
             "A read again before its back-off ended")
         await asyncio.sleep(0.8)
-        assert gate._descriptors_held == gate._limit, 'A never retried'
+        assert gate.held == gate._limit, 'A never retried'
     finally:
         await _teardown(gate, accepting, clients)
 
@@ -464,7 +571,7 @@ async def test_a_protocol_factory_that_raises_releases_its_admission(listener):
     try:
         with pytest.raises(RuntimeError, match='factory failed'):
             gate.connect(conn, broken, None)
-        assert gate._descriptors_held == 0
+        assert gate.held == 0
         assert conn.fileno() == -1
     finally:
         client.close()
@@ -522,7 +629,7 @@ async def test_a_failed_connect_is_reported_only_in_debug_and_never_as_unretriev
         await asyncio.sleep(0)
         gc.collect()
         await asyncio.sleep(0)
-        assert gate._descriptors_held == 0
+        assert gate.held == 0
         expected = (['Error on transport creation for incoming connection']
                     if debug else [])
         assert seen == expected
@@ -552,7 +659,7 @@ async def test_a_connect_cancelled_before_its_first_step_releases(
         assert len(cancelled) == 1
         await _settle(gate)
         await asyncio.sleep(0.05)
-        assert gate._descriptors_held == 0
+        assert gate.held == 0
         assert conn.fileno() == -1
         assert not gate._connecting
     finally:
@@ -598,7 +705,7 @@ async def test_a_connect_finished_in_its_first_step_is_not_tracked(
         for _ in range(3):
             gate.connect(conn, _Quiet, None)
         assert not gate._connecting
-        assert gate._descriptors_held == 0
+        assert gate.held == 0
     finally:
         client.close()
 
@@ -629,7 +736,7 @@ async def test_a_protocol_that_cannot_carry_an_admission_fails_at_accept(
     try:
         with pytest.raises(AttributeError):
             gate.connect(conn, factory, None)
-        assert gate._descriptors_held == 0
+        assert gate.held == 0
         assert conn.fileno() == -1
         assert not gate._connecting
     finally:
@@ -695,7 +802,7 @@ async def test_the_accept_task_serves_the_connection(listener, monkeypatch, eage
         assert _Serving.seen == [(accept_task, False, True)]
         assert not gate._serving
         await asyncio.sleep(0.05)
-        assert gate._descriptors_held == 0
+        assert gate.held == 0
     finally:
         client.close()
 
@@ -734,7 +841,7 @@ async def test_a_serve_failure_in_the_accept_task_is_logged_once(
         # Reported once, and not left in the task for asyncio to report again
         # at collection ("Task exception was never retrieved").
         assert accept_task.done() and accept_task.exception() is None
-        assert gate._descriptors_held == 0
+        assert gate.held == 0
     finally:
         _Serving.fail = False
         loop.set_exception_handler(None)
@@ -787,9 +894,9 @@ async def test_a_cancel_during_serve_leaves_the_socket_to_its_transport(
         transport = protocols[0].transport
         assert not transport.is_closing()
         assert conn.fileno() != -1, 'closed under a live transport'
-        assert gate._descriptors_held == 1
+        assert gate.held == 1
         transport.close()
         await asyncio.sleep(0.05)
-        assert gate._descriptors_held == 0
+        assert gate.held == 0
     finally:
         client.close()

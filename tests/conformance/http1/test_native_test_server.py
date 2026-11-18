@@ -240,10 +240,10 @@ async def test_a_connection_is_counted_from_accept_as_in_production(app):
         _reader, writer = await asyncio.open_connection('127.0.0.1', server.port)
         try:
             for _ in range(200):
-                if gate._descriptors_held == 1:
+                if gate.held == 1:
                     break
                 await asyncio.sleep(0.01)
-            assert gate._descriptors_held == 1
+            assert gate.held == 1
         finally:
             writer.close()
             await writer.wait_closed()

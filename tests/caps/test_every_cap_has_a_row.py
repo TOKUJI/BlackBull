@@ -38,6 +38,7 @@ ENFORCED: dict[str, set[str]] = {
     'header_timeout': {'http1', 'http2'},
     'max_body_size': {'http1', 'http2'},
     'max_connections': {'tcp'},
+    'max_held_connections': {'tcp'},
     'min_body_rate': {'http1', 'http2'},
     'mqtt_broker_inbox_max_bytes': {'mqtt'},
     'mqtt_broker_inbox_maxsize': {'mqtt'},

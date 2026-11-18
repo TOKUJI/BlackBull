@@ -244,7 +244,7 @@ class _Admission:
     ``connection_lost``.  Either may come alone, or both.
     """
 
-    __slots__ = ('_gate', 'transport')
+    __slots__ = ('_gate', 'transport', 'state')
 
     def __init__(self, gate) -> None:
         self._gate = gate
@@ -346,10 +346,14 @@ class _AcceptGate:
         #: Accept tasks that went on to serve: drained on stop, not cancelled.
         self._serving: set = set() if serving is None else serving
         self._limit = 0
-        #: Accepted descriptors, refusals and TLS handshakes included; the 503
-        #: decision counts ``Server._active_connections``, the ones being
-        #: served.  Not reset by ``close()``: releases arrive after it.
+        self._service_limit = 0
+        self._active = 0
+        #: Not reset by close(): transport releases arrive after it.
         self._held: set[_Admission] = set()
+        self._closing: dict[_Admission, float] = {}
+        self._close_timer: asyncio.TimerHandle | None = None
+        self._watch_closures = False
+        self._closing_timeout = _CLEANUP_TIMEOUT
         self._all_released: asyncio.Future | None = None
         self._paused = False
         self._connecting: set[asyncio.Task] = set()
@@ -357,7 +361,8 @@ class _AcceptGate:
         self._cap_hits = CapHitCounter(flush_interval=0)
 
     def arm(self, entries, max_connections: int, backlog: int,
-            handshake_timeout: float | None = None) -> list[_Listening]:
+            handshake_timeout: float | None = None, *,
+            closing_timeout: float = _CLEANUP_TIMEOUT) -> list[_Listening]:
         """Start accepting on each ``((factory, ssl_context), sock)``.
 
         Raises what failed when some listener cannot be armed, leaving none
@@ -366,9 +371,13 @@ class _AcceptGate:
         self.close()
         self._loop = asyncio.get_running_loop()
         self._handshake_timeout = handshake_timeout
+        self._closing_timeout = closing_timeout
+        self._watch_closures = True
+        self._service_limit = max_connections
         self._limit = (max_connections + _REFUSAL_RESERVE
                        if max_connections else 0)
-        self._paused = bool(self._limit) and self._descriptors_held >= self._limit
+        self._paused = bool(self._limit) and self.held >= self._limit
+        self._schedule_closures()
         listening: list[_Listening] = []
         try:
             for (factory, ssl_context), sock in entries:
@@ -382,6 +391,7 @@ class _AcceptGate:
             for entry in listening:
                 entry.stop()
             self._limit = 0
+            self._service_limit = 0
             self._paused = False
             raise
         self._listening = listening
@@ -433,7 +443,9 @@ class _AcceptGate:
             admission.transport, _ = await loop.connect_accepted_socket(
                 lambda: protocol, conn, ssl=ssl_context,
                 ssl_handshake_timeout=(self._handshake_timeout
-                                       if ssl_context is not None else None))
+                                       if ssl_context is not None else None),
+                ssl_shutdown_timeout=(self._closing_timeout
+                                      if ssl_context is not None else None))
         except Exception as exc:
             self._abandon(task, conn, admission)
             # Swallowed, as the loop's own accept does: a raise here would
@@ -461,15 +473,75 @@ class _AcceptGate:
             serving.discard(task)
 
     @property
-    def _descriptors_held(self) -> int:
+    def held(self) -> int:
         return len(self._held)
 
+    @property
+    def active(self) -> int:
+        return self._active
+
+    @property
+    def service_limit(self) -> int:
+        return self._service_limit
+
+    @property
+    def held_limit(self) -> int:
+        return self._limit
+
+    def admit(self, admission: _Admission, peer=None) -> bool:
+        if admission._gate is None:
+            return False
+        if admission.state != 'preparing':
+            return admission.state == 'serving'
+        if self._service_limit and self._active >= self._service_limit:
+            admission.state = 'finished'
+            self.watch_close(admission)
+            log_cap_hit('max_connections', requested=self._active + 1,
+                        limit=self._service_limit, peer=peer, protocol='tcp')
+            return False
+        admission.state = 'serving'
+        self._active += 1
+        return True
+
+    def finish(self, admission: _Admission) -> None:
+        if admission.state == 'serving':
+            self._active -= 1
+            admission.state = 'finished'
+
+    def watch_close(self, admission: _Admission) -> None:
+        if (not self._watch_closures
+                or admission._gate is None
+                or admission.state == 'serving'
+                or admission in self._closing):
+            return
+        admission.state = 'finished'
+        self._closing[admission] = self._loop.time() + self._closing_timeout
+        self._schedule_closures()
+
+    def _schedule_closures(self) -> None:
+        if self._closing and self._close_timer is None:
+            delay = max(0, min(self._closing.values()) - self._loop.time())
+            self._close_timer = self._loop.call_later(delay, self._expire_closures)
+
+    def _expire_closures(self) -> None:
+        self._close_timer = None
+        now = self._loop.time()
+        for admission, deadline in list(self._closing.items()):
+            if deadline <= now:
+                del self._closing[admission]
+                if admission.transport is not None:
+                    admission.transport.abort()
+        self._schedule_closures()
+
     def _hold(self, admission: _Admission) -> None:
+        admission.state = 'preparing'
         self._held.add(admission)
         if self._limit and not self._paused and len(self._held) >= self._limit:
             self._pause()
 
     def _release(self, admission: _Admission) -> None:
+        if self._closing:
+            self._closing.pop(admission, None)
         held = self._held
         held.discard(admission)
         if self._paused and len(held) < self._limit:
@@ -501,7 +573,12 @@ class _AcceptGate:
             entry.stop()
         self._listening = []
         self._limit = 0
+        self._service_limit = 0
         self._paused = False
+        self._watch_closures = False
+        if self._close_timer is not None:
+            self._close_timer.cancel()
+            self._close_timer = None
         self._cap_hits.flush(protocol='tcp')
         connecting = [task for task in self._connecting if not task.done()]
         for task in connecting:
@@ -510,8 +587,8 @@ class _AcceptGate:
 
     def _pause(self) -> None:
         self._paused = True
-        log_cap_hit('max_connections',
-                    requested=self._descriptors_held + 1, limit=self._limit,
+        log_cap_hit('max_held_connections',
+                    requested=self.held + 1, limit=self._limit,
                     counter=self._cap_hits, protocol='tcp')
         for entry in self._listening:
             entry.stop_reading()
@@ -642,6 +719,7 @@ class _ServedConnection(ConnectionProtocol):
                 (TLSWriter if self.tls else AsyncioWriter)(
                     self, write_timeout=write_timeout),
                 self.transport,
+                admission=self.admission,
                 bound_binding=bound_binding,
             )
         finally:
@@ -651,7 +729,11 @@ class _ServedConnection(ConnectionProtocol):
                 if not self._linger_decided:
                     await self.linger_close()
             finally:
-                self._end()
+                try:
+                    if not self.tls and self.transport.get_write_buffer_size():
+                        server._accept_gate.watch_close(self.admission)
+                finally:
+                    self._end()
 
     def connection_lost(self, exc):
         try:
@@ -709,7 +791,6 @@ class Server:
         self._lifespan_cm: LifespanManager | None = None
         self._stream_queue_depth = stream_queue_depth
         self._ws_queue_depth = ws_queue_depth
-        self._active_connections = 0
 
         # An app carries a registry only once a raw_handler is registered.
         from .protocol_registry import ProtocolRegistry as _PR  # noqa: PLC0415
@@ -830,6 +911,14 @@ class Server:
         self.ssl_context.verify_mode = ssl.CERT_REQUIRED
         self.ssl_context.load_verify_locations(cafile=ca_cert)
 
+    @property
+    def active_connections(self) -> int:
+        return self._accept_gate.active
+
+    @property
+    def held_connections(self) -> int:
+        return self._accept_gate.held
+
     def connection_protocol_factory(self, bound_binding=None):
         """One buffered protocol per accept; ``_AcceptGate`` serves it."""
         return partial(_ServedConnection,
@@ -855,6 +944,7 @@ class Server:
         return context
 
     async def _serve_connection(self, reader, writer, transport, *,
+                                admission: _Admission,
                                 bound_binding=None):
         """Run one ``ConnectionActor``.
 
@@ -886,14 +976,7 @@ class Server:
 
         aggregator = self._cached_aggregator
 
-        if self._max_connections and self._active_connections >= self._max_connections:
-            # This fires before ConnectionActor binds a CapHitCounter, so the
-            # contextvar is unset and the record is emitted unconditionally —
-            # safe, because nobody gets a connection past the cap to flood it.
-            log_cap_hit('max_connections',
-                        requested=self._active_connections + 1,
-                        limit=self._max_connections,
-                        peer=peername, protocol='tcp')
+        if not self._accept_gate.admit(admission, peername):
             # h1 is the safe guess: the peer has not spoken.
             if bound_binding is None and alpn != 'h2':
                 try:
@@ -907,15 +990,9 @@ class Server:
                     logger.debug(
                         '503 write failed for %s (peer disconnected?)',
                         peername)
-                # The close decides; ``docs/about/internals.md`` §Rejecting
-                # requires lingering.
-                await writer.close()
-            else:
-                # Nothing was written, so there is no response to protect.
-                await writer.close()
+            await writer.close()
             return
 
-        self._active_connections += 1
         try:
             actor = ConnectionActor(
                 reader, writer, self.app, aggregator,
@@ -929,7 +1006,7 @@ class Server:
             )
             await actor.run()
         finally:
-            self._active_connections -= 1
+            self._accept_gate.finish(admission)
 
     def open_socket(self, port=0, unix_path: str | None = None,
                     inherited_fd: int | None = None):
@@ -1199,7 +1276,11 @@ class Server:
         settings = get_settings()
         self._running_servers = self._accept_gate.arm(
             listening, self._max_connections, backlog or settings.socket_backlog,
-            settings.header_deadline)
+            settings.header_deadline,
+            closing_timeout=settings.write_timeout or _CLEANUP_TIMEOUT)
+        logger.info('connection_limits: service=%d held=%d reserve=%d',
+                    self._accept_gate.service_limit, self._accept_gate.held_limit,
+                    _REFUSAL_RESERVE if self._max_connections else 0)
 
     async def stop(self, drain_timeout: float = 8.0) -> None:
         """Stop accepting, then let the connections already being served finish.
@@ -1262,7 +1343,7 @@ class Server:
         if not pending and not gate._held:
             return
         logger.info('Draining %d connection(s), up to %.1fs',
-                    gate._descriptors_held, drain_timeout)
+                    gate.held, drain_timeout)
         budget = self._cleanup_budget
         loop = asyncio.get_running_loop()
         graceful_end = loop.time() + max(
@@ -1276,7 +1357,7 @@ class Server:
             return
         logger.warning(
             '%d connection(s) did not finish within %.1fs — aborting',
-            gate._descriptors_held, drain_timeout)
+            gate.held, drain_timeout)
         gate.abort()
         errors = [await _cancel_tasks(still, budget)]
         if not await gate.released(budget.remaining()):
