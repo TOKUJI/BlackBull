@@ -111,7 +111,8 @@ class _RouteTrie:
         # forms (dup/trailing slashes) fall through to the segment walk.
         self._static_full: dict[str, _TrieNode] = {}
 
-    def insert(self, path: str, methods: tuple, scheme_key: Any, handler: Any) -> None:
+    def insert(self, path: str, methods: tuple, scheme_key: Any, handler: Any,
+               *, capture_path: bool = True) -> None:
         segments = [s for s in path.split('/') if s]
         node = self.root
         param_specs: list[tuple] = []
@@ -131,7 +132,8 @@ class _RouteTrie:
                             f"route {path!r}: a '{{name:path}}' wildcard consumes "
                             f"all remaining segments, so nothing may follow it."
                         )
-                    param_specs.append((name, converter, True))
+                    if capture_path:
+                        param_specs.append((name, converter, True))
                     if node.wildcard_child is None:
                         node.wildcard_child = _TrieNode()
                     node.wildcard_child.entries.append(
@@ -300,6 +302,24 @@ class _RouteTrie:
 
 class ConfigurationError(Exception):
     """Raised by Router.validate() when route definitions are inconsistent."""
+
+
+class _HandledResponseError(Exception):
+    """The handler answered for an error; never render a second response."""
+
+    def __init__(self, error: Exception, *, abort: bool = False):
+        self.error = error
+        self.abort = abort
+
+
+class _AllMethods(tuple):
+    """A mount delegates method policy to its application."""
+
+    def __new__(cls):
+        return super().__new__(cls, ('*',))
+
+    def __contains__(self, value):
+        return True
 
 
 class HTTPException(Exception):
@@ -1159,6 +1179,8 @@ def _to_tuple(value: Any) -> tuple:
     Strings and other non-iterables are wrapped in a single-element tuple.
     Any other iterable is converted with tuple().
     """
+    if isinstance(value, tuple):
+        return value
     if isinstance(value, Iterable) and not isinstance(value, str):
         return tuple(value)
     return (value,)
@@ -1315,6 +1337,9 @@ class Router:
         scheme)``, routing the path to whichever of the two stores the class
         docstring describes.  An omitted scheme is stored as ``_ANY_SCHEME``.
         """
+        self._register(key, value)
+
+    def _register(self, key, value, *, capture_path: bool = True) -> None:
         if self._frozen:
             raise RuntimeError(
                 "Router is frozen — routes cannot be added after startup validation")
@@ -1363,11 +1388,12 @@ class Router:
                     f"placeholders). Pass a compiled re.Pattern for custom "
                     f"regex routes.")
 
-            self._trie.insert(path, tuple(methods), scheme_key, value)
+            self._trie.insert(path, methods, scheme_key, value,
+                              capture_path=capture_path)
             self._string_paths.add(path)
 
         elif isinstance(path, re.Pattern):
-            self._raw_regex[(path, tuple(methods), scheme_key)] = value
+            self._raw_regex[(path, methods, scheme_key)] = value
 
         else:
             logger.error(f"Unexpected type for path: {key!r}")

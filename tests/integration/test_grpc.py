@@ -147,6 +147,32 @@ class TestGrpcDispatchRouting:
     requests to the gRPC bridge (not the HTTP router)."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('replacement, expected', [
+        (None, b'application/grpc+proto; charset=utf-8'),
+        (b'application/grpc+proto; charset=utf-8', b'application/grpc+proto; charset=utf-8'),
+        (b'application/grpc+json', b'application/grpc+json'),
+        (b'text/plain', b'application/grpc'),
+        (b'', b'application/grpc'),
+    ])
+    async def test_content_type_after_handler_hook(self, replacement, expected):
+        from blackbull.headers import Headers
+
+        app, registry = _make_grpc_app()
+        app.enable_grpc(registry)
+        if replacement is not None:
+            @app.on('before_handler', blocking=True)
+            async def change_headers(event):
+                event.detail['conn'].headers = Headers([(b'content-type', replacement)])
+
+        async with _serve(app) as port:
+            async with HTTP2Client('127.0.0.1', port) as client:
+                response = await client.request('POST', '/missing/Method',
+                    headers=[('content-type', 'application/grpc+proto; charset=utf-8')],
+                    body=encode_message(b''))
+        assert response.headers.get(b'content-type') == expected
+        assert _grpc_status(response) == str(int(GrpcStatus.UNIMPLEMENTED))
+
+    @pytest.mark.asyncio
     async def test_grpc_content_type_triggers_grpc_path(self):
         """POST with ``Content-Type: application/grpc`` → UNIMPLEMENTED
         (if not registered) rather than 404 from HTTP router."""

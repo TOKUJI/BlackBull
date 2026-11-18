@@ -10,9 +10,10 @@ from http import HTTPStatus
 from .connection import Connection, disconnected, mark_disconnected
 from .event import EventDispatcher, EventHooks
 from .event_aggregator import emit_scope_end, handler_event, request_received_event
-from .native import NativeWSMessage, _native_from_asgi
+from .native import NativeWSMessage, _native_from_asgi, raw_receive
 from .request import ClientDisconnected
 from .response import Response
+from .router import _HandledResponseError
 
 logger = logging.getLogger(__name__)
 
@@ -211,24 +212,56 @@ class ASGIApp(EventHooks):
     ``receive()``, is served without one.  Each request's ``scope['state']``
     is a shallow copy of the lifespan state.
 
+    ``mounted=True`` reserves the adapter for ``BlackBull.mount``; that host
+    owns its events and lifespan. Placement cannot change after construction.
+
     Until BLA-676 a foreign app's WebSocket requests are refused.
     """
+
+    def __new__(cls, app, *, lifespan: bool = True, mounted: bool = False):
+        if cls is ASGIApp and mounted:
+            return super().__new__(_MountedASGIApp)
+        return super().__new__(cls)
 
     @property
     def available_ws_protocols(self) -> list[bytes]:
         """The wrapped BlackBull app's WebSocket subprotocols, else none."""
         return self._inner.available_ws_protocols if self._inner is not None else []
 
-    def __init__(self, app, *, lifespan: bool = True) -> None:
+    def __init__(self, app, *, lifespan: bool = True, mounted: bool = False) -> None:
         self.app = app
+        self._mounted = mounted
+        self._mount_owner = None
         self._lifespan = lifespan
         self._lifespan_state: dict = {}
         self._lifespan_task: asyncio.Task | None = None
         inner = _blackbull_in(app)
+        if mounted and inner is not None:
+            raise TypeError('a mounted ASGIApp requires a foreign ASGI application')
         self._inner = inner
         self._dispatcher = inner._dispatcher if inner is not None else EventDispatcher()
         # Its WebSocket sends reach the actor directly, as native code.
         self._warns_native_dicts = inner is not None and inner._warns_native_dicts
+
+    def _mount_handler(self, prefix):
+        async def mounted(conn, receive, send):
+            if conn.type == 'websocket':
+                await send(NativeWSMessage.close())
+                return
+            exchange = _Exchange(conn, raw_receive(receive), send)
+            exchange.scope['root_path'] = conn.root_path + prefix
+            exchange.scope['method'] = conn.state.get('_original_method', conn.method)
+            exchange.scope['state'] = self._lifespan_state.copy()
+            try:
+                exc = await exchange.run(
+                    lambda: self.app(exchange.scope, exchange.receive, exchange.send))
+            except Exception as exc:
+                conn.state['error_exception'] = exc
+                raise _HandledResponseError(exc, abort=True) from exc
+            if exc is not None:
+                conn.state['error_exception'] = exc
+                raise _HandledResponseError(exc) from exc
+        return mounted
 
     async def _lifespan_startup(self) -> None:
         if not self._lifespan or self._lifespan_task is not None:
@@ -312,6 +345,7 @@ class ASGIApp(EventHooks):
         dispatcher = self._dispatcher
         app = self.app
         called = False
+        exchange.scope['method'] = conn.state.get('_original_method', conn.method)
         exchange.scope['state'] = self._lifespan_state.copy()
 
         async def call():
@@ -335,3 +369,13 @@ class ASGIApp(EventHooks):
             # As natively: only a disconnect seen by receive withholds request_completed.
             await emit_scope_end(dispatcher, conn, exc,
                                  completed=not disconnected(exchange.scope))
+
+
+class _MountedASGIApp(ASGIApp):
+    async def __call__(self, conn, receive, send):
+        raise TypeError('a mounted ASGIApp must be registered with BlackBull.mount')
+
+    async def _lifespan_startup(self) -> None:
+        if self._mount_owner is None:
+            raise RuntimeError('a mounted ASGIApp requires a host via BlackBull.mount')
+        await super()._lifespan_startup()

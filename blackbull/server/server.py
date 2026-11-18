@@ -648,7 +648,8 @@ class _ServedConnection(ConnectionProtocol):
             try:
                 # A bare close would RST away the response a peer that is
                 # still sending has not read yet.
-                await self.linger_close()
+                if not self._linger_decided:
+                    await self.linger_close()
             finally:
                 self._end()
 

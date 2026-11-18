@@ -16,7 +16,7 @@ import logging
 from .event import Event, EventDispatcher, EventHooks
 from .event_aggregator import emit_scope_end, handler_event, request_received_event
 from .utils import Scheme, is_client_error, is_server_error
-from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param
+from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param, _AllMethods, _HandledResponseError
 from .request import ClientDisconnected
 from .connection import Connection, disconnected, refuse_scope, CONNECTION_STASH_KEY
 from .protocol.field_grammar import FieldError, media_type
@@ -404,9 +404,17 @@ class BlackBull(EventHooks):
             raise
         try:
             await self._dispatcher.emit(Event('app_startup'))
-        except Exception:
+        except BaseException:
             self._logger.error('app_startup hook failed:\n%s', traceback.format_exc())
+            await self._rollback_mounted_lifespans()
             raise
+
+    async def _rollback_mounted_lifespans(self) -> None:
+        for adapter in reversed(getattr(self, '_mounted_asgi_apps', ())):
+            try:
+                await adapter._lifespan_shutdown()
+            except BaseException:
+                self._logger.error('Mounted lifespan rollback failed', exc_info=True)
 
     async def _lifespan_shutdown(self) -> None:
         """Fire ``app_shutdown`` and close the dispatcher; raise, logged, on failure."""
@@ -415,8 +423,9 @@ class BlackBull(EventHooks):
         try:
             await self._dispatcher.emit(Event('app_shutdown'))
             await self._dispatcher.aclose()
-        except Exception:
+        except BaseException:
             self._logger.error('app_shutdown hook failed:\n%s', traceback.format_exc())
+            await self._rollback_mounted_lifespans()
             raise
 
     async def _handle_lifespan(self, receive, send):
@@ -478,12 +487,14 @@ class BlackBull(EventHooks):
         # gRPC rides the HTTP/2 path; see enable_grpc.
         if self._grpc_registry is not None and scheme == Scheme.http:
             is_grpc, serve_grpc = self._grpc_dispatch
-            if is_grpc(conn.headers.get(b'content-type', b'')):
+            content_type = conn.headers.get(b'content-type', b'')
+            if is_grpc(content_type):
                 exc_caught = None
                 try:
                     if self._dispatcher.has_listeners('before_handler'):
                         await self._dispatcher.emit(handler_event('before_handler', conn, serve_grpc))
-                    await serve_grpc(self._grpc_registry, conn, raw_receive(receive), send)
+                    await serve_grpc(self._grpc_registry, conn, raw_receive(receive), send,
+                                     _validated_content_type=content_type)
                 except BaseException as exc:
                     exc_caught = exc
                     raise
@@ -559,6 +570,11 @@ class BlackBull(EventHooks):
             if self._dispatcher.has_listeners('before_handler'):
                 await self._dispatcher.emit(handler_event('before_handler', conn, function))
             await function(conn, receive, send)
+        except _HandledResponseError as e:
+            exc_caught = e.error
+            if e.abort:
+                raise e.error
+            return
         except (ClientDisconnected, ConnectionResetError) as e:
             # Peer disconnect during body reads is an ordinary close, not a handler failure.
             exc_caught = e
@@ -733,6 +749,36 @@ class BlackBull(EventHooks):
     def group(self, middlewares=[]) -> 'RouteGroup':
         """Return a RouteGroup that prepends *middlewares* to every route."""
         return RouteGroup(self, middlewares)
+
+    def mount(self, url_prefix: str, app) -> None:
+        """Mount ``ASGIApp(foreign, mounted=True)`` with this app's lifecycle.
+
+        HTTP methods are delegated to the foreign app. Host middleware and
+        events apply; the foreign scope retains path and adds the mount to
+        root_path. Register before startup.
+        """
+        from .asgi_app import ASGIApp  # noqa: PLC0415
+        if not isinstance(app, ASGIApp) or not app._mounted:
+            raise ValueError('mount requires ASGIApp(foreign, mounted=True)')
+        if app._mount_owner is not None and app._mount_owner is not self:
+            raise ValueError('a mounted ASGIApp belongs to one host')
+        if (not url_prefix.startswith('/') or any(
+                char in url_prefix for char in '{}?#\\') or '//' in url_prefix):
+            raise ValueError('mount prefix must be a literal absolute URL path')
+        prefix = url_prefix.rstrip('/')
+        handler = app._mount_handler(prefix)
+        methods = _AllMethods()
+        schemes = (Scheme.http, Scheme.websocket)
+        paths = [f'{prefix}/{{mounted_path:path}}', prefix or '/']
+        for path in paths:
+            self._router._register((path, methods, schemes), handler, capture_path=False)
+        if app._mount_owner is None:
+            app._mount_owner = self
+            if not hasattr(self, '_mounted_asgi_apps'):
+                self._mounted_asgi_apps = []
+            self._mounted_asgi_apps.append(app)
+            self.on_startup(app._lifespan_startup)
+            self.on_shutdown(app._lifespan_shutdown)
 
     def register_converter(self, type_: type, converter: Callable | None = None):
         """Convert a custom simplified-handler return type to a supported sendable.
