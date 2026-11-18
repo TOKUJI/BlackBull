@@ -7,6 +7,7 @@ import asyncio
 import logging
 from http import HTTPStatus
 
+from .asgi import _ASGIAppAdapter
 from .connection import Connection, disconnected, mark_disconnected
 from .event import EventDispatcher, EventHooks
 from .event_aggregator import emit_scope_end, handler_event, request_received_event
@@ -200,7 +201,7 @@ async def _reclaim(task) -> None:
             logger.error('ASGI lifespan task ignored cancellation; leaving it running')
 
 
-class ASGIApp(EventHooks):
+class ASGIApp(EventHooks, _ASGIAppAdapter):
     """Serve the ASGI 3.0 application *app* as a native BlackBull callable.
 
     Construct it directly to register listeners with ``on``/``intercept``.
