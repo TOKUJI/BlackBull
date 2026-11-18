@@ -6354,7 +6354,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_MAX_CONNECTIONS</code></td>
 <td><code>auto</code></td>
-<td>Concurrent TCP connections <strong>per worker</strong>. <code>auto</code> subtracts a 64-descriptor reserve and already-open descriptors from <code>RLIMIT_NOFILE</code>; <code>0</code> disables the cap. Explicit numbers are not clamped to the descriptor budget. Counted from accept, including TLS handshakes. Excess connections wait in the accept queue; HTTP/1.1 and prior-knowledge h2c receive best-effort <code>503</code> with <code>Retry-After: 1</code>; ALPN-h2 and raw connections close silently. During lifespan startup the backlog applies instead. Set an explicit cap if the application opens descriptors later. See <a href="../../deployment/unix-and-fd/#the-startup-window">startup admission</a>.</td>
+<td>Service connections <strong>per worker</strong>, including keep-alive and WebSocket. <code>auto</code> subtracts 64 reserved and already-open descriptors from <code>RLIMIT_NOFILE</code>; explicit numbers are not clamped. Held descriptors (including TLS preparation and closing) have a separate derived limit of service cap + 16; reaching it pauses accept. Service excess receives best-effort <code>503</code> with <code>Retry-After: 1</code> on HTTP/1.1 and prior-knowledge h2c; ALPN-h2 and raw connections close silently. <code>0</code> disables both caps. During lifespan startup the backlog applies. See <a href="../../deployment/workers/#connection-limits">connection limits</a>.</td>
 </tr>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>
@@ -6374,7 +6374,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_WRITE_TIMEOUT</code></td>
 <td><code>30.0</code></td>
-<td>Seconds the server will wait for a single response socket drain, <code>sendfile</code> chunk, or HTTP/2 flow-control wait.  This is per progress wait, not a whole response total; an HTTP/2 stream that waits past it is reset with <code>RST_STREAM(CANCEL)</code>, after at most the one response head already sent.  <code>0</code> disables.</td>
+<td>Seconds the server will wait for a single response socket drain, <code>sendfile</code> chunk, or HTTP/2 flow-control wait; <code>0</code> disables those progress deadlines. An HTTP/2 stream that waits past it is reset with <code>RST_STREAM(CANCEL)</code>, after at most the one response head already sent. Also bounds a connection awaiting FD closure after service or refusal; <code>0</code> uses an 8-second closing budget.</td>
 </tr>
 <tr>
 <td><code>BB_KEEP_ALIVE_TIMEOUT</code></td>

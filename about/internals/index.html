@@ -6262,11 +6262,14 @@ when the peer does not read.</p>
 <h3 id="accept-admission">Accept admission<a class="headerlink" href="#accept-admission" title="Permanent link">&para;</a></h3>
 <p>New TCP listeners carry <code>IPPROTO_TCP</code> so asyncio enables <code>TCP_NODELAY</code>
 on accepted connections, as uvloop does.</p>
-<p>Count descriptors from <code>accept()</code> to close on every supported loop,
-including TLS handshakes and refusals. <code>connection_made</code> misses handshakes.
-Pause acceptance at the cap plus refusal reserve; do not consume the
-process's descriptor budget to manufacture refusal replies.
-Read <code>_AcceptGate</code> in <code>blackbull/server/server.py</code>.</p>
+<p>The accept gate owns both connection counts. Service completion releases
+the service slot, and <code>connection_lost</code> releases the descriptor slot.
+If the descriptor closes first, the service slot remains until its actor ends.
+Repeated notifications do not release either slot twice.</p>
+<p>The gate's timer bounds refusal cleanup and pending plain-text output.
+TLS shutdown uses the event loop's timeout. See
+<a href="../../deployment/workers/#connection-limits">connection limits</a> for the
+effective limits, deadlines and log records.</p>
 <h2 id="receive-path-invariant">Receive-path invariant<a class="headerlink" href="#receive-path-invariant" title="Permanent link">&para;</a></h2>
 <p>Native body readers return bytes, <code>None</code> for completion, or raise
 <code>ClientDisconnected</code>. Empty bytes are not the completion sentinel.

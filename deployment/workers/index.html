@@ -1340,6 +1340,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#connection-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#pre-fork-multi-worker" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6016,6 +6027,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#connection-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#pre-fork-multi-worker" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6239,6 +6261,44 @@
 standard asyncio event loop.  This page covers how to scale to
 multiple workers, what <code>uvloop</code> buys you, and the abuse defences
 that protect each worker.</p>
+<h2 id="connection-limits">Connection limits<a class="headerlink" href="#connection-limits" title="Permanent link">&para;</a></h2>
+<p>Each worker applies two limits across all its listeners:</p>
+<table>
+<thead>
+<tr>
+<th>Quantity</th>
+<th>Limit</th>
+<th>When its slot is released</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Service work, including keep-alive and WebSocket</td>
+<td><code>BB_MAX_CONNECTIONS</code></td>
+<td>The connection actor finishes</td>
+</tr>
+<tr>
+<td>Held descriptors, including TLS preparation and closing</td>
+<td>Service limit + 16</td>
+<td>The transport reports connection loss</td>
+</tr>
+</tbody>
+</table>
+<p><code>auto</code> derives the service limit from <code>RLIMIT_NOFILE</code> and the descriptors
+already open. The 16 preparation/refusal slots come from the separate
+64-descriptor reserve. <code>0</code> disables both limits. Neither limit evicts existing
+service work. A freed service slot can admit new work while refused
+connections are still closing, provided the held limit has room.</p>
+<p>At the service limit, HTTP/1.1 and prior-knowledge h2c receive best-effort 503;
+ALPN-h2 and raw connections close silently. At the held limit, accept pauses
+and arrivals wait in the OS backlog. These produce distinct <code>blackbull.caps</code>
+records: <code>max_connections</code> and <code>max_held_connections</code>. Startup logs show both
+effective limits; <code>Server.active_connections</code> and <code>Server.held_connections</code>
+are read-only gauges. Active work can outlive its FD while its actor unwinds.</p>
+<p>TLS preparation is bounded by <code>BB_HEADER_TIMEOUT</code>, or the event loop's TLS
+handshake timeout when zero. Closing after service or refusal is bounded by
+<code>BB_WRITE_TIMEOUT</code>, with an 8-second closing budget when zero. The transport
+is aborted at that deadline; its held slot remains until connection loss.</p>
 <h2 id="pre-fork-multi-worker">Pre-fork multi-worker<a class="headerlink" href="#pre-fork-multi-worker" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="c1"># Pre-fork N worker processes, each with its own event loop.</span>
 <span class="c1"># 0 → os.cpu_count() workers.</span>
