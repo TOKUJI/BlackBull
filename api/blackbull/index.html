@@ -1889,6 +1889,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.mount" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mount
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.BlackBull.on_error" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7296,6 +7307,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.BlackBull.mount" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mount
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.BlackBull.on_error" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -8542,6 +8564,8 @@ app fires its own events and errors as when served natively.</p>
 ends without answering <code>lifespan.startup</code>, or raises before its first
 <code>receive()</code>, is served without one.  Each request's <code>scope['state']</code>
 is a shallow copy of the lifespan state.</p>
+<p><code>mounted=True</code> reserves the adapter for <code>BlackBull.mount</code>; that host
+owns its events and lifespan. Placement cannot change after construction.</p>
 <p>Until BLA-676 a foreign app's WebSocket requests are refused.</p>
 
 
@@ -9123,6 +9147,27 @@ docs_path=None disables the UI; see docs/guide/openapi.md.</p>
     <div class="doc doc-contents ">
 
         <p>Return a RouteGroup that prepends <em>middlewares</em> to every route.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.BlackBull.mount" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">mount</span><span class="p">(</span><span class="n">url_prefix</span><span class="p">,</span> <span class="n">app</span><span class="p">)</span></code>
+
+<a href="#blackbull.BlackBull.mount" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Mount <code>ASGIApp(foreign, mounted=True)</code> with this app's lifecycle.</p>
+<p>HTTP methods are delegated to the foreign app. Host middleware and
+events apply; the foreign scope retains path and adds the mount to
+root_path. Register before startup.</p>
 
 
     </div>

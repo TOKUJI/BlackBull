@@ -1101,6 +1101,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#mounting-inside-blackbull" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mounting inside BlackBull
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#current-compatibility" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5883,6 +5894,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#mounting-inside-blackbull" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mounting inside BlackBull
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#current-compatibility" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5966,6 +5988,29 @@ adapter explicitly:</p>
 host. <code>Server(foreign_app)</code> alone does not infer ASGI from its signature.
 <code>BB_FORCE_ASGI_SCOPE=1</code> also selects the adapter; combining it with
 <code>Server(..., asgi=False)</code> raises <code>ConfigurationError</code>.</p>
+<h2 id="mounting-inside-blackbull">Mounting inside BlackBull<a class="headerlink" href="#mounting-inside-blackbull" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASGIApp</span><span class="p">,</span> <span class="n">BlackBull</span>
+
+<span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
+<span class="n">foreign</span> <span class="o">=</span> <span class="n">ASGIApp</span><span class="p">(</span><span class="n">foreign_app</span><span class="p">,</span> <span class="n">mounted</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">app</span><span class="o">.</span><span class="n">mount</span><span class="p">(</span><span class="s1">'/api'</span><span class="p">,</span> <span class="n">foreign</span><span class="p">)</span>
+</code></pre></div>
+<p>Register before startup. The mounted adapter belongs to one host; it cannot
+be served directly or registered with <code>route()</code>. It must wrap a foreign ASGI
+app, rather than BlackBull or a wrapper exposing BlackBull via <code>__wrapped__</code>.</p>
+<p>The prefix and its descendants accept every HTTP method, including extension
+methods. More specific host routes take precedence. The foreign scope keeps
+the original <code>path</code>, <code>raw_path</code> and query string; <code>root_path</code> adds the prefix
+(<code>/api</code> above). Mounting at <code>/</code> adds an empty prefix. The host <code>Connection</code>
+is not rewritten, including on exceptions or cancellation.</p>
+<p>Host middleware applies and host listeners own the request events; listeners
+on the mounted adapter do not fire. Registering the same adapter at several
+prefixes runs its lifespan once per host lifecycle and shares its lifespan
+state. Startup failure reclaims already-started mounted lifespans.</p>
+<p><code>enable_grpc()</code> intercepts gRPC requests before HTTP routing, including mounts.
+To serve gRPC from a foreign app, let that app own gRPC instead of enabling
+the host's registry. The foreign app supplies its own API schema; host
+<code>get_routes()</code> and OpenAPI generation do not enumerate its internal routes.</p>
 <h2 id="current-compatibility">Current compatibility<a class="headerlink" href="#current-compatibility" title="Permanent link">&para;</a></h2>
 <p>These are transport capabilities, not certification of every ASGI framework
 or middleware package. Check the application's required extensions before
@@ -6027,8 +6072,7 @@ messages. Do not send an extension message merely because another ASGI host
 supports it.</p>
 <p>Foreign WebSocket requests end without calling the foreign app; a specific
 HTTP rejection status is not guaranteed. WebSocket support and pre-upgrade
-HTTP responses are tracked in BLA-676. Mounting an <code>ASGIApp</code> under a BlackBull
-route is tracked in BLA-674. Neither is a currently supported integration.
+HTTP responses are tracked in BLA-676. This restriction also applies to mounts.
 The native <a href="../websockets/">WebSocket API</a> is a separate supported path.</p>
 <h2 id="lifespan-and-request-state">Lifespan and request state<a class="headerlink" href="#lifespan-and-request-state" title="Permanent link">&para;</a></h2>
 <p>The server runs the app's lifespan once per worker's server lifecycle, before

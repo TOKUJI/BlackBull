@@ -6015,6 +6015,8 @@ app fires its own events and errors as when served natively.</p>
 ends without answering <code>lifespan.startup</code>, or raises before its first
 <code>receive()</code>, is served without one.  Each request's <code>scope['state']</code>
 is a shallow copy of the lifespan state.</p>
+<p><code>mounted=True</code> reserves the adapter for <code>BlackBull.mount</code>; that host
+owns its events and lifespan. Placement cannot change after construction.</p>
 <p>Until BLA-676 a foreign app's WebSocket requests are refused.</p>
 
 

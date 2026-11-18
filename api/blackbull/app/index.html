@@ -1895,6 +1895,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.mount" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mount
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.on_error" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6270,6 +6281,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.app.BlackBull.mount" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mount
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.app.BlackBull.on_error" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7004,6 +7026,27 @@ docs_path=None disables the UI; see docs/guide/openapi.md.</p>
     <div class="doc doc-contents ">
 
         <p>Return a RouteGroup that prepends <em>middlewares</em> to every route.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.app.BlackBull.mount" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">mount</span><span class="p">(</span><span class="n">url_prefix</span><span class="p">,</span> <span class="n">app</span><span class="p">)</span></code>
+
+<a href="#blackbull.app.BlackBull.mount" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Mount <code>ASGIApp(foreign, mounted=True)</code> with this app's lifecycle.</p>
+<p>HTTP methods are delegated to the foreign app. Host middleware and
+events apply; the foreign scope retains path and adds the mount to
+root_path. Register before startup.</p>
 
 
     </div>
