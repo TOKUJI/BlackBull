@@ -213,6 +213,28 @@ async def test_head_size_limits(settings, caps, env, raw, status, cap):
     assert caps() == ([(cap, 'http1')] if cap else [])
 
 
+@pytest.mark.parametrize('env,raw,status', [
+    pytest.param({}, _head(b'/', b'X-Big: ' + b'a' * 9000), 431, id='line'),
+    pytest.param({'BB_HEADER_MAX_TOTAL': '256'},
+                 _head(b'/', *[b'X-%d: %s' % (i, b'a' * 40) for i in range(8)]), 431, id='total'),
+    pytest.param({}, _head(host=None), 400, id='missing-host'),
+    pytest.param({}, b'GET / HTTP/1.1\r\nHost: localh', 400, id='eof-mid-head'),
+])
+async def test_a_refusal_after_a_keep_alive_response_is_still_answered(settings, env, raw,
+                                                                         status):
+    """The refusal is answered before dispatch, on the second request as on the first."""
+    settings(**env)
+    async with served(_noop) as s:
+        w = await s.wire()
+        await w.send(_head())
+        assert (await w.response()).status == 200
+        await w.send(raw)
+        if not raw.endswith(b'\r\n\r\n'):
+            w.half_close()
+        assert (await w.response()).status == status
+        assert await w.closed()
+
+
 async def test_a_head_that_never_completes_times_out(settings, caps):
     settings(BB_HEADER_TIMEOUT='0.05')
     async with served(_noop) as s:

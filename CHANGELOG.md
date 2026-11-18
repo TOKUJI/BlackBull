@@ -126,6 +126,10 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- HTTP/1.1: on a keep-alive connection, a request refused before dispatch
+  (for example `431` for oversized fields, or `400` for a missing `Host`)
+  after an earlier response is answered again instead of the connection
+  closing silently (BLA-686).
 - HTTP/2 client: resets answering a server frame (for example a
   self-dependent `PRIORITY`) now count against `BB_FRAME_RATE_LIMIT`, and
   excess ends the connection with `GOAWAY(ENHANCE_YOUR_CALM)`; deadline and
