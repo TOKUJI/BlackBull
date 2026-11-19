@@ -27,9 +27,11 @@ semantics in `blackbull.grpc`; see [gRPC design](grpc-assessment.md).
 ## Application dispatch
 
 `BlackBull._dispatch` chooses each HTTP request's one handler and
-`BlackBull._handle` runs it; only `_handle` emits `before_handler` and
-`after_handler`, for routes and gRPC alike. Where each kind of protocol is
-chosen, and where a new one goes:
+`BlackBull._handle` runs it; within a BlackBull app only `_handle` emits
+`before_handler` and `after_handler`, for routes, mounts and gRPC alike.
+`ASGIApp` serving a foreign app on its own is that app's application layer and
+emits them itself. Where each kind of protocol is chosen, and where a new one
+goes:
 
 | Protocol | Chosen by | A new one goes in |
 |---|---|---|
