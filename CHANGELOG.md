@@ -105,8 +105,8 @@ metadata; reinstall an editable checkout after changing that version.
   finds it gone, or an HTTP/2 reset or dropped connection, however the handler
   reads the body. It fires at the end of the request, in place of
   `request_completed`. It no longer fires for a handler that only reads past
-  the body, or for a request the server abandons (body timeout, minimum body
-  rate, its own GOAWAY). `conn.disconnected` reads the same state. The
+  the body, or for a request the server abandons (body or write timeout,
+  minimum body rate, its own GOAWAY). `conn.disconnected` reads the same state. The
   built-in `websocket` middleware, `websocket_message` and `warm_request` no
   longer build ASGI event dicts (BLA-685).
 - `BLACKBULL_ENV` defaults to `production`, and an unrecognised value is

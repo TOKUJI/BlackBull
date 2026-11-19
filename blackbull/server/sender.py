@@ -184,6 +184,9 @@ class AbstractWriter(ABC):
 
     # Peer death is shared by every sender on this connection writer.
     peer_gone: bool = False
+    # This server closed the transport itself (a write timeout, an orderly
+    # close), so a loss seen after it is not the peer leaving.
+    closed_by_server: bool = False
 
     @abstractmethod
     async def write(self, data: bytes) -> None:
@@ -302,6 +305,7 @@ class AsyncioWriter(AbstractWriter):
             self._write_timeout)
         log_cap_hit(self._cap_name, requested=self._write_timeout,
                     limit=self._write_timeout, protocol=self._protocol)
+        self.closed_by_server = True
         try:
             self._sw.close()
         except Exception as close_exc:
@@ -337,6 +341,7 @@ class AsyncioWriter(AbstractWriter):
 
     async def close(self) -> None:
         # Writes have drained; close without waiting for transport shutdown.
+        self.closed_by_server = True
         if self._linger is not None:
             await self._linger()
             return
@@ -1171,6 +1176,11 @@ class HTTP2Sender(BaseSender):
                 self._stream_id, ErrorCodes.INTERNAL_ERROR).save())
             self.retire_stream()
         raise ValueError(f'response body {problem} Content-Length')
+
+    @property
+    def answered(self) -> bool:
+        """The response has ended: its END_STREAM is out."""
+        return self._end_stream_sent
 
     def retire_stream(self) -> None:
         """Stop this stream's pending and future output without closing its peer.

@@ -712,7 +712,8 @@ class BlackBull(EventHooks):
             exc = e
             raise
         finally:
-            gone = want_request_end and (disconnected(request) or disconnected(target))
+            gone = want_request_end and (
+                request.disconnected or (target is not request and disconnected(target)))
             await emit_scope_end(
                 dispatcher, request, exc or request.state.get('error_exception'),
                 completed=want_request_end, disconnected=gone)

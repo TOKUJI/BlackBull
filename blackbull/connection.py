@@ -263,7 +263,7 @@ class Connection:
         reads the same state at the two ASGI boundaries, where it may live on
         a ``scope`` dict instead.
         """
-        return self._disconnected or getattr(self._receive, 'peer_gone', False)
+        return self._disconnected or getattr(self._receive, 'peer_gone', False) is True
 
     @property
     def path_params(self) -> dict[str, Any]:

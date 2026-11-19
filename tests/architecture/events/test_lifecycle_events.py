@@ -333,30 +333,73 @@ async def test_an_h2_reset_mid_body_is_disconnected_not_completed():
     assert seen['request_completed'] == []
 
 
+async def _h2_get(wire, path: bytes) -> None:
+    fields = [(b':method', b'GET'), (b':path', path), (b':scheme', b'http'),
+              (b':authority', b'x')]
+    await wire.send(_make_h2_frame(
+        FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM, 1,
+        Encoder().encode(fields)))
+
+
+async def _h2_body(wire) -> bytes:
+    """Stream 1's response body, through to its END_STREAM."""
+    body = b''
+    while True:
+        kind, flags, sid, payload = await read_h2_frame(wire.reader)
+        if kind == 0 and sid == 1:
+            body += payload
+            if flags & 1:
+                return body
+
+
 async def test_a_stream_answered_after_the_clients_goaway_is_completed():
     async def late(conn, receive, send):
         await asyncio.sleep(SETTLE)
         await send(Response(b'late'))
 
     app, seen = _app(**{'/late': late})
-    fields = [(b':method', b'GET'), (b':path', b'/late'), (b':scheme', b'http'),
-              (b':authority', b'x')]
     async with served(app) as s:
         wire = await h2_connect(s)
-        await wire.send(_make_h2_frame(
-            FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM, 1,
-            Encoder().encode(fields)))
+        await _h2_get(wire, b'/late')
         await wire.send(_make_h2_frame(FrameTypes.GOAWAY, 0, 0, bytes(8)))
-        body = b''
-        while True:
-            kind, flags, sid, payload = await read_h2_frame(wire.reader)
-            if kind == 0 and sid == 1:
-                body += payload
-                if flags & 1:
-                    break
+        body = await _h2_body(wire)
         await _until(seen, 'request_completed')
     assert body == b'late'
     assert len(seen['request_completed']) == 1 and seen['request_disconnected'] == []
+
+
+@pytest.mark.parametrize('leave', ['close', 'reset'])
+async def test_an_answered_h2_stream_is_completed_however_the_client_leaves(leave):
+    async def lingers(conn, receive, send):
+        await send(Response(b'ok'))
+        await asyncio.sleep(SETTLE * 2)
+
+    app, seen = _app(**{'/linger': lingers})
+    async with served(app) as s:
+        wire = await h2_connect(s)
+        await _h2_get(wire, b'/linger')
+        assert await _h2_body(wire) == b'ok'
+        if leave == 'close':
+            await wire.aclose()
+        else:
+            await wire.send(_make_h2_frame(FrameTypes.RST_STREAM, 0, 1, (8).to_bytes(4, 'big')))
+        await _until(seen, 'request_completed')
+    assert len(seen['request_completed']) == 1 and seen['request_disconnected'] == []
+
+
+async def test_a_write_the_server_times_out_is_not_a_disconnect(monkeypatch):
+    monkeypatch.setenv('BB_WRITE_TIMEOUT', '0.2')
+
+    async def big(conn, receive, send):
+        await send(Response(b'x' * (64 << 20)))
+
+    app, seen = _app(**{'/big': big})
+    async with served(app) as s:
+        w = await s.wire()
+        await w.send(_get(b'/big'))
+        await _until(seen, 'request_completed')
+    assert seen['request_disconnected'] == []
+    assert len(seen['request_completed']) == 1
 
 
 async def test_a_handler_cancelled_by_an_h2_reset_sees_the_peer_gone():

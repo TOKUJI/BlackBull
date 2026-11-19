@@ -65,12 +65,10 @@ def _req_headers(conn: Connection) -> Headers:
     return conn.headers
 
 
-def _signal_recipients(recipients: dict[int, _StreamRecipient], *,
-                       peer: bool = False) -> None:
-    """Inject http.disconnect into every active stream recipient; *peer* when
-    the peer ended the connection."""
+def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
+    """Inject http.disconnect into every active stream recipient."""
     for recipient in recipients.values():
-        recipient.put_disconnect(peer=peer)
+        recipient.put_disconnect()
 
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
@@ -589,7 +587,9 @@ class HTTP2Actor(Actor, HTTP2Connection):
             else:
                 sender.mark_client_gone()
         if recipient is not None:
-            recipient.put_disconnect(peer=by_peer)
+            # A peer reset after the response ended leaves nothing unanswered.
+            peer = by_peer and getattr(sender, 'answered', False) is not True
+            recipient.put_disconnect(peer=peer)
             self._release_recipient_credit(recipient, additional_credit)
         elif additional_credit:
             self._release_recipient_credit(None, additional_credit)
@@ -815,7 +815,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
                 await self._on_goaway_frame(self._last_peer_stream_id)
                 return
 
-        _signal_recipients(self._recipients, peer=True)
+        self._signal_peer_lost()
 
     def _spawn_stream_task(
         self,
@@ -1116,6 +1116,14 @@ class HTTP2Actor(Actor, HTTP2Connection):
         conn = stream.conn
         if conn is not None and conn.extensions is not None:
             conn.extensions['http.response.priority'] = hint
+
+    def _signal_peer_lost(self) -> None:
+        """The connection ended under every live stream: the peer left those
+        still answering, unless this server closed the connection itself."""
+        lost = getattr(self._writer, 'closed_by_server', False) is not True
+        for stream_id, recipient in self._recipients.items():
+            answered = getattr(self._senders.get(stream_id), 'answered', False) is True
+            recipient.put_disconnect(peer=lost and not answered)
 
     async def _on_goaway_frame(self, last_stream_id: int) -> None:
         """Send GOAWAY with the supplied peer-stream id and signal all recipients.

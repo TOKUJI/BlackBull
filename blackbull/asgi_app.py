@@ -83,7 +83,7 @@ class _Exchange:
     def peer_gone(self) -> bool:
         """The transport saw the peer leave; a BlackBull app given this
         channel reads it as ``conn.disconnected``."""
-        return getattr(self._receive, 'peer_gone', False)
+        return getattr(self._receive, 'peer_gone', False) is True
 
     async def relay(self, event):
         """Convert only: a BlackBull app answers for itself, as when served natively."""

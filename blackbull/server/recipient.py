@@ -302,6 +302,12 @@ class BaseRecipient(ABC):
     async def __call__(self) -> dict: pass
 
 
+class _NoWriter:
+    """The writer of a directly driven recipient: nothing to consult."""
+
+    peer_gone = closed_by_server = False
+
+
 class HTTP1Recipient(BaseRecipient):
     """Yield lazy HTTP/1.1 request-body slices as http.request events.
 
@@ -325,7 +331,7 @@ class HTTP1Recipient(BaseRecipient):
         super().__init__(reader)
         # The connection's writer, whose ``peer_gone`` a failed response write
         # sets; it holds no Connection, so no reference cycle.
-        self._peer_writer = writer
+        self._peer_writer = writer if writer is not None else _NoWriter
         # ``chunk_size`` slices a chunked body, ``chunk_max`` bounds one
         # transport-paced Content-Length read; see docs/reference/env-vars.md.
         # All five fall back to settings when a caller does not inject them.
@@ -399,9 +405,10 @@ class HTTP1Recipient(BaseRecipient):
     def peer_gone(self) -> bool:
         """The peer left before this request ended: EOF mid-body, or a
         response write that found it gone.  A body this server refused
-        (timeout, rate floor, size) is not the peer leaving."""
-        return self._eof_mid_body or (self._peer_writer is not None
-                                      and self._peer_writer.peer_gone)
+        (timeout, rate floor, size) or a connection it closed itself (a
+        write timeout) is not the peer leaving."""
+        writer = self._peer_writer
+        return (self._eof_mid_body or writer.peer_gone) and not writer.closed_by_server
 
     @property
     def must_close(self) -> bool:

@@ -317,9 +317,9 @@ place of `request_completed`: the two are **mutually exclusive**.
 The client has left when a body read finds the connection closed,
 however the handler reads it; when a response write finds it gone; or,
 on HTTP/2, when it resets the stream or drops the connection.  A request
-the server abandons itself (a body timeout, the minimum body rate, its own
-GOAWAY) is not a disconnect, and neither is a stream still answered after the
-client's GOAWAY.
+the server abandons itself (a body or write timeout, the minimum body rate,
+its own GOAWAY) is not a disconnect, and neither is a stream still answered
+after the client's GOAWAY.
 
 `conn.disconnected` reads the same state while the handler runs.  An
 HTTP/2 reset cancels the handler, and the flag is already set when its
