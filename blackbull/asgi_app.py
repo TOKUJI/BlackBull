@@ -8,7 +8,7 @@ import logging
 from http import HTTPStatus
 
 from .asgi import _ASGIAppAdapter
-from .connection import Connection, bind_receive_channel, disconnected
+from .connection import Connection, disconnected
 from .event import EventDispatcher, EventHooks
 from .event_aggregator import emit_scope_end, handler_event, request_received_event
 from .native import NativeWSMessage, _native_from_asgi, raw_receive
@@ -47,7 +47,8 @@ class _Exchange:
         self.conn = conn
         self.scope = conn.to_asgi_scope(force_asgi=True)
         # So ``conn.disconnected`` reads the transport's own peer state.
-        bind_receive_channel(conn, receive)
+        if conn._receive is None:
+            conn._receive = receive
         self._receive = receive
         self._send = send
         self._state = _START

@@ -449,7 +449,7 @@ class BaseSender(ABC):
     shared size gate selects joining versus vectored transport writes.
     """
 
-    __slots__ = ('_writer', '_closed')
+    __slots__ = ('_writer', '_closed', '_peer_lost')
     #: Whether a write to a gone peer raises ClientDisconnected (response
     #: senders) or is dropped (the connection's own frames, WebSocket).
     _raise_when_gone = False
@@ -457,6 +457,8 @@ class BaseSender(ABC):
     def __init__(self, writer: AbstractWriter):
         self._writer = writer
         self._closed = False
+        #: One of this sender's writes found the peer gone.
+        self._peer_lost = False
 
     async def _settle_buffered_head(self) -> None:
         """A head that never got content is complete — settle it before the
@@ -487,24 +489,26 @@ class BaseSender(ABC):
         other sender on the connection has to rediscover it.
         """
         if self._closed or self._writer.peer_gone:
-            if self._writer.peer_gone and self._raise_when_gone:
-                raise _response_lost()
+            if self._writer.peer_gone:
+                self._peer_lost = True
+                if self._raise_when_gone:
+                    raise _response_lost()
             return
         if self._writer.peer_is_gone():
-            self._closed = self._writer.peer_gone = True
+            self._closed = self._peer_lost = self._writer.peer_gone = True
             if _DEBUG:
                 logger.debug('sender: transport already closing; write skipped')
             return
         try:
             await write_fn(arg)
         except (ConnectionResetError, BrokenPipeError) as exc:
-            self._closed = self._writer.peer_gone = True
+            self._closed = self._peer_lost = self._writer.peer_gone = True
             if _DEBUG:
                 logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
         except OSError as exc:
             # SSLEOFError / SSLZeroReturnError land here on TLS connections
             # whose peer dropped without a proper close-notify.
-            self._closed = self._writer.peer_gone = True
+            self._closed = self._peer_lost = self._writer.peer_gone = True
             if _DEBUG:
                 logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
 
@@ -1037,7 +1041,7 @@ class HTTP2Sender(BaseSender):
     __slots__ = (
         '_factory', '_stream_id', '_push_callback',
         '_conn_window', 'stream_window_size',
-        '_window_open', '_end_stream_sent', '_answered',
+        '_window_open', '_end_stream_sent',
         '_flow_control_timeout',
         '_flow_control_cap',
         '_buffered_status', '_buffered_headers', '_expect_trailers',
@@ -1084,7 +1088,6 @@ class HTTP2Sender(BaseSender):
         self._flow_control_timeout: float = flow_control_timeout
         self._flow_control_cap = flow_control_cap
         self._end_stream_sent: bool = False
-        self._answered: bool = False
         self._buffered_status: HTTPStatus | None = None
         self._buffered_headers: list[tuple[bytes, bytes]] | None = None
         self._expect_trailers: bool = False
@@ -1124,7 +1127,6 @@ class HTTP2Sender(BaseSender):
 
     def reset_per_request_state(self) -> None:
         self._end_stream_sent = False
-        self._answered = False
         self._buffered_status = None
         self._buffered_headers = None
         self._expect_trailers = False
@@ -1181,13 +1183,8 @@ class HTTP2Sender(BaseSender):
 
     @property
     def answered(self) -> bool:
-        """The response has ended and its END_STREAM went to a peer still there."""
-        return self._answered
-
-    def _end_stream(self) -> None:
-        self._end_stream_sent = True
-        # The guarded write absorbs a failure, so judge the peer after it.
-        self._answered = not self._writer.peer_gone
+        """The response has ended and none of its writes found the peer gone."""
+        return self._end_stream_sent and not self._peer_lost
 
     @property
     def lost(self) -> bool:
@@ -1241,7 +1238,7 @@ class HTTP2Sender(BaseSender):
         if forbidden:
             await self._write(h_bytes)
             if not informational:
-                self._end_stream()
+                self._end_stream_sent = True
             return
 
         total = len(body)
@@ -1262,7 +1259,7 @@ class HTTP2Sender(BaseSender):
             await super()._write(h_bytes)
             await self._write_data(body, end_stream=set_end_stream)
         if set_end_stream:
-            self._end_stream()
+            self._end_stream_sent = True
 
     def _schedule_auto_flush(self) -> None:
         """Defer the first buffered chunk until the synchronous send burst finishes.
@@ -1362,8 +1359,10 @@ class HTTP2Sender(BaseSender):
         offset = 0
         while offset < total:
             if self._closed or self._writer.peer_gone:
-                if self._writer.peer_gone and self._raise_when_gone:
-                    raise _response_lost()
+                if self._writer.peer_gone:
+                    self._peer_lost = True
+                    if self._raise_when_gone:
+                        raise _response_lost()
                 return
             while (self._conn_window.size <= 0 or
                    self.stream_window_size <= 0):
@@ -1528,7 +1527,7 @@ class HTTP2Sender(BaseSender):
         if self._log_record is not None and end_stream:
             self._log_record.mark('body_arm_out')
         if end_stream and not self._expect_trailers and not self._suppress_body:
-            self._end_stream()
+            self._end_stream_sent = True
 
     async def _handle_trailers(
         self,
@@ -1581,7 +1580,7 @@ class HTTP2Sender(BaseSender):
                 self._buffered_status = None
                 self._buffered_headers = None
                 if not informational:
-                    self._end_stream()
+                    self._end_stream_sent = True
                 return
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id,
@@ -1625,7 +1624,7 @@ class HTTP2Sender(BaseSender):
                 self._factory.encoder, self._stream_id, headers,
                 max_frame_size=self.max_frame_size))
         self._expect_trailers = False
-        self._end_stream()
+        self._end_stream_sent = True
 
     async def __call__(self, body: _SenderBody | FrameBase,
                        status: HTTPStatus = HTTPStatus.OK,
