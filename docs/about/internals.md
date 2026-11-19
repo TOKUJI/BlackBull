@@ -24,6 +24,25 @@ their inherited inbox does not imply that dispatch goes through it.
 gRPC reuses HTTP/2 stream work and the receive/send boundary. Keep call
 semantics in `blackbull.grpc`; see [gRPC design](grpc-assessment.md).
 
+## Application dispatch
+
+`BlackBull._dispatch` chooses each HTTP request's one handler and
+`BlackBull._handle` runs it; within a BlackBull app only `_handle` emits
+`before_handler` and `after_handler`, for routes, mounts and gRPC alike.
+`ASGIApp` serving a foreign app on its own is that app's application layer and
+emits them itself. Where each kind of protocol is chosen, and where a new one
+goes:
+
+| Protocol | Chosen by | A new one goes in |
+|---|---|---|
+| Raw TCP protocols (MQTT) | `ConnectionActor`, through a `ProtocolBinding` | a binding registered with `app.raw_handler` |
+| HTTP/1.1, HTTP/2 | `ConnectionActor` detection, then the HTTP actors | a transport actor; HTTP/3 would be one, on a UDP listener |
+| WebSocket and other extended-CONNECT protocols | the HTTP actors (upgrade, RFC 8441), then the router's `websocket` scheme | the actors, as WebSocket |
+| A protocol selected per HTTP request (gRPC) | the selector `enable_grpc` installs, ahead of the router and mounts | that selector; gRPC-Web or Connect would widen it, as the app holds one |
+| Anything else over HTTP (JSON-RPC, GraphQL, SSE) | the router | a route |
+
+With no selector installed the HTTP path pays one `None` check for it.
+
 ## Startup
 
 `blackbull.server.warmup.warm_tls()` returns the number of attempts in which

@@ -67,6 +67,11 @@ metadata; reinstall an editable checkout after changing that version.
   `TypeError`. This intentional public API break requires the 0.83.0 MINOR
   release and is approved only for PR #601 (BLA-673).
 
+- `serve_grpc` no longer accepts its private `_validated_content_type`
+  keyword; it reads the request's Content-Type itself. This intentional public
+  API break requires the 0.83.0 MINOR release and is approved only for PR #613
+  (BLA-684).
+
 - `blackbull.client.scenario` and `blackbull.client.scenario_oracle` (BBD003).
   Import from `blackbull.fault_injection` instead, using `H1CSendRawBytes`
   in place of `scenario.SendBytes` (BLA-578).
@@ -90,6 +95,11 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Changed
 
+- `after_handler` reports a cancelled route handler's cancellation as
+  `exception`, as it already did for gRPC, instead of `None`, which means
+  success.  Route and gRPC handlers run through one place that emits the
+  handler events; with gRPC enabled, an ordinary request without a
+  `Content-Type` is no longer parsed for it (BLA-684).
 - `BLACKBULL_ENV` defaults to `production`, and an unrecognised value is
   `production` with a warning.  Unset, `StaticFiles` serves nothing, the
   default error handler shows no exception detail, and the fault-injection

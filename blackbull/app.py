@@ -20,7 +20,7 @@ from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNot
 from .request import ClientDisconnected
 from .connection import Connection, disconnected, refuse_scope, CONNECTION_STASH_KEY
 from .protocol.field_grammar import FieldError, media_type
-from .native import DictReceive, NativeResponse, asgi_send_boundary, raw_receive
+from .native import DictReceive, NativeResponse, asgi_send_boundary
 from .response import wrap_native_send
 from .asgi import ASGIReceiveCallable, ASGISendCallable, _ASGIAppAdapter
 from .config import AppConfig
@@ -32,7 +32,6 @@ _DEBUG = debug_gate(logger)
 
 #: Value-to-member lookups without ``Enum.__call__``'s two Python frames; see
 #: ``_PSEUDO_BY_BYTES`` in ``blackbull/protocol/frame_types.py``.
-_SCHEME_BY_VALUE: dict[str, Scheme] = {m.value: m for m in Scheme}
 _METHOD_BY_VALUE: dict[str, HTTPMethod] = {m.value: m for m in HTTPMethod}
 
 
@@ -273,6 +272,8 @@ class BlackBull(EventHooks):
         self._protocol_registry = None
 
         self._grpc_registry = None
+        #: The HTTP-carried protocol selector enable_grpc installs; see _dispatch.
+        self._http_protocol = None
 
         if trusted_proxies is not None:
             from .middleware.proxy import TrustedProxy  # noqa: PLC0415
@@ -460,7 +461,7 @@ class BlackBull(EventHooks):
             self._logger.debug((conn, receive, send))
 
         # WebSocket has its own lifecycle events, so it returns before the HTTP
-        # request_received emit and _dispatch_http below.
+        # request_received emit and the handler events below.
         if conn.type == 'websocket':
             path = conn.path
             try:
@@ -471,36 +472,21 @@ class BlackBull(EventHooks):
             await function(conn, receive, send)
             return
 
-        scheme = _SCHEME_BY_VALUE.get(conn.type)
-        if scheme is None:
+        if conn.type != 'http':
             self._logger.error(f'Invalid scheme ({conn.type}) is requested.')
             raise Exception('Invalid scheme is requested.')
 
         dispatcher = self._dispatcher
         if dispatcher.has_listeners('request_received'):
             await dispatcher.emit(request_received_event(conn))
-        await self._dispatch_http(conn, receive, send, scheme)
 
-    async def _dispatch_http(self, conn, receive: ASGIReceiveCallable | None,
-                             send: ASGISendCallable, scheme):
-        """Route and run one HTTP request (the non-WebSocket half of _dispatch)."""
-        # gRPC rides the HTTP/2 path; see enable_grpc.
-        if self._grpc_registry is not None and scheme == Scheme.http:
-            is_grpc, serve_grpc = self._grpc_dispatch
-            content_type = conn.headers.get(b'content-type', b'')
-            if is_grpc(content_type):
-                exc_caught = None
-                try:
-                    if self._dispatcher.has_listeners('before_handler'):
-                        await self._dispatcher.emit(handler_event('before_handler', conn, serve_grpc))
-                    await serve_grpc(self._grpc_registry, conn, raw_receive(receive), send,
-                                     _validated_content_type=content_type)
-                except BaseException as exc:
-                    exc_caught = exc
-                    raise
-                finally:
-                    if self._dispatcher.has_listeners('after_handler'):
-                        await self._dispatcher.emit(handler_event('after_handler', conn, serve_grpc, exc_caught))
+        # An HTTP-carried protocol enable_* installed (gRPC) takes the request
+        # before the router, mounts included; None until one is enabled.
+        select = self._http_protocol
+        if select is not None:
+            handler = select(conn)
+            if handler is not None:
+                await self._handle(conn, receive, send, handler, False)
                 return
 
         # ``raw_send`` is retained so a route with declared response headers can
@@ -513,10 +499,10 @@ class BlackBull(EventHooks):
 
         path = conn.path
         if _DEBUG:
-            self._logger.debug((path, scheme))
+            self._logger.debug(path)
 
         try:
-            function = self._router[(path, method, scheme)]
+            function = self._router[(path, method, Scheme.http)]
         except MethodNotApplicable as e:
             if _DEBUG:
                 self._logger.debug("%s: path=%r method=%r allowed=%r",
@@ -563,46 +549,69 @@ class BlackBull(EventHooks):
                     await handler(conn, receive, send)
                 return
 
-        if _DEBUG:
-            self._logger.debug((self, function))
-        exc_caught: Exception | None = None
-        try:
-            if self._dispatcher.has_listeners('before_handler'):
-                await self._dispatcher.emit(handler_event('before_handler', conn, function))
-            await function(conn, receive, send)
-        except _HandledResponseError as e:
-            exc_caught = e.error
-            if e.abort:
-                raise e.error
-            return
-        except (ClientDisconnected, ConnectionResetError) as e:
-            # Peer disconnect during body reads is an ordinary close, not a handler failure.
-            exc_caught = e
-            if _DEBUG:
-                self._logger.debug('client disconnected before request body completed')
-        except HTTPException as e:
-            exc_caught = e
-            if is_server_error(e.status):
-                self._logger.error(traceback.format_exc())
-            else:
-                self._logger.info('%s on %s %s: %s', int(e.status),
-                                  conn.method, conn.path,
-                                  e.detail or e)
-        except Exception as e:
-            exc_caught = e
-            self._logger.error(traceback.format_exc())
-        finally:
-            if self._dispatcher.has_listeners('after_handler'):
-                await self._dispatcher.emit(handler_event('after_handler', conn, function, exc_caught))
+        await self._handle(conn, receive, send, function)
 
-        if exc_caught is not None and not isinstance(exc_caught, ClientDisconnected):
-            err_status = (exc_caught.status if isinstance(exc_caught, HTTPException)
+    async def _handle(self, conn, receive, send, function, routes_errors: bool = True):
+        """Run the request's one handler between ``before_handler`` and ``after_handler``.
+
+        The application layer is the only emitter of these events, for routes
+        and for an HTTP-carried protocol alike.  ``after_handler`` reports what
+        the handler raised, cancellation included.  A route's failure goes on
+        to the error handlers; with *routes_errors* false the handler answers
+        its own failures (gRPC status), so they propagate.
+        """
+        dispatcher = self._dispatcher
+        try:
+            if dispatcher.has_listeners('before_handler'):
+                await dispatcher.emit(handler_event('before_handler', conn, function))
+            await function(conn, receive, send)
+        except Exception as e:
+            handled = isinstance(e, _HandledResponseError)
+            routed = routes_errors and not handled
+            # Logged before after_handler, whose interceptor may raise.
+            if routed:
+                if isinstance(e, (ClientDisconnected, ConnectionResetError)):
+                    # Peer disconnect during body reads is an ordinary close, not a handler failure.
+                    if _DEBUG:
+                        self._logger.debug('client disconnected before request body completed')
+                elif isinstance(e, HTTPException):
+                    if is_server_error(e.status):
+                        self._logger.error(traceback.format_exc())
+                    else:
+                        self._logger.info('%s on %s %s: %s', int(e.status),
+                                          conn.method, conn.path, e.detail or e)
+                else:
+                    self._logger.error(traceback.format_exc())
+            if dispatcher.has_listeners('after_handler'):
+                await dispatcher.emit(handler_event('after_handler', conn, function,
+                                                    e.error if handled else e))
+            if not routed:
+                if not handled:
+                    raise
+                if e.abort:
+                    raise e.error
+                return
+            # Bound only here: a local holding an exception that propagates
+            # ties this frame to its traceback, a cycle only the collector frees.
+            exc = e
+        except BaseException as e:
+            # Cancellation and interpreter exits: reported, never routed.
+            if dispatcher.has_listeners('after_handler'):
+                await dispatcher.emit(handler_event('after_handler', conn, function, e))
+            raise
+        else:
+            if dispatcher.has_listeners('after_handler'):
+                await dispatcher.emit(handler_event('after_handler', conn, function, None))
+            return
+
+        if not isinstance(exc, ClientDisconnected):
+            err_status = (exc.status if isinstance(exc, HTTPException)
                           else HTTPStatus.INTERNAL_SERVER_ERROR)
             conn.state.update({
                 'error_status': err_status,
-                'error_exception': exc_caught,
+                'error_exception': exc,
             })
-            handler = self._error_router.resolve(type(exc_caught), err_status)
+            handler = self._error_router.resolve(type(exc), err_status)
             if handler is not None:
                 await handler(conn, receive, send)
 
@@ -878,10 +887,9 @@ class BlackBull(EventHooks):
         Handlers exchange raw message bytes without a protobuf dependency. Use
         TLS+ALPN or h2c; status is sent in trailers. HTTP routes remain available.
         """
-        # Imported here, once: dispatch must not pay for it per request.
-        from .grpc.asgi import _is_grpc_content_type, serve_grpc  # noqa: PLC0415 — optional subpackage
-        self._grpc_dispatch = (_is_grpc_content_type, serve_grpc)
+        from .grpc.asgi import http_selector  # noqa: PLC0415 — optional subpackage
         self._grpc_registry = registry
+        self._http_protocol = http_selector(registry)
 
     def enable_openapi(self, *,
                        title: str = 'BlackBull API',

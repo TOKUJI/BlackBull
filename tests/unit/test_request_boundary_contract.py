@@ -4,7 +4,7 @@ Native parsing and ``Connection.from_scope`` (an external ASGI host, or
 ``BB_FORCE_ASGI_SCOPE=1``) both hand dispatch a Connection whose header names
 are lowercase tchar, whose values carry no edge SP/HTAB and no CTL, whose Host
 is at most one valid authority, and whose scheme is lowercase.  Code past
-``app._dispatch_http`` relies on that and does not normalise again.
+``app._dispatch`` relies on that and does not normalise again.
 """
 from __future__ import annotations
 

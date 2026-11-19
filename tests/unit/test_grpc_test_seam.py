@@ -395,12 +395,12 @@ class TestOkIsNeverReportedForABrokenReply:
     b'text/plain', b''])
 def test_the_helper_accepts_the_content_types_the_server_accepts(content_type):
     """One grammar on both sides: what the server echoes is what the helper reads."""
-    from blackbull.grpc.asgi import _resolve_content_type
+    from blackbull.grpc.asgi import _is_grpc_content_type
 
     reply = _judge(_response(head=[(b'content-type', content_type)],
                              body=encode_message(b'ok'), trailers=[_status(b'0')]))
 
-    server_accepts = _resolve_content_type(content_type) == content_type
+    server_accepts = _is_grpc_content_type(content_type)
     assert (reply.violation is None) is server_accepts
 
 

@@ -6,13 +6,14 @@ rather than introducing another protocol actor.
 from __future__ import annotations
 
 import asyncio
+import functools
 import base64
 import binascii
 import logging
 
 from ..connection import Connection
 from ..protocol.field_grammar import list_members, media_type
-from ..native import NativeResponse
+from ..native import NativeResponse, raw_receive
 from ..request import stream_body, ClientDisconnected
 from ..utils import create_eager_task
 from . import compression
@@ -236,13 +237,7 @@ class GrpcContext:
         raise GrpcError(status, details)
 
 
-def _resolve_content_type(raw: bytes) -> bytes:
-    """Return the response content-type, echoing a valid ``application/grpc``
-    request subtype (e.g. ``application/grpc+proto``); falls back to bare
-    ``application/grpc``."""
-    return raw if _is_grpc_content_type(raw) else _GRPC_CONTENT_TYPE
-
-
+@functools.lru_cache(maxsize=128)
 def _is_grpc_content_type(value: bytes) -> bool:
     """Whether *value*'s media type is ``application/grpc`` or
     ``application/grpc+<subtype>``, in any case: the one grammar for requests
@@ -780,19 +775,19 @@ async def _serve_with_deadline(call, context):
 
 
 async def serve_grpc(registry: GrpcServiceRegistry, conn: Connection,
-                     receive, send, *, _validated_content_type: bytes | None = None) -> None:
+                     receive, send) -> None:
     """Serve any of the four gRPC call shapes for *conn*.
 
     Report handler and protocol failures as gRPC status.
     """
+    receive = raw_receive(receive)
     path = conn.path
     context = GrpcContext(conn)
     # Echo the request's content-type subtype (application/grpc+proto, +json, …)
     # back on the response, defaulting to bare application/grpc.
     content_type = context.metadata(b'content-type')
-    # before_handler may replace the field after dispatch classified it.
-    if content_type != _validated_content_type:
-        content_type = _resolve_content_type(content_type)
+    if not _is_grpc_content_type(content_type):
+        content_type = _GRPC_CONTENT_TYPE
 
     method = registry.lookup_method(path)
     if method is None:
@@ -839,3 +834,30 @@ async def serve_grpc(registry: GrpcServiceRegistry, conn: Connection,
                                            'deadline exceeded', content_type)
         except TimeoutError:
             raise TimeoutError('gRPC deadline notification blocked') from None
+
+
+class _GrpcCall(functools.partial):
+    """``serve_grpc`` bound to its registry."""
+
+    __slots__ = ()
+    #: The name the handler events report, as for ``serve_grpc`` itself.
+    __name__ = 'serve_grpc'
+
+
+def http_selector(registry: GrpcServiceRegistry):
+    """The selector ``BlackBull.enable_grpc`` installs ahead of the router.
+
+    Returns the gRPC handler for a request whose Content-Type is an
+    ``application/grpc`` media type, else ``None``; a request without a
+    Content-Type is never parsed.  The application runs the handler between
+    its handler events.
+    """
+    handler = _GrpcCall(serve_grpc, registry)
+
+    def select(conn: Connection):
+        content_type = conn.headers.get(b'content-type')
+        if content_type and _is_grpc_content_type(content_type):
+            return handler
+        return None
+
+    return select
