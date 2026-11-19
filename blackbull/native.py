@@ -498,16 +498,19 @@ def raw_receive(receive):
 class BodyChannel(Protocol):
     """BlackBull's HTTP receive channel: the request body as ``bytes``."""
 
-    async def next_chunk(self) -> bytes | None: ...
+    async def next_chunk(self) -> bytes | None:
+        """The next body chunk; ``None`` once the body is complete."""
 
 
 @runtime_checkable
 class MessageChannel(Protocol):
     """BlackBull's WebSocket receive channel: whole messages, ``str`` or ``bytes``."""
 
-    async def await_connect(self) -> None: ...
+    async def await_connect(self) -> None:
+        """Take the opening handshake."""
 
-    async def next_message(self) -> str | bytes: ...
+    async def next_message(self) -> str | bytes:
+        """The next whole message."""
 
 
 #: A request's receive channel: native on BlackBull's server; an external

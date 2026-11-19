@@ -344,6 +344,10 @@ def test_middleware_never_imports_the_dict_lane(scanned):
 # Runtime: serving native APIs executes none of the sites above
 # ---------------------------------------------------------------------------
 
+_needs_monitoring = pytest.mark.skipif(
+    sys.version_info < (3, 12), reason='sys.monitoring needs Python 3.12+')
+
+
 @contextmanager
 def _conversions(scanned):
     """Record ``module:line`` of every enumerated conversion site run inside."""
@@ -430,6 +434,7 @@ async def _h1(s, raw: bytes) -> bytes:
     _post(b'/read-body', b'payload'),
 ], ids=['get', 'conn-body', 'read-body'])
 @pytest.mark.usefixtures('native_serving')
+@_needs_monitoring
 async def test_serving_http1_converts_nothing(scanned, raw):
     async with served(_app()) as s:
         await _h1(s, raw)    # warm: first-request setup is not per request
@@ -442,6 +447,7 @@ async def test_serving_http1_converts_nothing(scanned, raw):
 @pytest.mark.parametrize('path,body', [(b'/', b''), (b'/body', b'payload')],
                          ids=['get', 'conn-body'])
 @pytest.mark.usefixtures('native_serving')
+@_needs_monitoring
 async def test_serving_http2_converts_nothing(scanned, path, body):
     fields = [(b':method', b'POST' if body else b'GET'), (b':path', path),
               (b':scheme', b'http'), (b':authority', b'x')]
@@ -466,6 +472,7 @@ async def test_serving_http2_converts_nothing(scanned, path, body):
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures('native_serving')
+@_needs_monitoring
 async def test_serving_a_websocket_through_the_builtin_middleware_converts_nothing(scanned):
     async with served(_app()) as s:
         with _conversions(scanned) as seen:
@@ -477,6 +484,7 @@ async def test_serving_a_websocket_through_the_builtin_middleware_converts_nothi
 
 
 @pytest.mark.asyncio
+@_needs_monitoring
 async def test_warm_request_reads_its_body_natively(scanned):
     app = BlackBull()
     bodies = []
@@ -495,6 +503,7 @@ async def test_warm_request_reads_its_body_natively(scanned):
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures('native_serving')
+@_needs_monitoring
 async def test_the_probe_sees_a_deprecated_receive_reader(scanned):
     async with served(_app()) as s:
         with pytest.warns(DeprecationWarning), _conversions(scanned) as seen:
