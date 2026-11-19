@@ -565,10 +565,9 @@ class BlackBull(EventHooks):
             if dispatcher.has_listeners('before_handler'):
                 await dispatcher.emit(handler_event('before_handler', conn, function))
             await function(conn, receive, send)
-        except BaseException as e:
+        except Exception as e:
             handled = isinstance(e, _HandledResponseError)
-            exc = e.error if handled else e
-            routed = routes_errors and not handled and isinstance(e, Exception)
+            routed = routes_errors and not handled
             # Logged before after_handler, whose interceptor may raise.
             if routed:
                 if isinstance(e, (ClientDisconnected, ConnectionResetError)):
@@ -584,16 +583,22 @@ class BlackBull(EventHooks):
                 else:
                     self._logger.error(traceback.format_exc())
             if dispatcher.has_listeners('after_handler'):
-                await dispatcher.emit(handler_event('after_handler', conn, function, exc))
+                await dispatcher.emit(handler_event('after_handler', conn, function,
+                                                    e.error if handled else e))
             if not routed:
-                # A local still holding the exception would tie this frame to
-                # its traceback: a cycle only the collector frees.
-                exc = None
                 if not handled:
                     raise
                 if e.abort:
                     raise e.error
                 return
+            # Bound only here: a local holding an exception that propagates
+            # ties this frame to its traceback, a cycle only the collector frees.
+            exc = e
+        except BaseException as e:
+            # Cancellation and interpreter exits: reported, never routed.
+            if dispatcher.has_listeners('after_handler'):
+                await dispatcher.emit(handler_event('after_handler', conn, function, e))
+            raise
         else:
             if dispatcher.has_listeners('after_handler'):
                 await dispatcher.emit(handler_event('after_handler', conn, function, None))
