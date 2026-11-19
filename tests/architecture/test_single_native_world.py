@@ -490,9 +490,8 @@ async def test_warm_request_reads_its_body_natively(scanned):
     bodies = []
 
     @app.route(path='/warm', methods=['POST'])
-    async def warm(body: bytes):
-        bodies.append(body)
-        return b'ok'
+    async def warm(conn, receive, send):
+        bodies.append(await conn.body())
 
     conn = Connection(method='POST', path='/warm', raw_path=b'/warm', headers=Headers([]))
     with _conversions(scanned) as seen:

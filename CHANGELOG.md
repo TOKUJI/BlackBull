@@ -106,9 +106,12 @@ metadata; reinstall an editable checkout after changing that version.
   reads the body. It fires at the end of the request, in place of
   `request_completed`. It no longer fires for a handler that only reads past
   the body, or for a request the server abandons (body or write timeout,
-  minimum body rate, its own GOAWAY). `conn.disconnected` reads the same state. The
-  built-in `websocket` middleware, `websocket_message` and `warm_request` no
-  longer build ASGI event dicts (BLA-685).
+  minimum body rate, its own GOAWAY). `conn.disconnected` reads the same
+  state. Under an external ASGI host, the body is read from the host's
+  `receive` through a native channel, and its `http.disconnect` before the
+  body ends counts. The built-in `websocket` middleware, `websocket_message`
+  and `warm_request` no longer build ASGI event dicts, and `warm_request`
+  hands `conn.body()` its payload (BLA-685).
 - `BLACKBULL_ENV` defaults to `production`, and an unrecognised value is
   `production` with a warning.  Unset, `StaticFiles` serves nothing, the
   default error handler shows no exception detail, and the fault-injection

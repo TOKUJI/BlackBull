@@ -74,3 +74,43 @@ class TestHTTP2Recipient:
         r = HTTP2Recipient(frame)
         event = await r()
         assert event == {'type': 'http.request', 'body': b'body', 'more_body': False}
+
+
+class _Transport:
+    """A loopback transport; with *reset*, the peer is gone and every write raises."""
+
+    def __init__(self, reset: bool) -> None:
+        self._reset = reset
+
+    def write(self, data) -> None:
+        if self._reset:
+            raise ConnectionResetError()
+
+    def writelines(self, parts) -> None:
+        if self._reset:
+            raise ConnectionResetError()
+
+    async def drain(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def is_closing(self) -> bool:
+        return False
+
+    def get_extra_info(self, name, default=None):
+        return default
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('reset', [False, True], ids=['delivered', 'write-reset'])
+async def test_a_stream_is_answered_only_when_its_end_reached_the_peer(reset):
+    from blackbull.native import NativeResponse
+    from blackbull.protocol.frame import FrameFactory
+    from blackbull.server.sender import AsyncioWriter, SenderFactory
+
+    sender = SenderFactory.http2(AsyncioWriter(_Transport(reset)), FrameFactory(), 1)
+    recipient = HTTP2Recipient(sender=sender)
+    await sender(NativeResponse(status=200, header=[], body=b'ok'))
+    assert (sender.answered, recipient.peer_gone) == (not reset, reset)

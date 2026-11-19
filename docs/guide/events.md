@@ -319,7 +319,8 @@ however the handler reads it; when a response write finds it gone; or,
 on HTTP/2, when it resets the stream or drops the connection.  A request
 the server abandons itself (a body or write timeout, the minimum body rate,
 its own GOAWAY) is not a disconnect, and neither is a stream still answered
-after the client's GOAWAY.
+after the client's GOAWAY.  Under an external ASGI host, the host's
+`http.disconnect` before the body ends is the client leaving.
 
 `conn.disconnected` reads the same state while the handler runs.  An
 HTTP/2 reset cancels the handler, and the flag is already set when its

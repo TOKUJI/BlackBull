@@ -343,7 +343,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             self._senders[stream_id] = sender
         return self._senders[stream_id]
 
-    def _make_stream_recipient(self, stream_id: int) -> HTTP2Recipient:
+    def _make_stream_recipient(self, stream_id: int, sender=None) -> HTTP2Recipient:
         """Recipient with consume-time WINDOW_UPDATE crediting.
 
         Why credit on consumption rather than on delivery:
@@ -357,6 +357,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             max_body=self._max_body_size,
             min_rate=self._min_body_rate,
             min_rate_grace=self._min_body_rate_grace,
+            sender=sender,
         )
 
     def _make_consume_credit_callback(
@@ -626,19 +627,21 @@ class HTTP2Actor(Actor, HTTP2Connection):
         assert self._reader is not None, "receive() called with no reader"
         try:
             data = await self._reader.readexactly(9)
+            size = int.from_bytes(data[:3], 'big', signed=False)
+            if size > DEFAULT_MAX_FRAME_SIZE:
+                # RFC 9113 §4.2.  Hand back the 9-byte header alone rather than
+                # buffer an attacker-declared payload of up to 16 MiB to reject it.
+                self._oversize_frame_len = size
+                return data
+            if size:
+                data += await self._reader.readexactly(size)
         except (IncompleteReadError, asyncio.IncompleteReadError):
             return b''
-        size = int.from_bytes(data[:3], 'big', signed=False)
-        if size > DEFAULT_MAX_FRAME_SIZE:
-            # RFC 9113 §4.2.  Hand back the 9-byte header alone rather than
-            # buffer an attacker-declared payload of up to 16 MiB to reject it.
-            self._oversize_frame_len = size
-            return data
-        if size:
-            try:
-                data += await self._reader.readexactly(size)
-            except (IncompleteReadError, asyncio.IncompleteReadError):
-                return b''
+        except ConnectionError:
+            # A reset reaches the reader as an error, not EOF: record it before
+            # the TaskGroup cancels the streams.
+            self._signal_peer_lost()
+            raise
         return data
 
     # ------------------------------------------------------------------
@@ -1011,7 +1014,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             return True
 
         self._apply_priority_and_extensions(stream, conn)
-        stream_recipient = self._make_stream_recipient(stream.stream_id)
+        stream_recipient = self._make_stream_recipient(stream.stream_id, send)
         self._recipients[stream.stream_id] = stream_recipient
         stream.on_headers_received(end_stream=bool(header_frame.end_stream))
         if header_frame.end_stream:

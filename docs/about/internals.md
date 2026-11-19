@@ -51,7 +51,7 @@ event dicts exist only where a caller asks for them:
 
 | Caller | Converted in |
 |---|---|
-| An external ASGI host, or `BB_FORCE_ASGI_SCOPE=1` | `BlackBull.__call__` (`Connection.from_scope`, `asgi_send_boundary`, lifespan) |
+| An external ASGI host, or `BB_FORCE_ASGI_SCOPE=1` | `BlackBull.__call__` (`Connection.from_scope`, `_HostBody` for the host's `receive`, `asgi_send_boundary`, lifespan) |
 | A foreign ASGI app, served or mounted | `ASGIApp` (`_Exchange`: `to_asgi_scope`, `_native_from_asgi`) |
 | A deprecated dict-API call site (BBD010 to BBD014) | the recipients' `__call__`, `DictReceive`, the send adapters' dict arm, a `scope`-declared `as_middleware`, `WebSocketResponse` |
 

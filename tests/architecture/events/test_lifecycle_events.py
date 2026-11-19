@@ -1,5 +1,7 @@
 """Lifecycle events through a served app; the contracts are in docs/guide/events.md."""
 import asyncio
+import socket
+import struct
 
 import pytest
 from hpack import Encoder
@@ -323,6 +325,65 @@ async def _h2_reset(app, seen, *, body: bool) -> None:
         await asyncio.sleep(SETTLE)
         await wire.send(_make_h2_frame(FrameTypes.RST_STREAM, 0, 1, (8).to_bytes(4, 'big')))
         await _until(seen, 'request_disconnected')
+
+
+@pytest.mark.parametrize('last,ends', [
+    ({'type': 'http.disconnect'}, 'request_disconnected'),
+    ({'type': 'http.request', 'body': b'def', 'more_body': False}, 'request_completed'),
+], ids=['host-disconnect', 'host-body'])
+async def test_an_external_hosts_disconnect_mid_body_is_disconnected(last, ends):
+    gone = []
+
+    async def reads(conn, receive, send):
+        try:
+            await conn.body()
+        finally:
+            gone.append(conn.disconnected)
+
+    app, seen = _app(**{'/slow': reads})
+    events = iter([{'type': 'http.request', 'body': b'abc', 'more_body': True}, last])
+
+    async def receive():
+        return next(events)
+
+    async def send(event):
+        pass
+
+    scope = {'type': 'http', 'asgi': {'version': '3.0'}, 'http_version': '1.1',
+             'method': 'POST', 'scheme': 'http', 'path': '/slow', 'raw_path': b'/slow',
+             'query_string': b'', 'headers': [(b'host', b'x')]}
+    await app(scope, receive, send)
+    await asyncio.sleep(SETTLE)
+    assert gone == [ends == 'request_disconnected']
+    other = {'request_completed', 'request_disconnected'} - {ends}
+    assert len(seen[ends]) == 1 and seen[other.pop()] == []
+
+
+def _reset(wire) -> None:
+    """Drop the connection with a TCP RST rather than a FIN."""
+    sock = wire.writer.get_extra_info('socket')
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+    wire.writer.transport.abort()
+
+
+@pytest.mark.parametrize('protocol', ['http1', 'http2'])
+async def test_a_connection_reset_mid_body_is_disconnected_not_completed(protocol):
+    app, seen = _app(**{'/slow': _reads_conn_body})
+    async with served(app) as s:
+        if protocol == 'http1':
+            wire = await s.wire()
+            await wire.send(_PARTIAL)
+        else:
+            wire = await h2_connect(s)
+            fields = [(b':method', b'POST'), (b':path', b'/slow'), (b':scheme', b'http'),
+                      (b':authority', b'x')]
+            await wire.send(_make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1,
+                                           Encoder().encode(fields))
+                            + _make_h2_frame(FrameTypes.DATA, 0, 1, b'abc'))
+        await asyncio.sleep(SETTLE)
+        _reset(wire)
+        await _until(seen, 'request_disconnected')
+    assert len(seen['request_disconnected']) == 1 and seen['request_completed'] == []
 
 
 async def test_an_h2_reset_mid_body_is_disconnected_not_completed():

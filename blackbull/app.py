@@ -18,11 +18,12 @@ from .event_aggregator import emit_scope_end, handler_event, request_received_ev
 from .utils import Scheme, is_client_error, is_server_error
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param, _AllMethods, _HandledResponseError
 from .request import ClientDisconnected
-from .connection import Connection, disconnected, refuse_scope, CONNECTION_STASH_KEY
+from .connection import (Connection, bind_receive_channel, disconnected, refuse_scope,
+                         CONNECTION_STASH_KEY)
 from .protocol.field_grammar import FieldError, media_type
 from .native import DictReceive, NativeResponse, NativeSend, ReceiveChannel, asgi_send_boundary
 from .response import wrap_native_send
-from .asgi import ASGISendCallable, _ASGIAppAdapter
+from .asgi import ASGIEvent, ASGISendCallable, _ASGIAppAdapter
 from .config import AppConfig
 from .logger import debug_gate  # noqa: E402
 from .server.protocol_registry import RawBinding
@@ -84,6 +85,42 @@ class _WarmBody:
     async def __call__(self) -> dict:
         return {'type': 'http.request', 'body': await self.next_chunk() or b'',
                 'more_body': False}
+
+
+class _HostBody:
+    """An external host's ASGI ``receive`` as a native body channel.
+
+    A deprecated ``receive()`` reader still gets the host's dicts.  An
+    ``http.disconnect`` before the body ends is the client leaving; after it,
+    the spec also sends one once the response is out, so it is not.
+    """
+
+    __slots__ = ('_receive', '_done', 'peer_gone')
+
+    def __init__(self, receive) -> None:
+        self._receive = receive
+        self._done = False
+        self.peer_gone = False
+
+    async def next_chunk(self) -> bytes | None:
+        if self._done:
+            return None
+        event = await self()
+        if event.get('type') == ASGIEvent.HTTP_DISCONNECT:
+            raise ClientDisconnected()
+        body = event.get('body', b'')
+        return body if body or not self._done else None
+
+    async def __call__(self):
+        event = await self._receive()
+        kind = event.get('type')
+        if kind == ASGIEvent.HTTP_DISCONNECT:
+            if not self._done:
+                self.peer_gone = True
+            self._done = True
+        elif kind == ASGIEvent.HTTP_REQUEST and not event.get('more_body', False):
+            self._done = True
+        return event
 
 
 def _wants_html(conn) -> bool:
@@ -391,7 +428,9 @@ class BlackBull(EventHooks):
                 headers=conn.headers, query_string=conn.query_string,
                 http_version=conn.http_version, scheme=conn.scheme, type=conn.type,
             )
-            await self(fresh, _WarmBody(body), _send)
+            channel = _WarmBody(body)
+            bind_receive_channel(fresh, channel)
+            await self(fresh, channel, _send)
 
     async def _lifespan_startup(self) -> None:
         """Validate middleware and routes, then fire ``app_startup``; raise, logged, on failure."""
@@ -676,12 +715,12 @@ class BlackBull(EventHooks):
         else:
             send = _to_asgi_boundary(send)
             # Reuse the stashed native Connection on compatibility scopes.
-            # Do not rebind _receive to the disconnect wrapper: it captures conn and
-            # would create a per-request reference cycle.  No WebSocket extra
-            # needs the scope dict past this point: each is derived from a
-            # request header or set by the actor.
+            # No WebSocket extra needs the scope dict past this point: each is
+            # derived from a request header or set by the actor.
             request = conn.get(CONNECTION_STASH_KEY)
             if request is None:
+                if conn.get('type') == 'http' and receive is not None:
+                    receive = _HostBody(receive)
                 try:
                     request = Connection.from_scope(conn, receive)
                 except FieldError:

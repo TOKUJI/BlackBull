@@ -664,8 +664,12 @@ class HTTP2Recipient(BaseRecipient):
                  credit_budget: int = DEFAULT_INITIAL_WINDOW_SIZE,
                  max_body: int | None = None,
                  min_rate: float | None = None,
-                 min_rate_grace: float | None = None):
+                 min_rate_grace: float | None = None,
+                 sender=None):
         super().__init__(None)
+        # The stream's own sender, which knows whether the response reached
+        # the peer; it holds no Connection.
+        self._sender = sender
         self._queue: asyncio.Queue | None = None
         self._queue_depth = queue_depth
         self._credit_cb = credit_callback
@@ -681,7 +685,7 @@ class HTTP2Recipient(BaseRecipient):
         self._disconnect_pending: bool = False
         self._done: bool = False
         #: The peer reset the stream or left the connection; see put_disconnect.
-        self.peer_gone: bool = False
+        self._peer_left: bool = False
         if max_body is None or min_rate is None or min_rate_grace is None:
             # Fallback for a directly-instantiated recipient (tests).
             _s = get_settings()
@@ -834,6 +838,12 @@ class HTTP2Recipient(BaseRecipient):
                         protocol='http2')
             return False
 
+    @property
+    def peer_gone(self) -> bool:
+        """The peer left before this stream's response reached it: a reset or
+        a lost connection, or a response write that found it gone."""
+        return self._peer_left or (self._sender is not None and self._sender.lost)
+
     def put_disconnect(self, *, peer: bool = False) -> None:
         """Unblock a waiting __call__() with an http.disconnect event.
 
@@ -844,7 +854,7 @@ class HTTP2Recipient(BaseRecipient):
         disconnect.
         """
         if peer:
-            self.peer_gone = True
+            self._peer_left = True
         if self._queue is None and self._end_of_stream_on_headers:
             if not self._initial_consumed:
                 self._disconnect_pending = True
@@ -969,7 +979,7 @@ class WebSocketRecipient(BaseRecipient):
                  decompressor=None,
                  max_frame_payload: int | None = None,
                  max_message_size: int | None = None,
-                 on_message: Callable[[dict], Awaitable[None]] | None = None,
+                 on_message: Callable[[str | bytes], Awaitable[None]] | None = None,
                  read_ahead_needed: Callable[[], bool] | None = None,
                  ws_idle_timeout: float | None = None,
                  ws_pong_timeout: float | None = None,
@@ -1760,14 +1770,15 @@ class RecipientFactory:
               credit_budget: int = DEFAULT_INITIAL_WINDOW_SIZE,
               max_body: int | None = None,
               min_rate: float | None = None,
-              min_rate_grace: float | None = None) -> HTTP2Recipient:
+              min_rate_grace: float | None = None,
+              sender=None) -> HTTP2Recipient:
         # Forwarded rather than left to the recipient's own per-stream fallback;
         # see ``HTTP2Recipient.__init__``.
         return HTTP2Recipient(frame, queue_depth=queue_depth,
                               credit_callback=credit_callback,
                               credit_budget=credit_budget,
                               max_body=max_body, min_rate=min_rate,
-                              min_rate_grace=min_rate_grace)
+                              min_rate_grace=min_rate_grace, sender=sender)
 
     @staticmethod
     def websocket(reader: AbstractReader, writer, *,
@@ -1775,7 +1786,7 @@ class RecipientFactory:
                   conn: Connection | None = None,
                   ws_queue_depth: int = _WS_READ_INLINE,
                   decompressor=None,
-                  on_message: Callable[[dict], Awaitable[None]] | None = None,
+                  on_message: Callable[[str | bytes], Awaitable[None]] | None = None,
                   read_ahead_needed: Callable[[], bool] | None = None) -> WebSocketRecipient:
         if not isinstance(writer, AbstractWriter):
             writer = AsyncioWriter(writer)
