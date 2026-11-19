@@ -637,9 +637,10 @@ class HTTP2Actor(Actor, HTTP2Connection):
                 data += await self._reader.readexactly(size)
         except (IncompleteReadError, asyncio.IncompleteReadError):
             return b''
-        except ConnectionError:
-            # A reset reaches the reader as an error, not EOF: record it before
-            # the TaskGroup cancels the streams.
+        except OSError:
+            # A lost transport (reset, timeout, TLS failure) reaches the reader
+            # as the error it died with, not EOF: record it before the TaskGroup
+            # cancels the streams.
             self._signal_peer_lost()
             raise
         return data
