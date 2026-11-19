@@ -6450,7 +6450,7 @@ not carry, such as <code>status</code> and <code>duration_ms</code>).</p>
 <td><code>after_handler</code></td>
 <td>Handler returned or raised</td>
 <td><code>conn</code>, <code>client_ip</code>, <code>method</code>, <code>path</code>, <code>handler</code>, <code>exception</code></td>
-<td>Observation only; <code>exception</code> is <code>None</code> on success</td>
+<td>Observation only; <code>exception</code> is <code>None</code> on success, else what the handler raised, cancellation included</td>
 </tr>
 <tr>
 <td><code>request_completed</code></td>
@@ -6495,9 +6495,10 @@ not carry, such as <code>status</code> and <code>duration_ms</code>).</p>
                                                             ↑                                      ↑
                                                          (or) request_disconnected ───────────────┘
 </code></pre></div>
-<p><code>scope_completed</code> is the terminal event on <em>every</em> path (including
-WebSocket and gRPC, which do not fire the HTTP-specific events
-above) — it always fires last, exactly once.</p>
+<p><code>scope_completed</code> is the terminal event on <em>every</em> path — it always
+fires last, exactly once.  A gRPC call is an HTTP request and fires the
+events above too, with <code>handler</code> <code>serve_grpc</code>; a WebSocket connection
+fires only its own events and <code>scope_completed</code>.</p>
 <h3 id="request_received-earliest-gate"><code>request_received</code> — earliest gate<a class="headerlink" href="#request_received-earliest-gate" title="Permanent link">&para;</a></h3>
 <p>Fires when the request enters the application, before routing or
 handler dispatch.  Fires for both HTTP/1.1 and HTTP/2 (once per

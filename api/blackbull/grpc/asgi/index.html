@@ -3100,6 +3100,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.grpc.asgi.http_selector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        http_selector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.grpc.asgi.serve_grpc" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6051,6 +6062,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.grpc.asgi.http_selector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        http_selector
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.grpc.asgi.serve_grpc" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6319,8 +6341,30 @@ with what the handler already set instead of clobbering it.</p>
 <div class="doc doc-object doc-function">
 
 
+<h3 id="blackbull.grpc.asgi.http_selector" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">http_selector</span><span class="p">(</span><span class="n">registry</span><span class="p">)</span></code>
+
+<a href="#blackbull.grpc.asgi.http_selector" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The selector <code>BlackBull.enable_grpc</code> installs ahead of the router.</p>
+<p>Returns the gRPC handler for a request whose Content-Type is an
+<code>application/grpc</code> media type, else <code>None</code>; a request without a
+Content-Type is never parsed.  The application runs the handler between
+its handler events.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
 <h3 id="blackbull.grpc.asgi.serve_grpc" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">serve_grpc</span><span class="p">(</span><span class="n">registry</span><span class="p">,</span> <span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">_validated_content_type</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">serve_grpc</span><span class="p">(</span><span class="n">registry</span><span class="p">,</span> <span class="n">conn</span><span class="p">,</span> <span class="n">receive</span><span class="p">,</span> <span class="n">send</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
