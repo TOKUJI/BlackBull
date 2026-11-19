@@ -8,7 +8,7 @@ import logging
 from http import HTTPStatus
 
 from .asgi import _ASGIAppAdapter
-from .connection import Connection, disconnected, mark_disconnected
+from .connection import Connection, bind_receive_channel, disconnected
 from .event import EventDispatcher, EventHooks
 from .event_aggregator import emit_scope_end, handler_event, request_received_event
 from .native import NativeWSMessage, _native_from_asgi, raw_receive
@@ -46,6 +46,8 @@ class _Exchange:
     def __init__(self, conn, receive, send) -> None:
         self.conn = conn
         self.scope = conn.to_asgi_scope(force_asgi=True)
+        # So ``conn.disconnected`` reads the transport's own peer state.
+        bind_receive_channel(conn, receive)
         self._receive = receive
         self._send = send
         self._state = _START
@@ -65,18 +67,23 @@ class _Exchange:
                     self._settled.set()
             await self._settled.wait()
             return {'type': 'http.disconnect'}
-        event = await self.relay_receive()
+        event = await self()
         if event.get('type') == 'http.request' and not event.get('more_body', False):
             self._body_done = True
         return event
 
-    async def relay_receive(self):
+    async def __call__(self):
+        """The receive channel as relayed, for a BlackBull app as well."""
         event = await self._receive()
-        if event.get('type') == 'http.disconnect' and not self._gone:
+        if event.get('type') == 'http.disconnect':
             self._gone = True
-            # A BlackBull app reads the flag off the scope it was given.
-            mark_disconnected(self.scope)
         return event
+
+    @property
+    def peer_gone(self) -> bool:
+        """The transport saw the peer leave; a BlackBull app given this
+        channel reads it as ``conn.disconnected``."""
+        return getattr(self._receive, 'peer_gone', False)
 
     async def relay(self, event):
         """Convert only: a BlackBull app answers for itself, as when served natively."""
@@ -338,7 +345,7 @@ class ASGIApp(EventHooks, _ASGIAppAdapter):
             return
         exchange = _Exchange(conn, receive, send)
         if self._inner is not None:
-            await self.app(exchange.scope, exchange.relay_receive, exchange.relay)
+            await self.app(exchange.scope, exchange, exchange.relay)
             return
         await self._serve(conn, exchange)
 
@@ -367,9 +374,8 @@ class ASGIApp(EventHooks, _ASGIAppAdapter):
         finally:
             if called and dispatcher.has_listeners('after_handler'):
                 await dispatcher.emit(handler_event('after_handler', conn, app, exc))
-            # As natively: only a disconnect seen by receive withholds request_completed.
-            await emit_scope_end(dispatcher, conn, exc,
-                                 completed=not disconnected(exchange.scope))
+            await emit_scope_end(dispatcher, conn, exc, completed=True,
+                                 disconnected=disconnected(conn))
 
 
 class _MountedASGIApp(ASGIApp):

@@ -11,9 +11,11 @@ from ..websocket import (handshake_closed, mark_handshake_accepted,
 
 
 async def websocket(conn, receive, send, call_next):
-    msg = await raw_receive(receive)()
-
-    if msg.get('type') != ASGIEvent.WS_CONNECT:
+    channel = raw_receive(receive)
+    native = getattr(channel, 'await_connect', None)
+    if native is not None:
+        await native()
+    elif (msg := await channel()).get('type') != ASGIEvent.WS_CONNECT:
         raise ValueError(
             f'Received Message ({msg}) does not request to open a websocket connection.'
         )

@@ -43,6 +43,21 @@ goes:
 
 With no selector installed the HTTP path pays one `None` check for it.
 
+## ASGI boundary
+
+Dispatch threads a `Connection`, a native receive channel (`BodyChannel` or
+`MessageChannel` in `blackbull/native.py`) and a `NativeSend`. ASGI scopes and
+event dicts exist only where a caller asks for them:
+
+| Caller | Converted in |
+|---|---|
+| An external ASGI host, or `BB_FORCE_ASGI_SCOPE=1` | `BlackBull.__call__` (`Connection.from_scope`, `asgi_send_boundary`, lifespan) |
+| A foreign ASGI app, served or mounted | `ASGIApp` (`_Exchange`: `to_asgi_scope`, `_native_from_asgi`) |
+| A deprecated dict-API call site (BBD010 to BBD014) | the recipients' `__call__`, `DictReceive`, the send adapters' dict arm, a `scope`-declared `as_middleware`, `WebSocketResponse` |
+
+`tests/architecture/test_single_native_world.py` lists every conversion site
+and asserts that serving native APIs runs none of them.
+
 ## Startup
 
 `blackbull.server.warmup.warm_tls()` returns the number of attempts in which

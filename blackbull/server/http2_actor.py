@@ -43,8 +43,8 @@ from .access_log import (
     open_record as _open_record,
     start_record as _start_record,
 )
-from ..asgi import ASGIEvent, ASGIReceiveCallable, ASGISendCallable
-from ..native import NativeResponse
+from ..asgi import ASGIEvent
+from ..native import NativeResponse, NativeSend, ReceiveChannel
 from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ _DEBUG = debug_gate(logger)
 @runtime_checkable
 class _StreamRecipient(Protocol):
     """Duck-type interface shared by HTTP2Recipient and HTTP2StreamReader."""
-    def put_disconnect(self) -> None: pass
+    def put_disconnect(self, *, peer: bool = False) -> None: pass
     def put_DATAFrame(self, frame) -> bool: pass
 
 
@@ -65,10 +65,12 @@ def _req_headers(conn: Connection) -> Headers:
     return conn.headers
 
 
-def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
-    """Inject http.disconnect into every active stream recipient."""
+def _signal_recipients(recipients: dict[int, _StreamRecipient], *,
+                       peer: bool = False) -> None:
+    """Inject http.disconnect into every active stream recipient; *peer* when
+    the peer ended the connection."""
     for recipient in recipients.values():
-        recipient.put_disconnect()
+        recipient.put_disconnect(peer=peer)
 
 
 _DEFAULT_PRIORITY: dict[str, int | bool] = {'urgency': 3, 'incremental': False}
@@ -161,8 +163,8 @@ class StreamActor(Actor):
         self,
         stream_id: int,
         conn: Connection,
-        receive: ASGIReceiveCallable,
-        send: ASGISendCallable,
+        receive: ReceiveChannel,
+        send: NativeSend,
         app: Callable[..., Awaitable[None]],
         # ``None`` for a foreign ASGI app: the actor skips event emission
         # rather than the caller forking to a second dispatch path.
@@ -587,7 +589,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             else:
                 sender.mark_client_gone()
         if recipient is not None:
-            recipient.put_disconnect()
+            recipient.put_disconnect(peer=by_peer)
             self._release_recipient_credit(recipient, additional_credit)
         elif additional_credit:
             self._release_recipient_credit(None, additional_credit)
@@ -813,7 +815,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
                 await self._on_goaway_frame(self._last_peer_stream_id)
                 return
 
-        _signal_recipients(self._recipients)
+        _signal_recipients(self._recipients, peer=True)
 
     def _spawn_stream_task(
         self,

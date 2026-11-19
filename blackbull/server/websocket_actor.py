@@ -126,12 +126,7 @@ class WebSocketActor(Actor):
         """
         if not self._aggregator.has_websocket_message_listeners():
             return
-        is_text = isinstance(message, str)
-        await self._aggregator.on_websocket_message(
-            self._conn,
-            {'type': ASGIEvent.WS_RECEIVE,
-             'text': message if is_text else None,
-             'bytes': None if is_text else message})
+        await self._aggregator.on_websocket_message(self._conn, message)
 
     async def run(self) -> None:
         try:

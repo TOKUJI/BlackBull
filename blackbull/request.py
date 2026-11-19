@@ -7,8 +7,8 @@ Connection alias, not an independent request model.
 import json
 from typing import Any, AsyncIterator
 
-from .asgi import ASGIEvent, ASGIReceiveCallable
-from .native import raw_receive
+from .asgi import ASGIEvent
+from .native import ReceiveChannel, raw_receive
 
 
 class ClientDisconnected(Exception):
@@ -28,8 +28,8 @@ class ClientDisconnected(Exception):
         self.partial = partial
 
 
-async def read_body(receive: ASGIReceiveCallable) -> bytes:
-    """Read the complete request body from the ASGI receive channel.
+async def read_body(receive: ReceiveChannel) -> bytes:
+    """Read the complete request body from *receive*, native or ASGI.
 
     Raises [`ClientDisconnected`][] if an ``http.disconnect`` arrives
     before the body is complete, so a truncated upload is never silently
@@ -69,7 +69,7 @@ async def read_body(receive: ASGIReceiveCallable) -> bytes:
     return b''.join(chunks)
 
 
-async def stream_body(receive: ASGIReceiveCallable) -> AsyncIterator[bytes]:
+async def stream_body(receive: ReceiveChannel) -> AsyncIterator[bytes]:
     """Yield the request body one ``http.request`` chunk at a time.
 
     The streaming counterpart to [`read_body`][]: it never accumulates the
@@ -102,7 +102,7 @@ async def stream_body(receive: ASGIReceiveCallable) -> AsyncIterator[bytes]:
             break
 
 
-async def read_json(receive: ASGIReceiveCallable) -> Any:
+async def read_json(receive: ReceiveChannel) -> Any:
     """Read the request body and parse it as JSON.
 
     Returns the parsed JSON value (``dict``, ``list``, ``str``, ``int``,
@@ -137,7 +137,7 @@ def _json_or_none(body: bytes) -> Any:
         return None
 
 
-async def read_text(receive: ASGIReceiveCallable, encoding: str = 'utf-8') -> str:
+async def read_text(receive: ReceiveChannel, encoding: str = 'utf-8') -> str:
     """Read the request body and decode it as text.
 
     Uses ``errors='replace'`` so undecodable bytes become U+FFFD rather than

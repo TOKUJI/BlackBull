@@ -134,7 +134,7 @@ class _Recipient:
         self.credit = credit
         self.credit_takes = 0
 
-    def put_disconnect(self) -> None:
+    def put_disconnect(self, *, peer=False) -> None:
         self.disconnected = True
 
     def put_DATAFrame(self, frame) -> bool:

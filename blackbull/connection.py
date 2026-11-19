@@ -22,7 +22,7 @@ def disconnected(target) -> bool:
     [`Connection`][] (the ``app(conn, …)`` path) or an ASGI ``scope`` dict
     (the ``BB_FORCE_ASGI_SCOPE`` / external-server path)."""
     if isinstance(target, Connection):
-        return target._disconnected
+        return target.disconnected
     return bool(target.get('_disconnected'))
 
 
@@ -238,10 +238,8 @@ class Connection:
     _form: dict[str, str] | None = field(default=None, compare=False, repr=False)
     # Bind only the raw receive recipient; a wrapper capturing conn forms a cycle.
     _receive: Callable | None = field(default=None, compare=False, repr=False)
-    # Set by the actor's disconnect-detecting receive wrapper when the client
-    # drops mid-request; read by ``BlackBull.__call__`` to skip the terminal
-    # ``request_completed`` event. Lives on the Connection (not the scope) so the
-    # native ``app(conn, …)`` path shares it across the actor↔app boundary.
+    # Set by ``mark_disconnected``; ``disconnected`` also reads the bound
+    # channel's ``peer_gone``, which is how an HTTP request learns of it.
     _disconnected: bool = field(default=False, compare=False, repr=False)
     # Native-only WebSocket handshake data; never add it to an ASGI scope.
     _ws: dict[str, Any] | None = field(default=None, compare=False, repr=False)
@@ -259,12 +257,13 @@ class Connection:
                 if conn.disconnected:
                     break
 
-        It goes true when the *server* notices, at the next ``receive()``,
-        rather than the instant the peer's FIN lands.  The module-level
-        [`disconnected`][] reads the same state at the two ASGI boundaries,
-        where it may live on a ``scope`` dict instead.
+        It goes true when the server notices the peer gone (a body read
+        that found it closed, a write it refused, an HTTP/2 reset), not the
+        instant the peer's FIN lands.  The module-level [`disconnected`][]
+        reads the same state at the two ASGI boundaries, where it may live on
+        a ``scope`` dict instead.
         """
-        return self._disconnected
+        return self._disconnected or getattr(self._receive, 'peer_gone', False)
 
     @property
     def path_params(self) -> dict[str, Any]:

@@ -1,13 +1,11 @@
 """Tests for HTTP/2 disconnect detection via HTTP2Recipient and _frame_loop."""
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-from blackbull.event_aggregator import EventAggregator
 from blackbull.server.recipient import HTTP2Recipient
 from blackbull.server.http2_actor import _signal_recipients
-from blackbull.server.access_log import _make_disconnect_detecting_receive as _make_h2_disconnect_receiver
 
 
 # ---------------------------------------------------------------------------
@@ -58,58 +56,11 @@ def test_signal_recipients_empty_dict():
     _signal_recipients({})  # must not raise
 
 
-# ---------------------------------------------------------------------------
-# _make_h2_disconnect_receiver
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_h2_disconnect_receiver_passes_through_normal_events():
-    async def raw_receive():
-        return {'type': 'http.request', 'body': b'x', 'more_body': False}
-
-    aggregator = MagicMock(spec=EventAggregator)
-    scope = {}
-    wrapped = _make_h2_disconnect_receiver(raw_receive, scope, aggregator)
-    event = await wrapped()
-    assert event == {'type': 'http.request', 'body': b'x', 'more_body': False}
-    aggregator.on_request_disconnected.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_h2_disconnect_receiver_emits_request_disconnected():
-    async def raw_receive():
-        return {'type': 'http.disconnect'}
-
-    aggregator = MagicMock(spec=EventAggregator)
-    aggregator.on_request_disconnected = AsyncMock()
-    scope = {}
-    wrapped = _make_h2_disconnect_receiver(raw_receive, scope, aggregator)
-    event = await wrapped()
-
-    assert event == {'type': 'http.disconnect'}
-    aggregator.on_request_disconnected.assert_awaited_once_with(scope)
-    assert scope['_disconnected'] is True
-
-
-@pytest.mark.asyncio
-async def test_h2_disconnect_receiver_idempotent():
-    """request_disconnected fires only once even if handler calls receive() again."""
-    calls = 0
-
-    async def raw_receive():
-        nonlocal calls
-        calls += 1
-        return {'type': 'http.disconnect'}
-
-    aggregator = MagicMock(spec=EventAggregator)
-    aggregator.on_request_disconnected = AsyncMock()
-    scope = {}
-    wrapped = _make_h2_disconnect_receiver(raw_receive, scope, aggregator)
-
-    await wrapped()   # first call — emits event
-    await wrapped()   # second call — already flagged, must not emit again
-
-    aggregator.on_request_disconnected.assert_awaited_once()
+def test_only_a_stream_the_peer_ended_is_peer_gone():
+    retired, reset = HTTP2Recipient(), HTTP2Recipient()
+    retired.put_disconnect()
+    reset.put_disconnect(peer=True)
+    assert (retired.peer_gone, reset.peer_gone) == (False, True)
 
 
 class TestHTTP2Recipient:

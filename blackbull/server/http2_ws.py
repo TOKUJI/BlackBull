@@ -43,7 +43,7 @@ class HTTP2StreamReader(AbstractReader):
         self._arrival.set()
         return True
 
-    def put_disconnect(self) -> None:
+    def put_disconnect(self, *, peer: bool = False) -> None:
         self._eof = True
         self._arrival.set()
 

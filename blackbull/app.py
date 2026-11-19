@@ -20,9 +20,9 @@ from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNot
 from .request import ClientDisconnected
 from .connection import Connection, disconnected, refuse_scope, CONNECTION_STASH_KEY
 from .protocol.field_grammar import FieldError, media_type
-from .native import DictReceive, NativeResponse, asgi_send_boundary
+from .native import DictReceive, NativeResponse, NativeSend, ReceiveChannel, asgi_send_boundary
 from .response import wrap_native_send
-from .asgi import ASGIReceiveCallable, ASGISendCallable, _ASGIAppAdapter
+from .asgi import ASGISendCallable, _ASGIAppAdapter
 from .config import AppConfig
 from .logger import debug_gate  # noqa: E402
 from .server.protocol_registry import RawBinding
@@ -66,6 +66,24 @@ def _inject_response_headers(raw_send, extra_headers):
         await raw_send(event)
 
     return _send
+
+
+class _WarmBody:
+    """``warm_request``'s receive channel: *body* once, as a native chunk or,
+    to a deprecated ``receive()`` reader, as one ``http.request``."""
+
+    __slots__ = ('_body',)
+
+    def __init__(self, body: bytes) -> None:
+        self._body: bytes | None = body or None
+
+    async def next_chunk(self) -> bytes | None:
+        body, self._body = self._body, None
+        return body
+
+    async def __call__(self) -> dict:
+        return {'type': 'http.request', 'body': await self.next_chunk() or b'',
+                'more_body': False}
 
 
 def _wants_html(conn) -> bool:
@@ -368,22 +386,12 @@ class BlackBull(EventHooks):
             pass
 
         for _ in range(n):
-            sent = False
-
-            async def _receive():
-                nonlocal sent
-                if not sent:
-                    sent = True
-                    return {'type': 'http.request', 'body': body,
-                            'more_body': False}
-                return {'type': 'http.request', 'body': b'', 'more_body': False}
-
             fresh = Connection(
                 method=conn.method, path=conn.path, raw_path=conn.raw_path,
                 headers=conn.headers, query_string=conn.query_string,
                 http_version=conn.http_version, scheme=conn.scheme, type=conn.type,
             )
-            await self(fresh, _receive, _send)
+            await self(fresh, _WarmBody(body), _send)
 
     async def _lifespan_startup(self) -> None:
         """Validate middleware and routes, then fire ``app_startup``; raise, logged, on failure."""
@@ -450,8 +458,8 @@ class BlackBull(EventHooks):
                 await send({'type': 'lifespan.shutdown.complete'})
                 return
 
-    async def _dispatch(self, conn, receive: ASGIReceiveCallable | None,
-                        send: ASGISendCallable):
+    async def _dispatch(self, conn, receive: ReceiveChannel | None,
+                        send: NativeSend):
         """Emit request_received/before_handler/after_handler while dispatching.
 
         BlackBull.__call__ emits request_completed after the global middleware chain;
@@ -634,8 +642,8 @@ class BlackBull(EventHooks):
                                | self._error_router.exposes_receive)
 
     async def __call__(self, conn: 'Connection | dict',
-                       receive: ASGIReceiveCallable | None,
-                       send: ASGISendCallable):
+                       receive: ReceiveChannel | None,
+                       send: NativeSend | ASGISendCallable):
         """The ASGI 3.0 callable, and the app's only native/ASGI boundary.
 
         Everything below this method threads a
@@ -655,9 +663,8 @@ class BlackBull(EventHooks):
                 passes a callable; the tolerance is for direct drives.
             send: The host's send callable.
         """
-        # ``target`` is what the actor's disconnect-detecting receive wrapper
-        # shares with us (the Connection natively, the scope dict in the compat
-        # lanes); ``disconnected(target)`` reads the flag off whichever it is.
+        # ``target`` is what the caller handed us: the Connection natively, the
+        # scope dict in the compat lanes.
         target = conn
         if isinstance(conn, Connection):
             request = conn
@@ -689,9 +696,10 @@ class BlackBull(EventHooks):
 
         # Emit terminal events after the whole middleware chain, including buffered responses.
         dispatcher = self._dispatcher
-        want_request_completed = (request.type == 'http'
-                                  and dispatcher.has_listeners('request_completed'))
-        if not (want_request_completed
+        want_request_end = request.type == 'http' and (
+            dispatcher.has_listeners('request_completed')
+            or dispatcher.has_listeners('request_disconnected'))
+        if not (want_request_end
                 or dispatcher.has_listeners('scope_completed')):
             await self._chain(request, receive, send)
             return
@@ -704,9 +712,10 @@ class BlackBull(EventHooks):
             exc = e
             raise
         finally:
+            gone = want_request_end and (disconnected(request) or disconnected(target))
             await emit_scope_end(
                 dispatcher, request, exc or request.state.get('error_exception'),
-                completed=want_request_completed and not disconnected(target))
+                completed=want_request_end, disconnected=gone)
 
     def to_asgi(self):
         """Return the ASGI 3.0 callable to hand to an external host (uvicorn …).

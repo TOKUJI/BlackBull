@@ -3,7 +3,6 @@
 Keep application event names and detail shapes transport-independent.
 See docs/guide/events.md for the public contract.
 """
-from blackbull.asgi import WebSocketReceiveEvent
 from blackbull.event import Event, EventDispatcher
 
 
@@ -33,12 +32,28 @@ def handler_event(name: str, conn, handler, exception=None) -> Event:
     return Event(name, detail=detail)
 
 
-async def emit_scope_end(dispatcher, conn, exception, *, completed: bool) -> None:
-    """Fire ``request_completed`` when *completed*, then ``scope_completed``."""
-    if completed and dispatcher.has_listeners('request_completed'):
+async def emit_scope_end(dispatcher, conn, exception, *, completed: bool,
+                         disconnected: bool = False) -> None:
+    """End an HTTP request with ``request_disconnected`` when the peer left
+    first, else ``request_completed`` when *completed*; then ``scope_completed``."""
+    if disconnected:
+        if dispatcher.has_listeners('request_disconnected'):
+            await dispatcher.emit(request_disconnected_event(conn))
+    elif completed and dispatcher.has_listeners('request_completed'):
         await dispatcher.emit(request_completed_event(conn))
     if dispatcher.has_listeners('scope_completed'):
         await dispatcher.emit(scope_completed_event(conn, exception))
+
+
+def request_disconnected_event(conn) -> Event:
+    client = conn.client or ('-',)
+    return Event('request_disconnected', detail={
+        'conn':         conn,
+        'client_ip':    str(client[0]),
+        'method':       conn.method,
+        'path':         conn.path,
+        'http_version': conn.http_version,
+    })
 
 
 def request_completed_event(conn) -> Event:
@@ -122,24 +137,8 @@ class EventAggregator:
     def has_request_completed_listeners(self) -> bool:
         return self._dispatcher.has_listeners('request_completed')
 
-    def has_request_disconnected_listeners(self) -> bool:
-        return self._dispatcher.has_listeners('request_disconnected')
-
     def has_websocket_message_listeners(self) -> bool:
         return self._dispatcher.has_listeners('websocket_message')
-
-    async def on_request_disconnected(self, conn) -> None:
-        """Fire Level B ``request_disconnected``."""
-        if not self._dispatcher.has_listeners('request_disconnected'):
-            return
-        client = conn.client or ['-']
-        await self._dispatcher.emit(Event("request_disconnected", {
-            'conn':        conn,
-            'client_ip':    str(client[0]),
-            'method':       conn.method,
-            'path':         conn.path,
-            'http_version': conn.http_version,
-        }))
 
     async def on_websocket_connected(
         self, conn, subprotocol: str | None = None
@@ -154,18 +153,17 @@ class EventAggregator:
             "subprotocol":   subprotocol,
         }))
 
-    async def on_websocket_message(
-        self, conn, message: WebSocketReceiveEvent
-    ) -> None:
+    async def on_websocket_message(self, conn, message: str | bytes) -> None:
         """Emit websocket_message with conn/text/bytes detail when listeners exist.
         """
         if not self._dispatcher.has_listeners('websocket_message'):
             return
+        is_text = isinstance(message, str)
         await self._dispatcher.emit(
             Event("websocket_message", {
                 'conn':  conn,
-                'text':  message.get('text'),
-                'bytes': message.get('bytes'),
+                'text':  message if is_text else None,
+                'bytes': None if is_text else message,
             })
         )
 
