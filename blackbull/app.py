@@ -570,20 +570,19 @@ class BlackBull(EventHooks):
             exc = e.error if handled else e
             routed = routes_errors and not handled and isinstance(e, Exception)
             # Logged before after_handler, whose interceptor may raise.
-            if not routed:
-                pass
-            elif isinstance(e, (ClientDisconnected, ConnectionResetError)):
-                # Peer disconnect during body reads is an ordinary close, not a handler failure.
-                if _DEBUG:
-                    self._logger.debug('client disconnected before request body completed')
-            elif isinstance(e, HTTPException):
-                if is_server_error(e.status):
-                    self._logger.error(traceback.format_exc())
+            if routed:
+                if isinstance(e, (ClientDisconnected, ConnectionResetError)):
+                    # Peer disconnect during body reads is an ordinary close, not a handler failure.
+                    if _DEBUG:
+                        self._logger.debug('client disconnected before request body completed')
+                elif isinstance(e, HTTPException):
+                    if is_server_error(e.status):
+                        self._logger.error(traceback.format_exc())
+                    else:
+                        self._logger.info('%s on %s %s: %s', int(e.status),
+                                          conn.method, conn.path, e.detail or e)
                 else:
-                    self._logger.info('%s on %s %s: %s', int(e.status),
-                                      conn.method, conn.path, e.detail or e)
-            else:
-                self._logger.error(traceback.format_exc())
+                    self._logger.error(traceback.format_exc())
             if dispatcher.has_listeners('after_handler'):
                 await dispatcher.emit(handler_event('after_handler', conn, function, exc))
             if not routed:
