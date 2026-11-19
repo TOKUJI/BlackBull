@@ -67,6 +67,11 @@ metadata; reinstall an editable checkout after changing that version.
   `TypeError`. This intentional public API break requires the 0.83.0 MINOR
   release and is approved only for PR #601 (BLA-673).
 
+- `serve_grpc` no longer accepts its private `_validated_content_type`
+  keyword; it reads the request's Content-Type itself. This intentional public
+  API break requires the 0.83.0 MINOR release and is approved only for PR #613
+  (BLA-684).
+
 - `blackbull.client.scenario` and `blackbull.client.scenario_oracle` (BBD003).
   Import from `blackbull.fault_injection` instead, using `H1CSendRawBytes`
   in place of `scenario.SendBytes` (BLA-578).
