@@ -37,6 +37,10 @@ _METHOD_BY_VALUE: dict[str, HTTPMethod] = {m.value: m for m in HTTPMethod}
 
 
 
+#: The events that end a request, and those plus the one that ends any scope.
+_REQUEST_END_EVENTS = frozenset({'request_completed', 'request_disconnected'})
+_SCOPE_END_EVENTS = _REQUEST_END_EVENTS | {'scope_completed'}
+
 #: The handler-boundary adapter, the innermost wrap of every HTTP send.
 _wrap_send_native = wrap_native_send
 
@@ -95,28 +99,37 @@ class _HostBody:
     the spec also sends one once the response is out, so it is not.
     """
 
-    __slots__ = ('_receive', '_done', 'peer_gone')
+    __slots__ = ('_receive', '_done', '_left')
 
     def __init__(self, receive) -> None:
         self._receive = receive
         self._done = False
-        self.peer_gone = False
+        self._left = False
+
+    @property
+    def peer_gone(self) -> bool:
+        # A relayed native channel (BB_FORCE_ASGI_SCOPE) knows more than its dicts say.
+        return self._left or getattr(self._receive, 'peer_gone', False) is True
 
     async def next_chunk(self) -> bytes | None:
         if self._done:
             return None
-        event = await self()
+        event = await self._receive()
         if event.get('type') == ASGIEvent.HTTP_DISCONNECT:
+            self._left = self._done = True
             raise ClientDisconnected()
         body = event.get('body', b'')
-        return body if body or not self._done else None
+        if event.get('more_body', False):
+            return body
+        self._done = True
+        return body or None
 
     async def __call__(self):
         event = await self._receive()
         kind = event.get('type')
         if kind == ASGIEvent.HTTP_DISCONNECT:
             if not self._done:
-                self.peer_gone = True
+                self._left = True
             self._done = True
         elif kind == ASGIEvent.HTTP_REQUEST and not event.get('more_body', False):
             self._done = True
@@ -735,13 +748,11 @@ class BlackBull(EventHooks):
 
         # Emit terminal events after the whole middleware chain, including buffered responses.
         dispatcher = self._dispatcher
-        want_request_end = request.type == 'http' and (
-            dispatcher.has_listeners('request_completed')
-            or dispatcher.has_listeners('request_disconnected'))
-        if not (want_request_end
-                or dispatcher.has_listeners('scope_completed')):
+        if not dispatcher.has_any_listeners(_SCOPE_END_EVENTS):
             await self._chain(request, receive, send)
             return
+        want_request_end = (request.type == 'http'
+                            and dispatcher.has_any_listeners(_REQUEST_END_EVENTS))
         exc: BaseException | None = None
         try:
             await self._chain(request, receive, send)
