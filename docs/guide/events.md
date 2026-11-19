@@ -187,7 +187,7 @@ not carry, such as `status` and `duration_ms`).
 | `app_shutdown` | Server has received a stop signal and is about to exit | *(empty)* | Sugar: `@app.on_shutdown` |
 | `request_received` | HTTP request entered the app, before routing | `conn`, `client_ip`, `method`, `path`, `http_version`, `headers` | `@app.on` and `@app.intercept`; raise to abort |
 | `before_handler` | Route matched, before handler dispatch (not for 404/405) | `conn`, `client_ip`, `method`, `path`, `handler` | `@app.on` and `@app.intercept`; raise to abort |
-| `after_handler` | Handler returned or raised | `conn`, `client_ip`, `method`, `path`, `handler`, `exception` | Observation only; `exception` is `None` on success |
+| `after_handler` | Handler returned or raised | `conn`, `client_ip`, `method`, `path`, `handler`, `exception` | Observation only; `exception` is `None` on success, else what the handler raised, cancellation included |
 | `request_completed` | HTTP request finished — response fully sent (or failed before that) | `conn`, `client_ip`, `method`, `path`, `http_version`, `status`, `response_bytes`, `duration_ms` | Observation only; not fired if client disconnected or for WebSocket |
 | `scope_completed` | Any ASGI scope finished — HTTP request, WebSocket connection, or gRPC call | `conn`, `type`, `client_ip`, `path`, `exception` | Guaranteed once per scope, every protocol, on success or error; the cleanup hook. Pair with `@app.on(..., blocking=True)` |
 | `request_disconnected` | HTTP client closed connection before response complete | `conn`, `client_ip`, `method`, `path`, `http_version` | Observation only; mutually exclusive with `request_completed` |
@@ -203,9 +203,10 @@ request_received → routing → before_handler → handler → after_handler �
                                                          (or) request_disconnected ───────────────┘
 ```
 
-`scope_completed` is the terminal event on *every* path (including
-WebSocket and gRPC, which do not fire the HTTP-specific events
-above) — it always fires last, exactly once.
+`scope_completed` is the terminal event on *every* path — it always
+fires last, exactly once.  A gRPC call is an HTTP request and fires the
+events above too, with `handler` `serve_grpc`; a WebSocket connection
+fires only its own events and `scope_completed`.
 
 ### `request_received` — earliest gate
 

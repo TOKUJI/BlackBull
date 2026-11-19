@@ -90,6 +90,11 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Changed
 
+- `after_handler` reports a cancelled route handler's cancellation as
+  `exception`, as it already did for gRPC, instead of `None`, which means
+  success.  Route and gRPC handlers run through one place that emits the
+  handler events; with gRPC enabled, an ordinary request without a
+  `Content-Type` is no longer parsed for it (BLA-684).
 - `BLACKBULL_ENV` defaults to `production`, and an unrecognised value is
   `production` with a warning.  Unset, `StaticFiles` serves nothing, the
   default error handler shows no exception detail, and the fault-injection

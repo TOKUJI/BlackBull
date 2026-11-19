@@ -6,13 +6,14 @@ rather than introducing another protocol actor.
 from __future__ import annotations
 
 import asyncio
+import functools
 import base64
 import binascii
 import logging
 
 from ..connection import Connection
 from ..protocol.field_grammar import list_members, media_type
-from ..native import NativeResponse
+from ..native import NativeResponse, raw_receive
 from ..request import stream_body, ClientDisconnected
 from ..utils import create_eager_task
 from . import compression
@@ -785,6 +786,7 @@ async def serve_grpc(registry: GrpcServiceRegistry, conn: Connection,
 
     Report handler and protocol failures as gRPC status.
     """
+    receive = raw_receive(receive)
     path = conn.path
     context = GrpcContext(conn)
     # Echo the request's content-type subtype (application/grpc+proto, +json, …)
@@ -839,3 +841,28 @@ async def serve_grpc(registry: GrpcServiceRegistry, conn: Connection,
                                            'deadline exceeded', content_type)
         except TimeoutError:
             raise TimeoutError('gRPC deadline notification blocked') from None
+
+
+class _GrpcCall(functools.partial):
+    """``serve_grpc`` bound to its registry and the Content-Type dispatch validated."""
+
+    __slots__ = ()
+    #: The name the handler events report, as for ``serve_grpc`` itself.
+    __name__ = 'serve_grpc'
+
+
+def http_selector(registry: GrpcServiceRegistry):
+    """The selector ``BlackBull.enable_grpc`` installs ahead of the router.
+
+    Returns the gRPC handler for a request whose Content-Type is an
+    ``application/grpc`` media type, else ``None``; a request without a
+    Content-Type is never parsed.  The application runs the handler between
+    its handler events.
+    """
+    def select(conn: Connection):
+        content_type = conn.headers.get(b'content-type')
+        if content_type and _is_grpc_content_type(content_type):
+            return _GrpcCall(serve_grpc, registry, _validated_content_type=content_type)
+        return None
+
+    return select
