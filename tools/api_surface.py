@@ -33,6 +33,11 @@ _PR_APPROVALS = {
         'Parameter was removed':
         '0.83.0 (BLA-673): reject unknown Server keywords instead of ignoring them',
     },
+    613: {
+        'blackbull.grpc.serve_grpc: blackbull.grpc.asgi.serve_grpc(_validated_content_type): '
+        'Parameter was removed':
+        '0.83.0 (BLA-684): serve_grpc reads the Content-Type itself instead of being handed it',
+    },
 }
 
 
