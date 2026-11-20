@@ -40,6 +40,7 @@ case "$WS_TOOL" in
     k6) AB_LANE="k6 websocket_echo_throughput.js vus=$WS_VUS d=$WS_DURATION tick=${WS_TICK_MS}ms x$WS_BURST $WS_PATH" ;;
     gcannon)
         AB_LANE="gcannon --ws -c $WS_CONNS -t $WS_THREADS -d ${DURATION}s $WS_PATH"
+        command -v gcannon >/dev/null || _ab_die "gcannon is not installed (bench/load/install_gcannon.sh)"
         # One descriptor per connection on both sides of the loopback.
         ulimit -n 65536 || _ab_die "cannot raise the open-file limit for $WS_CONNS connections" ;;
     *) _ab_die "WS_TOOL must be k6 or gcannon" ;;

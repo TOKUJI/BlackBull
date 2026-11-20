@@ -15,6 +15,8 @@
 #   - uvicorn, hypercorn, granian, daphne, starlette  peer ASGI servers
 
 set -e
+# Absolute: the wrk2 build changes directory.
+HERE="$(cd "$(dirname "$0")" && pwd)"
 
 echo "=== Installing h2load (nghttp2-client) + wrk + nginx ==="
 sudo apt-get update -qq
@@ -131,7 +133,7 @@ fi
 echo ""
 echo "=== Installing gcannon ==="
 # OPTIONAL like k6: only the gcannon WebSocket A/B lanes need it.
-bash "$(dirname "$0")/install_gcannon.sh" || echo "  gcannon install failed (optional; skipping — WS_TOOL=gcannon disabled)"
+bash "$HERE/install_gcannon.sh" || echo "  gcannon install failed (optional; skipping — WS_TOOL=gcannon disabled)"
 
 echo ""
 echo "=== Installing peer ASGI servers ==="
