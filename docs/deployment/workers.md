@@ -60,26 +60,20 @@ reported failure. If cleanup itself has several independent failures and no
 startup error is active, they are reported together as an `ExceptionGroup`;
 a single cleanup failure is raised unchanged.
 
-On Linux each worker binds its own listening socket via
-`SO_REUSEPORT` by default (`BB_SOCKET_REUSEPORT=auto`), so the
-kernel hashes incoming connections evenly across the workers'
-accept queues.  With one shared socket, every incoming connection
-wakes every worker and whichever accepts first takes it: a burst of
-connections opened at once can pile onto one or two workers, whose
-requests then wait while the others idle.
+On Linux each worker binds its own `SO_REUSEPORT` listening socket by
+default (`BB_SOCKET_REUSEPORT=auto`), and the kernel spreads connections
+evenly across them.  On a shared socket whichever worker accepts first takes
+the connection, so a burst can pile onto a few workers while the rest idle.
 
-`auto` keeps the shared socket on other platforms, with `--reload`,
-and whenever a listener is AF_UNIX or an adopted fd.  `1` re-binds
-per worker on any platform; on macOS the kernel then hands every
-connection to a single worker (measured on Darwin 25.6).  `0`
-always shares.  Per-worker sockets change three things:
+`auto` shares the socket on other platforms, under `--reload`, and when any
+listener is AF_UNIX or an adopted fd.  `1` splits on any platform; on macOS
+every connection then reaches one worker.  `0` always shares.  With
+per-worker sockets:
 
-- `BB_SOCKET_BACKLOG` sizes each worker's queue, so up to
-  backlog × workers connections can wait.
-- A worker that exits resets the connections still queued on its
-  own socket.  Linux 5.14+ moves them to the other workers with
-  `net.ipv4.tcp_migrate_req=1`.
-- A stalled worker keeps receiving its share of new connections.
+- each worker's queue holds `BB_SOCKET_BACKLOG` connections;
+- a worker that exits resets the connections queued on its socket
+  (`net.ipv4.tcp_migrate_req=1` on Linux 5.14+ hands them to the others);
+- a stalled worker keeps receiving its share.
 
 An adopted fd
 (`--bind fd://N`) is not always the workers' to split — see

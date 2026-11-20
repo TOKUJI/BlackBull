@@ -134,17 +134,19 @@ def _per_worker_sockets(choice: bool | None, shared) -> bool:
     if choice is not None:
         return choice and REUSEPORT_SUPPORTED
     return REUSEPORT_BALANCES and all(
-        not isinstance(listener.where, InheritedFd)
-        and all(sock.family in _IP_FAMILIES for sock in socks)
+        not isinstance(listener.where, InheritedFd) and not _non_ip(socks)
         for listener, socks in shared)
+
+
+def _non_ip(socks) -> list:
+    return [sock for sock in socks if sock.family not in _IP_FAMILIES]
 
 
 def _refuse_non_ip_rebind(shared, workers: int) -> None:
     """Refuse non-IP listeners: SO_REUSEPORT rebinding does not support AF_UNIX.
     """
     for _listener, socks in shared:
-        non_ip = [sock for sock in socks if sock.family not in _IP_FAMILIES]
-        if non_ip:
+        if non_ip := _non_ip(socks):
             raise RuntimeError(_refusal(
                 workers, _describe(non_ip),
                 f'SO_REUSEPORT is an IP-socket option, and '

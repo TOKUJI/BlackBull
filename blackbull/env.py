@@ -50,12 +50,15 @@ class DerivedCap(int):
     operator named; the server may lower it to the descriptors left."""
 
 
+def _truthy(raw: str) -> bool:
+    return raw.strip().lower() not in ('0', 'false', 'no', 'off')
+
+
 def resolve_reuseport(raw: str | None) -> bool | None:
     """Resolve ``BB_SOCKET_REUSEPORT`` — ``auto`` (``None``), ``1`` or ``0``."""
-    value = '' if raw is None else raw.strip().lower()
-    if value in ('', 'auto'):
+    if raw is None or raw.strip().lower() in ('', 'auto'):
         return None
-    return value not in ('0', 'false', 'no', 'off')
+    return _truthy(raw)
 
 
 def resolve_max_connections(raw: str | None) -> int:
@@ -262,7 +265,7 @@ class Settings:
         doc="`listen()` backlog depth, sized for connection bursts; Linux caps the effective value at `net.core.somaxconn`.  Where BlackBull binds, **this value bounds the accept queue**; an adopted fd keeps its creator's `Backlog=` until accepting begins; see [The startup window](../deployment/unix-and-fd.md#the-startup-window).  During that window a TCP client beyond the backlog is served late and a non-blocking `AF_UNIX` client is refused ([details](../deployment/unix-and-fd.md#what-a-client-beyond-the-backlog-observes)); an `AF_UNIX` queue found full when accepting opens is logged on `blackbull.caps`.")
     socket_reuseport: bool | None = setting(
         'BB_SOCKET_REUSEPORT', None, parse=resolve_reuseport, shown='auto', config=('server', 'socket_reuseport'), section=_section,
-        doc='Give each worker its own `SO_REUSEPORT` TCP listening socket. `auto` does so on Linux when every listener is a TCP socket BlackBull bound itself and `--reload` is off; otherwise the workers share one socket. `1` re-binds per worker on any platform (on macOS every connection then reaches one worker); AF_UNIX, and an adopted fd whose supervisor retains ownership, are refused. `0` always shares. A single worker never sets it. See [socket scope](../deployment/workers.md#socket-options-across-bind-paths).')
+        doc='Give each worker its own `SO_REUSEPORT` listening socket. `auto`: on Linux, when every listener is TCP bound by BlackBull and `--reload` is off; otherwise the workers share one socket. `1`: on any platform (macOS then sends every connection to one worker); refused for AF_UNIX and for an adopted fd its supervisor still holds. `0`: always shared. See [socket scope](../deployment/workers.md#socket-options-across-bind-paths).')
     socket_sndbuf: int = setting(
         'BB_SOCKET_SNDBUF', 0, minimum=0, config=('server', 'socket_sndbuf'), section=_section,
         doc="`SO_SNDBUF` (bytes) on BlackBull's own listeners and the TCP connections accepted from them; `0` keeps the kernel default.  Linux clamps at `net.core.wmem_max` and doubles.  See [Per-path scope](../deployment/workers.md#socket-options-across-bind-paths).")
@@ -437,7 +440,7 @@ def _read(field: dataclasses.Field) -> Any:
     if raw is None:
         return field.default
     if field.type is bool:
-        return raw.strip().lower() not in ('0', 'false', 'no', 'off')
+        return _truthy(raw)
     if field.type is str:
         return raw
     try:
