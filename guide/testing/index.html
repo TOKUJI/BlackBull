@@ -6754,6 +6754,8 @@ close code:</p>
                 <span class="k">pass</span>
         <span class="k">assert</span> <span class="n">excinfo</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">code</span> <span class="o">==</span> <span class="mi">4401</span>
 </code></pre></div>
+<p>A custom HTTP response from <code>ws.reject()</code> raises
+<code>blackbull.client.HandshakeError</code> with the HTTP status in its message.</p>
 <p>For server-streamed sessions where the handler emits a sequence
 of frames and then closes, <code>ws.iter_text()</code> and
 <code>ws.iter_bytes()</code> consume the stream until the close arrives —

@@ -6362,14 +6362,14 @@ tracing is disabled, so callers don't need to guard themselves.</p>
 
 
 <h3 id="blackbull.server.access_log.close_ws_record" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">close_ws_record</span><span class="p">(</span><span class="n">record</span><span class="p">,</span> <span class="n">close_code</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">close_ws_record</span><span class="p">(</span><span class="n">record</span><span class="p">,</span> <span class="n">close_code</span><span class="p">,</span> <span class="n">denial_status</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.access_log.close_ws_record" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Emit session close code without a dispatch_done phase; no-op for None.</p>
+        <p>Emit either the HTTP denial status or the WebSocket close code.</p>
 
 
     </div>

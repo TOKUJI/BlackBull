@@ -6335,11 +6335,15 @@ no sentinel event to test for, and no <code>try</code>/<code>except</code> aroun
 <tbody>
 <tr>
 <td><code>await ws.accept(subprotocol=None, headers=None)</code></td>
-<td>Completes the handshake.  Nothing may be sent before it.  <em>headers</em> are extra response fields, in order and with duplicates kept (<code>Set-Cookie</code> twice sends two).</td>
+<td>Completes the handshake. <em>headers</em> are extra response fields, in order and with duplicates kept.</td>
 </tr>
 <tr>
 <td><code>await ws.close(code=1000, reason=None)</code></td>
-<td>Closes.  Called <em>before</em> <code>accept()</code>, it rejects the connection instead.  Idempotent, so <code>finally: await ws.close()</code> is safe.</td>
+<td>Closes. Before <code>accept()</code>, it rejects the handshake with HTTP 403. Idempotent.</td>
+</tr>
+<tr>
+<td><code>await ws.reject(response)</code></td>
+<td>Rejects a pending handshake with a complete <code>Response</code> and a 3xx–5xx status.</td>
 </tr>
 <tr>
 <td><code>await ws.send_text(str)</code> / <code>send_bytes(bytes)</code></td>
@@ -6472,12 +6476,13 @@ by exception far more often than a request does:</p>
         <span class="k">await</span> <span class="n">pool</span><span class="o">.</span><span class="n">release</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="rejecting-a-connection">Rejecting a connection<a class="headerlink" href="#rejecting-a-connection" title="Permanent link">&para;</a></h3>
-<p>Call <code>close()</code> without accepting.  The client's <code>connect()</code> fails outright,
-rather than seeing a connection open and immediately shut:</p>
+<p>Call <code>close()</code> before accepting to return HTTP 403, or use <code>reject()</code> for a
+custom HTTP response. With an external ASGI server, <code>reject()</code> requires
+the host's <code>websocket.http.response</code> extension.</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@app</span><span class="o">.</span><span class="n">route</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s1">'/private'</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="n">Scheme</span><span class="o">.</span><span class="n">websocket</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">private</span><span class="p">(</span><span class="n">ws</span><span class="p">:</span> <span class="n">WebSocket</span><span class="p">):</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">authorized</span><span class="p">(</span><span class="n">ws</span><span class="o">.</span><span class="n">headers</span><span class="p">):</span>
-        <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="mi">4401</span><span class="p">,</span> <span class="s1">'unauthorized'</span><span class="p">)</span>
+        <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">reject</span><span class="p">(</span><span class="n">Response</span><span class="p">(</span><span class="sa">b</span><span class="s1">'Unauthorized'</span><span class="p">,</span> <span class="n">status</span><span class="o">=</span><span class="n">HTTPStatus</span><span class="o">.</span><span class="n">UNAUTHORIZED</span><span class="p">))</span>
         <span class="k">return</span>
     <span class="k">await</span> <span class="n">ws</span><span class="o">.</span><span class="n">accept</span><span class="p">()</span>
     <span class="o">...</span>

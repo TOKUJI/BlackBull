@@ -1134,10 +1134,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#errors-and-disconnects" class="md-nav__link">
+  <a href="#http-errors-and-disconnects" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Errors and disconnects
+        HTTP errors and disconnects
       
     </span>
   </a>
@@ -5927,10 +5927,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#errors-and-disconnects" class="md-nav__link">
+  <a href="#http-errors-and-disconnects" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Errors and disconnects
+        HTTP errors and disconnects
       
     </span>
   </a>
@@ -6055,11 +6055,11 @@ deploying it.</p>
 <td>Only if peer permits</td>
 </tr>
 <tr>
-<td>Foreign app WebSockets</td>
-<td>Unavailable</td>
-<td>Unavailable</td>
-<td>Unavailable</td>
-<td>Unavailable</td>
+<td>WebSockets and <code>websocket.http.response</code></td>
+<td>Yes</td>
+<td>Yes</td>
+<td>With Extended CONNECT enabled</td>
+<td>With Extended CONNECT enabled</td>
 </tr>
 </tbody>
 </table>
@@ -6070,14 +6070,15 @@ snapshot, not a live credit balance. See <a href="../http2/">HTTP/2</a>.
 For file responses without <code>pathsend</code>, send ordinary <code>http.response.body</code>
 messages. Do not send an extension message merely because another ASGI host
 supports it.</p>
-<p>Foreign WebSocket requests end without calling the foreign app; a specific
-HTTP rejection status is not guaranteed. WebSocket support and pre-upgrade
-HTTP responses are tracked in BLA-676. This restriction also applies to mounts.
-The native <a href="../websockets/">WebSocket API</a> is a separate supported path.</p>
+<p>When the foreign app is served directly, closing or raising before acceptance
+returns HTTP 403. To choose the rejection status, headers and body, use the
+<a href="https://asgi.readthedocs.io/en/latest/extensions.html#websocket-denial-response"><code>websocket.http.response</code> extension</a>
+before accepting. An HTTP denial closes the HTTP/1.1 connection or ends the
+HTTP/2 stream. Mounts serve HTTP only.</p>
 <h2 id="lifespan-and-request-state">Lifespan and request state<a class="headerlink" href="#lifespan-and-request-state" title="Permanent link">&para;</a></h2>
 <p>The server runs the app's lifespan once per worker's server lifecycle, before
 accepting requests and during shutdown. <code>ASGIApp(app, lifespan=False)</code> skips it.
-Each HTTP request receives a shallow copy of the lifespan <code>scope['state']</code>:
+Each HTTP request and WebSocket session receives a shallow copy of the lifespan <code>scope['state']</code>:
 changing a top-level key is local to that request; referenced objects remain
 shared.</p>
 <p>An app that exits without answering <code>lifespan.startup</code>, or raises before its
@@ -6085,7 +6086,7 @@ first lifespan <code>receive()</code>, is treated as not supporting lifespan. An
 <code>lifespan.startup.failed</code> aborts startup. An exception after receiving startup
 but before sending <code>lifespan.startup.complete</code> also aborts it.
 See <a href="../listeners/">Listeners</a> for startup and cleanup ownership.</p>
-<h2 id="errors-and-disconnects">Errors and disconnects<a class="headerlink" href="#errors-and-disconnects" title="Permanent link">&para;</a></h2>
+<h2 id="http-errors-and-disconnects">HTTP errors and disconnects<a class="headerlink" href="#http-errors-and-disconnects" title="Permanent link">&para;</a></h2>
 <ul>
 <li>An exception or return before <code>http.response.start</code> produces <code>500</code>.</li>
 <li>An exception or return before a started response completes ends the
