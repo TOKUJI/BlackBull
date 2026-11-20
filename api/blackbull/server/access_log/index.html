@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -4412,17 +4412,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.access_log.disconnect_events_observed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        disconnect_events_observed
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.access_log.emit_access_log" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6095,17 +6084,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.server.access_log.disconnect_events_observed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        disconnect_events_observed
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.server.access_log.emit_access_log" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6392,29 +6370,6 @@ tracing is disabled, so callers don't need to guard themselves.</p>
     <div class="doc doc-contents ">
 
         <p>Emit session close code without a dispatch_done phase; no-op for None.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.server.access_log.disconnect_events_observed" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">disconnect_events_observed</span><span class="p">(</span><span class="n">aggregator</span><span class="p">)</span></code>
-
-<a href="#blackbull.server.access_log.disconnect_events_observed" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Whether the disconnect-detecting receive wrapper is observed.</p>
-<p>The wrapper emits <code>request_disconnected</code> and marks the request so
-<code>request_completed</code> can suppress itself on a dropped one.  With neither
-listener present nothing observes either effect and the actor dispatches
-the raw <code>receive</code> instead.  Body-level disconnect detection
-(<code>conn.body()</code> → <code>ClientDisconnected</code>) does not go through it.</p>
 
 
     </div>

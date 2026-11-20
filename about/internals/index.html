@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -5702,6 +5702,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#asgi-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ASGI boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#startup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6033,6 +6044,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#asgi-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ASGI boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#startup" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6252,6 +6274,34 @@ goes:</p>
 </tbody>
 </table>
 <p>With no selector installed the HTTP path pays one <code>None</code> check for it.</p>
+<h2 id="asgi-boundary">ASGI boundary<a class="headerlink" href="#asgi-boundary" title="Permanent link">&para;</a></h2>
+<p>Dispatch threads a <code>Connection</code>, a native receive channel (<code>BodyChannel</code> or
+<code>MessageChannel</code> in <code>blackbull/native.py</code>) and a <code>NativeSend</code>. ASGI scopes and
+event dicts exist only where a caller asks for them:</p>
+<table>
+<thead>
+<tr>
+<th>Caller</th>
+<th>Converted in</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>An external ASGI host, or <code>BB_FORCE_ASGI_SCOPE=1</code></td>
+<td><code>BlackBull.__call__</code> (<code>Connection.from_scope</code>, <code>_HostBody</code> for the host's <code>receive</code>, <code>asgi_send_boundary</code>, lifespan)</td>
+</tr>
+<tr>
+<td>A foreign ASGI app, served or mounted</td>
+<td><code>ASGIApp</code> (<code>_Exchange</code>: <code>to_asgi_scope</code>, <code>_native_from_asgi</code>)</td>
+</tr>
+<tr>
+<td>A deprecated dict-API call site (BBD010 to BBD014)</td>
+<td>the recipients' <code>__call__</code>, <code>DictReceive</code>, the send adapters' dict arm, a <code>scope</code>-declared <code>as_middleware</code>, <code>WebSocketResponse</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>tests/architecture/test_single_native_world.py</code> lists every conversion site
+and asserts that serving native APIs runs none of them.</p>
 <h2 id="startup">Startup<a class="headerlink" href="#startup" title="Permanent link">&para;</a></h2>
 <p><code>blackbull.server.warmup.warm_tls()</code> returns the number of attempts in which
 both TLS endpoints completed their handshake, rather than the number tried.

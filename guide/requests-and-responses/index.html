@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -6605,11 +6605,11 @@ worth checking in a loop whose result nobody is waiting for any more:</p>
         <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
     <span class="k">return</span> <span class="p">{</span><span class="s1">'rows'</span><span class="p">:</span> <span class="n">rows</span><span class="p">}</span>
 </code></pre></div>
-<p>The flag goes true when the <em>server</em> notices — at the next body read — not
-the instant the peer's FIN arrives, so a handler that never reads the body
-and never streams will not see it change.  For a push-style notification
-instead of a poll, use the
-<a href="../events/"><code>request_disconnected</code> event</a>.</p>
+<p>The flag goes true when the <em>server</em> notices: a body read or a response
+write that finds the client gone, or an HTTP/2 reset.  That is not the
+instant the peer's FIN arrives, so on HTTP/1.1 a handler that neither reads
+the body nor writes will not see it change.  To be told instead of polling,
+use the <a href="../events/"><code>request_disconnected</code> event</a>.</p>
 <h3 id="read_json-and-read_text"><code>read_json</code> and <code>read_text</code><a class="headerlink" href="#read_json-and-read_text" title="Permanent link">&para;</a></h3>
 <p>For the two most common body shapes, <code>read_json</code> and <code>read_text</code>
 wrap <code>read_body</code> so the handler skips the parse/decode boilerplate:</p>

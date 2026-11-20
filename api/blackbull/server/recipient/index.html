@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -5017,6 +5017,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.peer_gone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        peer_gone
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP1Recipient.__call__" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5098,6 +5109,17 @@
   
     <nav class="md-nav" aria-label="HTTP2Recipient">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP2Recipient.peer_gone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        peer_gone
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="md-nav__link">
@@ -6500,6 +6522,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.peer_gone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        peer_gone
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP1Recipient.__call__" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6581,6 +6614,17 @@
   
     <nav class="md-nav" aria-label="HTTP2Recipient">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP2Recipient.peer_gone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        peer_gone
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP2Recipient.mark_end_of_stream_on_headers" class="md-nav__link">
@@ -7296,6 +7340,31 @@ request-smuggling shape — so the answer is to close, not to resynchronise.</p>
 
 </div>
 
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.recipient.HTTP1Recipient.peer_gone" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">peer_gone</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.server.recipient.HTTP1Recipient.peer_gone" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The peer left before this request ended: EOF mid-body, or a
+response write that found it gone.  A body this server refused
+(timeout, rate floor, size) or a connection it closed itself (a
+write timeout) is not the peer leaving.</p>
+
+    </div>
+
+</div>
+
 
 
 
@@ -7507,6 +7576,29 @@ mark_end_of_stream_on_headers so the first read delivers an empty final body.</p
 
 
 
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.recipient.HTTP2Recipient.peer_gone" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">peer_gone</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.server.recipient.HTTP2Recipient.peer_gone" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The peer left before this stream's response reached it: a reset or
+a lost connection, or a response write that found it gone.</p>
+
+    </div>
+
+</div>
+
 
 
 
@@ -7583,7 +7675,7 @@ consume-crediting mode.</p>
 
 
 <h4 id="blackbull.server.recipient.HTTP2Recipient.put_disconnect" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">put_disconnect</span><span class="p">()</span></code>
+            <code class="highlight language-python"><span class="n">put_disconnect</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">peer</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
 <a href="#blackbull.server.recipient.HTTP2Recipient.put_disconnect" class="headerlink" title="Permanent link">&para;</a></h4>
 
@@ -7591,8 +7683,11 @@ consume-crediting mode.</p>
     <div class="doc doc-contents ">
 
         <p>Unblock a waiting <strong>call</strong>() with an http.disconnect event.</p>
-<p>Without a queue, a stream that ended on HEADERS has no consumer
-waiting, so none is created for the disconnect.</p>
+<p><em>peer</em> says the peer ended it (RST_STREAM, a lost connection) rather
+than this server retiring the stream; a peer GOAWAY still lets
+accepted streams answer.  Without a queue, a stream that ended
+on HEADERS has no consumer waiting, so none is created for the
+disconnect.</p>
 
 
     </div>

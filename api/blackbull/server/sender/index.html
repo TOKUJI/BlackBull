@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -5135,10 +5135,32 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.HTTP2Sender.answered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        answered
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.HTTP2Sender.connection_window_size" class="md-nav__link">
     <span class="md-ellipsis">
       
         connection_window_size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.HTTP2Sender.lost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lost
       
     </span>
   </a>
@@ -6380,10 +6402,32 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.sender.HTTP2Sender.answered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        answered
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.sender.HTTP2Sender.connection_window_size" class="md-nav__link">
     <span class="md-ellipsis">
       
         connection_window_size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.server.sender.HTTP2Sender.lost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lost
       
     </span>
   </a>
@@ -7151,6 +7195,28 @@ Once a write has found the peer gone, raise ClientDisconnected.</p>
 
 
 
+<h4 id="blackbull.server.sender.HTTP2Sender.answered" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">answered</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.server.sender.HTTP2Sender.answered" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The response has ended and none of its writes found the peer gone.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
 <h4 id="blackbull.server.sender.HTTP2Sender.connection_window_size" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">connection_window_size</span></code>
 
@@ -7167,6 +7233,29 @@ Once a write has found the peer gone, raise ClientDisconnected.</p>
         <p>The shared connection-level send window.</p>
 <p>A property over <a class="autorefs autorefs-internal" href="#blackbull.server.sender.ConnectionWindow"><code>ConnectionWindow</code></a>, not a per-sender field:
 every sender on the connection reads and writes the same value.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="blackbull.server.sender.HTTP2Sender.lost" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">lost</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#blackbull.server.sender.HTTP2Sender.lost" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The peer went away before this response reached it, without this
+server closing the connection.</p>
 
     </div>
 

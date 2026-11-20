@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -2375,17 +2375,6 @@
     <span class="md-ellipsis">
       
         on_message_sent
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#blackbull.event_aggregator.EventAggregator.on_request_disconnected" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        on_request_disconnected
       
     </span>
   </a>
@@ -6055,17 +6044,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#blackbull.event_aggregator.EventAggregator.on_request_disconnected" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        on_request_disconnected
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#blackbull.event_aggregator.EventAggregator.on_websocket_connected" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6344,28 +6322,6 @@ listener (h1/h2 is not known at accept), else the registered name.</p>
 <div class="doc doc-object doc-function">
 
 
-<h4 id="blackbull.event_aggregator.EventAggregator.on_request_disconnected" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">on_request_disconnected</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#blackbull.event_aggregator.EventAggregator.on_request_disconnected" class="headerlink" title="Permanent link">&para;</a></h4>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Fire Level B <code>request_disconnected</code>.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
 <h4 id="blackbull.event_aggregator.EventAggregator.on_websocket_connected" class="doc doc-heading">
             <code class="highlight language-python"><span class="n">on_websocket_connected</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">subprotocol</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
@@ -6442,7 +6398,7 @@ listener (h1/h2 is not known at accept), else the registered name.</p>
 
 
 <h3 id="blackbull.event_aggregator.emit_scope_end" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">emit_scope_end</span><span class="p">(</span><span class="n">dispatcher</span><span class="p">,</span> <span class="n">conn</span><span class="p">,</span> <span class="n">exception</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">completed</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">emit_scope_end</span><span class="p">(</span><span class="n">dispatcher</span><span class="p">,</span> <span class="n">conn</span><span class="p">,</span> <span class="n">exception</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">completed</span><span class="p">,</span> <span class="n">disconnected</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -6453,7 +6409,8 @@ listener (h1/h2 is not known at accept), else the registered name.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Fire <code>request_completed</code> when <em>completed</em>, then <code>scope_completed</code>.</p>
+        <p>End an HTTP request with <code>request_disconnected</code> when the peer left
+first, else <code>request_completed</code> when <em>completed</em>; then <code>scope_completed</code>.</p>
 
 
     </div>

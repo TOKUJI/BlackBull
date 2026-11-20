@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -6651,17 +6651,19 @@ observation that need not finish before the scope ends; use
 <code>blocking=True</code> for anything that releases a resource the scope
 owns.</p>
 <h3 id="request_disconnected-client-gave-up"><code>request_disconnected</code> — client gave up<a class="headerlink" href="#request_disconnected-client-gave-up" title="Permanent link">&para;</a></h3>
-<p>Fires when an HTTP client closes the connection before the
-response has been fully sent.  <strong>Mutually exclusive</strong> with
-<code>request_completed</code>: a request that disconnected does not also
-fire <code>request_completed</code>.</p>
-<p>The event fires when a read of the request body (<code>conn.body()</code>,
-<code>conn.stream()</code>, or the deprecated direct <code>receive()</code>) finds the
-client gone.</p>
-<p>For HTTP/2, when the underlying TCP connection closes while
-streams are still in flight (the common case for SSE), the
-framework injects an <code>http.disconnect</code> event into every active
-stream's receive channel.</p>
+<p>Fires when an HTTP client leaves before the response has been fully
+sent, on HTTP/1.1 and HTTP/2.  It fires at the end of the request in
+place of <code>request_completed</code>: the two are <strong>mutually exclusive</strong>.</p>
+<p>The client has left when a body read finds the connection closed,
+however the handler reads it; when a response write finds it gone; or,
+on HTTP/2, when it resets the stream or drops the connection.  A request
+the server abandons itself (a body or write timeout, the minimum body rate,
+its own GOAWAY) is not a disconnect, and neither is a stream still answered
+after the client's GOAWAY.  Under an external ASGI host, the host's
+<code>http.disconnect</code> before the body ends is the client leaving.</p>
+<p><code>conn.disconnected</code> reads the same state while the handler runs.  An
+HTTP/2 reset cancels the handler, and the flag is already set when its
+cleanup runs.</p>
 <p>WebSocket connections never fire <code>request_disconnected</code> — use
 <code>websocket_disconnected</code> instead.</p>
 <h3 id="websocket_message-observation-only"><code>websocket_message</code> — observation only<a class="headerlink" href="#websocket_message-observation-only" title="Permanent link">&para;</a></h3>

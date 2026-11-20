@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -3766,6 +3766,34 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.native.BodyChannel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BodyChannel
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BodyChannel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.BodyChannel.next_chunk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        next_chunk
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.native.DictReceive" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3773,6 +3801,45 @@
       
     </span>
   </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.MessageChannel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MessageChannel
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MessageChannel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.MessageChannel.await_connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        await_connect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.MessageChannel.next_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        next_message
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -6060,6 +6127,34 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#blackbull.native.BodyChannel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BodyChannel
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BodyChannel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.BodyChannel.next_chunk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        next_chunk
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.native.DictReceive" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6067,6 +6162,45 @@
       
     </span>
   </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.MessageChannel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MessageChannel
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MessageChannel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.MessageChannel.await_connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        await_connect
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blackbull.native.MessageChannel.next_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        next_message
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -6337,6 +6471,76 @@ dictionaries only at conversion boundaries.</p>
 
 
 
+<h3 id="blackbull.native.BodyChannel" class="doc doc-heading">
+            <code>BodyChannel</code>
+
+
+<a href="#blackbull.native.BodyChannel" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>BlackBull's HTTP receive channel: the request body as <code>bytes</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.native.BodyChannel.next_chunk" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">next_chunk</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.native.BodyChannel.next_chunk" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The next body chunk; <code>None</code> once the body is complete.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
 <h3 id="blackbull.native.DictReceive" class="doc doc-heading">
             <code>DictReceive</code>
 
@@ -6371,6 +6575,98 @@ dictionaries only at conversion boundaries.</p>
 
 
 
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.native.MessageChannel" class="doc doc-heading">
+            <code>MessageChannel</code>
+
+
+<a href="#blackbull.native.MessageChannel" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="typing.Protocol">Protocol</span></code></p>
+
+
+
+        <p>BlackBull's WebSocket receive channel: whole messages, <code>str</code> or <code>bytes</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.native.MessageChannel.await_connect" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">await_connect</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.native.MessageChannel.await_connect" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Take the opening handshake.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.native.MessageChannel.next_message" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">next_message</span><span class="p">()</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#blackbull.native.MessageChannel.next_message" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>The next whole message.</p>
+
+
+    </div>
+
+</div>
 
 
 

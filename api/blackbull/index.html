@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -8866,7 +8866,7 @@ is never a request and never becomes a <code>Connection</code>.</p>
                 <code>receive</code>
             </td>
             <td>
-                  <code><span title="blackbull.asgi.ASGIReceiveCallable">ASGIReceiveCallable</span> | None</code>
+                  <code><span title="blackbull.native.ReceiveChannel">ReceiveChannel</span> | None</code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -8885,7 +8885,7 @@ passes a callable; the tolerance is for direct drives.</p>
                 <code>send</code>
             </td>
             <td>
-                  <code><span title="blackbull.asgi.ASGISendCallable">ASGISendCallable</span></code>
+                  <code><span title="blackbull.native.NativeSend">NativeSend</span> | <span title="blackbull.asgi.ASGISendCallable">ASGISendCallable</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -10030,14 +10030,15 @@ is waiting for::</p>
     if conn.disconnected:
         break
 </code></pre>
-<p>It goes true when the <em>server</em> notices, at the next <code>receive()</code>,
-rather than the instant the peer's FIN lands.  The module-level
-<a class="autorefs autorefs-internal" title="disconnected
+<p>It goes true when the server notices the peer gone (a body read
+that found it closed, a write it refused, an HTTP/2 reset), not the
+instant the peer's FIN lands.  The module-level <a class="autorefs autorefs-internal" title="disconnected
 
   
       property
-  " href="connection/#blackbull.connection.Connection.disconnected"><code>disconnected</code></a> reads the same state at the two ASGI boundaries,
-where it may live on a <code>scope</code> dict instead.</p>
+  " href="connection/#blackbull.connection.Connection.disconnected"><code>disconnected</code></a>
+reads the same state at the two ASGI boundaries, where it may live on
+a <code>scope</code> dict instead.</p>
 
     </div>
 
@@ -12471,7 +12472,7 @@ widening the public union.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Read the complete request body from the ASGI receive channel.</p>
+        <p>Read the complete request body from <em>receive</em>, native or ASGI.</p>
 <p>Raises <a class="autorefs autorefs-internal" href="request/#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a> if an <code>http.disconnect</code> arrives
 before the body is complete, so a truncated upload is never silently
 returned as if whole.</p>

@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -6203,7 +6203,7 @@ parsing, so both wire formats produce the same result.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Read the complete request body from the ASGI receive channel.</p>
+        <p>Read the complete request body from <em>receive</em>, native or ASGI.</p>
 <p>Raises <a class="autorefs autorefs-internal" href="#blackbull.request.ClientDisconnected"><code>ClientDisconnected</code></a> if an <code>http.disconnect</code> arrives
 before the body is complete, so a truncated upload is never silently
 returned as if whole.</p>
