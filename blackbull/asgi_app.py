@@ -399,7 +399,7 @@ class ASGIApp(EventHooks, _ASGIAppAdapter):
         try:
             await self.app(exchange.scope, exchange.receive, exchange.send)
         except SendAfterDisconnect:
-            pass
+            return
         except BaseException as error:
             exc = error
             raise

@@ -163,7 +163,7 @@ class WebSocketActor(Actor):
         try:
             await self._send_denial(NativeResponse.complete(403, [], b''))
         except ClientDisconnected:
-            pass
+            return
 
     async def _send_denial(self, event: NativeResponse) -> None:
         if self._http_send is None or self._accepted or self._denied:
