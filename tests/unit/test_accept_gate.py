@@ -452,6 +452,30 @@ async def test_one_accept_tick_stops_at_the_limit(listener):
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(30)
+async def test_one_accept_tick_drains_a_full_backlog(listener):
+    """A burst that fills the accept queue is taken in one readable wakeup."""
+    backlog = 64
+    port = listener.getsockname()[1]
+    clients = [socket.create_connection(('127.0.0.1', port)) for _ in range(backlog)]
+    gate = _AcceptGate()
+    accepting = []
+    try:
+        accepting = gate.arm([((_Quiet, None), listener)], 0, backlog)
+        # The reader runs once per loop iteration; two yields cover exactly one.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert gate.held == backlog
+    finally:
+        for client in clients:
+            client.close()
+        gate.close()
+        for entry in accepting:
+            entry.close()
+        await _settle(gate)
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(30)
 async def test_a_connect_that_fails_before_a_transport_closes_the_socket(
         listener, monkeypatch):
     async def refuse(*_args, **_kwargs):

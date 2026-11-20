@@ -229,8 +229,9 @@ def _validate_unique_socket_fds(bound_listeners) -> None:
 
 
 _REFUSAL_RESERVE = FD_RESERVE // 4
-_ACCEPTS_PER_TICK = FD_RESERVE // 8
-assert _REFUSAL_RESERVE + _ACCEPTS_PER_TICK <= FD_RESERVE
+#: Left for the application's own descriptors once the gate holds its limit.
+_APPLICATION_SPARE = FD_RESERVE // 8
+assert _REFUSAL_RESERVE + _APPLICATION_SPARE <= FD_RESERVE
 
 _ACCEPT_RETRY_DELAY = asyncio.constants.ACCEPT_RETRY_DELAY
 _ACCEPT_RESOURCE_ERRNOS = frozenset(
@@ -264,9 +265,12 @@ class _Listening:
     ``Server.stop`` closes it as it would an ``asyncio.Server``.
     """
 
-    def __init__(self, gate, sock, factory, ssl_context) -> None:
+    def __init__(self, gate, sock, factory, ssl_context, backlog: int) -> None:
         self._gate = gate
         self._sock = sock
+        #: Accepts per readable wakeup: one full queue, so a burst that
+        #: fills it is never left to overflow while it drains.
+        self._backlog = backlog
         self._fd = sock.fileno()
         self._factory = factory
         self._tls = ssl_context
@@ -304,7 +308,7 @@ class _Listening:
             self._sock.close()
 
     def _on_readable(self) -> None:
-        for _ in range(_ACCEPTS_PER_TICK):
+        for _ in range(self._backlog):
             if not self._reading:
                 return
             try:
@@ -383,7 +387,7 @@ class _AcceptGate:
             for (factory, ssl_context), sock in entries:
                 sock.listen(backlog)
                 sock.setblocking(False)
-                entry = _Listening(self, sock, factory, ssl_context)
+                entry = _Listening(self, sock, factory, ssl_context, backlog)
                 listening.append(entry)
                 if not self._paused:
                     entry.start_reading()
@@ -705,7 +709,7 @@ def _fit_to_open_descriptors(cap: int) -> int:
         open_now = len(os.listdir('/dev/fd'))
     except OSError:
         return cap
-    return max(1, min(cap, soft - open_now - _REFUSAL_RESERVE - _ACCEPTS_PER_TICK))
+    return max(1, min(cap, soft - open_now - _REFUSAL_RESERVE - _APPLICATION_SPARE))
 
 
 class _ServedConnection(ConnectionProtocol):
