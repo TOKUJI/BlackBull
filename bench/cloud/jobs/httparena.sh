@@ -74,23 +74,12 @@ _install_tooling() {
     _ssh 'set -euo pipefail
         sudo apt-get update -qq
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io git jq curl \
-            ca-certificates build-essential pkg-config libssl-dev wrk nghttp2-client >/dev/null
+            ca-certificates build-essential pkg-config wrk nghttp2-client >/dev/null
         sudo systemctl enable --now docker >/dev/null
         sudo usermod -aG docker ubuntu
         mkdir -p ~/build' || return 1
-    # gcannon needs OpenSSL headers, liburing >= 2.9 (built from source) and kernel 6.1+ io_uring.
-    _ssh 'set -euo pipefail; cd ~/build
-        if ! pkg-config --atleast-version=2.9 liburing 2>/dev/null; then
-            rm -rf liburing
-            git clone --quiet --depth 1 --branch liburing-2.9 https://github.com/axboe/liburing.git
-            (cd liburing && ./configure --prefix=/usr >/dev/null && make -s -j"$(nproc)" -C src \
-                && sudo make -s install -C src >/dev/null && sudo ldconfig)
-        fi
-        if ! command -v gcannon >/dev/null; then
-            rm -rf gcannon
-            git clone --quiet --depth 1 https://github.com/MDA2AV/gcannon.git
-            (cd gcannon && make -s && sudo cp gcannon /usr/local/bin/)
-        fi' || return 1
+    scp "${SSH_OPTS[@]}" bench/load/install_gcannon.sh "$HA_HOST:build/install_gcannon.sh" >/dev/null \
+        && _ssh 'bash ~/build/install_gcannon.sh' || return 1
     # ghz backs every gRPC profile's readiness probe as well as its load: without
     # it framework.sh aborts and those profiles silently produce no numbers.
     _ssh 'set -euo pipefail; cd ~/build

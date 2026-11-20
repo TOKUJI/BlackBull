@@ -28,7 +28,7 @@ def repo(tmp_path: Path) -> Path:
 
 def _ab(repo: Path, script: str, **env: str) -> subprocess.CompletedProcess[str]:
     base = {k: v for k, v in os.environ.items()
-            if not k.startswith(('REF_', 'ROUNDS', 'URL_PATH', 'H2_', 'PHASES', 'DURATION'))}
+            if not k.startswith(('REF_', 'ROUNDS', 'URL_PATH', 'H2_', 'WS_', 'PHASES', 'DURATION'))}
     job = ROOT / 'bench/cloud/jobs/ab.sh'
     return subprocess.run(
         ['bash', '-c', f'source {job} && job_preflight && {script}'],
@@ -79,3 +79,26 @@ def test_the_ab_runner_hands_the_h2_lanes_a_request_body(repo):
     assert done.returncode == 0, done.stderr
 
     assert 'export H2_DATA=bench/ab/grpc/unary.bin' in done.stdout.splitlines()
+
+
+def test_the_ab_runner_drives_one_gcannon_ws_lane_per_connection_count(repo):
+    done = _ab(repo, 'job_runner', REF_BASE='HEAD~1', REF_TREAT='HEAD', URL_PATHS='',
+               WS_CONNS='256,1024', WS_PATH='/ws-object', REMOTE_REPO='/r', REMOTE_RUN='/run')
+    assert done.returncode == 0, done.stderr
+
+    runs = [line for line in done.stdout.splitlines() if 'ab_commit_ws.sh' in line]
+    assert len(runs) == 2
+    for conns, run in zip(('256', '1024'), runs):
+        assert f'BENCH_RUN_DIR=/run/ws-c{conns} ' in run
+        assert f'WS_CONNS={conns} ' in run and 'WS_TOOL=gcannon ' in run
+    assert 'export WS_PATH=/ws-object' in done.stdout.splitlines()
+    assert 'ab_commit.sh' not in done.stdout
+
+
+def test_the_ab_wait_limit_counts_the_ws_lanes(repo):
+    def wait(**env: str) -> int:
+        done = _ab(repo, 'echo "$JOB_WAIT_SECONDS"', REF_BASE='HEAD~1', REF_TREAT='HEAD', **env)
+        assert done.returncode == 0, done.stderr
+        return int(done.stdout)
+
+    assert wait(URL_PATHS='', WS_CONNS='256,1024') > 2 * wait(URL_PATHS='', WS_CONNS='256') - 1200

@@ -129,8 +129,9 @@ REF_BASE=<base> REF_TREAT=<treatment> URL_PATHS=/conn,/plaintext H2_PROFILES=/1k
 **m7a.2xlarge** (8 vCPU, **no SMT** — each vCPU a physical core, enough for one
 worker + `wrk -t4` + the OS; an xlarge's 4 cores are oversubscribed by
 `wrk -t4`), a self-shutdown armed for the session's length, the working tree
-and its git history deployed, one `ab_commit.sh` per HTTP/1.1 lane and one
-`ab_commit_h2.sh` per HTTP/2 lane run detached, then the results pulled and
+and its git history deployed, one `ab_commit.sh` per HTTP/1.1 lane, one
+`ab_commit_h2.sh` per HTTP/2 lane and one gcannon `ab_commit_ws.sh` per
+`WS_CONNS` count run detached, then the results pulled and
 the instance torn down.  The defaults (8 rounds, 15 s runs, null + real,
 server on cores 0–1, load on 2–5) are this document's recipe.  `REF_TREAT`
 must be the checked-out tree — that tree is what is deployed.
@@ -145,7 +146,7 @@ see [bench/cloud/README.md](../cloud/README.md).  The verdict is in
 | Tool | Purpose |
 |---|---|
 | `abba.sh` | The shared core: commit resolution, in-place swap with import-hash proof, ABBA + null schedule, pinning, `raw.tsv` per round |
-| `ab_commit.sh` / `ab_commit_h2.sh` / `ab_commit_ws.sh` | The wrk / h2load / k6 lanes |
+| `ab_commit.sh` / `ab_commit_h2.sh` / `ab_commit_ws.sh` | The wrk / h2load / k6-or-gcannon lanes |
 | `report.py` | Verdict: round-paired Δ (per mode when bimodal), bootstrap 95 % CI, null floor, equivalence within `--equiv` |
 
 ## 6. Calibration evidence

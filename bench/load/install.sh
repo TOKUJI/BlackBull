@@ -10,6 +10,7 @@
 #   - wrk2 (built from source)    Constant-rate, CO-corrected HdrHistogram
 #   - oha                         HTTP/1.1 load gen (granian-style)
 #   - k6                          VU-based load gen + WebSocket
+#   - gcannon (built from source) io_uring load gen; HttpArena's, and the WS A/B lanes
 #   - nginx                       reference floor (static plaintext/json)
 #   - uvicorn, hypercorn, granian, daphne, starlette  peer ASGI servers
 
@@ -126,6 +127,11 @@ if ! command -v k6 >/dev/null 2>&1; then
 else
   echo "k6 already installed, skipping."
 fi
+
+echo ""
+echo "=== Installing gcannon ==="
+# OPTIONAL like k6: only the gcannon WebSocket A/B lanes need it.
+bash "$(dirname "$0")/install_gcannon.sh" || echo "  gcannon install failed (optional; skipping — WS_TOOL=gcannon disabled)"
 
 echo ""
 echo "=== Installing peer ASGI servers ==="

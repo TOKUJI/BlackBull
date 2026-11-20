@@ -18,7 +18,7 @@ question.  A new tool is added to this index, given a test, and run in CI
 
 | Question | Start with | Read |
 |---|---|---|
-| Did my commit change throughput? | `bench/ab/ab_commit.sh` (HTTP/1.1, wrk), `bench/ab/ab_commit_h2.sh` (HTTP/2, h2load), `bench/ab/ab_commit_ws.sh` (WebSocket, k6); on EC2 `just ab-verify` | [ab/AB-HIGH-PRECISION.md](ab/AB-HIGH-PRECISION.md) |
+| Did my commit change throughput? | `bench/ab/ab_commit.sh` (HTTP/1.1, wrk), `bench/ab/ab_commit_h2.sh` (HTTP/2, h2load), `bench/ab/ab_commit_ws.sh` (WebSocket, k6 or gcannon); on EC2 `just ab-verify` | [ab/AB-HIGH-PRECISION.md](ab/AB-HIGH-PRECISION.md) |
 | How fast is BlackBull against peer servers? | `just bench-compare` (`bench/compare/compare_servers.sh`); on EC2 `bench/cloud/session.sh compare` | [compare/README.md](compare/README.md) |
 | Where does BlackBull stand on HttpArena? | `just httparena-bench`; correctness first with `bench/httparena/validate_local.sh` | [httparena/README.md](httparena/README.md) |
 | How does one server behave under HTTP/2 multiplexing and k6 load? | `bench/ab/h2load/benchmark.sh` | [ab/h2load/README.md](ab/h2load/README.md) |
@@ -51,7 +51,7 @@ Entry points are in **bold**; everything else is a part of the tool on its row.
 
 | File | Role |
 |---|---|
-| **`bench/ab/ab_commit.sh`**, **`bench/ab/ab_commit_h2.sh`**, **`bench/ab/ab_commit_ws.sh`** | ABBA A/B on HTTP/1.1 (wrk), HTTP/2 (h2load), WebSocket (k6) |
+| **`bench/ab/ab_commit.sh`**, **`bench/ab/ab_commit_h2.sh`**, **`bench/ab/ab_commit_ws.sh`** | ABBA A/B on HTTP/1.1 (wrk), HTTP/2 (h2load), WebSocket (k6 or gcannon) |
 | `bench/ab/abba.sh` | their shared core: swap, import proof, schedule, run directory |
 | **`bench/ab/report.py`** | verdict for a `raw.tsv`: paired / per-mode Δ, bootstrap CI, null floor |
 | `bench/ab/static_ab.js` | a static asset the A/B lanes serve (e.g. `URL_PATH=/static/static_ab.js`) |
