@@ -74,11 +74,11 @@ _install_tooling() {
     _ssh 'set -euo pipefail
         sudo apt-get update -qq
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io git jq curl \
-            ca-certificates build-essential pkg-config wrk nghttp2-client >/dev/null
+            ca-certificates build-essential pkg-config libssl-dev wrk nghttp2-client >/dev/null
         sudo systemctl enable --now docker >/dev/null
         sudo usermod -aG docker ubuntu
         mkdir -p ~/build' || return 1
-    # gcannon needs liburing >= 2.9 (built from source) and kernel 6.1+ io_uring.
+    # gcannon needs OpenSSL headers, liburing >= 2.9 (built from source) and kernel 6.1+ io_uring.
     _ssh 'set -euo pipefail; cd ~/build
         if ! pkg-config --atleast-version=2.9 liburing 2>/dev/null; then
             rm -rf liburing
