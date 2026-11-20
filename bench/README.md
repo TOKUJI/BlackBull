@@ -117,7 +117,8 @@ Entry points are in **bold**; everything else is a part of the tool on its row.
 
 | File | Role |
 |---|---|
-| **`bench/load/install.sh`** | installs h2load, wrk, wrk2, oha, k6 and the peer servers |
+| **`bench/load/install.sh`** | installs h2load, wrk, wrk2, oha, k6, gcannon and the peer servers |
+| `bench/load/install_gcannon.sh` | builds liburing >= 2.9 and gcannon; shared by `install.sh` and the HttpArena job |
 | `bench/load/wrk/run.sh`, `bench/load/wrk/lane_e.sh`, `bench/load/wrk2/run.sh`, `bench/load/oha/run.sh`, `bench/load/wrk/_stats.py` | lane drivers used by `compare_servers.sh` |
 | `bench/load/wrk/pipeline.lua`, `bench/load/wrk/post_echo.lua`, `bench/load/wrk/no_keepalive.lua`, `bench/load/wrk/httparena_baseline.lua`, `bench/load/wrk/httparena_json_comp.lua` | wrk scripts |
 | `bench/load/k6/http_rampup.js`, `bench/load/k6/http_stress.js`, `bench/load/k6/websocket.js`, `bench/load/k6/websocket_echo_throughput.js` | k6 scripts |
