@@ -15,7 +15,6 @@ from http import HTTPStatus
 from ..actor import Actor, Message
 from ..env import get_settings
 from ..event_aggregator import EventAggregator
-from ..asgi import ASGIReceiveCallable, ASGISendCallable
 from ..connection import (
     Connection, bind_receive_channel)
 from ..headers import Headers
@@ -31,11 +30,9 @@ from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
                         AbstractReader, HTTP1Recipient, IncompleteReadError,
                         RecipientFactory, _WS_READ_INLINE)
 from .sender import AbstractWriter, SenderFactory
-from ..native import warns_app_dicts
+from ..native import NativeSend, ReceiveChannel, warns_app_dicts
 from .access_log import (AccessLogRecord as _AccessLogRecord,
-                         _make_disconnect_detecting_receive,
                          close_ws_record as _close_ws_record,
-                         disconnect_events_observed as _disconnect_events_observed,
                          emit_access_log as _emit_access_log,
                          request_record_needed as _request_record_needed,
                          start_record as _start_record,
@@ -134,8 +131,8 @@ class RequestActor(Actor):
     def __init__(
         self,
         conn: Connection,
-        recipient: ASGIReceiveCallable,
-        send: ASGISendCallable,
+        recipient: ReceiveChannel,
+        send: NativeSend,
         app: Callable[..., Awaitable[None]],
         # ``None`` for a foreign ASGI app: the actor skips event emission
         # rather than the caller forking to a second dispatch path.
@@ -148,8 +145,8 @@ class RequestActor(Actor):
         self._app = app
         self._aggregator = aggregator
 
-    def bind(self, conn: Connection, recipient: ASGIReceiveCallable,
-             send: ASGISendCallable) -> 'RequestActor':
+    def bind(self, conn: Connection, recipient: ReceiveChannel,
+             send: NativeSend) -> 'RequestActor':
         """Bind the next sequential HTTP/1.1 request; retain per-connection settings.
 
         Do not share this actor across concurrent HTTP/2 streams.
@@ -161,17 +158,8 @@ class RequestActor(Actor):
 
     async def run(self) -> None:  # override: single-shot, no inbox loop
         conn = self._conn
-        # Bind the raw recipient before wrappers to avoid a conn/wrapper reference cycle.
-        bind_receive_channel(conn, self._recipient)
-        # Only when a listener observes it — otherwise the raw recipient, and
-        # no per-request closure.  Body-level disconnect (``conn.body()`` →
-        # ClientDisconnected) is independent of this wrapper.
-        if (self._aggregator is not None
-                and _disconnect_events_observed(self._aggregator)):
-            receive = _make_disconnect_detecting_receive(
-                self._recipient, conn, self._aggregator)
-        else:
-            receive = self._recipient
+        receive = self._recipient
+        bind_receive_channel(conn, receive)
         try:
             await self._app(conn, receive, self._send)
         except ClientDisconnected:
@@ -773,7 +761,7 @@ class HTTP1Actor(Actor):
         if first_request_on_connection:
             inner_receive = RecipientFactory.http1(
                 self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl,
-                framing=self._request_framing)
+                framing=self._request_framing, writer=self._writer)
         else:
             inner_receive.bind(conn, self._request_framing)
 

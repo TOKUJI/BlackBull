@@ -302,6 +302,12 @@ class BaseRecipient(ABC):
     async def __call__(self) -> dict: pass
 
 
+class _NoWriter:
+    """The writer of a directly driven recipient: nothing to consult."""
+
+    peer_gone = closed_by_server = False
+
+
 class HTTP1Recipient(BaseRecipient):
     """Yield lazy HTTP/1.1 request-body slices as http.request events.
 
@@ -320,8 +326,12 @@ class HTTP1Recipient(BaseRecipient):
                  max_body: int | None = None,
                  min_rate: float | None = None,
                  min_rate_grace: float | None = None,
-                 framing: tuple[int | None, bool]):
+                 framing: tuple[int | None, bool],
+                 writer: AbstractWriter | None = None):
         super().__init__(reader)
+        # The connection's writer, whose ``peer_gone`` a failed response write
+        # sets; it holds no Connection, so no reference cycle.
+        self._peer_writer = writer if writer is not None else _NoWriter
         # ``chunk_size`` slices a chunked body, ``chunk_max`` bounds one
         # transport-paced Content-Length read; see docs/reference/env-vars.md.
         # All five fall back to settings when a caller does not inject them.
@@ -388,7 +398,17 @@ class HTTP1Recipient(BaseRecipient):
         self._body_refused = False
         # A chunked-framing violation; see [`must_close`][].
         self.framing_broken = False
+        self._eof_mid_body = False
         return self
+
+    @property
+    def peer_gone(self) -> bool:
+        """The peer left before this request ended: EOF mid-body, or a
+        response write that found it gone.  A body this server refused
+        (timeout, rate floor, size) or a connection it closed itself (a
+        write timeout) is not the peer leaving."""
+        writer = self._peer_writer
+        return (self._eof_mid_body or writer.peer_gone) and not writer.closed_by_server
 
     @property
     def must_close(self) -> bool:
@@ -600,6 +620,7 @@ class HTTP1Recipient(BaseRecipient):
         except EOFError:
             # EOF mid-body — not a cap hit, and no synthetic 408.
             self._done = True
+            self._eof_mid_body = True
             raise ClientDisconnected() from None
 
     async def __call__(self) -> dict:
@@ -643,8 +664,12 @@ class HTTP2Recipient(BaseRecipient):
                  credit_budget: int = DEFAULT_INITIAL_WINDOW_SIZE,
                  max_body: int | None = None,
                  min_rate: float | None = None,
-                 min_rate_grace: float | None = None):
+                 min_rate_grace: float | None = None,
+                 sender=None):
         super().__init__(None)
+        # The stream's own sender, which knows whether the response reached
+        # the peer; it holds no Connection.
+        self._sender = sender
         self._queue: asyncio.Queue | None = None
         self._queue_depth = queue_depth
         self._credit_cb = credit_callback
@@ -659,6 +684,8 @@ class HTTP2Recipient(BaseRecipient):
         #: by ``__call__`` after the empty body, as the queue would have.
         self._disconnect_pending: bool = False
         self._done: bool = False
+        #: The peer reset the stream or left the connection; see put_disconnect.
+        self._peer_left: bool = False
         if max_body is None or min_rate is None or min_rate_grace is None:
             # Fallback for a directly-instantiated recipient (tests).
             _s = get_settings()
@@ -811,12 +838,23 @@ class HTTP2Recipient(BaseRecipient):
                         protocol='http2')
             return False
 
-    def put_disconnect(self) -> None:
+    @property
+    def peer_gone(self) -> bool:
+        """The peer left before this stream's response reached it: a reset or
+        a lost connection, or a response write that found it gone."""
+        return self._peer_left or (self._sender is not None and self._sender.lost)
+
+    def put_disconnect(self, *, peer: bool = False) -> None:
         """Unblock a waiting __call__() with an http.disconnect event.
 
-        Without a queue, a stream that ended on HEADERS has no consumer
-        waiting, so none is created for the disconnect.
+        *peer* says the peer ended it (RST_STREAM, a lost connection) rather
+        than this server retiring the stream; a peer GOAWAY still lets
+        accepted streams answer.  Without a queue, a stream that ended
+        on HEADERS has no consumer waiting, so none is created for the
+        disconnect.
         """
+        if peer:
+            self._peer_left = True
         if self._queue is None and self._end_of_stream_on_headers:
             if not self._initial_consumed:
                 self._disconnect_pending = True
@@ -941,7 +979,7 @@ class WebSocketRecipient(BaseRecipient):
                  decompressor=None,
                  max_frame_payload: int | None = None,
                  max_message_size: int | None = None,
-                 on_message: Callable[[dict], Awaitable[None]] | None = None,
+                 on_message: Callable[[str | bytes], Awaitable[None]] | None = None,
                  read_ahead_needed: Callable[[], bool] | None = None,
                  ws_idle_timeout: float | None = None,
                  ws_pong_timeout: float | None = None,
@@ -1719,9 +1757,10 @@ class RecipientFactory:
     def http1(reader: AbstractReader, conn: Connection, *,
               body_timeout: float = 0.0,
               deadline: Guard | None = None,
-              framing: tuple[int | None, bool]) -> HTTP1Recipient:
+              framing: tuple[int | None, bool],
+              writer: AbstractWriter | None = None) -> HTTP1Recipient:
         return HTTP1Recipient(reader, conn, body_timeout=body_timeout,
-                              deadline=deadline, framing=framing)
+                              deadline=deadline, framing=framing, writer=writer)
 
     @staticmethod
     def http2(frame: FrameBase | None = None,
@@ -1731,14 +1770,15 @@ class RecipientFactory:
               credit_budget: int = DEFAULT_INITIAL_WINDOW_SIZE,
               max_body: int | None = None,
               min_rate: float | None = None,
-              min_rate_grace: float | None = None) -> HTTP2Recipient:
+              min_rate_grace: float | None = None,
+              sender=None) -> HTTP2Recipient:
         # Forwarded rather than left to the recipient's own per-stream fallback;
         # see ``HTTP2Recipient.__init__``.
         return HTTP2Recipient(frame, queue_depth=queue_depth,
                               credit_callback=credit_callback,
                               credit_budget=credit_budget,
                               max_body=max_body, min_rate=min_rate,
-                              min_rate_grace=min_rate_grace)
+                              min_rate_grace=min_rate_grace, sender=sender)
 
     @staticmethod
     def websocket(reader: AbstractReader, writer, *,
@@ -1746,7 +1786,7 @@ class RecipientFactory:
                   conn: Connection | None = None,
                   ws_queue_depth: int = _WS_READ_INLINE,
                   decompressor=None,
-                  on_message: Callable[[dict], Awaitable[None]] | None = None,
+                  on_message: Callable[[str | bytes], Awaitable[None]] | None = None,
                   read_ahead_needed: Callable[[], bool] | None = None) -> WebSocketRecipient:
         if not isinstance(writer, AbstractWriter):
             writer = AsyncioWriter(writer)

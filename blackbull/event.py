@@ -75,6 +75,10 @@ class EventDispatcher:
     def has_listeners(self, event_name: str) -> bool:
         return event_name in self._registered
 
+    def has_any_listeners(self, event_names: frozenset[str]) -> bool:
+        """Whether any of *event_names* has a listener: one check for a group."""
+        return not self._registered.isdisjoint(event_names)
+
     async def emit(self, event: Event, *, timeout: float | None = None) -> None:
         """Dispatch ``event`` to all registered handlers.
 

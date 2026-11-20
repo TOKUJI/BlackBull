@@ -145,11 +145,11 @@ async def report(conn):
     return {'rows': rows}
 ```
 
-The flag goes true when the *server* notices — at the next body read — not
-the instant the peer's FIN arrives, so a handler that never reads the body
-and never streams will not see it change.  For a push-style notification
-instead of a poll, use the
-[`request_disconnected` event](events.md).
+The flag goes true when the *server* notices: a body read or a response
+write that finds the client gone, or an HTTP/2 reset.  That is not the
+instant the peer's FIN arrives, so on HTTP/1.1 a handler that neither reads
+the body nor writes will not see it change.  To be told instead of polling,
+use the [`request_disconnected` event](events.md).
 
 ### `read_json` and `read_text`
 

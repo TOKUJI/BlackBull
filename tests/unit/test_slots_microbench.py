@@ -116,8 +116,10 @@ def test_print_per_instance_sizes(capsys):
     # drop guard whether the missing content was the sender's own job, so it
     # cannot be recomputed away. `_remaining` and `_poisoned` hold the content
     # still owed to a stated length and whether it broke after HEADERS.
+    # Every sender's `_peer_lost` records whether one of its writes found the
+    # peer gone, which only the write itself knows.
     for name, size in sizes.items():
-        assert size < 224, (
+        assert size < 232, (
             f'{name} is {size} bytes — far above the slots-equipped '
             f'baseline (~48-96 bytes); check that __slots__ is still in '
             f'effect.'

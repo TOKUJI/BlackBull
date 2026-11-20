@@ -122,7 +122,7 @@
  "unit/test_header_line_cache.py": 52,
  "unit/test_host_header_bytes.py": 1,
  "unit/test_http1_response_framing_policy.py": 12,
- "unit/test_http2_disconnect.py": 2,
+ "unit/test_http2_disconnect.py": 1,
  "unit/test_http2_extensions.py": 2,
  "unit/test_middleware_capabilities.py": 5,
  "unit/test_middleware_decorator.py": 3,

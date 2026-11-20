@@ -26,7 +26,6 @@ def _agg(*, listener_states=None, on_disconnect=None):
     """Spec'd aggregator: predicates need return values (beartype)."""
     agg = AsyncMock(spec=EventAggregator)
     agg.has_request_completed_listeners.return_value = False
-    agg.has_request_disconnected_listeners.return_value = False
     if listener_states is None:
         agg.has_websocket_message_listeners.return_value = False
     else:

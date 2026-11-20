@@ -124,7 +124,7 @@ class _FakeRecipient:
     def __init__(self):
         self.disconnected = False
 
-    def put_disconnect(self):
+    def put_disconnect(self, *, peer=False):
         self.disconnected = True
 
     def put_DATAFrame(self, frame):

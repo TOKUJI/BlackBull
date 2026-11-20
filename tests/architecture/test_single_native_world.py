@@ -20,11 +20,30 @@ entry reading *residual* is a producer that has not been converted yet: still
 correct, still paying the round trip, and the list of them is the remaining
 work.  Adding a new *boundary* entry means claiming a new external edge exists;
 adding a new *residual* entry means moving in the wrong direction.
+
+The runtime half serves native APIs on BlackBull's own server and asserts none
+of those sites executes: a boundary is paid only by the caller that asked for
+it.  Its clients are not BlackBull's own, whose modules the server shares.
 """
 import ast
+import asyncio
 import pathlib
+import sys
+from contextlib import contextmanager
 
 import pytest
+from hpack import Decoder, Encoder
+from websockets.asyncio.client import connect
+
+from blackbull import BlackBull, Response, WebSocket
+from blackbull.connection import Connection
+from blackbull.headers import Headers
+from blackbull.middleware import websocket as websocket_middleware
+from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
+from blackbull.request import read_body
+from blackbull.utils import Scheme
+from tests.conformance.http2._harness import _make_h2_frame, h2_connect, h2_terminal
+from tests.harness import served
 
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -90,9 +109,9 @@ _REQUEST_DICT_ALLOWED: dict[str, str] = {
         'asked for it (a full-form receive(), or an external host)',
     'blackbull/server/recipient.py::HTTP2Recipient.__call__':
         'boundary — the same channel on H2',
-    'blackbull/app.py::BlackBull.warm_request._receive':
-        'boundary — a synthetic ASGI receive built for warm-up requests; it '
-        'is a plain callable with no native arm, by construction',
+    'blackbull/app.py::_WarmBody.__call__':
+        "boundary — warm_request's channel as a deprecated receive() reader "
+        'sees it; native readers take next_chunk',
     'blackbull/testing/native.py::request.receive':
         'boundary — Tier-1 drives the app through the ASGI receive contract',
 }
@@ -118,9 +137,6 @@ _WS_DICT_ALLOWED: dict[str, str] = {
         'boundary — the ASGI receive channel, minted per call for the raw '
         '(conn, receive, send) form and the external host; the object form '
         'takes next_message() and pays nothing',
-    'blackbull/server/websocket_actor.py::WebSocketActor._emit_websocket_message':
-        "boundary — builds the websocket_message event's documented "
-        "{'conn', 'text', 'bytes'} detail, and only when a listener wants it",
 }
 
 # The ASGI → native response parser and its typed event shapes.  These exist
@@ -167,6 +183,8 @@ class _Scanner(ast.NodeVisitor):
         self.ws_dicts: list[str] = []
         self.dict_lane_imports: list[str] = []
         self.boundary_wrappers: list[str] = []
+        #: The line of every site above, for the runtime probe.
+        self.lines: list[int] = []
 
     # -- qualname tracking --------------------------------------------------
 
@@ -188,31 +206,28 @@ class _Scanner(ast.NodeVisitor):
         if isinstance(func, ast.Attribute):
             if func.attr == 'to_asgi':
                 self.to_asgi.append(self._site)
+                self.lines.append(node.lineno)
             elif func.attr == 'to_asgi_scope':
                 self.to_asgi_scope.append(self._site)
+                self.lines.append(node.lineno)
         elif isinstance(func, ast.Name) and func.id == 'asgi_send_boundary':
             self.boundary_wrappers.append(self._site)
+            self.lines.append(node.lineno)
         self.generic_visit(node)
 
     def visit_Dict(self, node: ast.Dict) -> None:
         for key, value in zip(node.keys, node.values):
             if not (isinstance(key, ast.Constant) and key.value == 'type'):
                 continue
-            if isinstance(value, ast.Constant) and value.value in _RESPONSE_TYPES:
-                self.response_dicts.append(self._site)
-            elif (isinstance(value, ast.Attribute)
-                    and value.attr in _RESPONSE_TYPE_ATTRS):
-                self.response_dicts.append(self._site)
-            elif isinstance(value, ast.Constant) and value.value in _REQUEST_TYPES:
-                self.request_dicts.append(self._site)
-            elif (isinstance(value, ast.Attribute)
-                    and value.attr in _REQUEST_TYPE_ATTRS):
-                self.request_dicts.append(self._site)
-            elif isinstance(value, ast.Constant) and value.value in _WS_TYPES:
-                self.ws_dicts.append(self._site)
-            elif (isinstance(value, ast.Attribute)
-                    and value.attr in _WS_TYPE_ATTRS):
-                self.ws_dicts.append(self._site)
+            kind = value.value if isinstance(value, ast.Constant) else (
+                value.attr if isinstance(value, ast.Attribute) else None)
+            for found, constants, attrs in (
+                    (self.response_dicts, _RESPONSE_TYPES, _RESPONSE_TYPE_ATTRS),
+                    (self.request_dicts, _REQUEST_TYPES, _REQUEST_TYPE_ATTRS),
+                    (self.ws_dicts, _WS_TYPES, _WS_TYPE_ATTRS)):
+                if kind in (constants if isinstance(value, ast.Constant) else attrs):
+                    found.append(self._site)
+                    self.lines.append(node.lineno)
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
@@ -323,3 +338,173 @@ def test_middleware_never_imports_the_dict_lane(scanned):
     assert not offenders, (
         'middleware importing the ASGI dict lane:\n'
         + '\n'.join(f'    {o}' for o in offenders))
+
+
+# ---------------------------------------------------------------------------
+# Runtime: serving native APIs executes none of the sites above
+# ---------------------------------------------------------------------------
+
+_needs_monitoring = pytest.mark.skipif(
+    sys.version_info < (3, 12), reason='sys.monitoring needs Python 3.12+')
+
+
+@contextmanager
+def _conversions(scanned):
+    """Record ``module:line`` of every enumerated conversion site run inside."""
+    sites = {(str(_REPO_ROOT / sc.module), line) for sc in scanned for line in sc.lines}
+    mon = sys.monitoring
+    tool = next(t for t in range(6) if mon.get_tool(t) is None)
+    seen: list[str] = []
+
+    def on_line(code, line):
+        if (code.co_filename, line) not in sites:
+            return mon.DISABLE
+        seen.append(f'{pathlib.Path(code.co_filename).relative_to(_REPO_ROOT)}:{line}')
+
+    mon.use_tool_id(tool, 'single-native-world')
+    try:
+        mon.register_callback(tool, mon.events.LINE, on_line)
+        mon.set_events(tool, mon.events.LINE)
+        yield seen
+    finally:
+        mon.set_events(tool, 0)
+        mon.free_tool_id(tool)
+
+
+@pytest.fixture
+def native_serving(monkeypatch):
+    """BlackBull's own server calling the app natively, on every test lane."""
+    monkeypatch.setenv('BB_FORCE_ASGI_SCOPE', '0')
+
+
+async def _ignore(event):
+    pass
+
+
+def _app() -> BlackBull:
+    app = BlackBull()
+
+    @app.route(path='/')
+    async def root(conn, receive, send):
+        await send(Response(b'ok'))
+
+    @app.route(path='/body', methods=['POST'])
+    async def body(conn, receive, send):
+        await send(Response(await conn.body()))
+
+    @app.route(path='/read-body', methods=['POST'])
+    async def read(conn, receive, send):
+        await send(Response(await read_body(receive)))
+
+    @app.route(path='/legacy', methods=['POST'])
+    async def legacy(conn, receive, send):
+        await receive()
+        await send(Response(b'ok'))
+
+    @app.route(path='/ws', scheme=Scheme.websocket, middlewares=[websocket_middleware])
+    async def echo(ws: WebSocket):
+        async for message in ws:
+            await ws.send(message)
+
+    async def passthrough(conn, receive, send, call_next):
+        await call_next(conn, receive, send)
+
+    app.use(passthrough)
+    # Observers whose events need no ASGI encoding of their own.
+    for name in ('request_disconnected', 'websocket_message'):
+        app.on(name)(_ignore)
+    return app
+
+
+def _post(path: bytes, body: bytes) -> bytes:
+    return (b'POST ' + path + b' HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n'
+            % len(body) + body)
+
+
+async def _h1(s, raw: bytes) -> bytes:
+    w = await s.wire()
+    await w.send(raw)
+    return (await w.response()).body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('raw', [
+    b'GET / HTTP/1.1\r\nHost: x\r\n\r\n',
+    _post(b'/body', b'payload'),
+    _post(b'/read-body', b'payload'),
+], ids=['get', 'conn-body', 'read-body'])
+@pytest.mark.usefixtures('native_serving')
+@_needs_monitoring
+async def test_serving_http1_converts_nothing(scanned, raw):
+    async with served(_app()) as s:
+        await _h1(s, raw)    # warm: first-request setup is not per request
+        with _conversions(scanned) as seen:
+            await _h1(s, raw)
+    assert seen == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('path,body', [(b'/', b''), (b'/body', b'payload')],
+                         ids=['get', 'conn-body'])
+@pytest.mark.usefixtures('native_serving')
+@_needs_monitoring
+async def test_serving_http2_converts_nothing(scanned, path, body):
+    fields = [(b':method', b'POST' if body else b'GET'), (b':path', path),
+              (b':scheme', b'http'), (b':authority', b'x')]
+    async with served(_app()) as s:
+        wire = await h2_connect(s)
+        encoder, decoder = Encoder(), Decoder()
+        for sid in (1, 3):
+            flags = HeaderFrameFlags.END_HEADERS | (0 if body else HeaderFrameFlags.END_STREAM)
+            frames = _make_h2_frame(FrameTypes.HEADERS, flags, sid, encoder.encode(fields))
+            if body:
+                frames += _make_h2_frame(FrameTypes.DATA, 1, sid, body)
+            if sid == 1:
+                await wire.send(frames)
+                await h2_terminal(wire, sid, decoder)
+                continue
+            with _conversions(scanned) as seen:
+                await wire.send(frames)
+                _, got = await h2_terminal(wire, sid, decoder)
+    assert got == (body or b'ok')
+    assert seen == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures('native_serving')
+@_needs_monitoring
+async def test_serving_a_websocket_through_the_builtin_middleware_converts_nothing(scanned):
+    async with served(_app()) as s:
+        with _conversions(scanned) as seen:
+            async with connect(f'ws://127.0.0.1:{s.server.port}/ws') as ws:
+                await ws.send('hello')
+                assert await ws.recv() == 'hello'
+        await asyncio.sleep(0.05)
+    assert seen == []
+
+
+@pytest.mark.asyncio
+@_needs_monitoring
+async def test_warm_request_reads_its_body_natively(scanned):
+    app = BlackBull()
+    bodies = []
+
+    @app.route(path='/warm', methods=['POST'])
+    async def warm(conn, receive, send):
+        bodies.append(await conn.body())
+
+    conn = Connection(method='POST', path='/warm', raw_path=b'/warm', headers=Headers([]))
+    with _conversions(scanned) as seen:
+        await app.warm_request(conn, body=b'payload', n=2)
+    assert bodies == [b'payload'] * 2
+    assert seen == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures('native_serving')
+@_needs_monitoring
+async def test_the_probe_sees_a_deprecated_receive_reader(scanned):
+    async with served(_app()) as s:
+        with pytest.warns(DeprecationWarning), _conversions(scanned) as seen:
+            assert await _h1(s, _post(b'/legacy', b'x')) == b'ok'
+    assert any(site.startswith('blackbull/server/recipient.py:') for site in seen)

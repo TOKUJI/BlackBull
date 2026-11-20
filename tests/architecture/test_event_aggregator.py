@@ -29,7 +29,7 @@ async def test_on_error_with_exception_group(aggregator, dispatcher) -> None:
 
 def test_all_level_b_events_covered() -> None:
     expected = {
-        "on_request_disconnected", "on_error",
+        "on_error",
         "on_websocket_connected", "on_websocket_message",
         "on_websocket_disconnected",
         "on_connection_accepted", "on_connection_closed",
@@ -47,7 +47,6 @@ def test_all_level_b_events_covered() -> None:
 _LISTENER_CHECKS = [
     ("has_websocket_message_listeners", "websocket_message"),
     ("has_request_completed_listeners", "request_completed"),
-    ("has_request_disconnected_listeners", "request_disconnected"),
 ]
 
 

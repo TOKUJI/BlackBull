@@ -6,7 +6,6 @@ import time
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-from ..asgi import ASGIEvent
 # Runtime import, not TYPE_CHECKING: beartype resolves the ``EventAggregator``
 # union annotations below as expressions against module globals.  Neither
 # module imports anything back from this one, so there is no cycle.
@@ -110,20 +109,6 @@ def request_record_needed(aggregator: EventAggregator | None) -> bool:
     if PHASE_TRACE or _access_logger.isEnabledFor(logging.INFO):
         return True
     return aggregator is not None and aggregator.has_request_completed_listeners()
-
-
-def disconnect_events_observed(aggregator: EventAggregator | None) -> bool:
-    """Whether the disconnect-detecting receive wrapper is observed.
-
-    The wrapper emits ``request_disconnected`` and marks the request so
-    ``request_completed`` can suppress itself on a dropped one.  With neither
-    listener present nothing observes either effect and the actor dispatches
-    the raw ``receive`` instead.  Body-level disconnect detection
-    (``conn.body()`` → ``ClientDisconnected``) does not go through it."""
-    if aggregator is None:
-        return False
-    return (aggregator.has_request_disconnected_listeners()
-            or aggregator.has_request_completed_listeners())
 
 
 @dataclass
@@ -267,19 +252,3 @@ class AccessLogRecord:
         return d
 
 
-
-def _make_disconnect_detecting_receive(receive, conn, aggregator: EventAggregator):
-    """Wrap *receive* to emit request_disconnected when http.disconnect is seen.
-
-    Used by both the HTTP/1.1 and HTTP/2 actor paths.
-    Marks *conn* disconnected on first detection (idempotent).
-    """
-    from ..connection import disconnected, mark_disconnected  # noqa: PLC0415
-    async def detecting_receive():
-        event = await receive()
-        if isinstance(event, dict) and event.get('type') == ASGIEvent.HTTP_DISCONNECT:
-            if not disconnected(conn):
-                mark_disconnected(conn)
-                await aggregator.on_request_disconnected(conn)
-        return event
-    return detecting_receive

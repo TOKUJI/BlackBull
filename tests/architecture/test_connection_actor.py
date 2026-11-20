@@ -22,7 +22,6 @@ def _mock_aggregator() -> AsyncMock:
     """
     agg = AsyncMock(spec_set=EventAggregator)
     agg.has_request_completed_listeners.return_value = False
-    agg.has_request_disconnected_listeners.return_value = False
     agg.has_websocket_message_listeners.return_value = False
     return agg
 

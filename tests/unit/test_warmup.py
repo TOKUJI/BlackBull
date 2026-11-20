@@ -290,3 +290,17 @@ async def test_warmup_inline_skips_warm_tls_without_context(monkeypatch):
     monkeypatch.setattr(warmup_mod, 'warm_tls', fake_warm_tls)
     await warmup_inline(app, None)
     assert called['v'] is False
+
+
+@pytest.mark.asyncio
+async def test_warm_request_hands_conn_body_the_payload_each_time():
+    app = BlackBull()
+    bodies = []
+
+    @app.route(path='/warm', methods=['POST'])
+    async def warm(conn, receive, send):
+        bodies.append(await conn.body())
+
+    conn = Connection(method='POST', path='/warm', raw_path=b'/warm', headers=Headers([]))
+    await app.warm_request(conn, body=b'payload', n=2)
+    assert bodies == [b'payload'] * 2

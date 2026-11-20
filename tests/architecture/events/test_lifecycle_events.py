@@ -1,17 +1,23 @@
 """Lifecycle events through a served app; the contracts are in docs/guide/events.md."""
 import asyncio
+import socket
+import struct
 
 import pytest
+from hpack import Encoder
 from websockets.asyncio.client import connect
 
-from blackbull import BlackBull, StreamingResponse
+from blackbull import BlackBull, Response, StreamingResponse
 from blackbull.connection import Connection
 from blackbull.event import Event
 from blackbull.middleware import Compression
+from blackbull.protocol.frame_types import FrameTypes, HeaderFrameFlags
+from blackbull.request import read_body
 from blackbull.server.access_log import AccessLogRecord
 from blackbull.utils import Scheme
 
-from tests.harness import served
+from tests.conformance.http2._harness import _make_h2_frame, h2_connect
+from tests.harness import read_h2_frame, served
 
 pytestmark = pytest.mark.asyncio
 
@@ -214,49 +220,262 @@ async def test_completion_follows_the_last_streamed_chunk():
             for e in seen['request_completed']] == [(200, 18), (200, 4)]
 
 
-async def test_a_lone_disconnect_listener_is_told():
-    async def waits(conn, receive, send):
-        await receive()
-        await receive()
+#: A request whose declared body never fully arrives.
+_PARTIAL = b'POST /slow HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\nabc'
 
+
+async def _reads_conn_body(conn, receive, send):
+    await conn.body()
+
+
+async def _reads_read_body(conn, receive, send):
+    await read_body(receive)
+
+
+async def _reads_receive(conn, receive, send):
+    while (await receive())['type'] != 'http.disconnect':
+        pass
+
+
+async def _until(seen, name) -> None:
+    for _ in range(200):
+        if seen[name]:
+            break
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(SETTLE)
+
+
+async def _gone_mid_body(app, seen) -> None:
+    async with served(app) as s:
+        w = await s.wire()
+        await w.send(_PARTIAL)
+        await asyncio.sleep(SETTLE)
+        await w.aclose()
+        await _until(seen, 'request_disconnected')
+
+
+@pytest.mark.parametrize('reader', [_reads_conn_body, _reads_read_body, _reads_receive],
+                         ids=['conn.body', 'read_body', 'receive'])
+async def test_a_client_gone_mid_body_is_disconnected_not_completed(reader):
+    app, seen = _app(**{'/slow': reader})
+    await _gone_mid_body(app, seen)
+    [event] = seen['request_disconnected']
+    d = event.detail
+    assert (d['method'], d['path'], _conn(d).path) == ('POST', '/slow', '/slow')
+    assert 'client_ip' in d and d['http_version'] == '1.1'
+    assert not {'status', 'response_bytes', 'duration_ms'} & d.keys()
+    assert seen['request_completed'] == []
+
+
+async def test_a_lone_disconnect_listener_is_told():
     app = BlackBull()
-    app.route(path='/slow')(waits)
+    app.route(path='/slow', methods=['POST'])(_reads_conn_body)
     got = []
 
     @app.on('request_disconnected')
     async def observe(event: Event):
         got.append(event)
 
-    async with served(app) as s:
-        w = await s.wire()
-        await w.send(_get(b'/slow'))
-        for _ in range(200):
-            if got:
-                break
-            await asyncio.sleep(0.01)
+    await _gone_mid_body(app, {'request_disconnected': got})
     assert len(got) == 1
 
 
-async def test_a_handler_that_finds_the_peer_gone_is_disconnected_not_completed():
-    async def waits(conn, receive, send):
+async def test_reading_past_the_body_is_not_a_disconnect():
+    async def past(conn, receive, send):
         await receive()
-        await receive()
+        assert (await receive())['type'] == 'http.disconnect'
+        await send(Response(b'ok'))
 
-    app, seen = _app(**{'/slow': waits})
+    app, seen = _app(**{'/past': past})
+    await _http(app, _get(b'/past', method=b'POST', body=b'abc'))
+    assert seen['request_disconnected'] == []
+    assert len(seen['request_completed']) == 1
+
+
+async def test_a_client_gone_mid_response_is_disconnected_not_completed():
+    async def chunks():
+        for _ in range(400):
+            yield b'x' * 65536
+
+    async def big(conn, receive, send):
+        await StreamingResponse(chunks())(conn, receive, send)
+
+    app, seen = _app(**{'/big': big})
     async with served(app) as s:
         w = await s.wire()
-        await w.send(_get(b'/slow'))
-        for _ in range(200):
-            if seen['request_disconnected']:
-                break
-            await asyncio.sleep(0.01)
-        await asyncio.sleep(SETTLE)
-    [event] = seen['request_disconnected']
-    d = event.detail
-    assert (d['method'], d['path'], _conn(d).path) == ('GET', '/slow', '/slow')
-    assert 'client_ip' in d and 'http_version' in d
-    assert not {'status', 'response_bytes', 'duration_ms'} & d.keys()
+        await w.send(_get(b'/big'))
+        await w.recv_until()
+        await w.aclose()
+        await _until(seen, 'request_disconnected')
+    assert len(seen['request_disconnected']) == 1
     assert seen['request_completed'] == []
+
+
+async def _h2_reset(app, seen, *, body: bool) -> None:
+    fields = [(b':method', b'POST'), (b':path', b'/slow'), (b':scheme', b'http'),
+              (b':authority', b'x')]
+    end = 0 if body else HeaderFrameFlags.END_STREAM
+    async with served(app) as s:
+        wire = await h2_connect(s)
+        frames = _make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS | end, 1,
+                                Encoder().encode(fields))
+        if body:
+            frames += _make_h2_frame(FrameTypes.DATA, 0, 1, b'abc')
+        await wire.send(frames)
+        await asyncio.sleep(SETTLE)
+        await wire.send(_make_h2_frame(FrameTypes.RST_STREAM, 0, 1, (8).to_bytes(4, 'big')))
+        await _until(seen, 'request_disconnected')
+
+
+@pytest.mark.parametrize('last,ends', [
+    ({'type': 'http.disconnect'}, 'request_disconnected'),
+    ({'type': 'http.request', 'body': b'def', 'more_body': False}, 'request_completed'),
+], ids=['host-disconnect', 'host-body'])
+async def test_an_external_hosts_disconnect_mid_body_is_disconnected(last, ends):
+    gone = []
+
+    async def reads(conn, receive, send):
+        try:
+            await conn.body()
+        finally:
+            gone.append(conn.disconnected)
+
+    app, seen = _app(**{'/slow': reads})
+    events = iter([{'type': 'http.request', 'body': b'abc', 'more_body': True}, last])
+
+    async def receive():
+        return next(events)
+
+    async def send(event):
+        pass
+
+    scope = {'type': 'http', 'asgi': {'version': '3.0'}, 'http_version': '1.1',
+             'method': 'POST', 'scheme': 'http', 'path': '/slow', 'raw_path': b'/slow',
+             'query_string': b'', 'headers': [(b'host', b'x')]}
+    await app(scope, receive, send)
+    await asyncio.sleep(SETTLE)
+    assert gone == [ends == 'request_disconnected']
+    other = {'request_completed', 'request_disconnected'} - {ends}
+    assert len(seen[ends]) == 1 and seen[other.pop()] == []
+
+
+def _reset(wire) -> None:
+    """Drop the connection with a TCP RST rather than a FIN."""
+    sock = wire.writer.get_extra_info('socket')
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+    wire.writer.transport.abort()
+
+
+@pytest.mark.parametrize('protocol', ['http1', 'http2'])
+async def test_a_connection_reset_mid_body_is_disconnected_not_completed(protocol):
+    app, seen = _app(**{'/slow': _reads_conn_body})
+    async with served(app) as s:
+        if protocol == 'http1':
+            wire = await s.wire()
+            await wire.send(_PARTIAL)
+        else:
+            wire = await h2_connect(s)
+            fields = [(b':method', b'POST'), (b':path', b'/slow'), (b':scheme', b'http'),
+                      (b':authority', b'x')]
+            await wire.send(_make_h2_frame(FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS, 1,
+                                           Encoder().encode(fields))
+                            + _make_h2_frame(FrameTypes.DATA, 0, 1, b'abc'))
+        await asyncio.sleep(SETTLE)
+        _reset(wire)
+        await _until(seen, 'request_disconnected')
+    assert len(seen['request_disconnected']) == 1 and seen['request_completed'] == []
+
+
+async def test_an_h2_reset_mid_body_is_disconnected_not_completed():
+    app, seen = _app(**{'/slow': _reads_conn_body})
+    await _h2_reset(app, seen, body=True)
+    [event] = seen['request_disconnected']
+    assert (event.detail['path'], event.detail['http_version']) == ('/slow', '2')
+    assert seen['request_completed'] == []
+
+
+async def _h2_get(wire, path: bytes) -> None:
+    fields = [(b':method', b'GET'), (b':path', path), (b':scheme', b'http'),
+              (b':authority', b'x')]
+    await wire.send(_make_h2_frame(
+        FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM, 1,
+        Encoder().encode(fields)))
+
+
+async def _h2_body(wire) -> bytes:
+    """Stream 1's response body, through to its END_STREAM."""
+    body = b''
+    while True:
+        kind, flags, sid, payload = await read_h2_frame(wire.reader)
+        if kind == 0 and sid == 1:
+            body += payload
+            if flags & 1:
+                return body
+
+
+async def test_a_stream_answered_after_the_clients_goaway_is_completed():
+    async def late(conn, receive, send):
+        await asyncio.sleep(SETTLE)
+        await send(Response(b'late'))
+
+    app, seen = _app(**{'/late': late})
+    async with served(app) as s:
+        wire = await h2_connect(s)
+        await _h2_get(wire, b'/late')
+        await wire.send(_make_h2_frame(FrameTypes.GOAWAY, 0, 0, bytes(8)))
+        body = await _h2_body(wire)
+        await _until(seen, 'request_completed')
+    assert body == b'late'
+    assert len(seen['request_completed']) == 1 and seen['request_disconnected'] == []
+
+
+@pytest.mark.parametrize('leave', ['close', 'reset'])
+async def test_an_answered_h2_stream_is_completed_however_the_client_leaves(leave):
+    async def lingers(conn, receive, send):
+        await send(Response(b'ok'))
+        await asyncio.sleep(SETTLE * 2)
+
+    app, seen = _app(**{'/linger': lingers})
+    async with served(app) as s:
+        wire = await h2_connect(s)
+        await _h2_get(wire, b'/linger')
+        assert await _h2_body(wire) == b'ok'
+        if leave == 'close':
+            await wire.aclose()
+        else:
+            await wire.send(_make_h2_frame(FrameTypes.RST_STREAM, 0, 1, (8).to_bytes(4, 'big')))
+        await _until(seen, 'request_completed')
+    assert len(seen['request_completed']) == 1 and seen['request_disconnected'] == []
+
+
+async def test_a_write_the_server_times_out_is_not_a_disconnect(monkeypatch):
+    monkeypatch.setenv('BB_WRITE_TIMEOUT', '0.2')
+
+    async def big(conn, receive, send):
+        await send(Response(b'x' * (64 << 20)))
+
+    app, seen = _app(**{'/big': big})
+    async with served(app) as s:
+        w = await s.wire()
+        await w.send(_get(b'/big'))
+        await _until(seen, 'request_completed')
+    assert seen['request_disconnected'] == []
+    assert len(seen['request_completed']) == 1
+
+
+async def test_a_handler_cancelled_by_an_h2_reset_sees_the_peer_gone():
+    seen_gone = []
+
+    async def waits(conn, receive, send):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            seen_gone.append(conn.disconnected)
+
+    app, seen = _app(**{'/slow': waits})
+    await _h2_reset(app, seen, body=False)
+    assert seen_gone == [True]
+    assert len(seen['request_disconnected']) == 1 and seen['request_completed'] == []
 
 
 async def test_an_answered_request_is_not_disconnected():

@@ -184,6 +184,9 @@ class AbstractWriter(ABC):
 
     # Peer death is shared by every sender on this connection writer.
     peer_gone: bool = False
+    # This server closed the transport itself (a write timeout, an orderly
+    # close), so a loss seen after it is not the peer leaving.
+    closed_by_server: bool = False
 
     @abstractmethod
     async def write(self, data: bytes) -> None:
@@ -302,6 +305,7 @@ class AsyncioWriter(AbstractWriter):
             self._write_timeout)
         log_cap_hit(self._cap_name, requested=self._write_timeout,
                     limit=self._write_timeout, protocol=self._protocol)
+        self.closed_by_server = True
         try:
             self._sw.close()
         except Exception as close_exc:
@@ -337,6 +341,7 @@ class AsyncioWriter(AbstractWriter):
 
     async def close(self) -> None:
         # Writes have drained; close without waiting for transport shutdown.
+        self.closed_by_server = True
         if self._linger is not None:
             await self._linger()
             return
@@ -444,7 +449,7 @@ class BaseSender(ABC):
     shared size gate selects joining versus vectored transport writes.
     """
 
-    __slots__ = ('_writer', '_closed')
+    __slots__ = ('_writer', '_closed', '_peer_lost')
     #: Whether a write to a gone peer raises ClientDisconnected (response
     #: senders) or is dropped (the connection's own frames, WebSocket).
     _raise_when_gone = False
@@ -452,6 +457,8 @@ class BaseSender(ABC):
     def __init__(self, writer: AbstractWriter):
         self._writer = writer
         self._closed = False
+        #: One of this sender's writes found the peer gone.
+        self._peer_lost = False
 
     async def _settle_buffered_head(self) -> None:
         """A head that never got content is complete — settle it before the
@@ -482,24 +489,26 @@ class BaseSender(ABC):
         other sender on the connection has to rediscover it.
         """
         if self._closed or self._writer.peer_gone:
-            if self._writer.peer_gone and self._raise_when_gone:
-                raise _response_lost()
+            if self._writer.peer_gone:
+                self._peer_lost = True
+                if self._raise_when_gone:
+                    raise _response_lost()
             return
         if self._writer.peer_is_gone():
-            self._closed = self._writer.peer_gone = True
+            self._closed = self._peer_lost = self._writer.peer_gone = True
             if _DEBUG:
                 logger.debug('sender: transport already closing; write skipped')
             return
         try:
             await write_fn(arg)
         except (ConnectionResetError, BrokenPipeError) as exc:
-            self._closed = self._writer.peer_gone = True
+            self._closed = self._peer_lost = self._writer.peer_gone = True
             if _DEBUG:
                 logger.debug('sender: peer closed write side (%s)', exc.__class__.__name__)
         except OSError as exc:
             # SSLEOFError / SSLZeroReturnError land here on TLS connections
             # whose peer dropped without a proper close-notify.
-            self._closed = self._writer.peer_gone = True
+            self._closed = self._peer_lost = self._writer.peer_gone = True
             if _DEBUG:
                 logger.debug('sender: write failed on closed TLS transport (%s)', exc.__class__.__name__)
 
@@ -1172,6 +1181,18 @@ class HTTP2Sender(BaseSender):
             self.retire_stream()
         raise ValueError(f'response body {problem} Content-Length')
 
+    @property
+    def answered(self) -> bool:
+        """The response has ended and none of its writes found the peer gone."""
+        return self._end_stream_sent and not self._peer_lost
+
+    @property
+    def lost(self) -> bool:
+        """The peer went away before this response reached it, without this
+        server closing the connection."""
+        writer = self._writer
+        return writer.peer_gone and not writer.closed_by_server and not self.answered
+
     def retire_stream(self) -> None:
         """Stop this stream's pending and future output without closing its peer.
 
@@ -1338,8 +1359,10 @@ class HTTP2Sender(BaseSender):
         offset = 0
         while offset < total:
             if self._closed or self._writer.peer_gone:
-                if self._writer.peer_gone and self._raise_when_gone:
-                    raise _response_lost()
+                if self._writer.peer_gone:
+                    self._peer_lost = True
+                    if self._raise_when_gone:
+                        raise _response_lost()
                 return
             while (self._conn_window.size <= 0 or
                    self.stream_window_size <= 0):

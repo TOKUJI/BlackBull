@@ -310,19 +310,21 @@ owns.
 
 ### `request_disconnected` — client gave up
 
-Fires when an HTTP client closes the connection before the
-response has been fully sent.  **Mutually exclusive** with
-`request_completed`: a request that disconnected does not also
-fire `request_completed`.
+Fires when an HTTP client leaves before the response has been fully
+sent, on HTTP/1.1 and HTTP/2.  It fires at the end of the request in
+place of `request_completed`: the two are **mutually exclusive**.
 
-The event fires when a read of the request body (`conn.body()`,
-`conn.stream()`, or the deprecated direct `receive()`) finds the
-client gone.
+The client has left when a body read finds the connection closed,
+however the handler reads it; when a response write finds it gone; or,
+on HTTP/2, when it resets the stream or drops the connection.  A request
+the server abandons itself (a body or write timeout, the minimum body rate,
+its own GOAWAY) is not a disconnect, and neither is a stream still answered
+after the client's GOAWAY.  Under an external ASGI host, the host's
+`http.disconnect` before the body ends is the client leaving.
 
-For HTTP/2, when the underlying TCP connection closes while
-streams are still in flight (the common case for SSE), the
-framework injects an `http.disconnect` event into every active
-stream's receive channel.
+`conn.disconnected` reads the same state while the handler runs.  An
+HTTP/2 reset cancels the handler, and the flag is already set when its
+cleanup runs.
 
 WebSocket connections never fire `request_disconnected` — use
 `websocket_disconnected` instead.

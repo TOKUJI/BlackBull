@@ -100,6 +100,18 @@ metadata; reinstall an editable checkout after changing that version.
   success.  Route and gRPC handlers run through one place that emits the
   handler events; with gRPC enabled, an ordinary request without a
   `Content-Type` is no longer parsed for it (BLA-684).
+- `request_disconnected` fires on HTTP/1.1 and HTTP/2 whenever the client
+  leaves before the response is complete: a body read or response write that
+  finds it gone, or an HTTP/2 reset or dropped connection, however the handler
+  reads the body. It fires at the end of the request, in place of
+  `request_completed`. It no longer fires for a handler that only reads past
+  the body, or for a request the server abandons (body or write timeout,
+  minimum body rate, its own GOAWAY). `conn.disconnected` reads the same
+  state. Under an external ASGI host, the body is read from the host's
+  `receive` through a native channel, and its `http.disconnect` before the
+  body ends counts. The built-in `websocket` middleware, `websocket_message`
+  and `warm_request` no longer build ASGI event dicts, and `warm_request`
+  hands `conn.body()` its payload (BLA-685).
 - `BLACKBULL_ENV` defaults to `production`, and an unrecognised value is
   `production` with a warning.  Unset, `StaticFiles` serves nothing, the
   default error handler shows no exception detail, and the fault-injection

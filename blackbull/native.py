@@ -6,6 +6,10 @@ dictionaries only at conversion boundaries.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import Protocol, runtime_checkable
+
+from .asgi import ASGIReceiveCallable
 from .headers import _MinimalResponseHeaders, _as_response_fields, _owned_response_fields
 from .deprecations import _warn_deprecated
 
@@ -486,3 +490,32 @@ class DictReceive:
 def raw_receive(receive):
     """The channel under a [`DictReceive`][], or *receive* itself."""
     return receive.raw if type(receive) is DictReceive else receive
+
+
+# -- request channels: what dispatch threads in place of ASGI receive/send --
+
+@runtime_checkable
+class BodyChannel(Protocol):
+    """BlackBull's HTTP receive channel: the request body as ``bytes``."""
+
+    async def next_chunk(self) -> bytes | None:
+        """The next body chunk; ``None`` once the body is complete."""
+
+
+@runtime_checkable
+class MessageChannel(Protocol):
+    """BlackBull's WebSocket receive channel: whole messages, ``str`` or ``bytes``."""
+
+    async def await_connect(self) -> None:
+        """Take the opening handshake."""
+
+    async def next_message(self) -> str | bytes:
+        """The next whole message."""
+
+
+#: A request's receive channel: native on BlackBull's server; an external
+#: host's or a deprecated reader's ASGI ``receive`` at the boundary.
+ReceiveChannel = BodyChannel | MessageChannel | ASGIReceiveCallable
+
+#: A request's send: it takes native messages.
+NativeSend = Callable[[NativeResponse | NativeWSMessage], Awaitable[None]]

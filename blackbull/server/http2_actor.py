@@ -43,8 +43,8 @@ from .access_log import (
     open_record as _open_record,
     start_record as _start_record,
 )
-from ..asgi import ASGIEvent, ASGIReceiveCallable, ASGISendCallable
-from ..native import NativeResponse
+from ..asgi import ASGIEvent
+from ..native import NativeResponse, NativeSend, ReceiveChannel
 from .http1_actor import RequestActor
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ _DEBUG = debug_gate(logger)
 @runtime_checkable
 class _StreamRecipient(Protocol):
     """Duck-type interface shared by HTTP2Recipient and HTTP2StreamReader."""
-    def put_disconnect(self) -> None: pass
+    def put_disconnect(self, *, peer: bool = False) -> None: pass
     def put_DATAFrame(self, frame) -> bool: pass
 
 
@@ -161,8 +161,8 @@ class StreamActor(Actor):
         self,
         stream_id: int,
         conn: Connection,
-        receive: ASGIReceiveCallable,
-        send: ASGISendCallable,
+        receive: ReceiveChannel,
+        send: NativeSend,
         app: Callable[..., Awaitable[None]],
         # ``None`` for a foreign ASGI app: the actor skips event emission
         # rather than the caller forking to a second dispatch path.
@@ -343,7 +343,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             self._senders[stream_id] = sender
         return self._senders[stream_id]
 
-    def _make_stream_recipient(self, stream_id: int) -> HTTP2Recipient:
+    def _make_stream_recipient(self, stream_id: int, sender=None) -> HTTP2Recipient:
         """Recipient with consume-time WINDOW_UPDATE crediting.
 
         Why credit on consumption rather than on delivery:
@@ -357,6 +357,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             max_body=self._max_body_size,
             min_rate=self._min_body_rate,
             min_rate_grace=self._min_body_rate_grace,
+            sender=sender,
         )
 
     def _make_consume_credit_callback(
@@ -587,7 +588,9 @@ class HTTP2Actor(Actor, HTTP2Connection):
             else:
                 sender.mark_client_gone()
         if recipient is not None:
-            recipient.put_disconnect()
+            # A peer reset after the response ended leaves nothing unanswered.
+            peer = by_peer and getattr(sender, 'answered', False) is not True
+            recipient.put_disconnect(peer=peer)
             self._release_recipient_credit(recipient, additional_credit)
         elif additional_credit:
             self._release_recipient_credit(None, additional_credit)
@@ -624,19 +627,22 @@ class HTTP2Actor(Actor, HTTP2Connection):
         assert self._reader is not None, "receive() called with no reader"
         try:
             data = await self._reader.readexactly(9)
+            size = int.from_bytes(data[:3], 'big', signed=False)
+            if size > DEFAULT_MAX_FRAME_SIZE:
+                # RFC 9113 §4.2.  Hand back the 9-byte header alone rather than
+                # buffer an attacker-declared payload of up to 16 MiB to reject it.
+                self._oversize_frame_len = size
+                return data
+            if size:
+                data += await self._reader.readexactly(size)
         except (IncompleteReadError, asyncio.IncompleteReadError):
             return b''
-        size = int.from_bytes(data[:3], 'big', signed=False)
-        if size > DEFAULT_MAX_FRAME_SIZE:
-            # RFC 9113 §4.2.  Hand back the 9-byte header alone rather than
-            # buffer an attacker-declared payload of up to 16 MiB to reject it.
-            self._oversize_frame_len = size
-            return data
-        if size:
-            try:
-                data += await self._reader.readexactly(size)
-            except (IncompleteReadError, asyncio.IncompleteReadError):
-                return b''
+        except OSError:
+            # A lost transport (reset, timeout, TLS failure) reaches the reader
+            # as the error it died with, not EOF: record it before the TaskGroup
+            # cancels the streams.
+            self._signal_peer_lost()
+            raise
         return data
 
     # ------------------------------------------------------------------
@@ -813,7 +819,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
                 await self._on_goaway_frame(self._last_peer_stream_id)
                 return
 
-        _signal_recipients(self._recipients)
+        self._signal_peer_lost()
 
     def _spawn_stream_task(
         self,
@@ -1009,7 +1015,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             return True
 
         self._apply_priority_and_extensions(stream, conn)
-        stream_recipient = self._make_stream_recipient(stream.stream_id)
+        stream_recipient = self._make_stream_recipient(stream.stream_id, send)
         self._recipients[stream.stream_id] = stream_recipient
         stream.on_headers_received(end_stream=bool(header_frame.end_stream))
         if header_frame.end_stream:
@@ -1114,6 +1120,14 @@ class HTTP2Actor(Actor, HTTP2Connection):
         conn = stream.conn
         if conn is not None and conn.extensions is not None:
             conn.extensions['http.response.priority'] = hint
+
+    def _signal_peer_lost(self) -> None:
+        """The connection ended under every live stream: the peer left those
+        still answering, unless this server closed the connection itself."""
+        lost = getattr(self._writer, 'closed_by_server', False) is not True
+        for stream_id, recipient in self._recipients.items():
+            answered = getattr(self._senders.get(stream_id), 'answered', False) is True
+            recipient.put_disconnect(peer=lost and not answered)
 
     async def _on_goaway_frame(self, last_stream_id: int) -> None:
         """Send GOAWAY with the supplied peer-stream id and signal all recipients.

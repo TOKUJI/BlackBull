@@ -1,13 +1,12 @@
 """Tests for HTTP/2 disconnect detection via HTTP2Recipient and _frame_loop."""
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+import ssl
+from unittest.mock import MagicMock
 
 import pytest
 
-from blackbull.event_aggregator import EventAggregator
-from blackbull.server.recipient import HTTP2Recipient
+from blackbull.server.recipient import AbstractReader, HTTP2Recipient
 from blackbull.server.http2_actor import _signal_recipients
-from blackbull.server.access_log import _make_disconnect_detecting_receive as _make_h2_disconnect_receiver
 
 
 # ---------------------------------------------------------------------------
@@ -58,58 +57,11 @@ def test_signal_recipients_empty_dict():
     _signal_recipients({})  # must not raise
 
 
-# ---------------------------------------------------------------------------
-# _make_h2_disconnect_receiver
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_h2_disconnect_receiver_passes_through_normal_events():
-    async def raw_receive():
-        return {'type': 'http.request', 'body': b'x', 'more_body': False}
-
-    aggregator = MagicMock(spec=EventAggregator)
-    scope = {}
-    wrapped = _make_h2_disconnect_receiver(raw_receive, scope, aggregator)
-    event = await wrapped()
-    assert event == {'type': 'http.request', 'body': b'x', 'more_body': False}
-    aggregator.on_request_disconnected.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_h2_disconnect_receiver_emits_request_disconnected():
-    async def raw_receive():
-        return {'type': 'http.disconnect'}
-
-    aggregator = MagicMock(spec=EventAggregator)
-    aggregator.on_request_disconnected = AsyncMock()
-    scope = {}
-    wrapped = _make_h2_disconnect_receiver(raw_receive, scope, aggregator)
-    event = await wrapped()
-
-    assert event == {'type': 'http.disconnect'}
-    aggregator.on_request_disconnected.assert_awaited_once_with(scope)
-    assert scope['_disconnected'] is True
-
-
-@pytest.mark.asyncio
-async def test_h2_disconnect_receiver_idempotent():
-    """request_disconnected fires only once even if handler calls receive() again."""
-    calls = 0
-
-    async def raw_receive():
-        nonlocal calls
-        calls += 1
-        return {'type': 'http.disconnect'}
-
-    aggregator = MagicMock(spec=EventAggregator)
-    aggregator.on_request_disconnected = AsyncMock()
-    scope = {}
-    wrapped = _make_h2_disconnect_receiver(raw_receive, scope, aggregator)
-
-    await wrapped()   # first call — emits event
-    await wrapped()   # second call — already flagged, must not emit again
-
-    aggregator.on_request_disconnected.assert_awaited_once()
+def test_only_a_stream_the_peer_ended_is_peer_gone():
+    retired, reset = HTTP2Recipient(), HTTP2Recipient()
+    retired.put_disconnect()
+    reset.put_disconnect(peer=True)
+    assert (retired.peer_gone, reset.peer_gone) == (False, True)
 
 
 class TestHTTP2Recipient:
@@ -123,3 +75,104 @@ class TestHTTP2Recipient:
         r = HTTP2Recipient(frame)
         event = await r()
         assert event == {'type': 'http.request', 'body': b'body', 'more_body': False}
+
+
+class _Transport:
+    """A loopback transport; with *reset*, the peer is gone and every write raises."""
+
+    def __init__(self, reset: bool) -> None:
+        self._reset = reset
+
+    def write(self, data) -> None:
+        if self._reset:
+            raise ConnectionResetError()
+
+    def writelines(self, parts) -> None:
+        if self._reset:
+            raise ConnectionResetError()
+
+    async def drain(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def is_closing(self) -> bool:
+        return False
+
+    def get_extra_info(self, name, default=None):
+        return default
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('reset', [False, True], ids=['delivered', 'write-reset'])
+async def test_a_stream_is_answered_only_when_its_end_reached_the_peer(reset):
+    from blackbull.native import NativeResponse
+    from blackbull.protocol.frame import FrameFactory
+    from blackbull.server.sender import AsyncioWriter, SenderFactory
+
+    sender = SenderFactory.http2(AsyncioWriter(_Transport(reset)), FrameFactory(), 1)
+    recipient = HTTP2Recipient(sender=sender)
+    await sender(NativeResponse(status=200, header=[], body=b'ok'))
+    assert (sender.answered, recipient.peer_gone) == (not reset, reset)
+
+
+class _LostReader(AbstractReader):
+    """Hands out *data*, then waits for *lose* and raises *loss* as the
+    transport's connection_lost would."""
+
+    def __init__(self, data: bytes, lose: asyncio.Event, loss: BaseException) -> None:
+        self.buf = bytearray(data)
+        self.lose = lose
+        self.loss = loss
+
+    async def read(self, n: int) -> bytes:
+        if not self.buf:
+            await self.lose.wait()
+            raise self.loss
+        chunk = bytes(self.buf[:n])
+        del self.buf[:n]
+        return chunk
+
+    async def readexactly(self, n: int) -> bytes:
+        return await self.read(n)    # the buffer holds whole frames only
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('loss', [ConnectionResetError(), TimeoutError(), ssl.SSLError()],
+                         ids=['reset', 'timeout', 'tls'])
+async def test_a_transport_loss_mid_body_ends_the_request_disconnected(loss):
+    from blackbull import BlackBull
+    from blackbull.protocol.frame_types import FrameTypes
+    from blackbull.server.http2_actor import HTTP2Actor
+    from blackbull.server.sender import AsyncioWriter
+    from tests.conformance.http2._harness import _make_h2_frame, _make_headers_frame
+
+    app, ended, reading, lose = BlackBull(), [], asyncio.Event(), asyncio.Event()
+
+    @app.route(path='/slow', methods=['POST'])
+    async def slow(conn, receive, send):
+        reading.set()
+        await conn.body()
+
+    @app.on('request_completed', blocking=True)
+    async def completed(event):
+        ended.append('request_completed')
+
+    @app.on('request_disconnected', blocking=True)
+    async def disconnected(event):
+        ended.append('request_disconnected')
+
+    fields = [(b':method', b'POST'), (b':path', b'/slow'), (b':scheme', b'http'),
+              (b':authority', b'x')]
+    data = (_make_headers_frame(stream_id=1, fields=fields)
+            + _make_h2_frame(FrameTypes.DATA, 0, 1, b'abc'))
+    actor = HTTP2Actor(_LostReader(data, lose, loss), AsyncioWriter(_Transport(False)), app,
+                       aggregator=None)
+    run = asyncio.ensure_future(actor.run())
+    await reading.wait()
+    lose.set()
+    with pytest.raises((OSError, BaseExceptionGroup)):
+        await run
+    assert ended == ['request_disconnected']
+
