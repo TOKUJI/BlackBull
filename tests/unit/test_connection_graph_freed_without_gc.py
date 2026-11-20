@@ -112,10 +112,10 @@ _PROBE = textwrap.dedent('''
     ('ws', 'after')])
 @pytest.mark.parametrize('close', ['fin', 'rst'])
 def test_a_finished_connection_is_freed_by_refcount(protocol, close, when):
-    if (sys.version_info < (3, 12) and protocol == 'http2'
+    if (sys.version_info < (3, 12, 8) and protocol == 'http2'
             and (close == 'rst' or when == 'during')):
-        pytest.skip('3.11 TaskGroup.__aexit__ keeps the group it raises in a '
-                    'local, a cycle through its traceback (fixed in 3.12)')
+        pytest.skip('TaskGroup.__aexit__ before 3.12.8 keeps the group it raises '
+                    'in a local, a cycle through its traceback')
     proc = subprocess.run([sys.executable, '-c', _PROBE, protocol, close, when],
                           capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, (
