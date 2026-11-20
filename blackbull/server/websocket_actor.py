@@ -1,9 +1,8 @@
-"""WebSocket Actor — owns one upgraded connection's frame loop."""
-import asyncio
+"""Owns WebSocket handshake decisions and the frame loop."""
 from collections.abc import Awaitable, Callable
 
 from ..actor import Actor, Message
-from ..native import NativeWSMessage, report_dict, warns_app_dicts
+from ..native import NativeResponse, NativeWSMessage, report_dict, warns_app_dicts
 from ..connection import Connection
 from ..event_aggregator import EventAggregator
 from ..asgi import (ASGIEvent, WebSocketAcceptEvent, WebSocketCloseEvent,
@@ -11,6 +10,7 @@ from ..asgi import (ASGIEvent, WebSocketAcceptEvent, WebSocketCloseEvent,
 from .conn_id import new_connection_id
 from .constants import WSCloseCode
 from ..headers import _MinimalResponseHeaders, _as_response_fields
+from ..request import ClientDisconnected
 from .permessage_deflate import (
     DeflateParams, InboundDecompressor, OutboundCompressor,
 )
@@ -67,21 +67,21 @@ class WebSocketActor(Actor):
         app: Callable[..., Awaitable[None]],
         aggregator: EventAggregator,
         *,
-        peername: tuple[str, int | None] | None = None,
-        sockname: tuple[str, int | None] | None = None,
-        ssl: bool = False,
         ws_queue_depth: int = _WS_READ_INLINE,
+        http_send: Callable[[NativeResponse], Awaitable[None]] | None = None,
+        abort_denial: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__()
-        self._reader = reader
         self._writer = writer
         self._conn = conn
         self._app = app
         self._warn_dicts = warns_app_dicts(app)
         self._aggregator = aggregator
-        self._peername = peername
-        self._sockname = sockname
-        self._ssl = ssl
+        self._http_send = http_send
+        self._abort_denial = abort_denial
+        self._accepted = False
+        self.denial_status: int | None = None
+        self._denied = False
         # permessage-deflate (RFC 7692) — when the handshake negotiated it,
         # the Connection's WS bag carries a [`DeflateParams`][].  Instantiate
         # the streaming inflater + deflater so the recipient/sender don't need
@@ -130,14 +130,16 @@ class WebSocketActor(Actor):
 
     async def run(self) -> None:
         try:
-            await self._app(self._conn, self._ws_receive, self._send)
-        except asyncio.CancelledError:
-            # Cancellation is not an error: re-raise so the task actually
-            # cancels rather than completing normally.  (Mirrors HTTP1Actor;
-            # the finally below still runs the disconnect/close cleanup.)
-            raise
-        except Exception as exc:
-            await self._aggregator.on_error(self._conn, exc)
+            try:
+                await self._app(self._conn, self._ws_receive, self._send)
+                if self.denial_status is not None and not self._denied:
+                    raise RuntimeError('WebSocket application left the HTTP denial incomplete')
+            except ClientDisconnected:
+                return
+            except Exception as exc:
+                await self._aggregator.on_error(self._conn, exc)
+            if not self._accepted:
+                await self._refuse_unanswered()
         finally:
             # Cancel the reader before closing: a full queue can leave it
             # blocked in queue.put(), which EOF cannot wake.
@@ -149,29 +151,65 @@ class WebSocketActor(Actor):
                 try:
                     await self._ws_receive.shutdown()
                 finally:
-                    await self._writer.close()
+                    if not self._denied:
+                        if self.denial_status is not None and self._abort_denial:
+                            await self._abort_denial()
+                        else:
+                            await self._writer.close()
 
+    async def _refuse_unanswered(self) -> None:
+        if self._http_send is None or self._accepted or self.denial_status is not None:
+            return
+        try:
+            await self._send_denial(NativeResponse.complete(403, [], b''))
+        except ClientDisconnected:
+            pass
+
+    async def _send_denial(self, event: NativeResponse) -> None:
+        if self._http_send is None or self._accepted or self._denied:
+            raise RuntimeError('HTTP denial is only available before WebSocket acceptance')
+        if event._extension is not None or event.expects_trailers or event._trailers is not None:
+            raise ValueError('WebSocket denial supports response headers and body only')
+        if event._header is not None:
+            if self.denial_status is not None or not 300 <= event.status <= 599:
+                raise ValueError('expected one HTTP denial status between 300 and 599')
+        elif self.denial_status is None or event.body is None:
+            raise RuntimeError('expected HTTP denial headers before the body')
+        await self._http_send(event)
+        if event._header is not None:
+            self.denial_status = event.status
+        if event.body is not None and not event.more_body:
+            await self._writer.close()
+            self._denied = True
 
     async def _send(self,
                     event: (WebSocketSendEvent | WebSocketCloseEvent
-                            | WebSocketAcceptEvent | NativeWSMessage),
+                            | WebSocketAcceptEvent | NativeWSMessage | NativeResponse),
                     _status=None, _headers=None) -> None:
-        # The accept message is the actor's cue to fire the deferred 101/200
-        # and the ``websocket_connected`` event.  It arrives native from the
-        # ``WebSocket`` object and as a dict from the raw compat form, so read
-        # the subprotocol from whichever shape this is.
         if isinstance(event, NativeWSMessage):
-            is_accept = event.kind == NativeWSMessage.ACCEPT
-            offered = event.subprotocol
-            extra = event.headers if is_accept else None
-        else:
+            kind = event.kind
+            is_accept = kind == NativeWSMessage.ACCEPT
+        elif isinstance(event, dict):
             if self._warn_dicts:
                 report_dict(event)
-            is_accept = (isinstance(event, dict)
-                         and event.get('type') == ASGIEvent.WS_ACCEPT)
-            offered = event.get('subprotocol') if is_accept else None
-            extra = event.get('headers') if is_accept else None
+            kind = event.get('type')
+            is_accept = kind == ASGIEvent.WS_ACCEPT
+        else:
+            await self._send_denial(event)
+            return
         if is_accept:
+            if self._accepted:
+                raise RuntimeError('WebSocket already accepted')
+            if self.denial_status is not None:
+                raise RuntimeError('WebSocket message after HTTP denial')
+            if isinstance(event, NativeWSMessage):
+                offered, extra = event.subprotocol, event.headers
+            else:
+                offered, extra = event.get('subprotocol'), event.get('headers')
+            if offered is not None:
+                protocol = offered.decode('utf-8') if isinstance(offered, bytes) else offered
+                if protocol not in self._conn.subprotocols:
+                    raise ValueError('selected a WebSocket subprotocol the client did not offer')
             # Checked before the response goes out: a refused header must
             # fail the accept, not arrive silently shortened.
             app_headers = _app_accept_headers(extra)
@@ -180,14 +218,21 @@ class WebSocketActor(Actor):
             if send_101:
                 subprotocol = offered or ws_bag.pop('auto_subprotocol', None)
                 await send_101(subprotocol, app_headers)
+            self._accepted = True
             if not self._conn.connection_id:
                 # Normally set by the HTTP actor's upgrade path from the
                 # accept-time id; mint one only for direct test drives.
                 self._conn.connection_id = new_connection_id()
             await self._aggregator.on_websocket_connected(self._conn, offered)
-        await self._ws_send(event)
-        # The idle watchdog services PING/CLOSE within a scanner tick.
-        # send_touch arms it when control servicing or deferred observation needs it.
+        elif not self._accepted and self._http_send is not None:
+            if self.denial_status is not None:
+                raise RuntimeError('WebSocket message after HTTP denial')
+            if kind in (NativeWSMessage.CLOSE, ASGIEvent.WS_CLOSE):
+                await self._refuse_unanswered()
+                return
+            raise RuntimeError('WebSocket send before acceptance')
+        else:
+            await self._ws_send(event)
         self._ws_receive.send_touch()
 
     async def _handle(self, msg: Message) -> None:

@@ -114,3 +114,8 @@ class HTTP2WSWriter(AbstractWriter):
                 await self._sender(NativeResponse(body=b'', more_body=False))
             except ClientDisconnected:
                 pass  # no stream end to send to a gone peer
+
+    async def send_denial(self, event: NativeResponse) -> None:
+        await self._sender(event)
+        if event.body is not None and not event.more_body:
+            self._ended = True

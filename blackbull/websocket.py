@@ -13,6 +13,7 @@ from .asgi import ASGIEvent
 from .connection import Connection
 from .headers import Headers
 from .native import NativeWSMessage, raw_receive
+from .response import Response
 
 logger = logging.getLogger(__name__)
 
@@ -357,6 +358,18 @@ class WebSocket:
         self._close_reason = reason
         # Published so middleware wrapping this handler does not append a
         # second close after we return.
+        mark_handshake_closed(self._conn)
+
+    async def reject(self, response: Response) -> None:
+        """Reject before acceptance with a complete HTTP response (status 3xx–5xx)."""
+        if self._accepted or self._closed:
+            raise RuntimeError('WebSocket.reject() requires a pending handshake')
+        if not 300 <= response.status <= 599:
+            raise ValueError('WebSocket rejection requires a status between 300 and 599')
+        await self._consume_connect()
+        if not self._disconnected:
+            await self._send(response.to_native())
+        self._closed = True
         mark_handshake_closed(self._conn)
 
     # ---- sending ---------------------------------------------------------

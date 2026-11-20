@@ -32,8 +32,9 @@ no sentinel event to test for, and no `try`/`except` around it.
 
 | Call | Does |
 |---|---|
-| `await ws.accept(subprotocol=None, headers=None)` | Completes the handshake.  Nothing may be sent before it.  *headers* are extra response fields, in order and with duplicates kept (`Set-Cookie` twice sends two). |
-| `await ws.close(code=1000, reason=None)` | Closes.  Called *before* `accept()`, it rejects the connection instead.  Idempotent, so `finally: await ws.close()` is safe. |
+| `await ws.accept(subprotocol=None, headers=None)` | Completes the handshake. *headers* are extra response fields, in order and with duplicates kept. |
+| `await ws.close(code=1000, reason=None)` | Closes. Before `accept()`, it rejects the handshake with HTTP 403. Idempotent. |
+| `await ws.reject(response)` | Rejects a pending handshake with a complete `Response` and a 3xx–5xx status. |
 | `await ws.send_text(str)` / `send_bytes(bytes)` | Sends one complete message. |
 | `await ws.send_json(obj, binary=False)` | Serialises and sends. |
 | `await ws.send(str \| bytes)` | Picks text or binary from the Python type. |
@@ -153,14 +154,15 @@ async def get_conn():
 
 ### Rejecting a connection
 
-Call `close()` without accepting.  The client's `connect()` fails outright,
-rather than seeing a connection open and immediately shut:
+Call `close()` before accepting to return HTTP 403, or use `reject()` for a
+custom HTTP response. With an external ASGI server, `reject()` requires
+the host's `websocket.http.response` extension.
 
 ```python
 @app.route(path='/private', scheme=Scheme.websocket)
 async def private(ws: WebSocket):
     if not authorized(ws.headers):
-        await ws.close(4401, 'unauthorized')
+        await ws.reject(Response(b'Unauthorized', status=HTTPStatus.UNAUTHORIZED))
         return
     await ws.accept()
     ...

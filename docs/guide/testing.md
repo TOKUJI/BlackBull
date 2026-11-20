@@ -376,6 +376,9 @@ def test_ws_rejects_unauthenticated():
         assert excinfo.value.code == 4401
 ```
 
+A custom HTTP response from `ws.reject()` raises
+`blackbull.client.HandshakeError` with the HTTP status in its message.
+
 For server-streamed sessions where the handler emits a sequence
 of frames and then closes, `ws.iter_text()` and
 `ws.iter_bytes()` consume the stream until the close arrives —

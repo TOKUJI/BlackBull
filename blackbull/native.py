@@ -449,13 +449,26 @@ def report_dict(event):
         _warn_deprecated('BBD010', stacklevel=3)
 
 
-def asgi_send_boundary(inner_send, *, warn_dicts: bool = False):
+def asgi_send_boundary(inner_send, *, warn_dicts: bool = False,
+                       websocket_extensions=None):
     """Expand native HTTP/WebSocket messages to ASGI dictionaries at a boundary.
 
     Use for external hosts and scope-declared middleware. Pass already-ASGI
     values through unchanged; with *warn_dicts*, a dict passing through came
     from native code and warns (BBD010).
     """
+    if websocket_extensions is not None:
+        host_send = inner_send
+
+        async def send_websocket(event):
+            if event['type'].startswith('http.response.'):
+                if 'websocket.http.response' not in websocket_extensions:
+                    raise RuntimeError('the ASGI host does not support WebSocket denial responses')
+                event = {**event, 'type': 'websocket.' + event['type']}
+            await host_send(event)
+
+        inner_send = send_websocket
+
     async def _send(event):
         if isinstance(event, (NativeResponse, NativeWSMessage)):
             for ev in event.to_asgi():

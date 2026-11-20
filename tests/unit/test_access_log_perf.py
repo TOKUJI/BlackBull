@@ -30,6 +30,15 @@ def _record(**kw) -> AccessLogRecord:
     return AccessLogRecord(**base)
 
 
+def test_websocket_denial_logs_http_status_without_close_code():
+    record = _record(status=101, close_code=1006)
+
+    access_log.close_ws_record(record, 1006, denial_status=403)
+
+    assert record.status == 403
+    assert record.close_code is None
+
+
 # ---------------------------------------------------------------------------
 # finalize() / duration snapshot
 # ---------------------------------------------------------------------------

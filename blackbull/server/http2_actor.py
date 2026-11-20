@@ -1193,6 +1193,9 @@ class HTTP2Actor(Actor, HTTP2Connection):
             with contextlib.suppress(ClientDisconnected):
                 await stream_send.send_response_headers(HTTPStatus(200), headers)
 
+        async def _abort_denial():
+            await self._reset(stream.stream_id, ErrorCodes.INTERNAL_ERROR)
+
         conn._ws = {'send_101': _ws_send_200, 'deflate': deflate_params}
 
         ws_reader = HTTP2StreamReader(
@@ -1210,14 +1213,14 @@ class HTTP2Actor(Actor, HTTP2Connection):
         log_record.status = 200
         ws_actor = WebSocketActor(
             ws_reader, ws_writer, conn, self.app, aggregator,
-            peername=self._peername, sockname=self._sockname, ssl=self._ssl,
+            http_send=ws_writer.send_denial, abort_denial=_abort_denial,
         )
 
         async def _run_ws():
             try:
                 await ws_actor.run()
             finally:
-                _close_ws_record(log_record, ws_actor._disconnect_code)
+                _close_ws_record(log_record, ws_actor._disconnect_code, ws_actor.denial_status)
 
         task = _schedule_group_task(tg, _run_ws())
         if task is None:

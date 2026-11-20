@@ -633,13 +633,12 @@ class HTTP1Actor(Actor):
         conn.connection_id = self._connection_id or new_connection_id()
         ws_actor = WebSocketActor(
             self._reader, self._writer, conn, self._app, aggregator,
-            peername=self._peername, sockname=self._sockname, ssl=self._ssl,
-            ws_queue_depth=self._ws_queue_depth,
+            ws_queue_depth=self._ws_queue_depth, http_send=send,
         )
         try:
             await ws_actor.run()
         finally:
-            _close_ws_record(log_record, ws_actor._disconnect_code)
+            _close_ws_record(log_record, ws_actor._disconnect_code, ws_actor.denial_status)
 
     async def _do_ws_handshake(self, conn: Connection, send) -> bool:
         """Validate the WebSocket upgrade and store a deferred 101 callback.

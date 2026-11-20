@@ -73,12 +73,16 @@ def close_record(record: "AccessLogRecord | None") -> None:
     emit_access_log(record)
 
 
-def close_ws_record(record: 'AccessLogRecord | None', close_code) -> None:
-    """Emit session close code without a dispatch_done phase; no-op for None.
-    """
+def close_ws_record(record: 'AccessLogRecord | None', close_code,
+                    denial_status: int | None = None) -> None:
+    """Emit either the HTTP denial status or the WebSocket close code."""
     if record is None:
         return
-    record.close_code = close_code
+    if denial_status is None:
+        record.close_code = close_code
+    else:
+        record.status = denial_status
+        record.close_code = None
     emit_access_log(record)
 
 

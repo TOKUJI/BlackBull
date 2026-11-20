@@ -70,7 +70,7 @@ deploying it.
 | Response trailers (`trailers=True`) | Chunked | Chunked | HEADERS | HEADERS |
 | `http.response.pathsend` advertised | Yes | No | No | No |
 | `http.response.push` advertised | No | No | Only if peer permits | Only if peer permits |
-| Foreign app WebSockets | Unavailable | Unavailable | Unavailable | Unavailable |
+| WebSockets and `websocket.http.response` | Yes | Yes | With Extended CONNECT enabled | With Extended CONNECT enabled |
 
 Use `scope['extensions']` for the current request, rather than inferring
 extensions from the protocol alone. H2 also supplies `http.response.priority`
@@ -80,16 +80,17 @@ For file responses without `pathsend`, send ordinary `http.response.body`
 messages. Do not send an extension message merely because another ASGI host
 supports it.
 
-Foreign WebSocket requests end without calling the foreign app; a specific
-HTTP rejection status is not guaranteed. WebSocket support and pre-upgrade
-HTTP responses are tracked in BLA-676. This restriction also applies to mounts.
-The native [WebSocket API](websockets.md) is a separate supported path.
+When the foreign app is served directly, closing or raising before acceptance
+returns HTTP 403. To choose the rejection status, headers and body, use the
+[`websocket.http.response` extension](https://asgi.readthedocs.io/en/latest/extensions.html#websocket-denial-response)
+before accepting. An HTTP denial closes the HTTP/1.1 connection or ends the
+HTTP/2 stream. Mounts serve HTTP only.
 
 ## Lifespan and request state
 
 The server runs the app's lifespan once per worker's server lifecycle, before
 accepting requests and during shutdown. `ASGIApp(app, lifespan=False)` skips it.
-Each HTTP request receives a shallow copy of the lifespan `scope['state']`:
+Each HTTP request and WebSocket session receives a shallow copy of the lifespan `scope['state']`:
 changing a top-level key is local to that request; referenced objects remain
 shared.
 
@@ -99,7 +100,7 @@ first lifespan `receive()`, is treated as not supporting lifespan. An explicit
 but before sending `lifespan.startup.complete` also aborts it.
 See [Listeners](listeners.md) for startup and cleanup ownership.
 
-## Errors and disconnects
+## HTTP errors and disconnects
 
 - An exception or return before `http.response.start` produces `500`.
 - An exception or return before a started response completes ends the

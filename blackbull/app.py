@@ -45,12 +45,12 @@ _SCOPE_END_EVENTS = _REQUEST_END_EVENTS | {'scope_completed'}
 _wrap_send_native = wrap_native_send
 
 
-def _to_asgi_boundary(send: ASGISendCallable):
+def _to_asgi_boundary(send: ASGISendCallable, *, websocket_extensions=None):
     """Wrap an external ASGI host's ``send`` with native→ASGI conversion.
 
     [`BlackBull.__call__`][BlackBull.__call__] decides when to install it.
     """
-    return asgi_send_boundary(send, warn_dicts=True)
+    return asgi_send_boundary(send, warn_dicts=True, websocket_extensions=websocket_extensions)
 
 
 def _inject_response_headers(raw_send, extra_headers):
@@ -720,13 +720,15 @@ class BlackBull(EventHooks):
         target = conn
         if isinstance(conn, Connection):
             request = conn
-            if self._asgi:
+            if self._asgi and conn.type != 'websocket':
                 send = _to_asgi_boundary(send)
         elif conn.get('type') == 'lifespan':
             await self._handle_lifespan(receive, send)
             return
         else:
-            send = _to_asgi_boundary(send)
+            send = _to_asgi_boundary(
+                send, websocket_extensions=(conn.get('extensions') or {}
+                                            if conn.get('type') == 'websocket' else None))
             # Reuse the stashed native Connection on compatibility scopes.
             # No WebSocket extra needs the scope dict past this point: each is
             # derived from a request header or set by the actor.
