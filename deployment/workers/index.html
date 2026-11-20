@@ -6322,16 +6322,21 @@ close or process-operation error, while the first startup error remains the
 reported failure. If cleanup itself has several independent failures and no
 startup error is active, they are reported together as an <code>ExceptionGroup</code>;
 a single cleanup failure is raised unchanged.</p>
-<p>On Linux / modern BSDs each worker can bind its own listening
-socket via <code>SO_REUSEPORT</code> (<code>BB_SOCKET_REUSEPORT=1</code>), so the
-kernel hashes incoming connections across workers' accept
-queues — no thundering-herd, per-connection CPU affinity for
-free.  It is <strong>off by default</strong>: with <code>BB_SOCKET_REUSEPORT=0</code>
-(the default) all workers share the master's single socket, and
-every incoming connection wakes every worker's loop, with N−1
-workers <code>accept()</code>-ing to EAGAIN — the thundering-herd accept
-race.  See "Workers vs cores under connection churn" below for
-when turning it on helps and when it does not.  An adopted fd
+<p>On Linux each worker binds its own <code>SO_REUSEPORT</code> listening socket by
+default (<code>BB_SOCKET_REUSEPORT=auto</code>), and the kernel spreads connections
+evenly across them.  On a shared socket whichever worker accepts first takes
+the connection, so a burst can pile onto a few workers while the rest idle.</p>
+<p><code>auto</code> shares the socket on other platforms, under <code>--reload</code>, and when any
+listener is AF_UNIX or an adopted fd.  <code>1</code> splits on any platform; on macOS
+every connection then reaches one worker.  <code>0</code> always shares.  With
+per-worker sockets:</p>
+<ul>
+<li>each worker's queue holds <code>BB_SOCKET_BACKLOG</code> connections;</li>
+<li>a worker that exits resets the connections queued on its socket
+  (<code>net.ipv4.tcp_migrate_req=1</code> on Linux 5.14+ hands them to the others);</li>
+<li>a stalled worker keeps receiving its share.</li>
+</ul>
+<p>An adopted fd
 (<code>--bind fd://N</code>) is not always the workers' to split — see
 <a href="../unix-and-fd/#several-workers-behind-an-activated-socket">Unix sockets and fd
 inheritance</a>.</p>
@@ -6390,11 +6395,11 @@ extension package) explicitly state their per-worker limits — see
 </tr>
 <tr>
 <td><code>BB_SOCKET_REUSEPORT</code></td>
-<td>n/a</td>
-<td>off</td>
-<td>per worker</td>
-<td>creator's socket blocks it</td>
-<td>not with <code>&gt; 1</code></td>
+<td>never set</td>
+<td><code>0</code>, or <code>auto</code> off Linux</td>
+<td><code>auto</code> on Linux, or <code>1</code></td>
+<td><code>auto</code> shares; <code>1</code> refused while the creator holds it</td>
+<td><code>auto</code> shares; <code>1</code> refused</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_SNDBUF</code>/<code>RCVBUF</code></td>
@@ -6466,8 +6471,7 @@ multi-worker-only; a single-worker server is never pinned.</p>
 <h3 id="workers-vs-cores-under-connection-churn">Workers vs cores under connection churn<a class="headerlink" href="#workers-vs-cores-under-connection-churn" title="Permanent link">&para;</a></h3>
 <p>Start at or below the available physical-core count and tune against your
 workload. Extra workers contend for CPU and accept queues, especially when
-clients reconnect frequently. Compare shared listeners and
-<code>BB_SOCKET_REUSEPORT=1</code> under that workload before choosing either.</p>
+clients reconnect frequently.</p>
 <h2 id="warm-up-before-fork">Warm-up before fork<a class="headerlink" href="#warm-up-before-fork" title="Permanent link">&para;</a></h2>
 <p><code>@app.on_warmup</code> runs once before binding listeners and forking workers.
 Only warm reusable code and data here; open per-worker resources at startup.</p>
@@ -6639,9 +6643,10 @@ in-memory broker state does not survive (see
 an <code>exec</code> via fd inheritance, and that handoff does not yet include the
 protocol listeners — so <code>reload=True</code> with a port-bound protocol still forces
 <code>workers=1</code>.  Run without reload to scale HTTP alongside the broker.</p>
-<p><strong><code>SO_REUSEPORT</code> applies to HTTP only.</strong>  <code>BB_SOCKET_REUSEPORT=1</code> gives each
-HTTP worker its own kernel accept queue (best load distribution); without it
-the workers share the master's listening socket.  The protocol port is always
+<p><strong><code>SO_REUSEPORT</code> applies to HTTP only.</strong>  Per-worker sockets (the Linux
+default, or <code>BB_SOCKET_REUSEPORT=1</code>) give each HTTP worker its own kernel
+accept queue; otherwise the workers share the master's listening socket.  The
+protocol port is always
 bound <em>without</em> <code>SO_REUSEPORT</code> — a single owner is the point.</p>
 <h2 id="production-checklist">Production checklist<a class="headerlink" href="#production-checklist" title="Permanent link">&para;</a></h2>
 <p>A reasonable production environment:</p>

@@ -6286,7 +6286,7 @@ namespace. Until then only the <code>BLACKBULL_</code> names are read.</p>
 <tr>
 <td><code>BB_WORKERS</code></td>
 <td><code>1</code></td>
-<td>Pre-fork worker count.  <code>0</code> resolves to <code>os.cpu_count()</code>.  Combine with <code>BB_SOCKET_REUSEPORT=1</code>, except under <code>--reload</code> or on a port-bound non-ASGI protocol, which keep one listener.  See <a href="../../deployment/workers/">Workers</a>.</td>
+<td>Pre-fork worker count.  <code>0</code> resolves to <code>os.cpu_count()</code>.  On Linux each worker gets its own listening socket by default (<code>BB_SOCKET_REUSEPORT</code>); a port-bound non-ASGI protocol keeps one listener.  See <a href="../../deployment/workers/">Workers</a>.</td>
 </tr>
 <tr>
 <td><code>BB_UVLOOP</code></td>
@@ -6566,8 +6566,8 @@ For failure types and buffered/streaming tradeoffs, see <a href="../../guide/cli
 </tr>
 <tr>
 <td><code>BB_SOCKET_REUSEPORT</code></td>
-<td><code>0</code></td>
-<td>Give each worker a separate TCP listening socket on supported systems. AF_UNIX is not rebound and cannot use this shape with multiple workers unless reload keeps a shared listener. An adopted fd whose supervisor retains ownership cannot be split this way. <code>0</code> keeps the kernel default. See <a href="../../deployment/workers/#socket-options-across-bind-paths">socket scope</a>.</td>
+<td><code>auto</code></td>
+<td>Give each worker its own <code>SO_REUSEPORT</code> listening socket. <code>auto</code>: on Linux, when every listener is TCP bound by BlackBull and <code>--reload</code> is off; otherwise the workers share one socket. <code>1</code>: on any platform (macOS then sends every connection to one worker); refused for AF_UNIX and for an adopted fd its supervisor still holds. <code>0</code>: always shared. See <a href="../../deployment/workers/#socket-options-across-bind-paths">socket scope</a>.</td>
 </tr>
 <tr>
 <td><code>BB_SOCKET_SNDBUF</code></td>
