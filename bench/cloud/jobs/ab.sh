@@ -1,7 +1,7 @@
 # bench/cloud/jobs/ab.sh — A/B of two commits on EC2 (`just ab-verify`).
 #
 # Runs bench/ab/ab_commit.sh once per HTTP/1.1 lane and ab_commit_h2.sh once
-# per HTTP/2 lane, each into its own directory of the session's run, all in one
+# per HTTP/2 lane and ab_commit_ws.sh (gcannon) once per WebSocket lane, each into its own directory of the session's run, all in one
 # session on one instance.  The defaults are the EC2 recipe of
 # bench/ab/AB-HIGH-PRECISION.md; nothing needs setting except the refs.
 #
@@ -12,23 +12,25 @@
 #   DURATION(=15) WARMUP(=5) THREADS(=4) CONNS(=32) PIPELINE(=1)
 #   BB_UVLOOP(=0) BB_FORCE_ASGI_SCOPE(=0) SERVER_CPUS(=0-1) LOAD_CPUS(=2-5)
 #   BASE_EXTRA_ENV TREAT_EXTRA_ENV  identical refs: compare two environments
-#   URL_PATHS(=/plaintext)  comma-separated HTTP/1.1 lanes
+#   URL_PATHS(=/plaintext)  comma-separated HTTP/1.1 lanes; empty = none
 #   WRK_HEADERS WRK_SCRIPT WRK_SCRIPT_ARGS  for every HTTP/1.1 lane, or
 #   WRK_SCRIPTS WRK_SCRIPT_ARGSS  comma lists parallel to URL_PATHS (empty = the above)
 #   H2_PROFILES  comma-separated HTTP/2 lanes (default none), with
 #   H2_CONNS H2_STREAMS H2_N H2_WARMUP H2_URIS H2_HEADER H2_DATA
+#   WS_CONNS  comma-separated connection counts, one WebSocket echo lane each
+#       (default none), with WS_PATH(=/ws) WS_THREADS(=4)
 #   APP APP_PYTHONPATH TLS_CERT TLS_KEY  instance paths; APP_ENV  VAR=value words for the app
 
 AB_KNOBS=(PATHSPEC ROUNDS PHASES PORT DURATION WARMUP THREADS CONNS PIPELINE BB_UVLOOP
           BB_FORCE_ASGI_SCOPE SERVER_CPUS LOAD_CPUS BASE_EXTRA_ENV TREAT_EXTRA_ENV WRK_HEADERS
           H2_CONNS H2_STREAMS H2_N H2_WARMUP H2_URIS H2_HEADER H2_DATA APP APP_PYTHONPATH
-          TLS_CERT TLS_KEY)
+          TLS_CERT TLS_KEY WS_PATH WS_THREADS)
 
 job_preflight() {
     : "${PATHSPEC:=blackbull/}" "${ROUNDS:=8}" "${PHASES:=null real}" "${PORT:=8443}"
     : "${DURATION:=15}" "${WARMUP:=5}" "${THREADS:=4}" "${CONNS:=32}" "${PIPELINE:=1}"
     : "${BB_UVLOOP:=0}" "${BB_FORCE_ASGI_SCOPE:=0}" "${SERVER_CPUS:=0-1}" "${LOAD_CPUS:=2-5}"
-    : "${URL_PATHS:=/plaintext}" "${H2_PROFILES:=}"
+    : "${URL_PATHS=/plaintext}" "${H2_PROFILES:=}" "${WS_CONNS:=}"
     [[ "$ROUNDS" =~ ^[1-9][0-9]*$ ]] || { echo "ab: ROUNDS must be a positive integer" >&2; return 1; }
     local phase phases=0
     for phase in $PHASES; do
@@ -43,14 +45,15 @@ job_preflight() {
     }
     IFS=, read -r -a H1_LANES <<< "$URL_PATHS"
     IFS=, read -r -a H2_LANES <<< "$H2_PROFILES"
+    IFS=, read -r -a WS_LANES <<< "$WS_CONNS"
     # Each arm: the measured run, its warm-up, and a server restart (~15 s);
     # an h2load arm of the default size takes well under 45 s.  Half again for
     # slack, plus the setup the runner does before its first arm.
     local arms=$((phases * ROUNDS * 4))
-    JOB_WAIT_SECONDS=$(( (arms * (${#H1_LANES[@]} * (DURATION + WARMUP + 15) + ${#H2_LANES[@]} * 45)) * 3 / 2 + 600 ))
+    JOB_WAIT_SECONDS=$(( (arms * ((${#H1_LANES[@]} + ${#WS_LANES[@]}) * (DURATION + WARMUP + 15) + ${#H2_LANES[@]} * 45)) * 3 / 2 + 600 ))
     JOB_DEPLOY_GIT=1
     JOB_SETTINGS=(ref_base="$REF_BASE" ref_treat="$REF_TREAT" h1_lanes="$URL_PATHS"
-                  h2_lanes="$H2_PROFILES" phase_count="$phases" app_env="${APP_ENV:-}")
+                  h2_lanes="$H2_PROFILES" ws_lanes="$WS_CONNS" phase_count="$phases" app_env="${APP_ENV:-}")
     local knob
     for knob in "${AB_KNOBS[@]}"; do JOB_SETTINGS+=("${knob,,}=${!knob:-}"); done
 }
@@ -77,6 +80,10 @@ job_runner() {
         printf 'BENCH_RUN_DIR=%q URL_PATH=%q bash bench/ab/ab_commit_h2.sh\n' \
             "$REMOTE_RUN/$(_ab_lane_dir h2 "${H2_LANES[$i]}")" "${H2_LANES[$i]}"
     done
+    for i in "${!WS_LANES[@]}"; do
+        printf 'BENCH_RUN_DIR=%q WS_TOOL=gcannon WS_CONNS=%q bash bench/ab/ab_commit_ws.sh\n' \
+            "$REMOTE_RUN/ws-c${WS_LANES[$i]}" "${WS_LANES[$i]}"
+    done
 }
 
 # Expectations come from the session's manifest, so `finish` in another shell
@@ -89,7 +96,8 @@ run = Path(sys.argv[1])
 s = json.loads((run / 'manifest.json').read_text())['settings']
 want = 1 + int(s['rounds']) * 4 * int(s['phase_count'])
 lanes = [('h1', u) for u in s['h1_lanes'].split(',') if u] + \
-        [('h2', u) for u in s['h2_lanes'].split(',') if u]
+        [('h2', u) for u in s['h2_lanes'].split(',') if u] + \
+        [('ws', f'c{c}') for c in s.get('ws_lanes', '').split(',') if c]
 ok, reports = True, []
 for kind, url in lanes:
     name = re.sub(rb'[^A-Za-z0-9._-]', b'_', url.removeprefix('/').encode()).decode()

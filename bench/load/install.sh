@@ -10,10 +10,13 @@
 #   - wrk2 (built from source)    Constant-rate, CO-corrected HdrHistogram
 #   - oha                         HTTP/1.1 load gen (granian-style)
 #   - k6                          VU-based load gen + WebSocket
+#   - gcannon (built from source) io_uring load gen; HttpArena's, and the WS A/B lanes
 #   - nginx                       reference floor (static plaintext/json)
 #   - uvicorn, hypercorn, granian, daphne, starlette  peer ASGI servers
 
 set -e
+# Absolute: the wrk2 build changes directory.
+HERE="$(cd "$(dirname "$0")" && pwd)"
 
 echo "=== Installing h2load (nghttp2-client) + wrk + nginx ==="
 sudo apt-get update -qq
@@ -126,6 +129,11 @@ if ! command -v k6 >/dev/null 2>&1; then
 else
   echo "k6 already installed, skipping."
 fi
+
+echo ""
+echo "=== Installing gcannon ==="
+# OPTIONAL like k6: only the gcannon WebSocket A/B lanes need it.
+bash "$HERE/install_gcannon.sh" || echo "  gcannon install failed (optional; skipping — WS_TOOL=gcannon disabled)"
 
 echo ""
 echo "=== Installing peer ASGI servers ==="
