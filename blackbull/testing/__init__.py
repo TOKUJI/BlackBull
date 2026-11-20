@@ -18,6 +18,8 @@ from typing import Any
 from weakref import WeakSet
 
 from ..asgi import ASGIReceiveEvent
+from ..client.exceptions import HandshakeError
+from ..native import NativeResponse as _NativeResponse
 from ..native import NativeWSMessage, report_dict, warns_app_dicts
 from ..websocket import WebSocketDisconnect
 
@@ -430,6 +432,10 @@ class WebSocketTestSession:
                 event = self._server_to_client.get(timeout=0.05)
                 if isinstance(event, NativeWSMessage):
                     return event.to_asgi()[0]
+                if isinstance(event, _NativeResponse):
+                    if self._accepted or event.header is None:
+                        raise RuntimeError('unexpected HTTP response in WebSocket session')
+                    raise HandshakeError(f'WebSocket handshake denied: HTTP {event.status}')
                 return event
             except queue.Empty:
                 deadline -= 0.05

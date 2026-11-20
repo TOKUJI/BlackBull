@@ -6,13 +6,15 @@ TestClient against a BlackBull app.
 """
 
 import logging
-from http import HTTPMethod
+from http import HTTPMethod, HTTPStatus
 
 import pytest
 
-from blackbull import BlackBull
+from blackbull import BlackBull, Response
+from blackbull.client import HandshakeError
 from blackbull.router import Scheme
 from blackbull.testing import TestClient, WebSocketDisconnect, WebSocketTestSession
+from blackbull.websocket import WebSocket
 
 
 def _make_app() -> BlackBull:
@@ -245,6 +247,19 @@ def test_websocket_rejected_raises_disconnect() -> None:
             with client.websocket_connect('/ws-reject'):
                 pass
         assert excinfo.value.code == 4401
+
+
+def test_websocket_http_rejection_reports_status() -> None:
+    app = BlackBull()
+
+    @app.route(path='/ws', scheme=Scheme.websocket)
+    async def deny(ws: WebSocket):
+        await ws.reject(Response(b'go away', status=HTTPStatus.FORBIDDEN))
+
+    with TestClient(app) as client:
+        with pytest.raises(HandshakeError, match='HTTP 403'):
+            with client.websocket_connect('/ws'):
+                pytest.fail('the handshake was denied')
 
 
 # ---------------------------------------------------------------------------

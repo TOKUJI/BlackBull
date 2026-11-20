@@ -175,6 +175,55 @@ class _Exchange:
                                   content_type='text/plain; charset=utf-8').to_native())
 
 
+class _WebSocketExchange:
+    """Translate the ASGI WebSocket channel at the server boundary."""
+
+    def __init__(self, conn, receive, send, state):
+        self.scope = conn.to_asgi_scope(force_asgi=True)
+        self.scope.pop('method', None)
+        self.scope['state'] = state
+        self.scope['subprotocols'] = conn.subprotocols
+        self.scope['extensions'] = {'websocket.http.response': {}}
+        self._receive = receive
+        self._send = send
+        self._disconnect = None
+
+    async def receive(self):
+        if self._disconnect is not None:
+            return self._disconnect
+        event = await self._receive()
+        if event['type'] == 'websocket.disconnect':
+            self._disconnect = event
+        return event
+
+    async def send(self, event):
+        if self._disconnect is not None:
+            raise SendAfterDisconnect('the WebSocket exchange has ended')
+        kind = event.get('type')
+        if kind == 'websocket.accept':
+            native = NativeWSMessage.accept(event.get('subprotocol'), event.get('headers'))
+        elif kind == 'websocket.send':
+            text, data = event.get('text'), event.get('bytes')
+            if (text is None) == (data is None):
+                raise ValueError('websocket.send requires exactly one of text and bytes')
+            native = (NativeWSMessage.text_message(text) if text is not None
+                      else NativeWSMessage.binary_message(data))
+        elif kind == 'websocket.close':
+            native = NativeWSMessage.close(event.get('code', 1000), event.get('reason', ''))
+        elif kind in ('websocket.http.response.start', 'websocket.http.response.body'):
+            native = _native_from_asgi({**event, 'type': kind.removeprefix('websocket.')})
+        else:
+            raise RuntimeError(f'unexpected ASGI WebSocket message {kind!r}')
+        try:
+            await self._send(native)
+        except ClientDisconnected:
+            self._disconnect = {'type': 'websocket.disconnect', 'code': 1006}
+            raise SendAfterDisconnect('the client disconnected') from None
+        if kind == 'websocket.close' or (kind == 'websocket.http.response.body'
+                                         and not native.more_body):
+            self._disconnect = {'type': 'websocket.disconnect', 'code': 1005}
+
+
 async def _ask(task, inbox, outbox, phase):
     """Send ``lifespan.<phase>``; the app's answer, or None once *task* ended without one."""
     inbox.put_nowait({'type': f'lifespan.{phase}'})
@@ -224,7 +273,6 @@ class ASGIApp(EventHooks, _ASGIAppAdapter):
     ``mounted=True`` reserves the adapter for ``BlackBull.mount``; that host
     owns its events and lifespan. Placement cannot change after construction.
 
-    Until BLA-676 a foreign app's WebSocket requests are refused.
     """
 
     def __new__(cls, app, *, lifespan: bool = True, mounted: bool = False):
@@ -249,8 +297,6 @@ class ASGIApp(EventHooks, _ASGIAppAdapter):
             raise TypeError('a mounted ASGIApp requires a foreign ASGI application')
         self._inner = inner
         self._dispatcher = inner._dispatcher if inner is not None else EventDispatcher()
-        # Its WebSocket sends reach the actor directly, as native code.
-        self._warns_native_dicts = inner is not None and inner._warns_native_dicts
 
     def _mount_handler(self, prefix):
         async def mounted(conn, receive, send):
@@ -338,17 +384,28 @@ class ASGIApp(EventHooks, _ASGIAppAdapter):
             raise TypeError('ASGIApp is a native callable: serve it with blackbull.Server, '
                             'not from an ASGI host')
         if conn.type == 'websocket':
-            if self._inner is not None:
-                await self.app(conn, receive, send)
-            else:
-                await send(NativeWSMessage.close())
-                await emit_scope_end(self._dispatcher, conn, None, completed=False)
+            await self._serve_websocket(conn, receive, send)
             return
         exchange = _Exchange(conn, receive, send)
         if self._inner is not None:
             await self.app(exchange.scope, exchange, exchange.relay)
             return
         await self._serve(conn, exchange)
+
+    async def _serve_websocket(self, conn, receive, send):
+        state = self._lifespan_state.copy() if self._inner is None else conn.state
+        exchange = _WebSocketExchange(conn, receive, send, state)
+        exc = None
+        try:
+            await self.app(exchange.scope, exchange.receive, exchange.send)
+        except SendAfterDisconnect:
+            return
+        except BaseException as error:
+            exc = error
+            raise
+        finally:
+            if self._inner is None:
+                await emit_scope_end(self._dispatcher, conn, exc, completed=False)
 
     async def _serve(self, conn, exchange):
         dispatcher = self._dispatcher

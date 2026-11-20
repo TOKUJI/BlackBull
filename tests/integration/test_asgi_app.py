@@ -1,16 +1,22 @@
 """A foreign ASGI 3.0 application on BlackBull's server, through ASGIApp (BLA-673)."""
 import asyncio
 import logging
+import ssl
+from http import HTTPStatus
 
+from hpack import Decoder, Encoder
 import pytest
 
 from blackbull import ASGIApp, BlackBull, Response
-from blackbull.client import HTTP1Client, HTTP2Client, WebSocketClient
+from blackbull.client import HTTP1Client, HTTP2Client, WebSocketClient, WebSocketH2Client
 from blackbull.env import reset_settings_cache
 from blackbull.router import ConfigurationError
+from blackbull.protocol.frame_types import ErrorCodes
 from blackbull.server import Server
+from blackbull.server.ws_codec import WSOpcode
 from blackbull.utils import Scheme
 from blackbull.websocket import WebSocket
+from tests.conformance.http2._harness import h2_connect, h2_section, h2_terminal
 from tests.harness import served
 
 
@@ -316,20 +322,132 @@ async def test_around_a_blackbull_app_the_inner_events_fire_once(form):
     assert len(on_adapter['request_completed']) == 1
 
 
-# --- WebSocket (interim) and lifespan ---------------------------------------
+# --- WebSocket and lifespan -----------------------------------------------
 
-async def test_a_foreign_websocket_request_is_closed_cleanly():
-    called = []
+_UPGRADE = (b'GET /ws HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\n'
+            b'Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n'
+            b'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n')
 
+
+@pytest.mark.parametrize('mode, status', [('close', 403), ('raise', 403),
+                                         ('response', 429)])
+@pytest.mark.parametrize('tls', [False, True])
+async def test_foreign_websocket_can_deny_the_upgrade(mode, status, tls):
     async def foreign(scope, receive, send):
-        called.append(scope['type'])
+        assert scope['type'] == 'websocket'
+        assert 'websocket.http.response' in scope['extensions']
+        assert (await receive())['type'] == 'websocket.connect'
+        if mode == 'close':
+            await send({'type': 'websocket.close'})
+        elif mode == 'raise':
+            raise ValueError('refused')
+        else:
+            await send({'type': 'websocket.http.response.start', 'status': 429,
+                        'headers': [(b'retry-after', b'10')]})
+            await send({'type': 'websocket.http.response.body',
+                        'body': b'try ', 'more_body': True})
+            await send({'type': 'websocket.http.response.body', 'body': b'later'})
 
-    async with served(foreign, asgi=True) as server:
-        async with WebSocketClient('127.0.0.1', server.server.port) as client:
-            with pytest.raises(Exception):
-                await asyncio.wait_for(client.connect('/ws'), 5)
+    async with served(ASGIApp(foreign, lifespan=False), tls=tls) as server:
+        wire = await server.wire()
+        await wire.send(_UPGRADE)
+        reply = await wire.response()
+        assert reply.status == status
+        assert await wire.closed()
+    if mode == 'response':
+        assert reply.header(b'retry-after') == b'10'
+        assert reply.body == b'try later'
 
-    assert called == []
+
+@pytest.mark.parametrize('client_type', [WebSocketClient, WebSocketH2Client])
+async def test_foreign_websocket_can_accept_and_exchange_messages(client_type, h2_ws):
+    async def foreign(scope, receive, send):
+        assert scope['type'] == 'websocket'
+        assert scope['subprotocols'] == []
+        assert (await receive())['type'] == 'websocket.connect'
+        await send({'type': 'websocket.accept', 'headers': [(b'x-app', b'ws')]})
+        message = await receive()
+        await send({'type': 'websocket.send', 'text': message['text']})
+        await send({'type': 'websocket.close', 'code': 1000})
+
+    tls = h2_ws if client_type is WebSocketH2Client else None
+    async with served(ASGIApp(foreign, lifespan=False), tls=tls is not None) as server:
+        async with client_type('127.0.0.1', server.server.port, ssl=tls) as client:
+            ws = await asyncio.wait_for(client.connect('/ws'), 5)
+            await ws.send_text('hello')
+            message = await asyncio.wait_for(ws.receive(), 5)
+            if tls:
+                assert message == (WSOpcode.TEXT, b'hello')
+            else:
+                assert message['text'] == 'hello'
+
+
+@pytest.fixture
+def h2_ws(monkeypatch):
+    monkeypatch.setenv('BB_H2_ENABLE_WEBSOCKET', '1')
+    reset_settings_cache()
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    ctx.set_alpn_protocols(['h2'])
+    yield ctx
+    monkeypatch.delenv('BB_H2_ENABLE_WEBSOCKET', raising=False)
+    reset_settings_cache()
+
+
+@pytest.mark.parametrize('incomplete', [False, True])
+@pytest.mark.parametrize('tls', [False, True])
+async def test_h2_websocket_denial_leaves_the_connection_open(h2_ws, incomplete, tls):
+    async def foreign(scope, receive, send):
+        if scope['type'] == 'http':
+            await _ok(scope, receive, send)
+            return
+        assert (await receive())['type'] == 'websocket.connect'
+        await send({'type': 'websocket.http.response.start', 'status': 429,
+                    'headers': [(b'retry-after', b'10')]})
+        await send({'type': 'websocket.http.response.body', 'body': b'try later',
+                    'more_body': incomplete})
+
+    scheme = b'https' if tls else b'http'
+    async with served(ASGIApp(foreign, lifespan=False), tls=tls) as server:
+        wire = await h2_connect(server, alpn=['h2'])
+        encoder, decoder = Encoder(), Decoder()
+        await wire.send(h2_section(encoder.encode([
+            (b':method', b'CONNECT'), (b':protocol', b'websocket'),
+            (b':scheme', scheme), (b':path', b'/ws'), (b':authority', b'localhost'),
+        ]), end_stream=False))
+        result = await h2_terminal(wire, 1, decoder)
+        if incomplete:
+            assert result == (3, ErrorCodes.INTERNAL_ERROR)
+        else:
+            fields, body = result
+            assert (b':status', b'429') in fields
+            assert (b'retry-after', b'10') in fields
+            assert body == b'try later'
+
+        await wire.send(h2_section(encoder.encode([
+            (b':method', b'GET'), (b':scheme', scheme), (b':path', b'/'),
+            (b':authority', b'localhost'),
+        ]), sid=3))
+        fields, body = await h2_terminal(wire, 3, decoder)
+        assert (b':status', b'200') in fields
+        assert body == b'ok'
+
+
+@pytest.mark.parametrize('dual_path', [False, True])
+async def test_native_websocket_can_return_an_http_response(dual_path):
+    app = BlackBull()
+
+    @app.route(path='/ws', scheme=Scheme.websocket)
+    async def denial(ws: WebSocket):
+        await ws.reject(Response(b'not allowed', status=HTTPStatus.UNAUTHORIZED))
+
+    async with served(app, asgi=True if dual_path else None) as server:
+        wire = await server.wire()
+        await wire.send(_UPGRADE)
+        reply = await wire.response()
+        assert reply.status == 401
+        assert reply.body == b'not allowed'
 
 
 async def test_a_wrapped_blackbull_app_keeps_its_websockets():

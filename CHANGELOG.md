@@ -29,6 +29,10 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Added
 
+- `WebSocket.reject(response)` sends an HTTP response before an upgrade.
+  Directly hosted ASGI apps can handle WebSocket connections and use
+  `websocket.http.response` on HTTP/1.1 and HTTP/2. This public API addition
+  targets the 0.83.0 MINOR release (BLA-676).
 - `BlackBull.mount(prefix, ASGIApp(foreign, mounted=True))` hosts foreign apps
   under a native app with host middleware/events and one lifespan per adapter.
   This public API addition targets the 0.83.0 MINOR release (BLA-674).
@@ -41,7 +45,7 @@ metadata; reinstall an editable checkout after changing that version.
   non-BlackBull app) wrap with it.  Listeners register with its `on()` and
   `intercept()`.  A failure before the response starts answers `500`; an
   out-of-order message raises `RuntimeError`, a send after disconnect an
-  `OSError`.  Foreign WebSocket requests are refused for now (BLA-673).
+  `OSError` (BLA-673).
 - `ASGIApp` runs the foreign app's lifespan (`lifespan=False` skips it) and
   gives each request a shallow copy of the lifespan `state`.  An app that
   ends without answering startup, or raises before its first `receive()`, is

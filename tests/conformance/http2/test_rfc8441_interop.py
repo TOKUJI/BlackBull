@@ -137,7 +137,7 @@ class TestRFC8441Handshake:
             '127.0.0.1', rfc8441_server_port.port,
             ssl=_ssl_context_for_h2(),
         ) as client:
-            with pytest.raises(HandshakeError, match='unoffered'):
+            with pytest.raises(HandshakeError, match=':status=403'):
                 await client.connect(path='/ws-chat')
 
 

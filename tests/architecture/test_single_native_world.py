@@ -96,6 +96,8 @@ _TO_ASGI_SCOPE_ALLOWED: dict[str, str] = {
     'blackbull/asgi_app.py::_Exchange.__init__':
         'boundary — ASGIApp, the one converter for a foreign ASGI app on '
         "BlackBull's server (Server(asgi=True), BB_FORCE_ASGI_SCOPE=1)",
+    'blackbull/asgi_app.py::_WebSocketExchange.__init__':
+        'boundary — ASGIApp builds the WebSocket scope for the same foreign app',
     'blackbull/middleware/utils.py::_scope_edge':
         'boundary — builds the scope a `scope`-declaring middleware asked for',
 }
@@ -122,6 +124,8 @@ _REQUEST_DICT_ALLOWED: dict[str, str] = {
 _WS_DICT_ALLOWED: dict[str, str] = {
     'blackbull/native.py::NativeWSMessage.to_asgi':
         'boundary — this is the conversion',
+    'blackbull/asgi_app.py::_WebSocketExchange.send':
+        'boundary — the ASGI receive channel ends after a WebSocket denial or close',
     'blackbull/testing/__init__.py::WebSocketTestSession._open._spawn':
         'boundary — Tier-2 speaks the ASGI WebSocket contract to the app',
     'blackbull/testing/__init__.py::WebSocketTestSession.send_text':

@@ -5,7 +5,7 @@ import pytest
 
 from blackbull import ASGIApp, BlackBull
 from blackbull.client import HTTP1Client, HTTP2Client, WebSocketClient
-from blackbull.client.exceptions import ClientError
+from blackbull.client.exceptions import HandshakeError
 from tests.harness import served
 from tests.integration.test_asgi_app import _listen, _misbehaving
 
@@ -44,7 +44,6 @@ class ForeignApp:
                 await send({'type': f'lifespan.{phase}.complete'})
             return
         assert self.phases == ['startup']
-        assert scope['type'] == 'http'
         self.requests.append(scope)
         await self.respond(scope, receive, send)
 
@@ -53,6 +52,7 @@ async def test_scope_streaming_and_lifespan_across_transports(transport):
     client_type, tls, context = transport
 
     async def echo(scope, receive, send):
+        assert scope['type'] == 'http'
         assert 'local' not in scope['state']
         scope['state']['local'] = True
         body = bytearray()
@@ -162,21 +162,30 @@ async def test_file_response_uses_only_advertised_pathsend(transport, tmp_path):
     assert app.phases == ['startup', 'shutdown']
 
 
-async def test_foreign_websocket_is_refused_without_calling_the_app(transport, monkeypatch):
+async def test_foreign_websocket_can_reject_with_lifespan_state(transport, monkeypatch):
     monkeypatch.setenv('BB_H2_ENABLE_WEBSOCKET', '1')
     client_type, tls, context = transport
-    app = ForeignApp(_misbehaving([]))
+
+    async def reject(scope, receive, send):
+        assert scope['type'] == 'websocket'
+        assert scope['state']['pool'] is app.pool
+        assert (await receive())['type'] == 'websocket.connect'
+        await send({'type': 'websocket.close'})
+
+    app = ForeignApp(reject)
     adapter = ASGIApp(app)
     events = _listen(adapter, ['scope_completed'])
     ws_type = HTTP2Client if client_type is HTTP2Client else WebSocketClient
     async with served(adapter, tls=tls) as server:
         async with ws_type('127.0.0.1', server.server.port, ssl=context) as client:
-            with pytest.raises(ClientError):
-                if client_type is HTTP2Client:
-                    await client.request('CONNECT', '/ws', headers=[(b':protocol', b'websocket')])
-                else:
+            if client_type is HTTP2Client:
+                reply = await client.request(
+                    'CONNECT', '/ws', headers=[(b':protocol', b'websocket')])
+                assert reply.status == 403
+            else:
+                with pytest.raises(HandshakeError, match='status=403'):
                     await client.connect('/ws')
-    assert app.requests == []
+    assert [scope['type'] for scope in app.requests] == ['websocket']
     assert len(events['scope_completed']) == 1
     assert app.phases == ['startup', 'shutdown']
 
