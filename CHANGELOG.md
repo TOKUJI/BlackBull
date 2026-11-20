@@ -99,6 +99,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Changed
 
+- `BB_SOCKET_REUSEPORT` defaults to `auto`: on Linux, several workers serving
+  TCP listeners BlackBull bound itself each get their own `SO_REUSEPORT`
+  socket, so a burst of connections spreads evenly instead of piling onto one
+  worker. Other platforms, `--reload`, AF_UNIX and adopted fds keep the shared
+  socket; `1` and `0` behave as before. `BB_SOCKET_BACKLOG` then applies per
+  worker (BLA-690).
 - `after_handler` reports a cancelled route handler's cancellation as
   `exception`, as it already did for gRPC, instead of `None`, which means
   success.  Route and gRPC handlers run through one place that emits the

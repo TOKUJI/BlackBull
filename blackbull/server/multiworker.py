@@ -17,7 +17,7 @@ from .listener import InheritedFd, Listener
 from .recipient import _WS_READ_INLINE
 from .worker import run_worker
 from ..protocol.rsock import (close_sockets, create_configured_sockets,
-                              REUSEPORT_SUPPORTED)
+                              REUSEPORT_BALANCES, REUSEPORT_SUPPORTED)
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,20 @@ def _describe(socks) -> str:
         host, port = name[0], name[1]
         names.append(f'[{host}]:{port}' if ':' in host else f'{host}:{port}')
     return ', '.join(names)
+
+
+def _per_worker_sockets(choice: bool | None, shared) -> bool:
+    """Whether ``BB_SOCKET_REUSEPORT`` gives each worker its own socket.
+
+    ``auto`` (``None``) splits only what it can split without a refusal, on a
+    kernel that balances the group; an explicit choice is followed as named.
+    """
+    if choice is not None:
+        return choice and REUSEPORT_SUPPORTED
+    return REUSEPORT_BALANCES and all(
+        not isinstance(listener.where, InheritedFd)
+        and all(sock.family in _IP_FAMILIES for sock in socks)
+        for listener, socks in shared)
 
 
 def _refuse_non_ip_rebind(shared, workers: int) -> None:
@@ -342,8 +356,8 @@ class MultiWorkerServer:
 
             from ..env import get_settings as _get_settings  # noqa: PLC0415
             cfg = _get_settings()
-            if (workers > 1 and REUSEPORT_SUPPORTED
-                    and cfg.socket_reuseport and not reload):
+            if (workers > 1 and not reload
+                    and _per_worker_sockets(cfg.socket_reuseport, self._shared)):
                 _refuse_non_ip_rebind(self._shared, workers)
                 planned = [_PlannedListener(
                     listener=listener,

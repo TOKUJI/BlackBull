@@ -18,6 +18,9 @@ _DEFAULT_BACKLOG = 1024
 
 #: True when the OS supports SO_REUSEPORT (Linux ≥ 3.9, macOS ≥ 10.6).
 REUSEPORT_SUPPORTED = hasattr(socket, 'SO_REUSEPORT')
+#: True where the kernel spreads TCP connections across a SO_REUSEPORT group.
+#: macOS accepts the option but hands every connection to one socket.
+REUSEPORT_BALANCES = REUSEPORT_SUPPORTED and sys.platform.startswith('linux')
 
 #: Env var holding a comma-separated list of fds the master has handed
 #: to itself across ``os.execvp`` — see [`adopt_inherited_sockets`][].

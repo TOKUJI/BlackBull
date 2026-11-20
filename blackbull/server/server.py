@@ -1076,7 +1076,7 @@ class Server:
             return [sock]
 
         socks = create_configured_sockets(
-            where.port, _cfg, reuseport=_cfg.socket_reuseport, host=where.host)
+            where.port, _cfg, reuseport=_cfg.socket_reuseport is True, host=where.host)
         if not socks:
             logger.error(f'Failed to bind port {where.port}. Try another port.')
             raise RuntimeError(

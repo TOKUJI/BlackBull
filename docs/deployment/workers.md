@@ -60,16 +60,28 @@ reported failure. If cleanup itself has several independent failures and no
 startup error is active, they are reported together as an `ExceptionGroup`;
 a single cleanup failure is raised unchanged.
 
-On Linux / modern BSDs each worker can bind its own listening
-socket via `SO_REUSEPORT` (`BB_SOCKET_REUSEPORT=1`), so the
-kernel hashes incoming connections across workers' accept
-queues — no thundering-herd, per-connection CPU affinity for
-free.  It is **off by default**: with `BB_SOCKET_REUSEPORT=0`
-(the default) all workers share the master's single socket, and
-every incoming connection wakes every worker's loop, with N−1
-workers `accept()`-ing to EAGAIN — the thundering-herd accept
-race.  See "Workers vs cores under connection churn" below for
-when turning it on helps and when it does not.  An adopted fd
+On Linux each worker binds its own listening socket via
+`SO_REUSEPORT` by default (`BB_SOCKET_REUSEPORT=auto`), so the
+kernel hashes incoming connections evenly across the workers'
+accept queues.  With one shared socket, every incoming connection
+wakes every worker and whichever accepts first takes it: a burst of
+connections opened at once can pile onto one or two workers, whose
+requests then wait while the others idle.
+
+`auto` keeps the shared socket on other platforms, with `--reload`,
+and whenever a listener is AF_UNIX or an adopted fd.  `1` re-binds
+per worker on any platform; on macOS the kernel then hands every
+connection to a single worker (measured on Darwin 25.6).  `0`
+always shares.  Per-worker sockets change three things:
+
+- `BB_SOCKET_BACKLOG` sizes each worker's queue, so up to
+  backlog × workers connections can wait.
+- A worker that exits resets the connections still queued on its
+  own socket.  Linux 5.14+ moves them to the other workers with
+  `net.ipv4.tcp_migrate_req=1`.
+- A stalled worker keeps receiving its share of new connections.
+
+An adopted fd
 (`--bind fd://N`) is not always the workers' to split — see
 [Unix sockets and fd
 inheritance](unix-and-fd.md#several-workers-behind-an-activated-socket).
@@ -99,7 +111,7 @@ extension package) explicitly state their per-worker limits — see
 | knob | single | shared | + `REUSEPORT` | adopted fd | `AF_UNIX` |
 |---|---|---|---|---|---|
 | `BB_SOCKET_BACKLOG` | bounds queue | bounds queue | per-worker queues | creator's, until accepting | bounds queue |
-| `BB_SOCKET_REUSEPORT` | n/a | off | per worker | creator's socket blocks it | not with `> 1` |
+| `BB_SOCKET_REUSEPORT` | never set | `0`, or `auto` off Linux | `auto` on Linux, or `1` | `auto` shares; `1` refused while the creator holds it | `auto` shares; `1` refused |
 | `BB_SOCKET_SNDBUF`/`RCVBUF` | set | set | set on each | creator's value | listener only |
 | `BB_TCP_USER_TIMEOUT_MS` | set | set | set on each | creator's value | unsupported |
 | `BB_MAX_CONNECTIONS` | per worker | ×N | ×N | ×N | ×N |
@@ -155,8 +167,7 @@ multi-worker-only; a single-worker server is never pinned.
 
 Start at or below the available physical-core count and tune against your
 workload. Extra workers contend for CPU and accept queues, especially when
-clients reconnect frequently. Compare shared listeners and
-`BB_SOCKET_REUSEPORT=1` under that workload before choosing either.
+clients reconnect frequently.
 
 ## Warm-up before fork
 
@@ -340,9 +351,10 @@ an `exec` via fd inheritance, and that handoff does not yet include the
 protocol listeners — so `reload=True` with a port-bound protocol still forces
 `workers=1`.  Run without reload to scale HTTP alongside the broker.
 
-**`SO_REUSEPORT` applies to HTTP only.**  `BB_SOCKET_REUSEPORT=1` gives each
-HTTP worker its own kernel accept queue (best load distribution); without it
-the workers share the master's listening socket.  The protocol port is always
+**`SO_REUSEPORT` applies to HTTP only.**  Per-worker sockets (the Linux
+default, or `BB_SOCKET_REUSEPORT=1`) give each HTTP worker its own kernel
+accept queue; otherwise the workers share the master's listening socket.  The
+protocol port is always
 bound *without* `SO_REUSEPORT` — a single owner is the point.
 
 ## Production checklist
