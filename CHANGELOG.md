@@ -144,6 +144,12 @@ metadata; reinstall an editable checkout after changing that version.
   servers do not push responses the client cannot consume. Set it to `1`
   to retain promise acceptance followed by immediate cancellation (BLA-680).
 
+### Fixed
+
+- Server: one readable wakeup accepts up to the listen backlog instead of 8
+  connections, so a large connection burst no longer overflows the accept
+  queue and leaves clients waiting seconds on SYN retransmits (BLA-688).
+
 ## [0.82.1] — 2026-11-13
 
 ### Fixed
