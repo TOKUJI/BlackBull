@@ -50,6 +50,17 @@ class DerivedCap(int):
     operator named; the server may lower it to the descriptors left."""
 
 
+def _truthy(raw: str) -> bool:
+    return raw.strip().lower() not in ('0', 'false', 'no', 'off')
+
+
+def resolve_reuseport(raw: str | None) -> bool | None:
+    """Resolve ``BB_SOCKET_REUSEPORT`` — ``auto`` (``None``), ``1`` or ``0``."""
+    if raw is None or raw.strip().lower() in ('', 'auto'):
+        return None
+    return _truthy(raw)
+
+
 def resolve_max_connections(raw: str | None) -> int:
     """Resolve ``BB_MAX_CONNECTIONS`` — ``auto``, ``0``, or a number.
 
@@ -127,7 +138,7 @@ class Settings:
         doc='`production` | `development` | `test`; an unrecognised value is `production`, with a warning.  Set `development` for local development.  In `production`, `StaticFiles` declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details; in `development` it shows them to a loopback peer without `Forwarded`/`X-Forwarded-For` only.')
     workers: int = setting(
         'BB_WORKERS', 1, minimum=1, config=('server', 'workers'), section=_section,
-        doc='Pre-fork worker count.  `0` resolves to `os.cpu_count()`.  Combine with `BB_SOCKET_REUSEPORT=1`, except under `--reload` or on a port-bound non-ASGI protocol, which keep one listener.  See [Workers](../deployment/workers.md).')
+        doc='Pre-fork worker count.  `0` resolves to `os.cpu_count()`.  On Linux each worker gets its own listening socket by default (`BB_SOCKET_REUSEPORT`); a port-bound non-ASGI protocol keeps one listener.  See [Workers](../deployment/workers.md).')
     use_uvloop: bool = setting(
         'BB_UVLOOP', False, section=_section,
         doc="Install `uvloop`'s asyncio policy at startup.  Requires `pip install 'blackbull[speed]'`; falls back to the standard loop with a warning when uvloop is missing.")
@@ -252,9 +263,9 @@ class Settings:
     socket_backlog: int = setting(
         'BB_SOCKET_BACKLOG', 1024, minimum=1, config=('server', 'socket_backlog'), section=_section,
         doc="`listen()` backlog depth, sized for connection bursts; Linux caps the effective value at `net.core.somaxconn`.  Where BlackBull binds, **this value bounds the accept queue**; an adopted fd keeps its creator's `Backlog=` until accepting begins; see [The startup window](../deployment/unix-and-fd.md#the-startup-window).  During that window a TCP client beyond the backlog is served late and a non-blocking `AF_UNIX` client is refused ([details](../deployment/unix-and-fd.md#what-a-client-beyond-the-backlog-observes)); an `AF_UNIX` queue found full when accepting opens is logged on `blackbull.caps`.")
-    socket_reuseport: bool = setting(
-        'BB_SOCKET_REUSEPORT', False, config=('server', 'socket_reuseport'), section=_section,
-        doc='Give each worker a separate TCP listening socket on supported systems. AF_UNIX is not rebound and cannot use this shape with multiple workers unless reload keeps a shared listener. An adopted fd whose supervisor retains ownership cannot be split this way. `0` keeps the kernel default. See [socket scope](../deployment/workers.md#socket-options-across-bind-paths).')
+    socket_reuseport: bool | None = setting(
+        'BB_SOCKET_REUSEPORT', None, parse=resolve_reuseport, shown='auto', config=('server', 'socket_reuseport'), section=_section,
+        doc='Give each worker its own `SO_REUSEPORT` listening socket. `auto`: on Linux, when every listener is TCP bound by BlackBull and `--reload` is off; otherwise the workers share one socket. `1`: on any platform (macOS then sends every connection to one worker); refused for AF_UNIX and for an adopted fd its supervisor still holds. `0`: always shared. See [socket scope](../deployment/workers.md#socket-options-across-bind-paths).')
     socket_sndbuf: int = setting(
         'BB_SOCKET_SNDBUF', 0, minimum=0, config=('server', 'socket_sndbuf'), section=_section,
         doc="`SO_SNDBUF` (bytes) on BlackBull's own listeners and the TCP connections accepted from them; `0` keeps the kernel default.  Linux clamps at `net.core.wmem_max` and doubles.  See [Per-path scope](../deployment/workers.md#socket-options-across-bind-paths).")
@@ -429,7 +440,7 @@ def _read(field: dataclasses.Field) -> Any:
     if raw is None:
         return field.default
     if field.type is bool:
-        return raw.strip().lower() not in ('0', 'false', 'no', 'off')
+        return _truthy(raw)
     if field.type is str:
         return raw
     try:

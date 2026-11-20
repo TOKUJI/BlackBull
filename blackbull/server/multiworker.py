@@ -17,7 +17,7 @@ from .listener import InheritedFd, Listener
 from .recipient import _WS_READ_INLINE
 from .worker import run_worker
 from ..protocol.rsock import (close_sockets, create_configured_sockets,
-                              REUSEPORT_SUPPORTED)
+                              REUSEPORT_BALANCES, REUSEPORT_SUPPORTED)
 
 logger = logging.getLogger(__name__)
 
@@ -125,12 +125,28 @@ def _describe(socks) -> str:
     return ', '.join(names)
 
 
+def _per_worker_sockets(choice: bool | None, shared) -> bool:
+    """Whether ``BB_SOCKET_REUSEPORT`` gives each worker its own socket.
+
+    ``auto`` (``None``) splits only what it can split without a refusal, on a
+    kernel that balances the group; an explicit choice is followed as named.
+    """
+    if choice is not None:
+        return choice and REUSEPORT_SUPPORTED
+    return REUSEPORT_BALANCES and all(
+        not isinstance(listener.where, InheritedFd) and not _non_ip(socks)
+        for listener, socks in shared)
+
+
+def _non_ip(socks) -> list:
+    return [sock for sock in socks if sock.family not in _IP_FAMILIES]
+
+
 def _refuse_non_ip_rebind(shared, workers: int) -> None:
     """Refuse non-IP listeners: SO_REUSEPORT rebinding does not support AF_UNIX.
     """
     for _listener, socks in shared:
-        non_ip = [sock for sock in socks if sock.family not in _IP_FAMILIES]
-        if non_ip:
+        if non_ip := _non_ip(socks):
             raise RuntimeError(_refusal(
                 workers, _describe(non_ip),
                 f'SO_REUSEPORT is an IP-socket option, and '
@@ -342,8 +358,8 @@ class MultiWorkerServer:
 
             from ..env import get_settings as _get_settings  # noqa: PLC0415
             cfg = _get_settings()
-            if (workers > 1 and REUSEPORT_SUPPORTED
-                    and cfg.socket_reuseport and not reload):
+            if (workers > 1 and not reload
+                    and _per_worker_sockets(cfg.socket_reuseport, self._shared)):
                 _refuse_non_ip_rebind(self._shared, workers)
                 planned = [_PlannedListener(
                     listener=listener,
