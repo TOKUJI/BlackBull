@@ -12,6 +12,9 @@
 #   H2_CONNS(=32) H2_STREAMS(=16) H2_N(=100000) H2_WARMUP(=10000, discarded)
 #   H2_URIS     file of request URIs for h2load -i; each origin is replaced by this server's
 #   H2_HEADER   one extra request header, e.g. 'Accept-Encoding: gzip'
+#   H2_DATA     a request body file, sent as POST (h2load -d); the gRPC lane is
+#               APP=bench.apps.grpc_echo:app URL_PATH=/plaintext H2_URIS=bench/ab/grpc/uris.txt
+#               H2_HEADER='content-type: application/grpc' H2_DATA=bench/ab/grpc/unary.bin
 #   APP / APP_PYTHONPATH  serve this app through the blackbull CLI instead
 #   TLS_CERT / TLS_KEY    with APP: serve HTTPS (ALPN h2)
 #
@@ -47,6 +50,7 @@ ab_measure() {
         target=(-i "$BENCH_TMP/uris.txt")
     fi
     [ -z "${H2_HEADER:-}" ] || target+=(-H "$H2_HEADER")
+    [ -z "${H2_DATA:-}" ] || target+=(-d "$H2_DATA")
     "${PIN_LOAD[@]}" h2load -c "$H2_CONNS" -m "$H2_STREAMS" -n "$H2_WARMUP" "${target[@]}" \
         > /dev/null 2>&1
     "${PIN_LOAD[@]}" h2load -c "$H2_CONNS" -m "$H2_STREAMS" -n "$H2_N" "${target[@]}" \

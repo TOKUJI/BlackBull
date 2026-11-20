@@ -71,3 +71,11 @@ def test_the_ab_wait_limit_grows_with_the_measurement(repo):
     assert wait(ROUNDS='8', URL_PATHS='/conn,/plaintext', H2_PROFILES='/1kb') > 2 * one_lane - 1200
     # 8 rounds × 2 phases × 4 runs × (15 s + 5 s warm-up) is 21 minutes of wrk alone.
     assert one_lane > 21 * 60
+
+
+def test_the_ab_runner_hands_the_h2_lanes_a_request_body(repo):
+    done = _ab(repo, 'job_runner', REF_BASE='HEAD~1', REF_TREAT='HEAD', H2_PROFILES='/plaintext',
+               H2_DATA='bench/ab/grpc/unary.bin', REMOTE_REPO='/r', REMOTE_RUN='/run')
+    assert done.returncode == 0, done.stderr
+
+    assert 'export H2_DATA=bench/ab/grpc/unary.bin' in done.stdout.splitlines()
