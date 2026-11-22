@@ -58,6 +58,11 @@ class _MinimalResponseHeaders(list):
 
     __hash__ = None  # unhashable like list; equality spans mutable state
 
+    def __reduce__(self):
+        # Rebuilt from the fields: the default list reduction replays
+        # ``extend`` before the slots exist.
+        return _as_response_fields, (list(self),)
+
     def add(self, name: bytes, value: bytes) -> None:
         """Append one field, validated, with its name lowercased and its value
         trimmed of edge SP/HTAB."""
