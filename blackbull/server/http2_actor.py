@@ -935,14 +935,18 @@ class HTTP2Actor(Actor, HTTP2Connection):
             # and reach no handler; anything else earns the head's verdict.
             prohibited = next((name for name, _ in header_frame.headers
                                if name in PROHIBITED_TRAILER_FIELDS), None)
+            declared = stream.expected_content_length
             if (not header_frame.end_stream or header_frame.malformed
-                    or header_frame.pseudo_headers or prohibited is not None):
+                    or header_frame.pseudo_headers or prohibited is not None
+                    or declared not in (None, stream.received_data_bytes)):
                 reason = (header_frame.malformed_reason
                           or ('pseudo-header in trailer section'
                               if header_frame.pseudo_headers
                               else f'prohibited trailer field {prohibited!r}'
                               if prohibited is not None
-                              else 'section does not end the request'))
+                              else 'section does not end the request'
+                              if not header_frame.end_stream
+                              else 'body short of its content-length'))
                 if _DEBUG:
                     logger.debug(
                         'Stream %d refused trailing field section — %s',
@@ -982,9 +986,12 @@ class HTTP2Actor(Actor, HTTP2Connection):
         assert conn is not None  # not malformed → parse_headers built a Connection
         self._fill_scope_connection(conn)
         try:
-            # RFC 9113 §8.1.1: a length other than one canonical number is malformed.
-            stream.expected_content_length = parse_content_length(
+            # RFC 9113 §8.1.1: a length other than one canonical number is
+            # malformed, and so is a nonzero one on a head that ends the stream.
+            declared = stream.expected_content_length = parse_content_length(
                 conn.headers._index.get(b'content-length', ()), canonical=True)
+            if declared and header_frame.end_stream:
+                raise ValueError
         except ValueError:
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
@@ -1013,7 +1020,6 @@ class HTTP2Actor(Actor, HTTP2Connection):
 
         # Keep the common admission check inline; the refusal path rechecks
         # and enforces the limit.
-        declared = stream.expected_content_length
         if (declared is not None and declared > self._max_body_size > 0
                 and await self._refuse_oversized_declared_body(
                     stream, conn, send)):

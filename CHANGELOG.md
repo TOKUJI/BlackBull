@@ -27,6 +27,13 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Fixed
+
+- HTTP/2: a request that ends short of its declared `content-length` on its
+  head or on a trailer section is reset with `PROTOCOL_ERROR`, as a short DATA
+  body already was, instead of reaching the handler as an empty or short body
+  (RFC 9113 §8.1.1, BLA-669).
+
 ## [0.83.0] — 2026-11-23
 
 ### Added
