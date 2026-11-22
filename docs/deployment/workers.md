@@ -20,7 +20,8 @@ already open. The 16 preparation/refusal slots come from the separate
 service work. A freed service slot can admit new work while refused
 connections are still closing, provided the held limit has room.
 
-At the service limit, HTTP/1.1 and prior-knowledge h2c receive best-effort 503;
+At the service limit, HTTP/1.1 and prior-knowledge h2c receive a best-effort 503
+with `Retry-After: 1` and the text `Service is busy. Please retry shortly.`;
 ALPN-h2 and raw connections close silently. At the held limit, accept pauses
 and arrivals wait in the OS backlog. These produce distinct `blackbull.caps`
 records: `max_connections` and `max_held_connections`. Startup logs show both

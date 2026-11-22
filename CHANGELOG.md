@@ -99,6 +99,9 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Changed
 
+- A connection past the service cap (`BB_MAX_CONNECTIONS`) reads a 503 with a
+  plain-text body, `Service is busy. Please retry shortly.`, besides
+  `Retry-After: 1`, so a person sees why instead of a blank page (BLA-692).
 - `BB_SOCKET_REUSEPORT` defaults to `auto`: on Linux, several workers serving
   TCP listeners BlackBull bound itself each get their own `SO_REUSEPORT`
   socket, so a burst of connections spreads evenly instead of piling onto one

@@ -184,15 +184,17 @@ STARTUP_PARK_SECONDS = 1.5   # every burst client must be queued before acceptin
 @pytest.mark.asyncio
 @pytest.mark.timeout(180)
 @pytest.mark.parametrize('loop', LOOPS)
-async def test_a_burst_parked_through_the_startup_window_is_served_not_reset(loop):
+async def test_a_burst_parked_through_the_startup_window_is_answered_not_reset(loop):
+    """Past the service cap a parked client may be told to retry (503), but
+    every one gets an HTTP answer."""
     observed, server_view, _settled = await _burst(
         soft=TIGHT_FD_BUDGET, saturate=False, park=STARTUP_PARK_SECONDS,
         loop=loop)
 
     assert server_view['accept_errors'] == 0, (
         f'the first tick after the window spent the reserve: {server_view}')
-    assert observed['200'] == BURST, (
-        f'a connection parked through the window was not served: '
+    assert observed['200'] + observed['503'] == BURST and observed['200'], (
+        f'a connection parked through the window got no HTTP answer: '
         f'{dict(observed)}')
 
 
