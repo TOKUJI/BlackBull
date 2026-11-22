@@ -27,6 +27,13 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Docs
+
+- gRPC server reflection serves both `grpc.reflection.v1` and `v1alpha`
+  (`blackbull-protobuf` 0.2.0 or later). The stale v1alpha-only entry is gone
+  from KNOWN_LIMITATIONS, and the guide's `grpcurl` listing is checked against
+  the services the interop suite sees (BLA-644).
+
 ## [0.83.0] — 2026-11-23
 
 ### Added
