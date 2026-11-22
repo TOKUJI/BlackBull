@@ -27,6 +27,8 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+## [0.83.0] — 2026-11-23
+
 ### Added
 
 - `WebSocket.reject(response)` sends an HTTP response before an upgrade.
