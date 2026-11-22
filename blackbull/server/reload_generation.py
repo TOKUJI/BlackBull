@@ -77,6 +77,9 @@ class ReloadGeneration:
             try:
                 message = self.control.recv(1)
             except TimeoutError:
+                # A child it forked may still hold the control socket open.
+                if self.process.poll() is not None:
+                    raise RuntimeError('replacement exited before completing reload') from None
                 continue
             if message != expected:
                 raise RuntimeError('replacement exited before completing reload')
