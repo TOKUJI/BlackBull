@@ -27,6 +27,13 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Fixed
+
+- `StaticFiles` honours `If-Range` (RFC 9110 §13.1.5): a `Range` applies only
+  while the validator still matches the file (strong ETag or a date not older
+  than `Last-Modified`); otherwise the whole file is sent with 200, instead of
+  a slice of the changed file (BLA-671).
+
 ## [0.83.0] — 2026-11-23
 
 ### Added
