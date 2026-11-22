@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 
 from .._cleanup import combine_cleanup_errors
-from .listener import HTTP, InheritedFd, Listener
+from .listener import InheritedFd, Listener
 from .recipient import _WS_READ_INLINE
 from .worker import run_worker
 from .reload_generation import (CONTROL_ENV, EXCLUSIVE_HTTP_ENV, ReloadGeneration, WorkerReadiness,
