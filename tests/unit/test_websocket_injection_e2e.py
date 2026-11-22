@@ -13,7 +13,7 @@ outcome, and the client has to read it as an HTTP 400 refusal.
 import pytest
 
 from blackbull import BlackBull, Depends, WebSocket
-from blackbull.testing import HandshakeError, TestClient, WebSocketDisconnect
+from blackbull.testing import HandshakeError, TestClient
 from blackbull.utils import Scheme
 
 TEARDOWNS: list[str] = []
