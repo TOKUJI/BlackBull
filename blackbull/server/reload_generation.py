@@ -92,17 +92,20 @@ class ReloadGeneration:
                 or channel_readable(self.control))
 
     def stop(self, timeout):
-        if self.process.returncode is not None:
-            return
+        if self.control.fileno() < 0:
+            return      # already stopped: the group id may since have been reused
         deadline = time.monotonic() + timeout
         clean = False
         try:
-            try:
-                os.kill(self.process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                # EOF below still determines whether children were reclaimed.
-                pass
-            while self.control.fileno() >= 0 and time.monotonic() < deadline:
+            if self.process.poll() is None:
+                try:
+                    os.kill(self.process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    # EOF below still determines whether children were reclaimed.
+                    pass
+            # A leader that already exited leaves its workers in the group.
+            while (self.process.returncode is None and self.control.fileno() >= 0
+                   and time.monotonic() < deadline):
                 try:
                     message = self.control.recv(1)
                 except TimeoutError:
@@ -113,7 +116,7 @@ class ReloadGeneration:
         finally:
             self.control.close()
             if not clean:
-                # Keep the leader unreaped until its group has been signalled.
+                # The workers outlive a leader that exited: signal its whole group.
                 try:
                     os.killpg(self.process.pid, signal.SIGKILL)
                 except ProcessLookupError:
