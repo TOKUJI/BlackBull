@@ -25,6 +25,8 @@ server = Server(adapter)
 
 `ASGIApp` is a native BlackBull callable, not an app to pass to another ASGI
 host. `Server(foreign_app)` alone does not infer ASGI from its signature.
+It serves HTTP and WebSocket only: MQTT and other raw protocols are added to a
+BlackBull app with `add_extension`, which `ASGIApp` does not have.
 `BB_FORCE_ASGI_SCOPE=1` also selects the adapter; combining it with
 `Server(..., asgi=False)` raises `ConfigurationError`.
 
