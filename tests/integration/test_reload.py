@@ -53,6 +53,7 @@ _HARD_TIMEOUT_SEC = 120
 
 _REQ_TIMEOUT_SEC = 2.0
 _POLL_SEC = 0.1
+_HANDOFF = 'replacement reached handoff'
 _H2_PING = b'\x00\x00\x08\x06\x00\x00\x00\x00\x0012345678'
 _CERT_DIR = Path(__file__).resolve().parents[1]
 
@@ -511,7 +512,10 @@ def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env, entry):
                        lambda: _get_version(port) == 'v2',
                        'GET /version == v2 after reload')
         if extra_port is not None:
-            assert _get_version(extra_port, tls=True) == 'v2'
+            # Until the previous workers stop accepting, either generation may
+            # take a connection on a shared listener.
+            assert _await('new code live',
+                          lambda: _get_version(extra_port, tls=True) == 'v2')
         if raw_held is not None:
             assert _await('recycle begun', lambda: 'Draining ' in _log_text(log_path))
             with socket.create_connection(('127.0.0.1', raw_port), timeout=0.2) as raw:
@@ -560,6 +564,7 @@ def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env, entry):
                     pass
                 assert frame is not None and frame[2][:8] == b'\x00\x00\x00\x01\x00\x00\x00\x01'
             with held_h2.makefile('rb') as reader:
+                handoffs = _occurrences(log_path, _HANDOFF)
                 _write_app(script, port, 'v3')
                 (tmp_path / 'release').touch()
                 body = bytearray()
@@ -574,6 +579,9 @@ def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env, entry):
             if not _await('new code live', lambda: _get_version(port) == 'v3'):
                 _write_app(script, port, 'v3')
                 assert _await('new code live', lambda: _get_version(port) == 'v3')
+            # The new workers answer before their supervisor finishes the
+            # handoff; kill it only once the master has switched over.
+            assert _await('new code live', lambda: _occurrences(log_path, _HANDOFF) > handoffs)
             supervisor = int(_get_version(port, '/supervisor'))
             assert supervisor != proc.pid and os.getpgid(supervisor) == supervisor
             os.kill(supervisor, signal.SIGKILL)
@@ -583,7 +591,7 @@ def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env, entry):
                 return reply is not None and int(reply) not in (1, proc.pid, supervisor)
 
             assert _await('new code live', recovered)
-            assert _get_version(port) == 'v3'
+            assert _await('new code live', lambda: _get_version(port) == 'v3')
     finally:
         if websocket is not None:
             websocket.close()
