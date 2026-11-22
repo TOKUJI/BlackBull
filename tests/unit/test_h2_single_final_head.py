@@ -5,6 +5,8 @@ same stream: the stream ends with RST_STREAM(INTERNAL_ERROR), as HTTP/1.1
 discards the second response.  A stream that already stalled on flow control
 keeps its own ending (the stall is raised again, and the actor cancels it).
 """
+from http import HTTPStatus
+
 import pytest
 
 from blackbull.native import NativeResponse
@@ -58,7 +60,7 @@ def _sender(window: int = 65535):
 async def test_a_second_head_resets_the_stream_instead(second):
     writer, sender = _sender()
     await sender(NativeResponse(status=200, header=HEAD, body=b'partial', more_body=True))
-    await sender(second, status=500)
+    await sender(second, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
     kinds = [kind for kind, _payload in _frames(writer.wire)]
     assert kinds.count(HEADERS) == 1, f'a second final head reached the peer: {kinds}'
