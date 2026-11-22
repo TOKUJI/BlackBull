@@ -188,6 +188,9 @@ class HTTP1Actor(Actor):
     EventAggregator still receives the lifecycle events.
     """
 
+    #: Set by the reload worker; ``None`` serves without a drain.
+    _reload_drain = None
+
     # Class-level defaults, because test doubles built with ``object.__new__``
     # never run ``__init__``.  Immutable ones only: a mutable class default is
     # shared by *every* connection, which for the line cache is precisely the
@@ -636,7 +639,7 @@ class HTTP1Actor(Actor):
             ws_queue_depth=self._ws_queue_depth, http_send=send,
         )
         try:
-            await ws_actor.run(getattr(self, '_reload_drain', None))
+            await ws_actor.run(self._reload_drain)
         finally:
             _close_ws_record(log_record, ws_actor._disconnect_code, ws_actor.denial_status)
 

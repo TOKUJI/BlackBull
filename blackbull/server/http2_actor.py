@@ -219,6 +219,9 @@ class HTTP2Actor(Actor, HTTP2Connection):
     ``app._dispatcher`` instead.
     """
 
+    #: Set by the reload worker; ``None`` serves without a drain.
+    _reload_drain = None
+
     def __init__(
         self,
         reader: 'AbstractReader | None',
@@ -1220,7 +1223,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
 
         async def _run_ws():
             try:
-                await ws_actor.run(getattr(self, '_reload', None))
+                await ws_actor.run(self._reload_drain)
             finally:
                 _close_ws_record(log_record, ws_actor._disconnect_code, ws_actor.denial_status)
 
@@ -1362,7 +1365,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
 
 class ReloadingHTTP2Actor(HTTP2Actor):
     def watch_reload(self, drain: ReloadDrain) -> None:
-        self._reload = drain
+        self._reload_drain = drain
         self._reload_cutoff: int | None = None
 
     async def run(self) -> None:
@@ -1378,11 +1381,11 @@ class ReloadingHTTP2Actor(HTTP2Actor):
             self._retire_stream = self._retire_during_reload
             self._wake_reader()
 
-        self._reload.register(begin)
+        self._reload_drain.register(begin)
         try:
             await super().run()
         finally:
-            self._reload.unregister(begin)
+            self._reload_drain.unregister(begin)
             if wakeups is not None:
                 del self._admit, self._complete_header_block, self._retire_stream
                 wakeups()
