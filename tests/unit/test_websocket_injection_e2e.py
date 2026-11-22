@@ -8,12 +8,12 @@ real handshake and a real query string rather than a hand-built
 :class:`~blackbull.connection.Connection`.
 
 The rejection tests matter most here: a refused handshake is a *wire*
-outcome, and 1008 has to reach the client as a close code.
+outcome, and the client has to read it as an HTTP 400 refusal.
 """
 import pytest
 
 from blackbull import BlackBull, Depends, WebSocket
-from blackbull.testing import TestClient, WebSocketDisconnect
+from blackbull.testing import HandshakeError, TestClient, WebSocketDisconnect
 from blackbull.utils import Scheme
 
 TEARDOWNS: list[str] = []
@@ -86,13 +86,24 @@ def test_path_and_query_params_reach_the_handler(url, expected):
     pytest.param('/strict', id='missing-required-query'),
     pytest.param('/seats/front-row', id='uncoercible-path-param'),
 ])
-def test_missing_required_query_param_is_refused_with_1008(url):
+def test_missing_required_query_param_is_refused_with_400(url):
     app = _make_app()
     with TestClient(app) as client:
-        with pytest.raises(WebSocketDisconnect) as excinfo:
+        with pytest.raises(HandshakeError, match='HTTP 400'):
             with client.websocket_connect(url):
                 pass
-    assert excinfo.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_a_real_client_reads_the_refusal_as_an_http_response():
+    from tests.harness import served
+    async with served(_make_app()) as server:
+        wire = await server.wire()
+        await wire.send(b'GET /strict HTTP/1.1\r\nHost: a\r\nUpgrade: websocket\r\n'
+                        b'Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n'
+                        b'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n')
+        reply = await wire.response()
+    assert reply.status == 400 and b'token' in reply.body
 
 
 # ---------------------------------------------------------------------------

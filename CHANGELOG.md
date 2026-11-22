@@ -27,6 +27,13 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Fixed
+
+- A WebSocket handshake whose declared parameters cannot be bound (a required
+  query param missing, a value that will not coerce) is refused with HTTP
+  `400 Bad Request` naming the parameter, as on the HTTP path, instead of a
+  close code 1008 sent before the handshake completed (BLA-604).
+
 ## [0.83.0] — 2026-11-23
 
 ### Added

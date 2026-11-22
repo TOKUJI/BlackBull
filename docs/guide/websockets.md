@@ -100,9 +100,9 @@ every connection at runtime.
 `body` and dataclass-body forms have no WebSocket equivalent.
 
 When a declared parameter cannot be bound — a required query param missing, a
-value that will not coerce — the handshake is **refused with close code 1008**
-(policy violation) and the handler never runs. The HTTP path answers the same
-failure with `400`; a WebSocket has no response to put a status on.
+value that will not coerce — the handshake is **refused with `400 Bad Request`**,
+as on the HTTP path, and the handler never runs. The response body names the
+parameter; the client's connect fails with that status.
 
 #### Dependency lifetime — read this before injecting a database handle
 
