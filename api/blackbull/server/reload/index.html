@@ -16,7 +16,7 @@
         <link rel="prev" href="../recipient/">
       
       
-        <link rel="next" href="../request_target/">
+        <link rel="next" href="../reload_drain/">
       
       
         
@@ -4916,17 +4916,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.server.reload.exec_self_with_sockets" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        exec_self_with_sockets
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -4936,6 +4925,62 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reload_drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    reload_drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reload_generation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    reload_generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -5940,17 +5985,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#blackbull.server.reload.exec_self_with_sockets" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        exec_self_with_sockets
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -5991,9 +6025,7 @@
 
     <div class="doc doc-contents first">
 
-        <p>Master re-exec with inherited listening sockets.</p>
-<p>Re-import code by replacing the master, not importlib.reload. Keep listeners
-open across exec and close temporary event loops before fork.</p>
+        <p>Watch source changes for the reload supervisor.</p>
 
 
 
@@ -6090,27 +6122,6 @@ watch_filter:
 
 </div>
 
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="blackbull.server.reload.exec_self_with_sockets" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">exec_self_with_sockets</span><span class="p">(</span><span class="n">sockets</span><span class="p">,</span> <span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
-
-<a href="#blackbull.server.reload.exec_self_with_sockets" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Re-execute without returning on success, preserving listening descriptors.</p>
-<p>The caller must terminate subprocesses holding copies first. Preserve the
-original interpreter options and invocation unless argv overrides them.
-sys.executable is always the executable.</p>
-
-
-    </div>
-
-</div>
 
 
 

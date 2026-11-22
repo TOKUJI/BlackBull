@@ -4952,6 +4952,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/reload_drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    reload_drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/reload_generation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    reload_generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/request_target/" class="md-nav__link">
         
   
@@ -6129,8 +6185,8 @@ handler for. It decides who may answer:</p>
   serves the binding's port through the certificate the server was configured
   with; the binding cannot name one of its own. An HTTP
   <a href="../listeners/">listener</a> can.</li>
-<li><strong><code>--reload</code> pins <code>workers=1</code></strong> when a port-bound protocol is registered: the
-  exec handoff carries the HTTP sockets only.</li>
+<li>With <a href="../../deployment/hot-reload/"><code>--reload</code></a>, a single-owner listener takes
+  new connections in the replacement worker after the old generation exits.</li>
 </ul>
 <h2 id="a-note-on-the-server-class">A note on the server class<a class="headerlink" href="#a-note-on-the-server-class" title="Permanent link">&para;</a></h2>
 <p>The server class that drives all this is <code>blackbull.server.Server</code> (it serves

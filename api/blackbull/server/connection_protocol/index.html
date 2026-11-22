@@ -4513,6 +4513,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.connection_protocol.BufferReader.watch_wakeups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        watch_wakeups
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5044,6 +5055,62 @@
     
   
     reload
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reload_drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    reload_drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reload_generation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    reload_generation
   
 
     
@@ -6073,6 +6140,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.connection_protocol.BufferReader.watch_wakeups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        watch_wakeups
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -6377,6 +6455,24 @@ condition backpressure exists to prevent is not the one in play.</p>
 <p>A starving reader must resume input even if its requested slice exceeds the
 watermark. The reader publishes read_offer around this wait; a paused
 transport cannot otherwise supply the bytes needed to unblock it.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.connection_protocol.BufferReader.watch_wakeups" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">watch_wakeups</span><span class="p">(</span><span class="n">after_wait</span><span class="p">)</span></code>
+
+<a href="#blackbull.server.connection_protocol.BufferReader.watch_wakeups" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Notify a parked reader without consuming input or cancelling its read.</p>
 
 
     </div>

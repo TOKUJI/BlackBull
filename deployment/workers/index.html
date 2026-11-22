@@ -5085,6 +5085,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../../api/blackbull/server/reload_drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    reload_drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/blackbull/server/reload_generation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    reload_generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/blackbull/server/request_target/" class="md-nav__link">
         
   
@@ -6615,8 +6671,8 @@ each closed.</p>
 the load balancer first if you want zero in-flight requests at all — the
 server's job here is to not truncate the ones already running, not to know that
 your deploy started.</p>
-<p><code>--reload</code> uses the same path, so a code change now recycles workers by
-draining them rather than by killing them.</p>
+<p><a href="../hot-reload/"><code>--reload</code></a> starts replacement workers before it begins this
+drain.</p>
 <div class="highlight"><pre><span></span><code>SIGTERM ──▶ close listeners ──▶ drain accepted connections
                                         │
                         BB_WORKER_DRAIN_TIMEOUT reached ──▶ abort, cancel
@@ -6640,10 +6696,8 @@ crashes, the master respawns it and it re-inherits the still-open listening
 socket, so the broker resumes on the same port.  Clients reconnect;
 in-memory broker state does not survive (see
 <a href="../../guide/mqtt/">MQTT</a>).</p>
-<p><strong>Auto-reload is the exception.</strong>  <code>--reload</code> hands listening sockets across
-an <code>exec</code> via fd inheritance, and that handoff does not yet include the
-protocol listeners — so <code>reload=True</code> with a port-bound protocol still forces
-<code>workers=1</code>.  Run without reload to scale HTTP alongside the broker.</p>
+<p>With <a href="../hot-reload/"><code>--reload</code></a>, the replacement worker inherits the broker
+listener and starts accepting after the previous generation exits.</p>
 <p><strong><code>SO_REUSEPORT</code> applies to HTTP only.</strong>  Per-worker sockets (the Linux
 default, or <code>BB_SOCKET_REUSEPORT=1</code>) give each HTTP worker its own kernel
 accept queue; otherwise the workers share the master's listening socket.  The

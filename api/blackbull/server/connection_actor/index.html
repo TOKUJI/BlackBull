@@ -4440,6 +4440,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.connection_actor.ReloadingConnectionActor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ReloadingConnectionActor
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4889,6 +4900,62 @@
     
   
     reload
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reload_drain/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    reload_drain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reload_generation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    reload_generation
   
 
     
@@ -5873,6 +5940,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#blackbull.server.connection_actor.ReloadingConnectionActor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ReloadingConnectionActor
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -5958,6 +6036,54 @@ failures so one bad connection cannot affect others.</p>
 ExceptionGroup from HTTP/2's own stream TaskGroup included) is caught and
 emitted as a single on_error event; the connection is always closed in
 finally.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="blackbull.server.connection_actor.ReloadingConnectionActor" class="doc doc-heading">
+            <code>ReloadingConnectionActor</code>
+
+
+<a href="#blackbull.server.connection_actor.ReloadingConnectionActor" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="ConnectionActor (blackbull.server.connection_actor.ConnectionActor)" href="#blackbull.server.connection_actor.ConnectionActor">ConnectionActor</a></code></p>
+
+
+
+        <p>A reload worker's connection: idle ones close once the worker retires.</p>
 
 
 
