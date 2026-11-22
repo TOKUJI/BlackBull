@@ -6354,7 +6354,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_MAX_CONNECTIONS</code></td>
 <td><code>auto</code></td>
-<td>Service connections <strong>per worker</strong>, including keep-alive and WebSocket. <code>auto</code> subtracts 64 reserved and already-open descriptors from <code>RLIMIT_NOFILE</code>; explicit numbers are not clamped. Held descriptors (including TLS preparation and closing) have a separate derived limit of service cap + 16; reaching it pauses accept. Service excess receives best-effort <code>503</code> with <code>Retry-After: 1</code> on HTTP/1.1 and prior-knowledge h2c; ALPN-h2 and raw connections close silently. <code>0</code> disables both caps. During lifespan startup the backlog applies. See <a href="../../deployment/workers/#connection-limits">connection limits</a>.</td>
+<td>Service connections <strong>per worker</strong>, including keep-alive and WebSocket. <code>auto</code> subtracts 64 reserved and already-open descriptors from <code>RLIMIT_NOFILE</code>; explicit numbers are not clamped. Held descriptors (including TLS preparation and closing) have a separate derived limit of service cap + 16; reaching it pauses accept. Service excess receives a best-effort <code>503</code> with <code>Retry-After: 1</code> and a short text body on HTTP/1.1 and prior-knowledge h2c; ALPN-h2 and raw connections close silently. <code>0</code> disables both caps. During lifespan startup the backlog applies. See <a href="../../deployment/workers/#connection-limits">connection limits</a>.</td>
 </tr>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>

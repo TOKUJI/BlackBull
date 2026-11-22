@@ -5986,6 +5986,8 @@ adapter explicitly:</p>
 </code></pre></div>
 <p><code>ASGIApp</code> is a native BlackBull callable, not an app to pass to another ASGI
 host. <code>Server(foreign_app)</code> alone does not infer ASGI from its signature.
+It serves HTTP and WebSocket only: MQTT and other raw protocols are added to a
+BlackBull app with <code>add_extension</code>, which <code>ASGIApp</code> does not have.
 <code>BB_FORCE_ASGI_SCOPE=1</code> also selects the adapter; combining it with
 <code>Server(..., asgi=False)</code> raises <code>ConfigurationError</code>.</p>
 <h2 id="mounting-inside-blackbull">Mounting inside BlackBull<a class="headerlink" href="#mounting-inside-blackbull" title="Permanent link">&para;</a></h2>
