@@ -27,6 +27,13 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Fixed
+
+- A gRPC server-streaming handler ends when its client drops the connection:
+  the failed send closes its generator (its `finally` runs) instead of
+  leaving the handler and two tasks running for the life of the process
+  (BLA-681).
+
 ## [0.83.0] — 2026-11-23
 
 ### Added
