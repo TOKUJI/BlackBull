@@ -27,6 +27,13 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Security
+
+- `cookie_header` raises `ValueError` for a name that is not an RFC 9110
+  token, a value outside RFC 6265 cookie-octets, or a path containing `;` or a
+  control character, instead of emitting them: a `;` in the value used to add
+  cookie attributes such as `Domain` (BLA-605).
+
 ## [0.83.0] — 2026-11-23
 
 ### Added
