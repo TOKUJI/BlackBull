@@ -39,9 +39,11 @@ async def test_past_the_cap_is_a_complete_503(caplog):
 
     assert payload == (b'HTTP/1.1 503 Service Unavailable\r\n'
                        b'retry-after: 1\r\n'
-                       b'content-length: 0\r\n'
+                       b'content-type: text/plain; charset=utf-8\r\n'
+                       b'content-length: 39\r\n'
                        b'connection: close\r\n'
-                       b'\r\n')
+                       b'\r\n'
+                       b'Service is busy. Please retry shortly.\n')
     hits = [r for r in caplog.records if getattr(r, 'cap', None) == 'max_connections']
     assert hits and hits[0].levelno == logging.WARNING and hits[0].limit == 1
 

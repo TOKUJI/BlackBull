@@ -317,9 +317,11 @@ SWEEP_BURST = 50
 #: The refusal as it must arrive: a complete, parseable HTTP/1.1 response.
 REFUSAL = (b'HTTP/1.1 503 Service Unavailable\r\n'
            b'retry-after: 1\r\n'
-           b'content-length: 0\r\n'
+           b'content-type: text/plain; charset=utf-8\r\n'
+           b'content-length: 39\r\n'
            b'connection: close\r\n'
-           b'\r\n')
+           b'\r\n'
+           b'Service is busy. Please retry shortly.\n')
 
 #: Where the resource bounds are observed.  Both are this process's, since
 #: the probe and the server share one.
@@ -417,12 +419,16 @@ async def _read_response_head(reader, *, timeout: float = 15.0):
     The head terminator, not EOF: the question is whether the response is
     there to be read, and a read that kept going past it would report the
     reset that follows an already-delivered response as if the response had
-    never arrived.  A reset, an empty EOF, a timeout or a truncated head are
-    the failures, so they are what this returns as such.
+    never arrived.  A refusal is read through its declared body.  A reset, an
+    empty EOF, a timeout or a truncated head are the failures, so they are
+    what this returns as such.
     """
     try:
         head = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'),
                                       timeout=timeout)
+        if head.startswith(b'HTTP/1.1 503 '):
+            length = int(head.lower().split(b'content-length: ')[1].split(b'\r\n')[0])
+            head += await asyncio.wait_for(reader.readexactly(length), timeout=timeout)
     except ConnectionResetError:
         return 'reset', b''
     except asyncio.TimeoutError:

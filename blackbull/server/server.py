@@ -233,6 +233,16 @@ _REFUSAL_RESERVE = FD_RESERVE // 4
 _APPLICATION_SPARE = FD_RESERVE // 8
 assert _REFUSAL_RESERVE + _APPLICATION_SPARE <= FD_RESERVE
 
+_BUSY_BODY = b'Service is busy. Please retry shortly.\n'
+#: What a connection past the service cap reads: a complete response a person
+#: can read and a client can act on (retry on a new connection after 1 s).
+_BUSY_REFUSAL = (b'HTTP/1.1 503 Service Unavailable\r\n'
+                 b'retry-after: 1\r\n'
+                 b'content-type: text/plain; charset=utf-8\r\n'
+                 b'content-length: %d\r\n'
+                 b'connection: close\r\n'
+                 b'\r\n%s' % (len(_BUSY_BODY), _BUSY_BODY))
+
 _ACCEPT_RETRY_DELAY = asyncio.constants.ACCEPT_RETRY_DELAY
 _ACCEPT_RESOURCE_ERRNOS = frozenset(
     {errno.EMFILE, errno.ENFILE, errno.ENOBUFS, errno.ENOMEM})
@@ -984,12 +994,7 @@ class Server:
             # h1 is the safe guess: the peer has not spoken.
             if bound_binding is None and alpn != 'h2':
                 try:
-                    await writer.write(
-                        b'HTTP/1.1 503 Service Unavailable\r\n'
-                        b'retry-after: 1\r\n'
-                        b'content-length: 0\r\n'
-                        b'connection: close\r\n'
-                        b'\r\n')
+                    await writer.write(_BUSY_REFUSAL)
                 except Exception:
                     logger.debug(
                         '503 write failed for %s (peer disconnected?)',
