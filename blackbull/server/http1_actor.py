@@ -636,7 +636,7 @@ class HTTP1Actor(Actor):
             ws_queue_depth=self._ws_queue_depth, http_send=send,
         )
         try:
-            await ws_actor.run()
+            await ws_actor.run(getattr(self, '_reload_drain', None))
         finally:
             _close_ws_record(log_record, ws_actor._disconnect_code, ws_actor.denial_status)
 
@@ -826,3 +826,35 @@ class HTTP1Actor(Actor):
 
     async def _handle(self, msg: Message) -> None:  # never reached
         raise NotImplementedError
+
+
+class ReloadingHTTP1Actor(HTTP1Actor):
+    def watch_reload(self, drain) -> None:
+        self._reload_drain = drain
+
+    async def run(self) -> None:
+        drain = self._reload_drain
+        self._connection_task = asyncio.current_task()
+        assert self._connection_task is not None
+        self._waiting_for_head = False
+        close_if_idle = self._close_if_idle
+        drain.register(close_if_idle)
+        try:
+            await super().run()
+        finally:
+            drain.unregister(close_if_idle)
+            del self._connection_task
+
+    def _close_if_idle(self):
+        if self._waiting_for_head and not self._reader.buffered_len():
+            self._connection_task.cancel()
+
+    async def _read_headers(self, max_total: int) -> None:
+        if self._reload_drain.requested and not self._reader.buffered_len():
+            self._request = b''
+            raise IncompleteReadError(b'')
+        self._waiting_for_head = True
+        try:
+            await super()._read_headers(max_total)
+        finally:
+            self._waiting_for_head = False

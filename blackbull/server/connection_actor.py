@@ -58,6 +58,7 @@ class ConnectionActor(Actor):
         registry: ProtocolRegistry | None = None,
         bound_binding: ProtocolBinding | None = None,
         connection_id: str = '',
+        reload_drain=None,
     ) -> None:
         super().__init__()
         self._reader = reader
@@ -77,6 +78,7 @@ class ConnectionActor(Actor):
         # When set (port-bound raw protocol), detection is skipped entirely.
         self._bound_binding = bound_binding
         self._connection_id = connection_id
+        self._reload_drain = reload_drain
         # Protocol name reported on the lifecycle events.  At accept time the
         # h1/h2 split isn't known, so the shared listener reports ``'http'``;
         # a port-bound binding already knows its name.  ``_dispatch`` refines
@@ -127,6 +129,7 @@ class ConnectionActor(Actor):
             alpn=self._alpn, deadline=dl, connection_id=self._connection_id,
             stream_queue_depth=self._stream_queue_depth,
             ws_queue_depth=self._ws_queue_depth,
+            reload_drain=self._reload_drain,
         )
 
     def _select(self, prefix: bytes, at_eof: bool,
@@ -196,6 +199,18 @@ class ConnectionActor(Actor):
         # The discriminator is protocol-agnostic: no hardcoded byte counts, no
         # delimiters, no HTTP knowledge.  Each binding reads its own framing.
         alpn_binding = self._registry.by_alpn(self._alpn)
+        drain = self._reload_drain
+        if drain is not None:
+            if drain.requested and not self._reader.has_buffered():
+                return
+            task = asyncio.current_task()
+            assert task is not None
+
+            def close_idle():
+                if not self._reader.has_buffered():
+                    task.cancel()
+
+            drain.register(close_idle)
         try:
             if alpn_binding is not None:
                 # ALPN pre-commits the protocol; still wait for its declared
@@ -216,6 +231,9 @@ class ConnectionActor(Actor):
                                else self._fallback_binding())
             await self._on_detect_timeout(timeout_binding, deadline, dl)
             return
+        finally:
+            if drain is not None:
+                drain.unregister(close_idle)
 
         if binding is None:
             # No binding claimed the prefix — only reachable if the registry has

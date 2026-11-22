@@ -13,9 +13,11 @@ import time
 from dataclasses import dataclass
 
 from .._cleanup import combine_cleanup_errors
-from .listener import InheritedFd, Listener
+from .listener import HTTP, InheritedFd, Listener
 from .recipient import _WS_READ_INLINE
 from .worker import run_worker
+from .reload_generation import (CONTROL_ENV, EXCLUSIVE_HTTP_ENV, ReloadGeneration, WorkerReadiness,
+                                channel_readable, close_generation)
 from ..protocol.rsock import (close_sockets, create_configured_sockets,
                               REUSEPORT_BALANCES, REUSEPORT_SUPPORTED)
 
@@ -347,6 +349,21 @@ class MultiWorkerServer:
             self._shutdown_timeout = shutdown_timeout
             self._reload = reload
             self._reload_paths = reload_paths
+            control = os.environ.pop(CONTROL_ENV, None) if reload else None
+            self._generation_channel = (None if control is None
+                                        else socket.socket(fileno=int(control)))
+            self._worker_readiness = None
+            self._replacement = None
+            self._retiring_replacement = None
+            registry = getattr(app, '_protocol_registry', None)
+            self._exclusive_http = (reload and workers == 1 and registry is not None
+                                    and any(binding.stateful and binding.detector is not None
+                                            for binding in registry.raw_bindings.values()))
+            if self._generation_channel is not None:
+                inherited = os.environ.pop(EXCLUSIVE_HTTP_ENV)
+                if (inherited == '1') != self._exclusive_http:
+                    raise RuntimeError('reload cannot change stateful protocol ownership on the HTTP listener')
+            self._reload_listeners = bound_listeners
             self._reload_pending = False
             self._stopped = False
             self._watcher = None
@@ -418,14 +435,23 @@ class MultiWorkerServer:
     def run(self) -> None:
         """Spawn workers and block until a shutdown signal is received.
 
-        When ``reload`` is enabled the master also runs a file watcher and
-        re-execs itself on any matching change — see
-        [`blackbull.server.reload`][blackbull.server.reload].
+        When ``reload`` is enabled the master watches files and replaces
+        the worker generation after a change.
         """
         primary = None
         try:
             self._install_signal_handlers()
+            if self._generation_channel is not None:
+                self._worker_readiness = WorkerReadiness(
+                    self._mp_ctx, self._num_workers,
+                    deferred=bool(self._single_owner) or self._exclusive_http,
+                    exclusive_http=self._exclusive_http,
+                )
             self._spawn_all()
+            if self._generation_channel is not None:
+                self._worker_readiness.publish(
+                    self._generation_channel, self._processes, lambda: self._stopped)
+                self._worker_readiness = None
 
             logger.info(
                 'Master (PID %d) running %d worker(s)%s',
@@ -433,20 +459,26 @@ class MultiWorkerServer:
                 ' [auto-reload]' if self._reload else '',
             )
 
-            if self._reload:
+            if self._reload and self._generation_channel is None:
                 self._start_watcher()
 
             tick = _RELOAD_TICK if self._reload else _MONITOR_INTERVAL
             elapsed_since_reap = 0.0
             while not self._stopped:
+                if (self._generation_channel is not None
+                        and channel_readable(self._generation_channel)):
+                    break
                 if self._reload and self._reload_pending:
                     logger.info('reload: change detected — recycling workers')
                     self._reload_pending = False
-                    self._reload_now()  # does not return — execvp's
+                    self._reload_now()
                 # Only health-check on _MONITOR_INTERVAL cadence even when
                 # the loop ticks fast for reload responsiveness.
                 if elapsed_since_reap >= _MONITOR_INTERVAL:
-                    self._reap_and_respawn()
+                    if self._replacement is None:
+                        self._reap_and_respawn()
+                    elif self._replacement.exited():
+                        self._reload_now()
                     elapsed_since_reap = 0.0
                 time.sleep(tick)
                 elapsed_since_reap += tick
@@ -455,12 +487,20 @@ class MultiWorkerServer:
             raise
         finally:
             cleanup_error = self._shutdown_all()
+            for generation in (self._replacement, self._retiring_replacement):
+                if generation is not None:
+                    try:
+                        generation.stop(self._shutdown_timeout)
+                    except (OSError, RuntimeError) as exc:
+                        cleanup_error = combine_cleanup_errors(cleanup_error, exc)
             socket_error = close_sockets(self._listening_socket_references())
             self._listening_sockets = []
             self._worker_listeners = []
             self._single_owner = []
             self._shared = []
             cleanup_error = combine_cleanup_errors(cleanup_error, socket_error)
+            if self._generation_channel is not None:
+                close_generation(self._generation_channel, cleanup_error is None)
             if cleanup_error is not None:
                 if primary is None:
                     raise cleanup_error
@@ -508,12 +548,14 @@ class MultiWorkerServer:
         mine = {id(sock) for _listener, socks in listeners for sock in socks}
         disowned = [sock for sock in self._all_listening_sockets()
                     if id(sock) not in mine]
+        stage = (() if not self._reload else
+                 ((self._worker_readiness, self._generation_channel),))
         p = self._mp_ctx.Process(
             target=run_worker,
             args=(self._app, listeners, self._ssl_context,
                   worker_id, self._max_connections,
                   self._stream_queue_depth, self._ws_queue_depth,
-                  disowned),
+                  disowned, *stage),
             daemon=False,  # workers must be reaped explicitly on shutdown
             name=f'bb-worker-{worker_id}',
         )
@@ -757,20 +799,58 @@ class MultiWorkerServer:
         self._watcher.start()
 
     def _reload_now(self) -> None:
-        """SIGTERM workers, then re-exec the master.  Does not return."""
-        from .reload import exec_self_with_sockets  # noqa: PLC0415
-
-        cleanup_error = self._shutdown_all()
-        if cleanup_error is not None:
-            raise cleanup_error
-
-        if not self._listening_sockets:
-            # SO_REUSEPORT path closed the master sockets — reload was
-            # supposed to be incompatible with that branch, so we should
-            # never get here.  If we do, fall back to normal shutdown.
-            logger.error('reload: master holds no listening sockets — cannot exec')
-            self._stopped = True
+        if (self._retiring_replacement is not None
+                and not self._retire_replacement(self._retiring_replacement)):
             return
+        if self._pending_processes:
+            deadline = time.monotonic() + self._shutdown_timeout
+            self._pending_processes, _, error = self._reclaim_processes(
+                self._pending_processes, deadline, terminate=True)
+            if self._pending_processes:
+                logger.error('reload: previous workers are still draining: %s', error)
+                return
+        candidate = None
+        try:
+            if self._replacement is not None and self._replacement.exited():
+                self._replacement.stop(self._shutdown_timeout)
+            candidate = ReloadGeneration(
+                self._reload_listeners, exclusive_http=self._exclusive_http)
+            candidate.activate(lambda: self._stopped)
+            if self._stopped or candidate.exited():
+                raise RuntimeError('replacement exited or shutdown began before handoff')
+        except (OSError, RuntimeError) as exc:
+            if candidate is not None:
+                self._retire_replacement(candidate)
+            logger.error('reload: candidate failed, keeping the current generation: %s', exc)
+            return
+        previous, self._replacement = self._replacement, candidate
+        logger.info('reload: replacement reached handoff; draining previous workers')
+        if previous is not None:
+            retired = self._retire_replacement(previous)
+        else:
+            _, error = self._terminate_all()
+            deadline = time.monotonic() + self._shutdown_timeout
+            remaining, _, reclaim_error = self._reclaim_processes(
+                self._owned_processes(), deadline, terminate=False)
+            self._processes = []
+            self._pending_processes = remaining
+            retired = not remaining
+            failure = combine_cleanup_errors(error, reclaim_error)
+            if failure is not None:
+                logger.error('reload: previous workers did not drain cleanly: %s', failure)
+        if retired and not self._stopped:
+            try:
+                candidate.activate_exclusive(lambda: self._stopped)
+            except (OSError, RuntimeError) as exc:
+                logger.error('reload: replacement failed during exclusive listener handoff: %s', exc)
+                self._retire_replacement(candidate)
 
-        # execvp replaces the process — control does not return.
-        exec_self_with_sockets(self._listening_sockets)
+    def _retire_replacement(self, generation) -> bool:
+        self._retiring_replacement = generation
+        try:
+            generation.stop(self._shutdown_timeout)
+        except OSError as exc:
+            logger.error('reload: failed to reclaim generation: %s', exc)
+            return False
+        self._retiring_replacement = None
+        return True

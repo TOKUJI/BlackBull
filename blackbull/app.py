@@ -1126,16 +1126,6 @@ def serve(app, *,
     workers = workers if workers is not None else _cfg.workers
     workers = workers or (_os.cpu_count() or 1)
 
-    # Reload is the exception to "protocol on worker 0, HTTP on every worker";
-    # see docs/deployment/workers.md.  The warning below states the rest.
-    if (isinstance(app, BlackBull) and app._protocol_registry is not None
-            and app._protocol_registry.has_port_bindings() and workers > 1
-            and reload):
-        logger.warning(
-            'Auto-reload does not yet hand stateful protocol listeners across '
-            'its exec; forcing workers=1 (was %d). Run without reload to scale '
-            'HTTP alongside the broker.', workers)
-        workers = 1
     max_connections = max_connections if max_connections is not None else _cfg.max_connections
     stream_queue_depth = (stream_queue_depth if stream_queue_depth is not None
                           else _cfg.stream_queue_depth)

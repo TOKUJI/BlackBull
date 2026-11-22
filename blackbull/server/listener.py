@@ -54,7 +54,7 @@ class Unix:
 class InheritedFd:
     """A socket already bound and listening, handed over by a supervisor.
 
-    Covers systemd-style activation and the re-exec handoff that keeps the
+    Covers systemd-style activation and the handoff that keeps the
     listener continuous across an auto-reload.
     """
 

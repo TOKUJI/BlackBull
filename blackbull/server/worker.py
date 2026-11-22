@@ -19,7 +19,7 @@ def run_worker(app, bound_listeners, ssl_context, worker_id: int,
                max_connections: int,
                stream_queue_depth: int = 64,
                ws_queue_depth: int = _WS_READ_INLINE,
-               disowned=()) -> None:
+               disowned=(), reload_stage=None) -> None:
     """Entry point executed in each worker process.
 
     Parameters
@@ -85,6 +85,13 @@ def run_worker(app, bound_listeners, ssl_context, worker_id: int,
     server = ASGIServer(app, ssl_context=ssl_context, max_connections=max_connections,
                         stream_queue_depth=stream_queue_depth,
                         ws_queue_depth=ws_queue_depth)
+    if reload_stage is not None:
+        readiness, channel = reload_stage
+        server._reload_worker = True
+        if channel is not None:
+            channel.close()
+        if readiness is not None:
+            server._reload_stage = readiness, worker_id
     # Inject the inherited listeners so ASGIServer.run() skips its own bind
     # step.  Whether this worker owns a broker is already decided — it is in
     # the list or it is not.

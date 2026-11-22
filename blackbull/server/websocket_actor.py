@@ -1,4 +1,5 @@
 """Owns WebSocket handshake decisions and the frame loop."""
+import asyncio
 from collections.abc import Awaitable, Callable
 
 from ..actor import Actor, Message
@@ -15,6 +16,7 @@ from .permessage_deflate import (
     DeflateParams, InboundDecompressor, OutboundCompressor,
 )
 from .recipient import AbstractReader, RecipientFactory, _WS_READ_INLINE
+from .reload_drain import ReloadDrain
 from .sender import AbstractWriter, SenderFactory
 
 
@@ -128,8 +130,41 @@ class WebSocketActor(Actor):
             return
         await self._aggregator.on_websocket_message(self._conn, message)
 
-    async def run(self) -> None:
+    async def run(self, reload_drain: ReloadDrain | None = None) -> None:
+        retiring = sending = close_sent = False
+        retire = None
+        if reload_drain is not None and not reload_drain.requested:
+            task = asyncio.current_task()
+            assert task is not None
+            send = self._send
+
+            def retire():
+                nonlocal retiring
+                retiring = True
+                if not sending:
+                    task.cancel()
+
+            async def send_before_retirement(event, *args, **kwargs):
+                nonlocal sending, close_sent
+                if retiring:
+                    raise asyncio.CancelledError
+                sending = True
+                try:
+                    await send(event, *args, **kwargs)
+                    if isinstance(event, NativeWSMessage):
+                        close_sent |= event.kind == NativeWSMessage.CLOSE
+                    elif isinstance(event, dict):
+                        close_sent |= event.get('type') == ASGIEvent.WS_CLOSE
+                finally:
+                    sending = False
+                if retiring:
+                    raise asyncio.CancelledError
+
+            self._send = send_before_retirement
+            reload_drain.register(retire)
         try:
+            if reload_drain is not None and reload_drain.requested:
+                return
             try:
                 await self._app(self._conn, self._ws_receive, self._send)
                 if self.denial_status is not None and not self._denied:
@@ -141,15 +176,22 @@ class WebSocketActor(Actor):
             if not self._accepted:
                 await self._refuse_unanswered()
         finally:
+            if retire is not None:
+                reload_drain.unregister(retire)
+                del self._send
             # Cancel the reader before closing: a full queue can leave it
             # blocked in queue.put(), which EOF cannot wake.
+            going_away = retiring and self._accepted and not close_sent
             try:
+                if going_away:
+                    await self._ws_receive.shutdown(close_code=WSCloseCode.GOING_AWAY)
                 await self._aggregator.on_websocket_disconnected(
                     self._conn, code=self._disconnect_code,
                     timeout=_DISCONNECT_HOOK_TIMEOUT)
             finally:
                 try:
-                    await self._ws_receive.shutdown()
+                    if not going_away:
+                        await self._ws_receive.shutdown()
                 finally:
                     if not self._denied:
                         if self.denial_status is not None and self._abort_denial:

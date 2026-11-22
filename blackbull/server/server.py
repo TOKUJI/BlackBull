@@ -7,6 +7,7 @@ import asyncio
 import os
 import resource
 import errno
+import json
 import logging
 import socket
 import ssl
@@ -28,6 +29,7 @@ from .connection_actor import ConnectionActor
 from .connection_protocol import ConnectionProtocol
 from .sender import AsyncioWriter, TLSWriter
 from .recipient import (_HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
+from .reload_drain import ReloadDrain
 from .cap_log import CapHitCounter, log_cap_hit
 from ..env import FD_RESERVE, DerivedCap, get_settings
 from ..utils import _EAGER_TASKS, create_eager_task
@@ -255,7 +257,7 @@ class _Admission:
     ``connection_lost``.  Either may come alone, or both.
     """
 
-    __slots__ = ('_gate', 'transport', 'state')
+    __slots__ = ('_gate', 'transport', 'state', 'reload_drain')
 
     def __init__(self, gate) -> None:
         self._gate = gate
@@ -275,7 +277,7 @@ class _Listening:
     ``Server.stop`` closes it as it would an ``asyncio.Server``.
     """
 
-    def __init__(self, gate, sock, factory, ssl_context, backlog: int) -> None:
+    def __init__(self, gate, sock, factory, ssl_context, backlog: int, *, deferred=False) -> None:
         self._gate = gate
         self._sock = sock
         #: Accepts per readable wakeup: one full queue, so a burst that
@@ -286,13 +288,14 @@ class _Listening:
         self._tls = ssl_context
         self._reading = False
         self._stopped = False
+        self._deferred = deferred
         self._retry: asyncio.TimerHandle | None = None
 
     def is_serving(self) -> bool:
         return not self._stopped
 
     def start_reading(self) -> None:
-        if self._reading or self._stopped or self._retry is not None:
+        if self._reading or self._stopped or self._deferred or self._retry is not None:
             return
         self._gate._loop.add_reader(self._fd, self._on_readable)
         self._reading = True
@@ -301,6 +304,12 @@ class _Listening:
         if self._reading:
             self._reading = False
             self._gate._loop.remove_reader(self._fd)
+
+    def activate(self) -> None:
+        if self._deferred:
+            self._deferred = False
+            if not self._gate._paused:
+                self.start_reading()
 
     def stop(self) -> None:
         self._stopped = True
@@ -376,7 +385,8 @@ class _AcceptGate:
 
     def arm(self, entries, max_connections: int, backlog: int,
             handshake_timeout: float | None = None, *,
-            closing_timeout: float = _CLEANUP_TIMEOUT) -> list[_Listening]:
+            closing_timeout: float = _CLEANUP_TIMEOUT,
+            preserve_listener: bool = False, deferred=()) -> list[_Listening]:
         """Start accepting on each ``((factory, ssl_context), sock)``.
 
         Raises what failed when some listener cannot be armed, leaving none
@@ -395,9 +405,11 @@ class _AcceptGate:
         listening: list[_Listening] = []
         try:
             for (factory, ssl_context), sock in entries:
-                sock.listen(backlog)
+                if not preserve_listener:
+                    sock.listen(backlog)
                 sock.setblocking(False)
-                entry = _Listening(self, sock, factory, ssl_context, backlog)
+                entry = _Listening(self, sock, factory, ssl_context, backlog,
+                                   deferred=sock in deferred)
                 listening.append(entry)
                 if not self._paused:
                     entry.start_reading()
@@ -815,6 +827,7 @@ class Server:
         self._connection_tasks: set = set()
         self._accept_gate = _AcceptGate(serving=self._connection_tasks)
         self._stopping = False
+        self._reload_worker = False
         self._drain_timeout = None
         self._stopped_event = asyncio.Event()
         self._stop_done_event = asyncio.Event()
@@ -1003,6 +1016,9 @@ class Server:
             return
 
         try:
+            reload_drain = None
+            if self._reload_worker:
+                reload_drain = admission.reload_drain = ReloadDrain()
             actor = ConnectionActor(
                 reader, writer, self.app, aggregator,
                 peername=peername, sockname=sockname, ssl=ssl_flag,
@@ -1012,6 +1028,7 @@ class Server:
                 registry=self._protocol_registry,
                 bound_binding=bound_binding,
                 connection_id=new_connection_id(),
+                reload_drain=reload_drain,
             )
             await actor.run()
         finally:
@@ -1019,6 +1036,8 @@ class Server:
 
     def open_socket(self, port=0, unix_path: str | None = None,
                     inherited_fd: int | None = None):
+        from .reload_generation import CONTROL_ENV, LAYOUT_ENV, listener_layout  # noqa: PLC0415
+
         _cfg = get_settings()
         if self.bound_listeners:
             self._publish_socket_view()
@@ -1027,8 +1046,35 @@ class Server:
         acquired: list[tuple[Listener, list]] = []
         protocol_ports: dict[str, int] = {}
         listeners = self._listeners
+        replacement = CONTROL_ENV in os.environ
         try:
-            if listeners is None:
+            if replacement:
+                inherited = adopt_inherited_sockets()
+                if not inherited:
+                    raise RuntimeError('reload candidate has no inherited listeners')
+                implicit = _listener_from_args(port, unix_path, inherited_fd,
+                                               self.ssl_context)
+                acquired.append((implicit, inherited))
+                layout = json.loads(os.environ.pop(LAYOUT_ENV))
+                updated = (listeners or [implicit]) + list(self._protocol_listeners())
+                if (len(updated) != len(layout)
+                        or any(size < 1 for size, _ in layout)
+                        or sum(size for size, _ in layout) != len(inherited)
+                        or any(listener.speaks != HTTP and listener.speaks not in self._protocol_registry.raw_bindings
+                               for listener in updated)):
+                    raise RuntimeError('reload cannot change the listener layout')
+                groups = []
+                offset = 0
+                for listener, (size, expected) in zip(updated, layout):
+                    if listener_layout(listener) != expected:
+                        raise RuntimeError('reload cannot change the inherited listener configuration')
+                    sockets = inherited[offset:offset + size]
+                    groups.append((listener, sockets))
+                    if isinstance(listener.where, Tcp) and listener.speaks != HTTP:
+                        protocol_ports[listener.speaks] = sockets[0].getsockname()[1]
+                    offset += size
+                acquired = groups
+            elif listeners is None:
                 inherited = adopt_inherited_sockets()
                 if inherited:
                     acquired.append((
@@ -1045,8 +1091,9 @@ class Server:
                 for listener in listeners:
                     acquired.append((listener, self._bind_listener(listener, _cfg)))
 
-            self._bind_protocol_sockets(
-                _cfg, acquired=acquired, protocol_ports=protocol_ports)
+            if not replacement:
+                self._bind_protocol_sockets(
+                    _cfg, acquired=acquired, protocol_ports=protocol_ports)
             _validate_unique_socket_fds(acquired)
             raw_sockets, resolved_port, resolved_unix = self._socket_view(acquired)
         except BaseException:
@@ -1110,15 +1157,7 @@ class Server:
             return raw_sockets, sockname[1], None
         return raw_sockets, None, None
 
-    def _bind_protocol_sockets(self, _cfg, *, acquired, protocol_ports):
-        """Bind a listening socket per port-bound non-ASGI protocol.
-
-        Each [`RawBinding`][] registered with a ``port`` gets its own
-        dual-stack socket set, recorded in [`protocol_ports`][].  Sockets are
-        bound bare here; [`run`][] layers TLS onto the listeners whose
-        binding set ``tls=True``, cleartext otherwise.  These ports get no
-        ``SO_REUSEPORT``: a stateful protocol needs a single owning worker.
-        """
+    def _protocol_listeners(self):
         # Iterate the bindings, not a port-keyed view of them: several may ask
         # for port=0, which a port key would collapse into one listener.
         for binding in self._protocol_registry.raw_bindings.values():
@@ -1130,24 +1169,23 @@ class Server:
                     f'(tls=True) but the server has no certificate configured '
                     f'— pass certfile/keyfile or an ssl_context.')
             tls_context = self._raw_tls_context() if binding.tls else None
-            port = binding.port
+            yield Listener(Tcp(binding.port), speaks=binding.name, tls=tls_context)
+
+    def _bind_protocol_sockets(self, _cfg, *, acquired, protocol_ports):
+        """Bind each port-bound protocol without SO_REUSEPORT."""
+        for listener in self._protocol_listeners():
+            port = listener.where.port
             socks = create_configured_sockets(port, _cfg, reuseport=False)
             if not socks:
                 raise RuntimeError(
-                    f'Failed to bind {binding.name!r} on port {port}.')
+                    f'Failed to bind {listener.speaks!r} on port {port}.')
             # Track the sockets before asking them for metadata: even an
             # unusual getsockname failure must unwind through open_socket's
             # transaction rather than strand the descriptors.
-            acquired.append((
-                Listener(Tcp(port), speaks=binding.name, tls=tls_context),
-                socks))
+            acquired.append((listener, socks))
             bound_port = socks[0].getsockname()[1]
-            protocol_ports[binding.name] = bound_port
-            acquired[-1] = (
-                Listener(Tcp(bound_port), speaks=binding.name,
-                         tls=tls_context),
-                socks)
-            logger.info('Protocol %r listening on port %d', binding.name, bound_port)
+            protocol_ports[listener.speaks] = bound_port
+            logger.info('Protocol %r listening on port %d', listener.speaks, bound_port)
 
     def close_socket(self):
         cleanup_error = self._close_socket()
@@ -1190,12 +1228,16 @@ class Server:
 
     async def run(self, port=80):
         """Run an asyncio socket server with the setting in this object."""
+        from .reload_generation import CONTROL_ENV  # noqa: PLC0415
+
         budget = _AsyncCleanupBudget()
         self._cleanup_budget = budget
         startup_committed = False
         primary = None
         cleanup_error = None
         try:
+            if CONTROL_ENV in os.environ:
+                raise RuntimeError('reload candidate must run under the reload supervisor')
             if not self.bound_listeners:
                 if self.raw_sockets:
                     self.bound_listeners = [
@@ -1223,8 +1265,24 @@ class Server:
             try:
                 async with LifespanManager(self.app, budget,
                                            abandon_on=self._stopped_event):
-                    self._open_accepting(listening)
+                    stage = getattr(self, '_reload_stage', None)
+                    if stage is None:
+                        self._open_accepting(listening)
+                    else:
+                        readiness, worker_id = stage
+                        await readiness.wait(worker_id, self._stopped_event)
+                        deferred = {sock for listener, socks in self.bound_listeners
+                                    if readiness.defers(listener) for sock in socks}
+                        self._open_accepting(listening, preserve_listener=True, deferred=deferred)
+                        if not self._stopping:
+                            readiness.armed(worker_id)
                     startup_committed = True
+                    if stage is not None and readiness.has_exclusive:
+                        await readiness.wait_exclusive(self._stopped_event)
+                        if not self._stopping:
+                            for entry in self._running_servers:
+                                entry.activate()
+                            readiness.armed(worker_id, exclusive=True)
                     try:
                         await self._stopped_event.wait()
                     except KeyboardInterrupt:
@@ -1267,7 +1325,8 @@ class Server:
 
         logger.info('Server has been stopped.')
 
-    def _open_accepting(self, listening, backlog: int | None = None) -> None:
+    def _open_accepting(self, listening, backlog: int | None = None, *,
+                        preserve_listener: bool = False, deferred=()) -> None:
         if self._stopping:
             return
         af_unix = getattr(socket, 'AF_UNIX', None)
@@ -1286,7 +1345,8 @@ class Server:
         self._running_servers = self._accept_gate.arm(
             listening, self._max_connections, backlog or settings.socket_backlog,
             settings.header_deadline,
-            closing_timeout=settings.write_timeout or _CLEANUP_TIMEOUT)
+            closing_timeout=settings.write_timeout or _CLEANUP_TIMEOUT,
+            preserve_listener=preserve_listener, deferred=deferred)
         logger.info('connection_limits: service=%d held=%d reserve=%d',
                     self._accept_gate.service_limit, self._accept_gate.held_limit,
                     _REFUSAL_RESERVE if self._max_connections else 0)
@@ -1351,6 +1411,11 @@ class Server:
         gate = self._accept_gate
         if not pending and not gate._held:
             return
+        if self._reload_worker:
+            for admission in tuple(gate._held):
+                drain = getattr(admission, 'reload_drain', None)
+                if drain is not None:
+                    drain.begin()
         logger.info('Draining %d connection(s), up to %.1fs',
                     gate.held, drain_timeout)
         budget = self._cleanup_budget

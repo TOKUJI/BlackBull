@@ -14,9 +14,10 @@ from typing import Any
 
 from ..event_aggregator import EventAggregator
 from .deadline import Guard
-from .http1_actor import HTTP1Actor
+from .http1_actor import HTTP1Actor, ReloadingHTTP1Actor
 from .recipient import AbstractReader, _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE
 from .sender import AbstractWriter
+from .reload_drain import ReloadDrain
 
 
 _HTTP2_PREFACE_FIRST_LINE = b'PRI * HTTP/2.0\r\n'
@@ -68,6 +69,7 @@ class ConnectionView:
     connection_id: str
     stream_queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH
     ws_queue_depth: int = _WS_READ_INLINE
+    reload_drain: ReloadDrain | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -190,13 +192,17 @@ class Http2Binding(ProtocolBinding):
         await self._run(conn)
 
     async def _run(self, conn: ConnectionView) -> None:
-        from .http2_actor import HTTP2Actor  # noqa: PLC0415
-        actor = HTTP2Actor(
+        from .http2_actor import HTTP2Actor, ReloadingHTTP2Actor  # noqa: PLC0415
+        actor_class = HTTP2Actor if conn.reload_drain is None else ReloadingHTTP2Actor
+        actor = actor_class(
             conn.reader, conn.writer, conn.app, conn.aggregator,
             peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
             stream_queue_depth=conn.stream_queue_depth,
             connection_id=conn.connection_id,
         )
+        if conn.reload_drain is not None:
+            assert isinstance(actor, ReloadingHTTP2Actor)
+            actor.watch_reload(conn.reload_drain)
         await actor.run()
 
 
@@ -213,13 +219,18 @@ class Http1Binding(ProtocolBinding):
         # the whole head in one scan — pulling the first line here would split
         # that scan in two and, worse, hand the actor a head it must then
         # treat as already-read, skipping the budget check that guards it.
-        actor = HTTP1Actor(
+        drain = conn.reload_drain
+        actor_type = HTTP1Actor if drain is None else ReloadingHTTP1Actor
+        actor = actor_type(
             conn.reader, conn.writer, conn.app, conn.aggregator,
             peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
             ws_queue_depth=conn.ws_queue_depth,
             deadline=conn.deadline,
             connection_id=conn.connection_id,
         )
+        if drain is not None:
+            assert isinstance(actor, ReloadingHTTP1Actor)
+            actor.watch_reload(drain)
         await actor.run()
 
     async def on_detect_timeout(self, conn: ConnectionView) -> None:

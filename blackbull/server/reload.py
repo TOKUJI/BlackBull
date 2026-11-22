@@ -1,19 +1,10 @@
-"""Master re-exec with inherited listening sockets.
-
-Re-import code by replacing the master, not importlib.reload. Keep listeners
-open across exec and close temporary event loops before fork.
-"""
+"""Watch source changes for the reload supervisor."""
 from __future__ import annotations
 
 import logging
-import os
-import socket
-import sys
 import threading
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from pathlib import Path
-
-from ..protocol.rsock import _INHERIT_FDS_ENV
 
 logger = logging.getLogger(__name__)
 
@@ -123,52 +114,3 @@ class FileChangeWatcher:
             if self._thread.is_alive():
                 raise TimeoutError('file watcher did not stop before the deadline')
             self._thread = None
-
-
-def exec_self_with_sockets(sockets: Sequence[socket.socket],
-                           argv: Sequence[str] | None = None) -> None:
-    """Re-execute without returning on success, preserving listening descriptors.
-
-    The caller must terminate subprocesses holding copies first. Preserve the
-    original interpreter options and invocation unless argv overrides them.
-    sys.executable is always the executable.
-    """
-    if argv is None:
-        argv = sys.orig_argv[1:]
-    if not argv:
-        raise RuntimeError('cannot re-exec: invocation arguments are empty')
-    command = [sys.executable, *argv]
-
-    previous_env = os.environ.get(_INHERIT_FDS_ENV)
-    previous_flags: list[tuple[int, bool]] = []
-    try:
-        fd_strings: list[str] = []
-        for sock in sockets:
-            fd = sock.fileno()
-            if fd < 0:
-                logger.warning('skipping closed socket during exec')
-                continue
-            previous_flags.append((fd, os.get_inheritable(fd)))
-            os.set_inheritable(fd, True)
-            fd_strings.append(str(fd))
-
-        if not fd_strings:
-            raise RuntimeError('exec_self_with_sockets: no live sockets to hand off')
-
-        os.environ[_INHERIT_FDS_ENV] = ','.join(fd_strings)
-        logger.info('reload: execv %s argv=%r BB_INHERIT_FDS=%s',
-                    sys.executable, command, os.environ[_INHERIT_FDS_ENV])
-
-        # execvp replaces the process image — only returns on failure.
-        os.execvp(sys.executable, command)
-        raise RuntimeError('execvp returned without replacing the process')
-    finally:
-        for fd, inheritable in previous_flags:
-            try:
-                os.set_inheritable(fd, inheritable)
-            except OSError:
-                logger.exception('Failed to restore inheritable flag for fd %d', fd)
-        if previous_env is None:
-            os.environ.pop(_INHERIT_FDS_ENV, None)
-        else:
-            os.environ[_INHERIT_FDS_ENV] = previous_env

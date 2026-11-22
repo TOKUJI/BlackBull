@@ -378,42 +378,24 @@ def test_multiworker_http_scales_while_raw_stays_on_worker0(http_and_raw_app):
 
 
 # ---------------------------------------------------------------------------
-# Serve() no longer forces workers=1 for stateful protocols
-# (except under auto-reload, whose exec handoff does not carry them yet).
+# Serve() keeps the configured HTTP worker count with port-bound protocols.
 # ---------------------------------------------------------------------------
 
-def test_serve_keeps_workers_for_port_bindings_without_reload(http_and_raw_app):
+@pytest.mark.parametrize('reload', [False, True])
+def test_serve_keeps_workers_for_port_bindings(http_and_raw_app, reload):
     """serve(workers=4) with a port-bound protocol must reach the multi-worker
     path with workers unchanged — HTTP should scale alongside the broker."""
     from blackbull import app as app_mod
 
     with patch('blackbull.server.multiworker.MultiWorkerServer') as MockMWS:
         MockMWS.return_value.run.return_value = None
-        app_mod.serve(http_and_raw_app, port=0, workers=4)
+        app_mod.serve(http_and_raw_app, port=0, workers=4, reload=reload)
 
     assert MockMWS.called, 'multi-worker path must be taken (not forced to single-worker)'
     assert MockMWS.call_args.kwargs['workers'] == 4, 'workers must not be downgraded'
     handed = MockMWS.call_args.args[1]
     assert any(listener.speaks == 'echo' for listener, _socks in handed), \
         'broker sockets must be handed off'
-
-
-def test_serve_forces_single_worker_for_port_bindings_with_reload(http_and_raw_app):
-    """Under reload, the protocol-socket exec handoff is not wired, so a
-    port-bound protocol still forces the single-worker (asyncio.run) path."""
-    from blackbull import app as app_mod
-
-    with patch('blackbull.app.asyncio.run') as mock_run, \
-            patch('blackbull.server.multiworker.MultiWorkerServer') as MockMWS:
-        # reload=True normally takes the multiworker path, but the port-binding
-        # downgrade should pin workers=1 — which, with reload, still routes
-        # through MultiWorkerServer at workers=1 (not asyncio.run).  Assert the
-        # downgrade by inspecting the workers kwarg.
-        MockMWS.return_value.run.return_value = None
-        app_mod.serve(http_and_raw_app, port=0, workers=4, reload=True)
-
-    assert MockMWS.called
-    assert MockMWS.call_args.kwargs['workers'] == 1, 'reload + protocol must force workers=1'
 
 
 def _await_workers(port, expected, timeout=15.0):

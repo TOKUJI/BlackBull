@@ -1606,7 +1606,7 @@ class WebSocketRecipient(BaseRecipient):
         if self._watchdog is not None:
             self._watchdog.disarm()
 
-    async def shutdown(self) -> None:
+    async def shutdown(self, *, close_code: int | None = None) -> None:
         """Disarm the watchdog and cancel the read loop, waiting up to 5 seconds.
 
         Safe to call repeatedly or before reading starts; never joins itself.
@@ -1638,6 +1638,9 @@ class WebSocketRecipient(BaseRecipient):
         # Both refer back: the watchdog to this recipient, on_message to its actor.
         self.disarm_watchdog()
         self._watchdog = self._on_message = None
+        if close_code is not None and self._terminal_code is None and not self._read_finished:
+            self._terminal_code = close_code
+            await self._send_close(close_code)
 
     def _mark_connect_sent(self) -> None:
         """Claim the handshake read and arm timers once, shared by both channels.
