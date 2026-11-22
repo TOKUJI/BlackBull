@@ -7,6 +7,7 @@ import multiprocessing
 import os
 import socket
 import ssl
+import subprocess
 import threading
 from types import SimpleNamespace
 
@@ -17,7 +18,7 @@ from blackbull.app import serve
 from blackbull.protocol.rsock import adopt_inherited_sockets, close_sockets
 from blackbull.server.listener import InheritedFd, Listener, Tcp
 from blackbull.server.multiworker import MultiWorkerServer
-from blackbull.server.reload import exec_self_with_sockets
+from blackbull.server.reload_generation import ReloadGeneration
 from blackbull.server.server import LifespanManager, Server
 
 
@@ -760,25 +761,28 @@ def test_multiworker_entrypoint_closes_detached_sockets_before_handoff(
             sock.close()
 
 
-def test_exec_failure_restores_handoff_state(monkeypatch):
-    listening = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listening.bind(("127.0.0.1", 0))
-    listening.listen()
-    fd = listening.fileno()
-    original_flag = os.get_inheritable(fd)
+def test_reload_spawn_failure_keeps_owned_listener(monkeypatch):
     monkeypatch.setenv("BB_INHERIT_FDS", "previous")
+    control_pair = socket.socketpair()
+    monkeypatch.setattr(socket, "socketpair", lambda: control_pair)
 
-    def fail_exec(*_args):
-        raise OSError("exec failed")
+    def fail_spawn(*_args, env, pass_fds, **_kwargs):
+        assert env["BB_INHERIT_FDS"] == str(fd)
+        assert pass_fds == (fd, control_pair[1].fileno())
+        raise OSError("launch failed")
 
-    monkeypatch.setattr(os, "execvp", fail_exec)
-    try:
-        with pytest.raises(OSError, match="exec failed"):
-            exec_self_with_sockets([listening], argv=["probe"])
+    monkeypatch.setattr(subprocess, "Popen", fail_spawn)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listening:
+        listening.bind(("127.0.0.1", 0))
+        listening.listen()
+        fd = listening.fileno()
+        original_flag = os.get_inheritable(fd)
+        layout = [(Listener(Tcp(listening.getsockname()[1])), [listening])]
+        with pytest.raises(OSError, match="launch failed"):
+            ReloadGeneration(layout, exclusive_http=False)
         assert os.environ["BB_INHERIT_FDS"] == "previous"
         assert os.get_inheritable(fd) is original_flag
-    finally:
-        listening.close()
+        assert all(control.fileno() == -1 for control in control_pair)
 
 
 def test_spawn_failure_reclaims_real_child(monkeypatch):
@@ -862,7 +866,7 @@ def test_distinct_process_cleanup_failures_are_grouped(monkeypatch):
     assert cleanup_error.exceptions == (first.error, second.error)
 
 
-def test_reload_groups_distinct_cleanup_failures(monkeypatch):
+def test_supervisor_shutdown_groups_distinct_cleanup_failures(monkeypatch):
     monkeypatch.setattr("blackbull.server.multiworker.REUSEPORT_SUPPORTED", False)
     server = MultiWorkerServer(BlackBull(), [], None, workers=1, reload=True)
     termination_error = RuntimeError("terminate failed")
@@ -876,10 +880,10 @@ def test_reload_groups_distinct_cleanup_failures(monkeypatch):
         lambda *_args, **_kwargs: ([], [], reclaim_error),
     )
 
-    with pytest.raises(ExceptionGroup) as raised:
-        server._reload_now()
+    cleanup_error = server._shutdown_all()
 
-    assert raised.value.exceptions == (
+    assert isinstance(cleanup_error, ExceptionGroup)
+    assert cleanup_error.exceptions == (
         termination_error,
         watcher_error,
         reclaim_error,

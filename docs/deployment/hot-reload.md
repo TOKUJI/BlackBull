@@ -34,29 +34,40 @@ app.run(port=8000, reload=True, reload_paths=['src', 'templates'])
 
 ## How it works
 
-When `--reload` is on, BlackBull's master process:
+The master keeps the listeners open while a new Python interpreter runs the
+original invocation. The replacement workers finish lifespan startup before
+they take new connections on shared listeners. The master then retires the
+previous workers. If replacement startup fails or times out, the master logs
+the failure and keeps the active workers. Save a corrected file to try again.
 
-1. Watches the configured paths for `*.py` file changes.
-2. On a change, sends `SIGTERM` to the running workers.
-3. Re-execs itself (`os.execvp`) with the original Python options and invocation,
-   marking listening sockets as inheritable so the new master
-   can adopt them.
-4. The fresh master forks workers from the new code.
+During the handoff, workers from two generations can hold connections, memory,
+and lifespan resources at the same time. Connection limits apply per worker.
+Saves during a handoff are folded into the next reload. Restart the server to
+change its listener layout or update the master itself.
 
-The handoff is transactional. The old master records the previous
-`BB_INHERIT_FDS` value and each descriptor's inheritable flag before calling
-`execvp`. If descriptor preparation or `execvp` fails, those values are
-restored, workers and the watcher are reclaimed within the existing shutdown
-deadline, and the listening sockets are closed by the old master. The fresh
-master likewise adopts the advertised descriptors as one set: a malformed or
-unusable member closes any descriptors already adopted instead of starting
-with only part of the listener set.
+Single-owner listeners begin accepting on the replacement only after the old
+workers exit. This also applies to a shared listener that accepts a stateful
+raw protocol when running with one worker. Connections can wait in the kernel
+backlog during this part of the handoff. If a replacement exits after the old
+workers have been retired, the master starts a fresh generation.
 
-On a successful handoff, the kernel multiplexes the same listening fd across
-master generations without closing it, so connections in flight during a
-reload finish under the old workers and new connections route to new workers
-transparently. A failed handoff instead rolls back and closes the old master's
-listeners as described above.
+Reload respects the configured HTTP worker count with a port-bound protocol.
+Set `workers=1` if you were relying on the former automatic downgrade.
+
+On a retiring worker:
+
+- HTTP/1.1 closes an idle connection. An underway request or a head already
+  in the receive buffer can finish on that worker.
+- HTTP/2 sends GOAWAY and lets admitted streams finish. The client can retry
+  streams above the advertised last stream ID on a new connection.
+- An established WebSocket is closed with code 1001 after a send in progress
+  finishes. Reconnect to resume application traffic.
+- Raw handlers, including MQTT, own their sessions until they return or the
+  drain deadline expires. Reconnect after reload. In-memory MQTT broker state
+  is replaced with the worker.
+
+`BB_WORKER_DRAIN_TIMEOUT` bounds all four cases. A request cut off at that
+deadline can have an unknown outcome.
 
 Each step logs at `INFO`, so a reload that doesn't happen can be
 attributed rather than guessed at:
@@ -65,7 +76,7 @@ attributed rather than guessed at:
 auto-reload: watching /srv/app for *.py changes     # watcher armed
 auto-reload: change detected in /srv/app/views.py   # watcher saw the save
 reload: change detected — recycling workers         # master acted on it
-reload: execv /usr/bin/python argv=[...]            # master re-exec'd
+reload: replacement reached handoff; draining previous workers
 ```
 
 A missing line names the stage that stalled: no `change detected`
@@ -80,9 +91,8 @@ working directory.
 
 ## Caveats
 
-- **Development only.**  `--reload` exists for the edit-save
-  loop.  Don't run it in production — re-execing the process on
-  every file change is the opposite of what production wants.
+- **Development only.** Use `--reload` for the edit-save loop. Use the
+  deployment supervisor to roll out code in production.
 - **First `*.py` change after start may be delayed.**  The
   inotify watcher needs ~1-2 seconds after arm before
   subsequent events fire reliably.  Real users editing files

@@ -22,8 +22,7 @@ REUSEPORT_SUPPORTED = hasattr(socket, 'SO_REUSEPORT')
 #: macOS accepts the option but hands every connection to one socket.
 REUSEPORT_BALANCES = REUSEPORT_SUPPORTED and sys.platform.startswith('linux')
 
-#: Env var holding a comma-separated list of fds the master has handed
-#: to itself across ``os.execvp`` — see [`adopt_inherited_sockets`][].
+#: Comma-separated listener fds passed by the reload supervisor.
 _INHERIT_FDS_ENV = 'BB_INHERIT_FDS'
 
 

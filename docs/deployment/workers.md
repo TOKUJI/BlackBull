@@ -308,8 +308,8 @@ the load balancer first if you want zero in-flight requests at all — the
 server's job here is to not truncate the ones already running, not to know that
 your deploy started.
 
-`--reload` uses the same path, so a code change now recycles workers by
-draining them rather than by killing them.
+[`--reload`](hot-reload.md) starts replacement workers before it begins this
+drain.
 
 ```
 SIGTERM ──▶ close listeners ──▶ drain accepted connections
@@ -341,10 +341,8 @@ socket, so the broker resumes on the same port.  Clients reconnect;
 in-memory broker state does not survive (see
 [MQTT](../guide/mqtt.md)).
 
-**Auto-reload is the exception.**  `--reload` hands listening sockets across
-an `exec` via fd inheritance, and that handoff does not yet include the
-protocol listeners — so `reload=True` with a port-bound protocol still forces
-`workers=1`.  Run without reload to scale HTTP alongside the broker.
+With [`--reload`](hot-reload.md), the replacement worker inherits the broker
+listener and starts accepting after the previous generation exits.
 
 **`SO_REUSEPORT` applies to HTTP only.**  Per-worker sockets (the Linux
 default, or `BB_SOCKET_REUSEPORT=1`) give each HTTP worker its own kernel

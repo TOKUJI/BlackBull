@@ -132,8 +132,8 @@ async def metrics(reader, writer, ctx):
   serves the binding's port through the certificate the server was configured
   with; the binding cannot name one of its own. An HTTP
   [listener](listeners.md) can.
-- **`--reload` pins `workers=1`** when a port-bound protocol is registered: the
-  exec handoff carries the HTTP sockets only.
+- With [`--reload`](../deployment/hot-reload.md), a single-owner listener takes
+  new connections in the replacement worker after the old generation exits.
 
 ## A note on the server class
 

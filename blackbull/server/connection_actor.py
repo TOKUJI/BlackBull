@@ -10,10 +10,11 @@ from ..event_aggregator import EventAggregator
 from ..request import ClientDisconnected
 from .cap_log import _LazyCapHitCounter
 from .deadline import Guard
-from .protocol_registry import (ConnectionView, ProtocolBinding,
+from .protocol_registry import (ConnectionView, ProtocolBinding, ReloadingConnectionView,
                                 ProtocolRegistry)
 from .recipient import (AbstractReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
+from .reload_drain import ReloadDrain
 from .sender import AbstractWriter
 
 logger = logging.getLogger(__name__)
@@ -263,3 +264,43 @@ class ConnectionActor(Actor):
 
     async def _handle(self, msg: Message) -> None:
         raise NotImplementedError
+
+
+class ReloadingConnectionActor(ConnectionActor):
+    """A reload worker's connection: idle ones close once the worker retires."""
+
+    def __init__(self, *args, drains: set, reload_registry, registry, **kwargs) -> None:
+        super().__init__(*args, registry=reload_registry, **kwargs)
+        self._drain = ReloadDrain()
+        self._drains = drains
+
+    async def run(self) -> None:
+        self._drains.add(self._drain)
+        try:
+            await super().run()
+        finally:
+            self._drains.discard(self._drain)
+
+    async def _dispatch(self) -> None:
+        if (self._bound_binding is None and self._drain.requested
+                and not self._reader.has_buffered()):
+            return
+        await super()._dispatch()
+
+    async def _guarded(self, dl: Guard, deadline: 'float | None', coro):
+        # Detection only: a peer that has sent nothing is idle.
+        task = asyncio.current_task()
+
+        def close_idle():
+            if not self._reader.has_buffered():
+                task.cancel()
+
+        self._drain.register(close_idle)
+        try:
+            return await ConnectionActor._guarded(dl, deadline, coro)
+        finally:
+            self._drain.unregister(close_idle)
+
+    def _make_conn(self, reader: AbstractReader, dl: Guard) -> ConnectionView:
+        return ReloadingConnectionView(**vars(super()._make_conn(reader, dl)),
+                                       reload_drain=self._drain)

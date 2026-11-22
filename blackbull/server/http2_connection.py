@@ -89,6 +89,9 @@ class HTTP2Connection:
 
     # --- error scope (§5.4) ------------------------------------------------
 
+    def _goaway_last_stream_id(self) -> int:
+        return self._last_peer_stream_id
+
     async def _connection_error(self, error_code: ErrorCodes, reason: str = '') -> None:
         """Send GOAWAY once and end the connection (§5.4.1)."""
         if self._goaway_sent:
@@ -99,7 +102,7 @@ class HTTP2Connection:
         self._retire_all()
         with contextlib.suppress(Exception):
             await self._send_control(
-                self.factory.goaway(self._last_peer_stream_id, error_code))
+                self.factory.goaway(self._goaway_last_stream_id(), error_code))
         await self._after_goaway(reason)
 
     async def _undecodable(self, exc: Exception) -> None:

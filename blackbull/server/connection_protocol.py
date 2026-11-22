@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from collections.abc import Awaitable, Callable
 
 from .read_buffer import ReadBuffer
 from ..protocol.http1 import IncompleteReadError, ReadLimitExceeded
@@ -107,6 +108,23 @@ class BufferReader(AbstractReader):
             await proto.wait_for_arrival()
         finally:
             self._waiting = False
+
+    def watch_wakeups(self, after_wait: Callable[[], Awaitable[None]]):
+        """Notify a parked reader without consuming input or cancelling its read."""
+        wait = self._proto.wait_for_arrival
+
+        async def wait_and_notify():
+            # The first wake may have resumed a read parked before the hook.
+            await after_wait()
+            await wait()
+            await after_wait()
+
+        self._proto.wait_for_arrival = wait_and_notify
+
+        def unwatch():
+            del self._proto.wait_for_arrival
+
+        return self._proto._wake, unwatch
 
     # -- AbstractReader ----------------------------------------------------
 

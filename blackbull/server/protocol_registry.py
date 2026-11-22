@@ -14,9 +14,10 @@ from typing import Any
 
 from ..event_aggregator import EventAggregator
 from .deadline import Guard
-from .http1_actor import HTTP1Actor
+from .http1_actor import HTTP1Actor, ReloadingHTTP1Actor
 from .recipient import AbstractReader, _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE
 from .sender import AbstractWriter
+from .reload_drain import ReloadDrain
 
 
 _HTTP2_PREFACE_FIRST_LINE = b'PRI * HTTP/2.0\r\n'
@@ -299,6 +300,38 @@ class RawBinding(ProtocolBinding):
         await self.handler(conn.reader, conn.writer, ctx)
 
 
+@dataclass
+class ReloadingConnectionView(ConnectionView):
+    """A reload worker's connection view: carries the drain its actor watches."""
+    reload_drain: ReloadDrain | None = None
+
+
+class ReloadingHttp2Binding(Http2Binding):
+    async def _run(self, conn: ReloadingConnectionView) -> None:
+        from .http2_actor import ReloadingHTTP2Actor  # noqa: PLC0415
+        actor = ReloadingHTTP2Actor(
+            conn.reader, conn.writer, conn.app, conn.aggregator,
+            peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
+            stream_queue_depth=conn.stream_queue_depth,
+            connection_id=conn.connection_id,
+        )
+        actor.watch_reload(conn.reload_drain)
+        await actor.run()
+
+
+class ReloadingHttp1Binding(Http1Binding):
+    async def serve(self, conn: ReloadingConnectionView) -> None:
+        actor = ReloadingHTTP1Actor(
+            conn.reader, conn.writer, conn.app, conn.aggregator,
+            peername=conn.peername, sockname=conn.sockname, ssl=conn.ssl,
+            ws_queue_depth=conn.ws_queue_depth,
+            deadline=conn.deadline,
+            connection_id=conn.connection_id,
+        )
+        actor.watch_reload(conn.reload_drain)
+        await actor.run()
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -319,6 +352,17 @@ class ProtocolRegistry:
         self._ports: dict[str, RawBinding] = {}
         # Registration updates the cached detection order before accepts start.
         self._detection_order: tuple[ProtocolBinding, ...] = tuple(self._cleartext)
+
+    def for_reload(self) -> 'ProtocolRegistry':
+        """A copy whose HTTP bindings hand their actors the connection's drain."""
+        reloading = {Http2Binding: ReloadingHttp2Binding, Http1Binding: ReloadingHttp1Binding}
+        copy = object.__new__(ProtocolRegistry)
+        copy._cleartext = [reloading[type(b)]() if type(b) in reloading else b
+                           for b in self._cleartext]
+        copy._alpn = {b.alpn_token: b for b in copy._cleartext if b.alpn_token}
+        copy._ports = self._ports
+        copy._detection_order = tuple(self._ports.values()) + tuple(copy._cleartext)
+        return copy
 
     def register(
         self,

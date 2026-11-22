@@ -31,6 +31,8 @@ from ..request import ClientDisconnected
 from .parser import parse_headers
 from .deadline import Deadline
 from .cap_log import log_cap_hit
+from .connection_protocol import BufferReader
+from .reload_drain import ReloadDrain
 from .recipient import (AbstractReader, IncompleteReadError,
                         HTTP2Recipient, RecipientFactory,
                         _HTTP2_STREAM_QUEUE_DEPTH)
@@ -216,6 +218,9 @@ class HTTP2Actor(Actor, HTTP2Connection):
     If *aggregator* is ``None`` the actor dispatches events directly through
     ``app._dispatcher`` instead.
     """
+
+    #: Set by the reload worker; ``None`` serves without a drain.
+    _reload_drain = None
 
     def __init__(
         self,
@@ -816,7 +821,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             elif frame_type is FrameTypes.PRIORITY_UPDATE:
                 self.on_priority_update(frame)
             elif frame_type is FrameTypes.GOAWAY:
-                await self._on_goaway_frame(self._last_peer_stream_id)
+                await self._on_goaway_frame(self._goaway_last_stream_id())
                 return
 
         self._signal_peer_lost()
@@ -1218,7 +1223,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
 
         async def _run_ws():
             try:
-                await ws_actor.run()
+                await ws_actor.run(self._reload_drain)
             finally:
                 _close_ws_record(log_record, ws_actor._disconnect_code, ws_actor.denial_status)
 
@@ -1356,3 +1361,66 @@ class HTTP2Actor(Actor, HTTP2Connection):
 
     async def _handle(self, msg: Message) -> None:
         raise NotImplementedError
+
+
+class ReloadingHTTP2Actor(HTTP2Actor):
+    def watch_reload(self, drain: ReloadDrain) -> None:
+        self._reload_drain = drain
+        self._reload_cutoff: int | None = None
+
+    async def run(self) -> None:
+        assert isinstance(self._reader, BufferReader)
+        reader = self._reader
+        wakeups = None
+
+        def begin():
+            nonlocal wakeups
+            self._wake_reader, wakeups = reader.watch_wakeups(self._check_reload)
+            self._admit = self._admit_during_reload
+            self._complete_header_block = self._complete_during_reload
+            self._retire_stream = self._retire_during_reload
+            self._wake_reader()
+
+        self._reload_drain.register(begin)
+        try:
+            await super().run()
+        finally:
+            self._reload_drain.unregister(begin)
+            if wakeups is not None:
+                del self._admit, self._complete_header_block, self._retire_stream
+                wakeups()
+
+    async def _check_reload(self) -> None:
+        if self._goaway_sent:
+            return
+        if self._reload_cutoff is None:
+            self._reload_cutoff = self._last_peer_stream_id
+            await self.send_frame(self.factory.goaway(self._reload_cutoff))
+        if not self._stream_tasks and self._open_block is None:
+            raise IncompleteReadError(b'')
+
+    async def _admit_during_reload(self, frame):
+        try:
+            await self._check_reload()
+        except IncompleteReadError:
+            self._goaway_sent = True
+            await self._writer.close()
+            return SKIP
+        return await super()._admit(frame)
+
+    def _goaway_last_stream_id(self) -> int:
+        if self._reload_cutoff is not None:
+            return self._reload_cutoff
+        return super()._goaway_last_stream_id()
+
+    async def _complete_during_reload(self, frame, stream, send, tg) -> bool:
+        # Decode the block first to preserve HPACK for the streams still open.
+        if self._reload_cutoff is not None and stream.stream_id > self._reload_cutoff:
+            await self._reset(stream.stream_id, ErrorCodes.REFUSED_STREAM)
+            return True
+        return await super()._complete_header_block(frame, stream, send, tg)
+
+    def _retire_during_reload(self, *args, **kwargs) -> None:
+        super()._retire_stream(*args, **kwargs)
+        if self._reload_cutoff is not None and not self._stream_tasks:
+            self._wake_reader()

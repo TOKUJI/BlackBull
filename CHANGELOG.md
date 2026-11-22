@@ -99,6 +99,11 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Changed
 
+- Hot reload starts replacement workers before draining old connections and
+  retains the serving generation if startup fails. Single-owner listeners
+  switch after the old workers exit, and dedicated raw listeners no longer
+  force `workers=1` (BLA-445).
+
 - A connection past the service cap (`BB_MAX_CONNECTIONS`) reads a 503 with a
   plain-text body, `Service is busy. Please retry shortly.`, besides
   `Retry-After: 1`, so a person sees why instead of a blank page (BLA-692).
