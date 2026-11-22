@@ -27,6 +27,11 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Fixed
+
+- `BB_WORKERS=0` resolves to `os.cpu_count()`, as documented, instead of
+  being treated as invalid and falling back to one worker (BLA-561).
+
 ## [0.83.0] — 2026-11-23
 
 ### Added
