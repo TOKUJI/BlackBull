@@ -10,10 +10,11 @@ from ..event_aggregator import EventAggregator
 from ..request import ClientDisconnected
 from .cap_log import _LazyCapHitCounter
 from .deadline import Guard
-from .protocol_registry import (ConnectionView, ProtocolBinding,
+from .protocol_registry import (ConnectionView, ProtocolBinding, ReloadingConnectionView,
                                 ProtocolRegistry)
 from .recipient import (AbstractReader,
                         _HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
+from .reload_drain import ReloadDrain
 from .sender import AbstractWriter
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,6 @@ class ConnectionActor(Actor):
         registry: ProtocolRegistry | None = None,
         bound_binding: ProtocolBinding | None = None,
         connection_id: str = '',
-        reload_drain=None,
     ) -> None:
         super().__init__()
         self._reader = reader
@@ -78,7 +78,6 @@ class ConnectionActor(Actor):
         # When set (port-bound raw protocol), detection is skipped entirely.
         self._bound_binding = bound_binding
         self._connection_id = connection_id
-        self._reload_drain = reload_drain
         # Protocol name reported on the lifecycle events.  At accept time the
         # h1/h2 split isn't known, so the shared listener reports ``'http'``;
         # a port-bound binding already knows its name.  ``_dispatch`` refines
@@ -129,7 +128,6 @@ class ConnectionActor(Actor):
             alpn=self._alpn, deadline=dl, connection_id=self._connection_id,
             stream_queue_depth=self._stream_queue_depth,
             ws_queue_depth=self._ws_queue_depth,
-            reload_drain=self._reload_drain,
         )
 
     def _select(self, prefix: bytes, at_eof: bool,
@@ -199,18 +197,6 @@ class ConnectionActor(Actor):
         # The discriminator is protocol-agnostic: no hardcoded byte counts, no
         # delimiters, no HTTP knowledge.  Each binding reads its own framing.
         alpn_binding = self._registry.by_alpn(self._alpn)
-        drain = self._reload_drain
-        if drain is not None:
-            if drain.requested and not self._reader.has_buffered():
-                return
-            task = asyncio.current_task()
-            assert task is not None
-
-            def close_idle():
-                if not self._reader.has_buffered():
-                    task.cancel()
-
-            drain.register(close_idle)
         try:
             if alpn_binding is not None:
                 # ALPN pre-commits the protocol; still wait for its declared
@@ -231,9 +217,6 @@ class ConnectionActor(Actor):
                                else self._fallback_binding())
             await self._on_detect_timeout(timeout_binding, deadline, dl)
             return
-        finally:
-            if drain is not None:
-                drain.unregister(close_idle)
 
         if binding is None:
             # No binding claimed the prefix — only reachable if the registry has
@@ -281,3 +264,43 @@ class ConnectionActor(Actor):
 
     async def _handle(self, msg: Message) -> None:
         raise NotImplementedError
+
+
+class ReloadingConnectionActor(ConnectionActor):
+    """A reload worker's connection: idle ones close once the worker retires."""
+
+    def __init__(self, *args, drains: set, reload_registry, registry, **kwargs) -> None:
+        super().__init__(*args, registry=reload_registry, **kwargs)
+        self._drain = ReloadDrain()
+        self._drains = drains
+
+    async def run(self) -> None:
+        self._drains.add(self._drain)
+        try:
+            await super().run()
+        finally:
+            self._drains.discard(self._drain)
+
+    async def _dispatch(self) -> None:
+        if (self._bound_binding is None and self._drain.requested
+                and not self._reader.has_buffered()):
+            return
+        await super()._dispatch()
+
+    async def _guarded(self, dl: Guard, deadline: 'float | None', coro):
+        # Detection only: a peer that has sent nothing is idle.
+        task = asyncio.current_task()
+
+        def close_idle():
+            if not self._reader.has_buffered():
+                task.cancel()
+
+        self._drain.register(close_idle)
+        try:
+            return await ConnectionActor._guarded(dl, deadline, coro)
+        finally:
+            self._drain.unregister(close_idle)
+
+    def _make_conn(self, reader: AbstractReader, dl: Guard) -> ConnectionView:
+        return ReloadingConnectionView(**vars(super()._make_conn(reader, dl)),
+                                       reload_drain=self._drain)

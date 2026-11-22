@@ -4,6 +4,7 @@ Count TLS handshakes from accept. Stop listeners before draining accepted
 work. open_socket binds without serving for embedding and forked workers.
 """
 import asyncio
+import functools
 import os
 import resource
 import errno
@@ -25,11 +26,10 @@ from ..protocol.rsock import (
 )
 from .listener import HTTP, InheritedFd, Listener, Tcp, Unix
 from .conn_id import new_connection_id
-from .connection_actor import ConnectionActor
+from .connection_actor import ConnectionActor, ReloadingConnectionActor
 from .connection_protocol import ConnectionProtocol
 from .sender import AsyncioWriter, TLSWriter
 from .recipient import (_HTTP2_STREAM_QUEUE_DEPTH, _WS_READ_INLINE)
-from .reload_drain import ReloadDrain
 from .cap_log import CapHitCounter, log_cap_hit
 from ..env import FD_RESERVE, DerivedCap, get_settings
 from ..utils import _EAGER_TASKS, create_eager_task
@@ -257,7 +257,7 @@ class _Admission:
     ``connection_lost``.  Either may come alone, or both.
     """
 
-    __slots__ = ('_gate', 'transport', 'state', 'reload_drain')
+    __slots__ = ('_gate', 'transport', 'state')
 
     def __init__(self, gate) -> None:
         self._gate = gate
@@ -827,7 +827,8 @@ class Server:
         self._connection_tasks: set = set()
         self._accept_gate = _AcceptGate(serving=self._connection_tasks)
         self._stopping = False
-        self._reload_worker = False
+        self._connection_actor = ConnectionActor
+        self._reload_drains: set | None = None
         self._drain_timeout = None
         self._stopped_event = asyncio.Event()
         self._stop_done_event = asyncio.Event()
@@ -1016,10 +1017,7 @@ class Server:
             return
 
         try:
-            reload_drain = None
-            if self._reload_worker:
-                reload_drain = admission.reload_drain = ReloadDrain()
-            actor = ConnectionActor(
+            actor = self._connection_actor(
                 reader, writer, self.app, aggregator,
                 peername=peername, sockname=sockname, ssl=ssl_flag,
                 alpn=alpn,
@@ -1028,11 +1026,17 @@ class Server:
                 registry=self._protocol_registry,
                 bound_binding=bound_binding,
                 connection_id=new_connection_id(),
-                reload_drain=reload_drain,
             )
             await actor.run()
         finally:
             self._accept_gate.finish(admission)
+
+    def _serve_for_reload(self) -> None:
+        """Serve as a reload worker: a retiring worker closes idle connections."""
+        self._reload_drains = set()
+        self._connection_actor = functools.partial(
+            ReloadingConnectionActor, drains=self._reload_drains,
+            reload_registry=self._protocol_registry.for_reload())
 
     def open_socket(self, port=0, unix_path: str | None = None,
                     inherited_fd: int | None = None):
@@ -1411,11 +1415,9 @@ class Server:
         gate = self._accept_gate
         if not pending and not gate._held:
             return
-        if self._reload_worker:
-            for admission in tuple(gate._held):
-                drain = getattr(admission, 'reload_drain', None)
-                if drain is not None:
-                    drain.begin()
+        if self._reload_drains is not None:
+            for drain in tuple(self._reload_drains):
+                drain.begin()
         logger.info('Draining %d connection(s), up to %.1fs',
                     gate.held, drain_timeout)
         budget = self._cleanup_budget

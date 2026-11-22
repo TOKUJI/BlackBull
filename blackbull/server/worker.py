@@ -87,7 +87,7 @@ def run_worker(app, bound_listeners, ssl_context, worker_id: int,
                         ws_queue_depth=ws_queue_depth)
     if reload_stage is not None:
         readiness, channel = reload_stage
-        server._reload_worker = True
+        server._serve_for_reload()
         if channel is not None:
             channel.close()
         if readiness is not None:
