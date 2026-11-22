@@ -31,11 +31,10 @@ metadata; reinstall an editable checkout after changing that version.
 
 - `WebSocket.reject(response)` sends an HTTP response before an upgrade.
   Directly hosted ASGI apps can handle WebSocket connections and use
-  `websocket.http.response` on HTTP/1.1 and HTTP/2. This public API addition
-  targets the 0.83.0 MINOR release (BLA-676).
+  `websocket.http.response` on HTTP/1.1 and HTTP/2 (BLA-676).
 - `BlackBull.mount(prefix, ASGIApp(foreign, mounted=True))` hosts foreign apps
-  under a native app with host middleware/events and one lifespan per adapter.
-  This public API addition targets the 0.83.0 MINOR release (BLA-674).
+  under a native app with host middleware/events and one lifespan per adapter
+  (BLA-674).
 - Foreign ASGI hosting compatibility guide and real-socket H1/H2/TLS tests
   covering lifespan, response extensions and current limitations (BLA-678).
 - TOML `[limits] compression_max_inflight` and `brotli_quality` complete
@@ -68,14 +67,9 @@ metadata; reinstall an editable checkout after changing that version.
 ### Removed
 
 - `Server` no longer accepts ignored `**kwds`; unknown keywords raise
-  `TypeError`. This intentional public API break requires the 0.83.0 MINOR
-  release and is approved only for PR #601 (BLA-673).
-
+  `TypeError` (BLA-673).
 - `serve_grpc` no longer accepts its private `_validated_content_type`
-  keyword; it reads the request's Content-Type itself. This intentional public
-  API break requires the 0.83.0 MINOR release and is approved only for PR #613
-  (BLA-684).
-
+  keyword; it reads the request's Content-Type itself (BLA-684).
 - `blackbull.client.scenario` and `blackbull.client.scenario_oracle` (BBD003).
   Import from `blackbull.fault_injection` instead, using `H1CSendRawBytes`
   in place of `scenario.SendBytes` (BLA-578).
@@ -103,7 +97,6 @@ metadata; reinstall an editable checkout after changing that version.
   retains the serving generation if startup fails. Single-owner listeners
   switch after the old workers exit, and dedicated raw listeners no longer
   force `workers=1` (BLA-445).
-
 - A connection past the service cap (`BB_MAX_CONNECTIONS`) reads a 503 with a
   plain-text body, `Service is busy. Please retry shortly.`, besides
   `Retry-After: 1`, so a person sees why instead of a blank page (BLA-692).
@@ -144,9 +137,7 @@ metadata; reinstall an editable checkout after changing that version.
   from service refusals. Closing connections are aborted after
   `BB_WRITE_TIMEOUT` (8 seconds when zero); `Server.active_connections` and
   `held_connections` expose the two gauges (BLA-453).
-- `Server()` raises `TypeError` for an unknown keyword argument, which it
-  used to ignore, and refuses `asgi=False` under `BB_FORCE_ASGI_SCOPE=1`.
-  Without `asgi=True` or that variable, an app is always called as a native
+- `Server()` refuses `asgi=False` under `BB_FORCE_ASGI_SCOPE=1`.  Without `asgi=True` or that variable, an app is always called as a native
   `(conn, receive, send)` callable (BLA-673).
 - The server runs an app's startup and shutdown through the app's own hooks,
   not the ASGI lifespan protocol; failures read `Lifespan startup failed: …`
@@ -155,7 +146,6 @@ metadata; reinstall an editable checkout after changing that version.
   warns.  A foreign app's `scope['state']` no longer exposes BlackBull's
   per-request state, and `ASGIApp` refuses an ASGI host (`TypeError`)
   (BLA-675).
-
 - The `websocket` middleware sends `NativeWSMessage`s instead of event dicts
   (BLA-672).
 - HTTP/2 client: `BB_CLIENT_H2_ENABLE_PUSH` defaults to `0`, so conforming

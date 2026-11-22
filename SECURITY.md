@@ -12,9 +12,9 @@ critical vulnerabilities.
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 0.83.x  | :white_check_mark: |
 | 0.82.x  | :white_check_mark: |
-| 0.81.x  | :white_check_mark: |
-| < 0.81  | :x:                |
+| < 0.82  | :x:                |
 
 This table updates with each minor release.
 
@@ -97,6 +97,9 @@ The following are in scope for security reports:
   handshake state recorded on the connection — so a defect that lets
   a connection reach a handler as "accepted" when a middleware meant
   to reject it is a security report, not a bug report.
+- `ASGIApp` (`blackbull/asgi_app.py`), which serves a foreign ASGI app: an
+  out-of-order or malformed message from that app must not escape the
+  server's limits or corrupt the connection.
 - The `blackbull` CLI and module-level boot path (`blackbull.app.serve`).
 - **The async HTTP client under `blackbull/client/`** — experimental, in
   scope.  What holds at the shipped defaults, on **both** protocols: a peer

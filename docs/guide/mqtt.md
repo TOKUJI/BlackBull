@@ -436,8 +436,7 @@ interacts with `--reload` and `SO_REUSEPORT`.
   its state (subscriptions, sessions, retained messages) lives in that one
   process and is neither shared across workers nor persisted across restarts.
   HTTP, however, scales across all workers: `app.run(workers=4)` alongside the
-  broker runs HTTP on every worker and the broker on worker 0. (`--reload` still
-  pins `workers=1` when a broker is registered.)
+  broker runs HTTP on every worker and the broker on worker 0.
 - **In-memory sessions.** Session state lives in the broker process and does
   not survive a restart. A session with a finite Session Expiry Interval is
   removed once the interval elapses (§3.1.2.11.2). `0xFFFFFFFF` means *does not expire*, and BlackBull honours it:
