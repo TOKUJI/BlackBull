@@ -102,18 +102,21 @@ def _get_version(port: int, path='/version', *, tls=False) -> str | None:
         return None
 
 
-def _open_h2_request(port: int):
+def _h2_get(encoder: Encoder, stream_id: int, path: str) -> bytes:
+    """A HEADERS frame built by hand: the block may index *encoder*'s dynamic table."""
+    block = encoder.encode([(':method', 'GET'), (':scheme', 'http'),
+                            (':authority', 'localhost'), (':path', path)])
+    # Type HEADERS (0x1), flags END_STREAM | END_HEADERS (0x5).
+    return len(block).to_bytes(3, 'big') + b'\x01\x05' + stream_id.to_bytes(4, 'big') + block
+
+
+def _open_h2_request(port: int, encoder: Encoder | None = None):
+    """Open stream 1 on ``/held``; pass *encoder* to send later streams on the same HPACK context."""
     sock = socket.create_connection(('127.0.0.1', port), timeout=5)
     factory = FrameFactory()
-    head = factory.create(
-        FrameTypes.HEADERS, HeaderFrameFlags.END_HEADERS | HeaderFrameFlags.END_STREAM,
-        1, data=Encoder().encode([
-            (':method', 'GET'), (':scheme', 'http'),
-            (':authority', 'localhost'), (':path', '/held'),
-        ]),
-    )
     sock.sendall(b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n' + factory.settings().save()
-                 + factory.settings(ack=True).save() + head.save())
+                 + factory.settings(ack=True).save()
+                 + _h2_get(encoder or Encoder(), 1, '/held'))
     return sock
 
 
@@ -406,6 +409,7 @@ def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env, entry):
     untouched = None
     partial = None
     held_h2 = None
+    late_h2 = None
     websocket = None
     raw_held = None
     mqtt_held = None
@@ -464,7 +468,9 @@ def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env, entry):
                 held = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
                 held.request('GET', '/held', headers={'Connection': 'close'})
                 held_h2 = _open_h2_request(port)
-                assert _await('recycle begun', lambda: _occurrences(log_path, 'held request entered') == 2)
+                late_encoder = Encoder()
+                late_h2 = _open_h2_request(port, late_encoder)
+                assert _await('recycle begun', lambda: _occurrences(log_path, 'held request entered') == 3)
                 held_h2.sendall(_H2_PING[:11])
             elif extra_port is not None:
                 assert _get_version(extra_port, tls=True) == 'v1'
@@ -539,6 +545,21 @@ def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env, entry):
                 assert frame == (7, 0, b'\x00\x00\x00\x01\x00\x00\x00\x00')
                 held_h2.sendall(_H2_PING[11:])
                 assert _read_h2_frame(reader) == (6, 0, b'12345678')
+            with late_h2.makefile('rb') as reader:
+                while (frame := _read_h2_frame(reader)) is not None and frame[0] != 7:
+                    pass
+                assert frame == (7, 0, b'\x00\x00\x00\x01\x00\x00\x00\x00')
+                # A stream opened past the reload cutoff is refused, not served.
+                late_h2.sendall(_h2_get(late_encoder, 3, '/version'))
+                while (frame := _read_h2_frame(reader)) is not None and frame[:2] != (3, 3):
+                    pass
+                assert frame == (3, 3, b'\x00\x00\x00\x07')   # RST_STREAM REFUSED_STREAM
+                # A later connection error still names the cutoff, not stream 3.
+                late_h2.sendall(b'\x00\x00\x00\x00\x00\x00\x00\x00\x00')   # DATA on stream 0
+                while (frame := _read_h2_frame(reader)) is not None and frame[0] != 7:
+                    pass
+                assert frame is not None and frame[2][:8] == b'\x00\x00\x00\x01\x00\x00\x00\x01'
+            with held_h2.makefile('rb') as reader:
                 _write_app(script, port, 'v3')
                 (tmp_path / 'release').touch()
                 body = bytearray()
@@ -581,6 +602,8 @@ def test_auto_reload_picks_up_new_code(tmp_path: Path, child_env, entry):
             held.close()
         if held_h2 is not None:
             held_h2.close()
+        if late_h2 is not None:
+            late_h2.close()
         probe.stop()
         teardown_start = time.monotonic()
         proc.terminate()
