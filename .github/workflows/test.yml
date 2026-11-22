@@ -6,8 +6,9 @@ name: pytest
 #               matrix; no Docker, beartype enabled.  Catches regressions in
 #               unit, architecture, and property tests.
 # Integration — runs on every push/PR; tests/integration + tests/conformance
-#               under --run-integration.  The docker-dependent modules
-#               importorskip themselves out, so this lane needs no daemon.
+#               under --run-integration, plus the `slow` Docker-free tests.
+#               The docker-dependent modules importorskip themselves out, so
+#               this lane needs no daemon.
 #               Exists because these suites were previously reachable only
 #               from the weekly Full tier, which is gated on schedule /
 #               workflow_dispatch and therefore gates nothing: 33 tests rotted
@@ -170,6 +171,13 @@ jobs:
             --ignore=tests/conformance/fault_injection/test_h2_differential.py \
             --ignore=tests/conformance/fault_injection/test_client_cli.py \
             --run-integration --timeout=120 -q --beartype-packages=blackbull
+
+      - name: Run slow Docker-free tests
+        # `slow` tests ran only in the weekly Full tier, so a regression in one
+        # merged with green PR checks (#623).  14 tests, ~60s serially.
+        run: |
+          python -m pytest tests/unit tests/architecture tests/properties \
+            --run-slow -m slow --timeout=180 -q --beartype-packages=blackbull
 
   execution-audit:
     name: Execution audit (release gate)
