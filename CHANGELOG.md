@@ -27,6 +27,11 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Fixed
+
+- `StaticFiles` no longer percent-decodes the request path a second time:
+  `/static/%2541.txt` serves the file named `%41.txt`, not `A.txt` (BLA-662).
+
 ## [0.83.0] — 2026-11-23
 
 ### Added
