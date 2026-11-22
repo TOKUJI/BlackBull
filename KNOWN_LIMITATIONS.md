@@ -123,8 +123,7 @@ default) stops claiming there and stays reachable on its own port, because a
 later exchange would otherwise be answered by a worker that never saw the
 earlier one.  A stateful protocol with **no** port of its own cannot be given
 an owner and is refused before the workers fork.  See
-[Workers](docs/deployment/workers.md) for the mechanics, including why
-`--reload` forces `workers=1` when a protocol port is bound.
+[Workers](docs/deployment/workers.md) for the mechanics.
 
 ### mTLS does not expose the client certificate
 
