@@ -1261,8 +1261,13 @@ class HTTP2Actor(Actor, HTTP2Connection):
                 parent_stream_id)
             return
 
-        push_stream_id = self._allocate_push_stream_id()
         path = event.push.encode('utf-8')
+        if path[:1] != b'/':
+            logger.warning(
+                'HTTP2Actor: dropping http.response.push on stream %d — '
+                'path %r is not origin-form', parent_stream_id, path)
+            return
+        push_stream_id = self._allocate_push_stream_id()
 
         parent = parent_stream.conn
         if parent is not None:

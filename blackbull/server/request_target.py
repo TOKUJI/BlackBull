@@ -2,10 +2,15 @@
 from functools import lru_cache
 from urllib.parse import unquote
 
+from ..protocol.http1 import MessageError
+
 
 # Clients repeat their targets; bounded because the bytes are the peer's.
 @lru_cache(maxsize=128)
 def split_path_query(target: bytes) -> tuple[str, bytes, bytes]:
+    """Split an origin-form *target*; ``MessageError`` for any other form."""
+    if target[:1] != b'/':
+        raise MessageError(f'request-target is not origin-form: {target!r}')
     # Split before decoding: encoded delimiters are path data.  Leading //
     # belongs to the path, not an authority as in a generic URI reference.
     without_fragment, _, _ = target.partition(b'#')

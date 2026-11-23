@@ -808,6 +808,29 @@ class TestHTTP2ServerPush:
         assert 'http.response.push' not in (ext or {})
         assert 'push' in caplog.text.lower()
 
+    async def test_a_push_path_that_is_not_origin_form_is_dropped(self, caplog):
+        """A promised :path is origin-form (RFC 9113 §8.3.1), or no promise."""
+        h_frame = _make_headers_frame(stream_id=1, end_stream=True)
+        scopes = []
+
+        async def app(scope, receive, send):
+            scopes.append(scope)
+            await send({'type': 'http.response.push', 'path': 'late.css'})
+            await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+            await send({'type': 'http.response.body', 'body': b''})
+
+        handler, _ = _make_h2_actor(app=app)
+        handler.receive = AsyncMock(side_effect=[h_frame, None])
+        with caplog.at_level('WARNING'):
+            await handler.run()
+
+        sent_types = [call.args[0].FrameType()
+                      for call in handler.send_frame.call_args_list
+                      if hasattr(call.args[0], 'FrameType')]
+        assert FrameTypes.PUSH_PROMISE not in sent_types
+        assert len(scopes) == 1
+        assert 'not origin-form' in caplog.text
+
     async def test_late_disable_drops_push_before_allocation(self, caplog):
         """A SETTINGS change after dispatch still cannot leak a promise."""
         handler, _ = _make_h2_actor()
