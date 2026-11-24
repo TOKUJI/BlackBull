@@ -6105,6 +6105,9 @@ blackbull<span class="w"> </span>myapp:app<span class="w"> </span><span class="s
 <span class="c1"># Auto-reload via the CLI</span>
 blackbull<span class="w"> </span>myapp:app<span class="w"> </span>--bind<span class="w"> </span><span class="m">127</span>.0.0.1:8000<span class="w"> </span>--reload
 </code></pre></div>
+<p><code>--bind</code> with a named host (<code>127.0.0.1</code>, <code>localhost</code>, <code>[::1]</code>, an address)
+listens on that interface only; an empty host, <code>0.0.0.0</code> or <code>[::]</code> listens on
+every interface, IPv4 and IPv6.</p>
 <p>The CLI accepts any <code>module:attribute</code> import path; the
 attribute may be a <code>BlackBull</code> instance <em>or</em> a plain ASGI
 callable.  See <code>blackbull --help</code> for the full flag list and
