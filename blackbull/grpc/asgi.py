@@ -613,14 +613,24 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
     # may continue batching. A parked producer must not withhold yielded messages.
     flush_wanted = asyncio.Event()
     finished = False
+    driver = asyncio.current_task()
+    peer_left = False
 
     # Unannotated for the per-request-closure reason (see
     # response.py::wrap_native_send); takes nothing, returns nothing.
     async def _idle_flusher():
-        while not finished:
-            await flush_wanted.wait()
-            flush_wanted.clear()
-            await _flush()
+        nonlocal peer_left
+        try:
+            while not finished:
+                await flush_wanted.wait()
+                flush_wanted.clear()
+                await _flush()
+        except ClientDisconnected:
+            # The drive loop may be parked in the generator: end it too.
+            if not finished:
+                peer_left = True
+                driver.cancel()
+            raise
 
     loop = asyncio.get_running_loop()
     idle_flusher = None
@@ -668,6 +678,10 @@ async def _serve_server_streaming(handler, request, context, send, content_type,
             if len(buf) >= _STREAM_BATCH_BYTES:
                 await _flush()
 
+    except asyncio.CancelledError:
+        if peer_left and driver.uncancel() == 0:
+            raise ClientDisconnected() from None
+        raise
     except GrpcError as exc:
         # Deliver messages already committed by the generator, then the status.
         await _flush()

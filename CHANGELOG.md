@@ -49,6 +49,10 @@ metadata; reinstall an editable checkout after changing that version.
   a slice of the changed file (BLA-671).
 - `StaticFiles` no longer percent-decodes the request path a second time:
   `/static/%2541.txt` serves the file named `%41.txt`, not `A.txt` (BLA-662).
+- A gRPC server-streaming handler ends when its client drops the connection:
+  the failed send closes its generator (its `finally` runs) instead of
+  leaving the handler and two tasks running for the life of the process
+  (BLA-681).
 
 ### Docs
 
