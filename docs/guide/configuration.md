@@ -221,10 +221,11 @@ provenance of each non-default deploy setting is logged once at
 startup on the `blackbull.config` logger, e.g.
 `config: port=9000 (from $BLACKBULL_PORT)`.
 
-There is no `host` field / `BLACKBULL_HOST`: BlackBull's socket
-layer binds dual-stack on all interfaces, so a per-interface `host`
-would silently do nothing.  Use `unix_path` or `inherited_fd` for
-non-TCP binds.
+There is no `host` field / `BLACKBULL_HOST`: `port` binds every
+interface.  To listen on one interface, pass
+`listeners=[Listener(Tcp(port, host=...))]` (see
+[Listeners](listeners.md)) or `blackbull --bind host:port`.  Use
+`unix_path` or `inherited_fd` for non-TCP binds.
 
 #### `.env` files
 
