@@ -29,6 +29,8 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- `BB_WORKERS=0` resolves to `os.cpu_count()`, as documented, instead of
+  being treated as invalid and falling back to one worker (BLA-561).
 - A response field section holding `content-length` (as passed in
   `http.response.start` headers) round-trips through `pickle`, which raised
   `AttributeError`; it is rebuilt with the same fields and framing facts
