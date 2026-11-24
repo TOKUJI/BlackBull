@@ -229,8 +229,10 @@ job_runner() {
     printf 'BENCH_RUN_DIR=%q bash bench/httparena/run_httparena.sh %q %q %q %q\n' "$REMOTE_RUN" \
         "${FRAMEWORKS// /,}" "${PROFILES// /,}" "$SKIP_VALIDATE" "${WRK_CPUS:-}"
     echo 'rc=$?'
-    # HttpArena's own result files, for compare_table.py.
-    printf 'rsync -a --include="*/" --include="*.json" --include="*.tsv" --include="*.csv" --include="*.md" --include="*.log" --exclude="*" ~/HttpArena/ %q/httparena-tree/\n' "$REMOTE_RUN"
+    # HttpArena's result JSONs, for compare_table.py.  Only results/: the clone
+    # also carries the upstream site's published logs, hundreds of MB.
+    printf 'mkdir -p %q/httparena-tree && rsync -a ~/HttpArena/results/ %q/httparena-tree/results/\n' \
+        "$REMOTE_RUN" "$REMOTE_RUN"
     echo 'exit $rc'
 }
 

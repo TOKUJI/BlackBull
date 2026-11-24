@@ -72,8 +72,15 @@ def collect(result_dir: str) -> tuple[dict, list]:
 # "=== blackbull / baseline / 512c (tool=gcannon) ===" — the section header
 # benchmark.sh prints before each (framework, profile, conns) group of runs.
 _HEAD_RE = re.compile(r'^===\s*(\S+)\s*/\s*(\S+)\s*/\s*(\d+)c\b')
-# "  Throughput: 179.61K req/s" — one per run within the group.
-_RUN_RE = re.compile(r'Throughput:\s*([0-9.]+)\s*([KM]?)\s*req/s')
+# One line per run within the group, in the form of the tool that measured it:
+# gcannon "Throughput: 179.61K req/s", h2load "finished in 5.05s, 152463.80 req/s",
+# wrk and ghz "Requests/sec: 108271.55", zrk '"achieved_rate": 300707.86'.
+_RUN_RES = (
+    re.compile(r'Throughput:\s*([0-9.]+)\s*([KM]?)\s*req/s'),
+    re.compile(r'^finished in [0-9.]+s, ([0-9.]+)\s*([KM]?) req/s'),
+    re.compile(r'Requests/sec:\s*([0-9.]+)\s*([KM]?)'),
+    re.compile(r'"achieved_rate":\s*([0-9.]+)\s*([KM]?)'),
+)
 
 _SUFFIX = {'': 1.0, 'K': 1e3, 'M': 1e6}
 
@@ -82,8 +89,8 @@ def collect_runs(result_dir: str) -> dict:
     """Return {(profile, conns): {fw: [rps, ...]}} from the benchmark logs.
 
     The per-run throughputs never reach the JSON — only their maximum does —
-    so the logs are the only place the spread survives.  benchmark.sh prints
-    them rounded to ~4 significant figures ("179.61K req/s"), which quantises
+    so the logs are the only place the spread survives.  gcannon prints them
+    rounded to ~4 significant figures ("179.61K req/s"), which quantises
     these figures by ~0.05 % — two orders below the spread they are read for.
     """
     runs: dict = {}
@@ -97,7 +104,7 @@ def collect_runs(result_dir: str) -> dict:
                     fw, profile, conns = head.group(1), head.group(2), int(head.group(3))
                     key = (profile, conns, fw)
                     continue
-                run = _RUN_RE.search(line)
+                run = next((m for r in _RUN_RES if (m := r.search(line))), None)
                 if run and key is not None:
                     value = float(run.group(1)) * _SUFFIX[run.group(2)]
                     profile, conns, fw = key
