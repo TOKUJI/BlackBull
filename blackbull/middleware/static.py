@@ -413,10 +413,10 @@ class StaticFiles:
 
             extra_headers.append((b'etag', etag))
             extra_headers.append((b'last-modified', last_modified))
-        else:
-            etag = None
 
-        if range_hdr and _if_range_matches(conn.headers, etag, mtime_ns):
+        # Without validators (conditional off) no If-Range can match.
+        if range_hdr and _if_range_matches(
+                conn.headers, etag if self._conditional else None, mtime_ns):
             parsed = _parse_byte_range(range_hdr, size)
             if parsed is not None:
                 start, end = parsed
