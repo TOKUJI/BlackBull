@@ -13,7 +13,6 @@ import pytest
 from blackbull import JSONResponse, RedirectResponse, Response, StreamingResponse
 from blackbull.native import NativeResponse
 from blackbull.protocol.frame import FrameFactory
-from blackbull.response import cookie_header
 from blackbull.server.sender import AbstractWriter, HTTP1Sender, HTTP2Sender
 
 
@@ -69,7 +68,7 @@ async def test_all_response_helpers_reject_boundary_breaking_values():
         await StreamingResponse(
             chunks(), media_type='text/plain\r\nx-added: b')(None, None, send)
     with pytest.raises(ValueError, match='header value'):
-        NativeResponse(header=[cookie_header('session', 'a\r\nx-added: b')])
+        NativeResponse(header=[(b'set-cookie', b'session=a\r\nx-added: b')])
 
 
 def test_response_preserves_legal_field_value_controls_and_duplicates():
