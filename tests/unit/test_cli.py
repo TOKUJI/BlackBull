@@ -178,30 +178,46 @@ def test_main_bad_app_returns_1(capsys, argv, err_frag):
     assert err_frag in err
 
 
-def test_main_warns_on_specific_host(capsys, monkeypatch):
-    """A non-wildcard host triggers the 'advisory in v1' warning before serving."""
+def _run_cli(monkeypatch, argv):
+    """Run ``cli.main`` with ``_serve`` replaced; return (rc, kwargs, stderr)."""
     from blackbull import cli
-
-    # Replace _serve so main returns without actually binding.
-    called = {}
-    def _fake_serve(app, **kwargs):
-        called['app'] = app
-        called['kwargs'] = kwargs
-    monkeypatch.setattr(cli, '_serve', _fake_serve)
-    # Provide a dummy app on disk.
     import sys as _sys, types
-    mod = types.ModuleType('dummy_cli_warn_app')
+    called = {}
+    monkeypatch.setattr(cli, '_serve', lambda app, **kwargs: called.update(kwargs))
+    mod = types.ModuleType('dummy_cli_bind_app')
     mod.app = object()
-    _sys.modules['dummy_cli_warn_app'] = mod
-    try:
-        rc = cli.main(['dummy_cli_warn_app:app', '--bind', '10.0.0.5:8443'])
-    finally:
-        del _sys.modules['dummy_cli_warn_app']
+    monkeypatch.setitem(_sys.modules, 'dummy_cli_bind_app', mod)
+    return cli.main(argv), called
 
+
+@pytest.mark.parametrize('form', [['dummy_cli_bind_app:app'], ['serve', '.']])
+@pytest.mark.parametrize('spec, host', [
+    ('127.0.0.1:8443', '127.0.0.1'),
+    ('localhost:8443', 'localhost'),
+    ('[::1]:8443', '::1'),
+    ('10.0.0.5:8443', '10.0.0.5'),
+])
+def test_a_named_bind_host_is_the_only_interface(capsys, monkeypatch, form, spec, host):
+    rc, kwargs = _run_cli(monkeypatch, [*form, '--bind', spec])
     assert rc == 0
-    err = capsys.readouterr().err
-    assert 'advisory in v1' in err
-    assert called['kwargs']['port'] == 8443
+    [listener] = kwargs['listeners']
+    assert (listener.where.host, listener.where.port) == (host, 8443)
+    assert not kwargs.get('port')
+    assert 'advisory' not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('form', [['dummy_cli_bind_app:app'], ['serve', '.']])
+@pytest.mark.parametrize('spec', [':8443', '0.0.0.0:8443', '[::]:8443'])
+def test_a_wildcard_bind_host_keeps_every_interface(monkeypatch, form, spec):
+    rc, kwargs = _run_cli(monkeypatch, [*form, '--bind', spec])
+    assert rc == 0
+    assert kwargs['port'] == 8443 and not kwargs.get('listeners')
+
+
+def test_serve_prints_the_address_it_binds(capsys, monkeypatch):
+    rc, _kwargs = _run_cli(monkeypatch, ['serve', '.', '--bind', 'localhost:8443'])
+    assert rc == 0
+    assert 'on http://localhost:8443' in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

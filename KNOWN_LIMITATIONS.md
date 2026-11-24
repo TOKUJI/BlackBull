@@ -319,6 +319,20 @@ field on `AppConfig`) is advisory — the socket layer binds dual-stack
 on **all** interfaces, so `--bind 127.0.0.1:8000` still listens on
 every interface.  Use a `unix:` bind, `fd://` socket activation, or a
 fronting proxy when interface filtering matters.
+### gRPC: reflection is v1alpha-only
+
+All four gRPC RPC shapes — unary, server-streaming, client-streaming, and
+bidirectional — ship in `blackbull.grpc` (`app.enable_grpc`), with `gzip`
+message compression (`grpc-accept-encoding: identity,gzip`).
+`application/grpc` requests multiplex onto the same HTTP/2 port as REST and
+WebSocket, with `grpc-status` reported in trailers (a trailing HEADERS
+frame). Core handlers exchange raw message bytes by design; object-typed
+servicers, server reflection, `grpc.health.v1`, and rich error details ship
+in the optional [`blackbull-protobuf`](https://github.com/TOKUJI/blackbull-protobuf)
+package (`pip install 'blackbull[protobuf]'`). The remaining gap: reflection
+serves `grpc.reflection.v1alpha` only — `v1` is a planned fast-follow, and
+grpcurl and most clients fall back to v1alpha automatically. See
+[`docs/guide/grpc.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/grpc.md).
 
 ### `NativeTestServer` is HTTP/1.1 and WebSocket, cleartext only
 
