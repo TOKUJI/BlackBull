@@ -10,7 +10,6 @@ from ..protocol.framing import method_is
 from ..connection import Connection
 from ..headers import Headers
 from ..protocol.field_grammar import FieldError, authority_is_valid, host_field_value
-from .http1_actor import _TARGET_ALLOWED_OCTETS
 from .request_target import split_path_query
 
 
@@ -124,15 +123,7 @@ def parse_headers(frame) -> Connection | None:
             return None
         method = method_octets.decode('ascii')
 
-    # RFC 9112 §2.1 with RFC 3986 — the visible-ASCII rule HTTP/1.1 applies to
-    # its request-target, so the transports cannot disagree about a path
-    # (MAL-NON-ASCII-URL).  Graded whenever the field is present: the CONNECT
-    # forms below read ``:path`` too.
     path_pseudo = frame.pseudo_headers.get(PseudoHeaders.PATH)
-    if (path_pseudo is not None
-            and path_pseudo.translate(None, _TARGET_ALLOWED_OCTETS)):
-        frame._mark_malformed(f'invalid :path {path_pseudo!r}')
-        return None
 
     # RFC 3986 §3.1: grade a present scheme before using it for authority
     # or transport mapping.
@@ -157,8 +148,9 @@ def parse_headers(frame) -> Connection | None:
             frame._mark_malformed('empty :path')
             return None
 
-    # RFC 9113 §8.3.1: origin-form, or ``*`` for OPTIONS.  Absolute-form is
-    # HTTP/1.1 only (RFC 9112 §3.2.2).
+    # RFC 9113 §8.3.1: origin-form, or ``*`` for OPTIONS; absolute-form is
+    # HTTP/1.1 only (RFC 9112 §3.2.2).  The same split and octet rule as
+    # HTTP/1.1, for every form that carries ``:path``.
     path, raw_path, query_string = '', b'', b''
     if path_pseudo:
         try:
