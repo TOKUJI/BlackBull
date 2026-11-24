@@ -29,11 +29,40 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- `BB_WORKERS=0` resolves to `os.cpu_count()`, as documented, instead of
+  being treated as invalid and falling back to one worker (BLA-561).
+- A response field section holding `content-length` (as passed in
+  `http.response.start` headers) round-trips through `pickle`, which raised
+  `AttributeError`; it is rebuilt with the same fields and framing facts
+  (BLA-646).
+- A WebSocket handshake whose declared parameters cannot be bound (a required
+  query param missing, a value that will not coerce) is refused with HTTP
+  `400 Bad Request` naming the parameter, as on the HTTP path, instead of a
+  close code 1008 sent before the handshake completed (BLA-604).
 - A request target that is neither origin-form nor `*` for OPTIONS is refused
   before routing: HTTP/2 resets the stream with `PROTOCOL_ERROR` (RFC 9113
   §8.3.1 admits no absolute-form `:path`), and HTTP/1.1 answers 400 for a
   target such as `x` or `?q` (absolute-form is still rewritten). A server push
   whose path is not origin-form is dropped with a warning (BLA-668).
+
+### Docs
+
+- gRPC server reflection serves both `grpc.reflection.v1` and `v1alpha`
+  (`blackbull-protobuf` 0.2.0 or later). The stale v1alpha-only entry is gone
+  from KNOWN_LIMITATIONS, and the guide's `grpcurl` listing is checked against
+  the services the interop suite sees (BLA-644).
+
+### Security
+
+- `cookie_header` raises `ValueError` for a name that is not an RFC 9110
+  token, a value outside RFC 6265 cookie-octets, or a path containing `;` or a
+  control character, instead of emitting them: a `;` in the value used to add
+  cookie attributes such as `Domain` (BLA-605).
+- `blackbull --bind 127.0.0.1:PORT`, `localhost:PORT` and any other named
+  host, in both the app runner and `blackbull serve`, listen on that interface
+  only; they used to listen on every interface without a warning, and
+  `blackbull serve` printed the loopback address while doing so. An empty
+  host, `0.0.0.0` or `[::]` still listens on every interface (BLA-645).
 
 ## [0.83.0] — 2026-11-23
 

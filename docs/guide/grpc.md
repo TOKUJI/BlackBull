@@ -182,7 +182,9 @@ add_servicer(grpc, Greeter(), helloworld_pb2)
 ```
 
 **Server reflection** — `grpcurl`, `grpc_cli`, and Postman can list, describe,
-and invoke your services with no local `.proto` files:
+and invoke your services with no local `.proto` files. Both
+`grpc.reflection.v1` and `grpc.reflection.v1alpha` are served
+(`blackbull-protobuf` 0.2.0 or later):
 
 ```python
 from blackbull_protobuf import enable_reflection
@@ -193,6 +195,7 @@ enable_reflection(grpc)
 $ grpcurl -insecure localhost:8443 list
 helloworld.Greeter
 grpc.health.v1.Health
+grpc.reflection.v1.ServerReflection
 grpc.reflection.v1alpha.ServerReflection
 $ grpcurl -insecure -d '{"name": "world"}' localhost:8443 helloworld.Greeter/SayHello
 ```
