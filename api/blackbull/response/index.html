@@ -6524,8 +6524,10 @@ response types drive themselves and are not converted here.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Build a <code>set-cookie</code> header tuple for response headers; checked, like
-any field, when the NativeResponse carrying it is built.</p>
+        <p>Build a <code>set-cookie</code> header tuple for response headers.</p>
+<p>Raises <code>ValueError</code> for a <em>name</em> that is not a token, a <em>value</em> outside
+RFC 6265 cookie-octets (optionally double-quoted), or a <em>path</em> with ';' or
+a control character: each would rewrite or break the cookie.</p>
 
 
     </div>
