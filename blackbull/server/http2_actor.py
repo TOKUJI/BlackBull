@@ -986,12 +986,9 @@ class HTTP2Actor(Actor, HTTP2Connection):
         assert conn is not None  # not malformed → parse_headers built a Connection
         self._fill_scope_connection(conn)
         try:
-            # RFC 9113 §8.1.1: a length other than one canonical number is
-            # malformed, and so is a nonzero one on a head that ends the stream.
+            # RFC 9113 §8.1.1: a length other than one canonical number is malformed.
             declared = stream.expected_content_length = parse_content_length(
                 conn.headers._index.get(b'content-length', ()), canonical=True)
-            if declared and header_frame.end_stream:
-                raise ValueError
         except ValueError:
             await self.send_frame(
                 self.factory.rst_stream(stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
@@ -1018,12 +1015,18 @@ class HTTP2Actor(Actor, HTTP2Connection):
         # that response owes the same content rules as the application's.
         send._head_mode = head = method_is(conn.method, 'HEAD')
 
-        # Keep the common admission check inline; the refusal path rechecks
-        # and enforces the limit.
-        if (declared is not None and declared > self._max_body_size > 0
-                and await self._refuse_oversized_declared_body(
-                    stream, conn, send)):
-            return True
+        if declared:
+            if header_frame.end_stream:
+                # RFC 9113 §8.1.1: a nonzero length on a head that ends the stream.
+                await self.send_frame(self.factory.rst_stream(
+                    stream.stream_id, ErrorCodes.PROTOCOL_ERROR))
+                return True
+            # Keep the common admission check inline; the refusal path
+            # rechecks and enforces the limit.
+            if (declared > self._max_body_size > 0
+                    and await self._refuse_oversized_declared_body(
+                        stream, conn, send)):
+                return True
 
         self._apply_priority_and_extensions(stream, conn)
         stream_recipient = self._make_stream_recipient(stream.stream_id, send)
