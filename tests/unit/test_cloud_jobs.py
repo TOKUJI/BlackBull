@@ -102,3 +102,27 @@ def test_the_ab_wait_limit_counts_the_ws_lanes(repo):
         return int(done.stdout)
 
     assert wait(URL_PATHS='', WS_CONNS='256,1024') > 2 * wait(URL_PATHS='', WS_CONNS='256') - 1200
+
+
+def test_the_httparena_runner_pulls_back_only_the_results(tmp_path):
+    """The HttpArena clone also carries the upstream site's logs (hundreds of MB)."""
+    home, repo, run = tmp_path / 'home', tmp_path / 'repo', tmp_path / 'run'
+    arena = home / 'HttpArena'
+    for path, text in {'results/baseline/512/blackbull.json': '{"rps": 1}',
+                       'site/static/logs/baseline/512/peer.log': 'x',
+                       'frameworks/blackbull/meta.json': '{}'}.items():
+        (arena / path).parent.mkdir(parents=True, exist_ok=True)
+        (arena / path).write_text(text)
+    (repo / 'bench/httparena').mkdir(parents=True)
+    (repo / 'bench/httparena/run_httparena.sh').write_text('exit 0\n')
+    run.mkdir()
+    job = ROOT / 'bench/cloud/jobs/httparena.sh'
+    env = {**os.environ, 'HOME': str(home), 'REMOTE_REPO': str(repo), 'REMOTE_RUN': str(run),
+           'FRAMEWORKS': 'blackbull', 'PROFILES': 'baseline', 'SKIP_VALIDATE': '0'}
+    runner = subprocess.run(['bash', '-c', f'source {job} && job_runner'], env=env,
+                            capture_output=True, text=True, timeout=30, check=True).stdout
+    done = subprocess.run(['bash', '-c', runner], env=env, capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+
+    pulled = sorted(str(p.relative_to(run)) for p in run.rglob('*') if p.is_file())
+    assert pulled == ['httparena-tree/results/baseline/512/blackbull.json']
