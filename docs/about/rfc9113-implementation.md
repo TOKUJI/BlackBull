@@ -121,7 +121,9 @@ Use the same HTTP field grammar across transports. HTTP/2 additionally
 refuses uppercase names and leading/trailing field whitespace. Validate
 pseudo-header order and uniqueness, method tokens, URI schemes, target and
 authority before dispatch. Normalize the scheme before host and ws/wss
-decisions; `:authority` becomes the application's host header.
+decisions; `:authority` becomes the application's host header. `:path` is
+origin-form, or `*` for OPTIONS; absolute-form is HTTP/1.1 only, and HTTP/1.1
+answers any other target 400.
 
 Malformed trailers are malformed field sections, not successful request
 completion. Content-Length counts payload bytes, excluding padding.

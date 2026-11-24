@@ -20,11 +20,8 @@ from blackbull.protocol.field_grammar import (
     _AUTHORITY_SCAN_RE,
     HOST_FORBIDDEN_BYTES,
 )
-from blackbull.server.http1_actor import (
-    _TARGET_ALLOWED_OCTETS,
-    MessageError,
-    HTTP1Actor,
-)
+from blackbull.server.http1_actor import MessageError, HTTP1Actor
+from blackbull.server.request_target import TARGET_ALLOWED_OCTETS
 
 
 def _target_forbidden_reference(b: int) -> bool:
@@ -33,7 +30,7 @@ def _target_forbidden_reference(b: int) -> bool:
 
 
 def _target_rejects(data: bytes) -> bool:
-    return bool(data.translate(None, _TARGET_ALLOWED_OCTETS))
+    return bool(data.translate(None, TARGET_ALLOWED_OCTETS))
 
 
 @pytest.fixture

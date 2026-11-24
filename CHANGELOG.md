@@ -58,6 +58,11 @@ metadata; reinstall an editable checkout after changing that version.
   the failed send closes its generator (its `finally` runs) instead of
   leaving the handler and two tasks running for the life of the process
   (BLA-681).
+- A request target that is neither origin-form nor `*` for OPTIONS is refused
+  before routing: HTTP/2 resets the stream with `PROTOCOL_ERROR` (RFC 9113
+  §8.3.1 admits no absolute-form `:path`), and HTTP/1.1 answers 400 for a
+  target such as `x` or `?q` (absolute-form is still rewritten). A server push
+  whose path is not origin-form is dropped with a warning (BLA-668).
 
 ### Docs
 

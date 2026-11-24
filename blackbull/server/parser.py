@@ -10,7 +10,6 @@ from ..protocol.framing import method_is
 from ..connection import Connection
 from ..headers import Headers
 from ..protocol.field_grammar import FieldError, authority_is_valid, host_field_value
-from .http1_actor import _TARGET_ALLOWED_OCTETS
 from .request_target import split_path_query
 
 
@@ -124,15 +123,7 @@ def parse_headers(frame) -> Connection | None:
             return None
         method = method_octets.decode('ascii')
 
-    # RFC 9112 §2.1 with RFC 3986 — the visible-ASCII rule HTTP/1.1 applies to
-    # its request-target, so the transports cannot disagree about a path
-    # (MAL-NON-ASCII-URL).  Graded whenever the field is present: the CONNECT
-    # forms below read ``:path`` too.
     path_pseudo = frame.pseudo_headers.get(PseudoHeaders.PATH)
-    if (path_pseudo is not None
-            and path_pseudo.translate(None, _TARGET_ALLOWED_OCTETS)):
-        frame._mark_malformed(f'invalid :path {path_pseudo!r}')
-        return None
 
     # RFC 3986 §3.1: grade a present scheme before using it for authority
     # or transport mapping.
@@ -157,6 +148,19 @@ def parse_headers(frame) -> Connection | None:
             frame._mark_malformed('empty :path')
             return None
 
+    # RFC 9113 §8.3.1: origin-form, or ``*`` for OPTIONS; absolute-form is
+    # HTTP/1.1 only (RFC 9112 §3.2.2).  The same split and octet rule as
+    # HTTP/1.1, for every form that carries ``:path``.
+    path, raw_path, query_string = '', b'', b''
+    if path_pseudo:
+        try:
+            path, raw_path, query_string = split_path_query(path_pseudo)
+        except ValueError:
+            if path_pseudo != b'*' or method != 'OPTIONS':
+                frame._mark_malformed(f'invalid :path {path_pseudo!r}')
+                return None
+            path, raw_path, query_string = '*', b'*', b''
+
     protocol = frame.pseudo_headers.get(PseudoHeaders.PROTOCOL)
 
     if connect and protocol == b'websocket':
@@ -167,9 +171,6 @@ def parse_headers(frame) -> Connection | None:
         # guard (``Cache``'s cacheable-methods check, for one).  Routing and
         # lifecycle events are unaffected — ``BlackBull._dispatch`` branches on
         # ``conn.type`` before any method-based dispatch.
-        path, raw_path, query_string = '', b'', b''
-        if path_pseudo:
-            path, raw_path, query_string = split_path_query(path_pseudo)
         # RFC 8441 requests carry ``:authority`` too — same grammar check
         # and ``host`` mapping as plain requests, but presence is not
         # enforced (the Extended CONNECT handshake already succeeded).
@@ -184,10 +185,6 @@ def parse_headers(frame) -> Connection | None:
             path=path, raw_path=raw_path, query_string=query_string,
             headers=Headers.from_lowered(raw_headers), http_version='2',
         )
-
-    path, raw_path, query_string = '', b'', b''
-    if path_pseudo:
-        path, raw_path, query_string = split_path_query(path_pseudo)
 
     # Plain CONNECT is excluded from the host check: §8.5 gives its
     # ``:authority`` tunnel semantics, and the presence rule only binds

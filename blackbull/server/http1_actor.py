@@ -25,7 +25,7 @@ from ..protocol.http1 import (FieldsTooLarge, LineCache, MessageError,
                               connection_options, parse_head, persistent,
                               request_framing)
 from .deadline import Guard
-from .request_target import split_path_query
+from .request_target import TARGET_ALLOWED_OCTETS, split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
                         AbstractReader, HTTP1Recipient, IncompleteReadError,
                         RecipientFactory, _WS_READ_INLINE)
@@ -74,10 +74,6 @@ def _reject_oversized_head(head: bytes, max_total: int) -> None:
     raise FieldsTooLarge(
         f'header block {len(head)} bytes > BB_HEADER_MAX_TOTAL={max_total}',
         len(head), max_total)
-
-
-# RFC 9112 §2.1 / RFC 3986 — a request-target may carry only visible ASCII.
-_TARGET_ALLOWED_OCTETS = bytes(range(0x21, 0x7F))
 
 
 def _parse_host_header(value: bytes, default_port: int) -> tuple[str, int]:
@@ -488,13 +484,11 @@ class HTTP1Actor(Actor):
                     f'not {method!r}')
             asterisk_form = True
         else:
-            # Request-target octets — reject CTLs, DEL, and non-ASCII (§2.1 /
-            # RFC 3986; MAL-NON-ASCII-URL).  Before the absolute-form rewrite
-            # below, whose scheme and authority would otherwise reach the host
-            # header with no per-value check.
-            if not path or path.translate(None, _TARGET_ALLOWED_OCTETS):
-                raise MessageError(f'invalid request-target {path!r}')
+            # split_path_query grades an origin-form target's octets.
             if (_ss := path.find(b'://')) != -1 and b'/' not in path[:_ss]:
+                # Graded before the rewrite: the authority becomes Host.
+                if path.translate(None, TARGET_ALLOWED_OCTETS):
+                    raise MessageError(f'invalid request-target {path!r}')
                 # absolute-form (§3.2.2): ``scheme "://" authority
                 # path-abempty``.  Rewrite it to origin-form and let the
                 # authority override Host (§3.2.2 — the origin server MUST

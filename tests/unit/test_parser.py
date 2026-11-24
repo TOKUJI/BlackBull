@@ -185,12 +185,11 @@ class TestParse:
     @pytest.mark.parametrize('path,expected_path,expected_qs', [
         pytest.param('/api#frag', '/api', b'', id='strips-fragment'),
         pytest.param('/api?x=1?y=2', '/api', b'x=1?y=2', id='multiple-question-marks'),
-        pytest.param('?onlyq', '', b'onlyq', id='only-query-string'),
     ])
     def test_path_strips_fragment(self, path, expected_path, expected_qs):
         """RFC 7230 §5.3 — the fragment is silently stripped; per RFC 3986
         the first ? terminates the path and later ? characters stay in the
-        query; a bare ?query request-target has an empty path."""
+        query."""
         scope = _get_scope(_http_request(path=path))
         assert scope['path'] == expected_path
         assert scope['query_string'] == expected_qs
