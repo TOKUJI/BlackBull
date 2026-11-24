@@ -80,7 +80,9 @@ def _not_modified(headers, etag: bytes, mtime_ns: int) -> bool:
         # Present but not matching: not fresh, and If-Modified-Since is ignored.
         return if_none_match_hit(inm, etag)
     ims = headers.get(b'if-modified-since')
-    return bool(ims) and _not_newer_than(mtime_ns, ims)
+    if ims:
+        return _not_newer_than(mtime_ns, ims)
+    return False
 
 
 def _if_range_matches(headers, etag: bytes | None, mtime_ns: int) -> bool:
@@ -390,7 +392,6 @@ class StaticFiles:
         start, end = 0, size - 1
         status = HTTPStatus.OK
         extra_headers: list[tuple[bytes, bytes]] = []
-        etag = None
 
         if self._conditional:
             # Validators: a strong ETag over (mtime, size) plus Last-Modified,
@@ -412,6 +413,8 @@ class StaticFiles:
 
             extra_headers.append((b'etag', etag))
             extra_headers.append((b'last-modified', last_modified))
+        else:
+            etag = None
 
         if range_hdr and _if_range_matches(conn.headers, etag, mtime_ns):
             parsed = _parse_byte_range(range_hdr, size)
