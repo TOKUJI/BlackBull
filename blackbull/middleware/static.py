@@ -11,7 +11,6 @@ from collections import OrderedDict
 from stat import S_ISLNK, S_ISREG
 from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import unquote
 from http import HTTPStatus
 
 from blackbull.connection import Connection
@@ -81,19 +80,36 @@ def _not_modified(headers, etag: bytes, mtime_ns: int) -> bool:
         return if_none_match_hit(inm, etag)
     ims = headers.get(b'if-modified-since')
     if ims:
-        try:
-            ims_dt = parsedate_to_datetime(ims.decode('latin-1'))
-        except (ValueError, TypeError):
-            return False
-        if ims_dt is None:
-            return False
-        try:
-            ims_ts = ims_dt.timestamp()
-        except (ValueError, OverflowError, OSError):
-            return False
-        # HTTP dates carry 1-second granularity; compare at whole seconds.
-        return mtime_ns // 1_000_000_000 <= int(ims_ts)
+        return _not_newer_than(mtime_ns, ims)
     return False
+
+
+def _if_range_matches(headers, etag: bytes | None, mtime_ns: int) -> bool:
+    """Whether ``If-Range`` lets a ``Range`` apply (RFC 9110 §13.1.5).
+
+    Absent, it does.  An entity-tag matches only by strong comparison, so a
+    weak one never does; a date matches when the file is not newer.  With no
+    validators emitted (*etag* None) nothing can match.
+    """
+    value = headers.get(b'if-range')
+    if not value:
+        return True
+    if etag is None:
+        return False
+    value = value.strip(b' \t')
+    if value.startswith((b'"', b'W/')):
+        return value == etag
+    return _not_newer_than(mtime_ns, value)
+
+
+def _not_newer_than(mtime_ns: int, http_date: bytes) -> bool:
+    """Whether the file was modified no later than *http_date*."""
+    try:
+        ts = parsedate_to_datetime(http_date.decode('latin-1')).timestamp()
+    except (ValueError, TypeError, AttributeError, OverflowError, OSError):
+        return False
+    # HTTP dates carry 1-second granularity; compare at whole seconds.
+    return mtime_ns // 1_000_000_000 <= int(ts)
 
 
 def _file_stat(path: str) -> os.stat_result | None:
@@ -230,10 +246,10 @@ class StaticFiles:
                 return
             raw_path = raw_path[len(self._url_prefix):]
 
-        decoded = unquote(raw_path)
+        # conn.path is already percent-decoded once, at the request boundary.
         # Resolve symlinks before checking the root boundary.
         try:
-            target = os.path.realpath(os.path.join(self._root_str, decoded.lstrip('/')))
+            target = os.path.realpath(os.path.join(self._root_str, raw_path.lstrip('/')))
         except ValueError:  # an embedded NUL names no file
             target = ''
         if not self._inside_root(target):
@@ -397,7 +413,9 @@ class StaticFiles:
             extra_headers.append((b'etag', etag))
             extra_headers.append((b'last-modified', last_modified))
 
-        if range_hdr:
+        # Without validators (conditional off) no If-Range can match.
+        if range_hdr and _if_range_matches(
+                conn.headers, etag if self._conditional else None, mtime_ns):
             parsed = _parse_byte_range(range_hdr, size)
             if parsed is not None:
                 start, end = parsed

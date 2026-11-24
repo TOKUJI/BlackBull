@@ -39,6 +39,12 @@ metadata; reinstall an editable checkout after changing that version.
   query param missing, a value that will not coerce) is refused with HTTP
   `400 Bad Request` naming the parameter, as on the HTTP path, instead of a
   close code 1008 sent before the handshake completed (BLA-604).
+- `StaticFiles` honours `If-Range` (RFC 9110 §13.1.5): a `Range` applies only
+  while the validator still matches the file (strong ETag or a date not older
+  than `Last-Modified`); otherwise the whole file is sent with 200, instead of
+  a slice of the changed file (BLA-671).
+- `StaticFiles` no longer percent-decodes the request path a second time:
+  `/static/%2541.txt` serves the file named `%41.txt`, not `A.txt` (BLA-662).
 - HTTP/2: a handler that fails after its response head left no longer gets
   a second `500` head on the same stream; the stream ends with
   `RST_STREAM(INTERNAL_ERROR)` (RFC 9113 §8.1), as HTTP/1.1 already drops the
