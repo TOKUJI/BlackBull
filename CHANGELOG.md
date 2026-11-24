@@ -35,18 +35,20 @@ metadata; reinstall an editable checkout after changing that version.
   `http.response.start` headers) round-trips through `pickle`, which raised
   `AttributeError`; it is rebuilt with the same fields and framing facts
   (BLA-646).
+- A WebSocket handshake whose declared parameters cannot be bound (a required
+  query param missing, a value that will not coerce) is refused with HTTP
+  `400 Bad Request` naming the parameter, as on the HTTP path, instead of a
+  close code 1008 sent before the handshake completed (BLA-604).
+- `StaticFiles` no longer percent-decodes the request path a second time:
+  `/static/%2541.txt` serves the file named `%41.txt`, not `A.txt` (BLA-662).
+
 ### Docs
 
 - gRPC server reflection serves both `grpc.reflection.v1` and `v1alpha`
   (`blackbull-protobuf` 0.2.0 or later). The stale v1alpha-only entry is gone
   from KNOWN_LIMITATIONS, and the guide's `grpcurl` listing is checked against
   the services the interop suite sees (BLA-644).
-### Fixed
 
-- A WebSocket handshake whose declared parameters cannot be bound (a required
-  query param missing, a value that will not coerce) is refused with HTTP
-  `400 Bad Request` naming the parameter, as on the HTTP path, instead of a
-  close code 1008 sent before the handshake completed (BLA-604).
 ### Security
 
 - `cookie_header` raises `ValueError` for a name that is not an RFC 9110
