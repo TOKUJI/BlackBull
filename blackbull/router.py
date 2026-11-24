@@ -753,26 +753,9 @@ def _set_path_params(target, receive, params: dict) -> None:
     _conn_of(target, receive).path_params.update(params)
 
 
-#: RFC 6455 §7.4.1 close code 1008 — "policy violation".
-_WS_POLICY_VIOLATION = 1008
-
-#: RFC 6455 §5.5 caps a Close frame payload at 125 bytes, of which the code
-#: takes 2 — so a close *reason* has 123 bytes to work with.
-_WS_MAX_CLOSE_REASON = 123
-
-
 def _path_param_names(path: str) -> set[str]:
     """The ``{name}`` placeholders declared in a route *path*."""
     return {m.group(1) for m in Router._param_pattern.finditer(path)}
-
-
-def _truncate_close_reason(detail: str) -> str:
-    """Clip *detail* to fit an RFC 6455 Close frame, without splitting a
-    multi-byte character (a lone surrogate would make the frame unsendable)."""
-    raw = detail.encode('utf-8')
-    if len(raw) <= _WS_MAX_CLOSE_REASON:
-        return detail
-    return raw[:_WS_MAX_CLOSE_REASON].decode('utf-8', errors='ignore')
 
 
 def _scope_types(scheme) -> set[str]:
@@ -1067,7 +1050,8 @@ async def _ws_reject(ws, detail: str) -> None:
     than opening and immediately closing.
     """
     logger.info(f'WebSocket handshake rejected: {detail}')
-    await ws.close(code=_WS_POLICY_VIOLATION, reason=_truncate_close_reason(detail))
+    await ws.reject(_Response(detail.encode(), status=HTTPStatus.BAD_REQUEST,
+                              content_type='text/plain; charset=utf-8'))
 
 
 def _adapt_handler(fn, path: str, converters: dict | None = None):

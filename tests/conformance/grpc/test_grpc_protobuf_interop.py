@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import threading
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -184,6 +186,15 @@ async def test_reflection_v1_endpoint_answers_on_the_wire(grpc_server):
     names = await asyncio.to_thread(_reflection_v1_list_services, port)
     assert 'bbinterop.Greeter' in names
     assert 'grpc.reflection.v1.ServerReflection' in names
+
+
+@pytest.mark.asyncio
+async def test_the_guide_lists_every_reflection_version_served(grpc_server):
+    port, _ = grpc_server
+    served = {n for n in await asyncio.to_thread(_reflection_v1_list_services, port)
+              if n.startswith('grpc.reflection.')}
+    guide = (Path(__file__).parents[3] / 'docs/guide/grpc.md').read_text()
+    assert set(re.findall(r'^grpc\.reflection\.\S+', guide, re.M)) == served
 
 
 def _describe_service(port: int, symbol: str):
