@@ -43,6 +43,12 @@ metadata; reinstall an editable checkout after changing that version.
   head or on a trailer section is reset with `PROTOCOL_ERROR`, as a short DATA
   body already was, instead of reaching the handler as an empty or short body
   (RFC 9113 §8.1.1, BLA-669).
+- `StaticFiles` honours `If-Range` (RFC 9110 §13.1.5): a `Range` applies only
+  while the validator still matches the file (strong ETag or a date not older
+  than `Last-Modified`); otherwise the whole file is sent with 200, instead of
+  a slice of the changed file (BLA-671).
+- `StaticFiles` no longer percent-decodes the request path a second time:
+  `/static/%2541.txt` serves the file named `%41.txt`, not `A.txt` (BLA-662).
 
 ### Docs
 

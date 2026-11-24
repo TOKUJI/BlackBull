@@ -15,6 +15,7 @@
 #   H2_DATA     a request body file, sent as POST (h2load -d); the gRPC lane is
 #               APP=bench.apps.grpc_echo:app URL_PATH=/plaintext H2_URIS=bench/ab/grpc/uris.txt
 #               H2_HEADER='content-type: application/grpc' H2_DATA=bench/ab/grpc/unary.bin
+#               (H2_URIS=bench/ab/grpc/stream-uris.txt: the server-streaming lane)
 #   APP / APP_PYTHONPATH  serve this app through the blackbull CLI instead
 #   TLS_CERT / TLS_KEY    with APP: serve HTTPS (ALPN h2)
 #

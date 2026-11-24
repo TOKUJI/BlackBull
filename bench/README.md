@@ -64,7 +64,7 @@ Entry points are in **bold**; everything else is a part of the tool on its row.
 | File | Role |
 |---|---|
 | `bench/apps/native_app.py`, `bench/apps/asgi_app.py` | BlackBull, native and ASGI forms |
-| `bench/apps/grpc_echo.py`, `bench/ab/grpc/` | `native_app` with gRPC enabled and one unary echo method, and the request the gRPC A/B lane sends (`ab_commit_h2.sh`'s header) |
+| `bench/apps/grpc_echo.py`, `bench/ab/grpc/` | `native_app` with gRPC enabled, a unary and a server-streaming echo method, and the request and URI lists the gRPC A/B lanes send (`ab_commit_h2.sh`'s header) |
 | `bench/apps/fastapi_app.py`, `bench/apps/quart_app.py`, `bench/apps/starlette_app.py`, `bench/apps/sanic_app.py` | the same routes on peer frameworks |
 | `bench/apps/gate_stamp.py`, `bench/apps/gc_stats.py`, `bench/apps/loop_stamp.py`, `bench/apps/response_timing.py`, `bench/apps/no_events.py` | opt-in instruments the apps load from environment variables |
 
