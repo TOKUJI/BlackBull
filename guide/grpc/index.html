@@ -6305,13 +6305,16 @@ and maps each method's streaming shape automatically:</p>
 <span class="n">add_servicer</span><span class="p">(</span><span class="n">grpc</span><span class="p">,</span> <span class="n">Greeter</span><span class="p">(),</span> <span class="n">helloworld_pb2</span><span class="p">)</span>
 </code></pre></div>
 <p><strong>Server reflection</strong> — <code>grpcurl</code>, <code>grpc_cli</code>, and Postman can list, describe,
-and invoke your services with no local <code>.proto</code> files:</p>
+and invoke your services with no local <code>.proto</code> files. Both
+<code>grpc.reflection.v1</code> and <code>grpc.reflection.v1alpha</code> are served
+(<code>blackbull-protobuf</code> 0.2.0 or later):</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">blackbull_protobuf</span><span class="w"> </span><span class="kn">import</span> <span class="n">enable_reflection</span>
 <span class="n">enable_reflection</span><span class="p">(</span><span class="n">grpc</span><span class="p">)</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><span class="gp">$ </span>grpcurl<span class="w"> </span>-insecure<span class="w"> </span>localhost:8443<span class="w"> </span>list
 <span class="go">helloworld.Greeter</span>
 <span class="go">grpc.health.v1.Health</span>
+<span class="go">grpc.reflection.v1.ServerReflection</span>
 <span class="go">grpc.reflection.v1alpha.ServerReflection</span>
 <span class="gp">$ </span>grpcurl<span class="w"> </span>-insecure<span class="w"> </span>-d<span class="w"> </span><span class="s1">'{"name": "world"}'</span><span class="w"> </span>localhost:8443<span class="w"> </span>helloworld.Greeter/SayHello
 </code></pre></div>
