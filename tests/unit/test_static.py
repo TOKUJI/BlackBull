@@ -183,8 +183,8 @@ class TestStaticFilesPathSecurity:
             f'{label} must be rejected; got {start["status"]}'
         )
 
-    @pytest.mark.parametrize('path', ['/\x00', '/hello.txt\x00.png', '/%00'],
-                             ids=['nul', 'nul-before-suffix', 'encoded-nul'])
+    @pytest.mark.parametrize('path', ['/\x00', '/hello.txt\x00.png'],
+                             ids=['nul', 'nul-before-suffix'])
     async def test_a_nul_in_the_path_is_a_bad_request(self, static_dir, path):
         from blackbull.middleware.static import StaticFiles
         app = StaticFiles(directory=str(static_dir))
@@ -200,6 +200,23 @@ class TestStaticFilesPathSecurity:
             w = await s.wire()
             await w.send(b'GET /static/%00 HTTP/1.1\r\nHost: x\r\n\r\n')
             assert (await w.response()).status == 400
+
+    @pytest.mark.parametrize('target, body', [
+        (b'/static/%2541.txt', b'LITERAL'),   # names the file called %41.txt
+        (b'/static/%41.txt', b'AAA'),         # names A.txt
+    ])
+    async def test_the_request_path_is_decoded_once(self, tmp_path, target, body):
+        from blackbull import BlackBull
+        from tests.harness import served
+        (tmp_path / 'A.txt').write_bytes(b'AAA')
+        (tmp_path / '%41.txt').write_bytes(b'LITERAL')
+        app = BlackBull()
+        app.static('/static', str(tmp_path))
+        async with served(app) as s:
+            w = await s.wire()
+            await w.send(b'GET ' + target + b' HTTP/1.1\r\nHost: x\r\n\r\n')
+            reply = await w.response()
+        assert (reply.status, reply.body) == (200, body)
 
     async def test_directory_listing_not_served(self, static_dir):
         """Requesting a bare directory path must return 404 (no directory listing)."""

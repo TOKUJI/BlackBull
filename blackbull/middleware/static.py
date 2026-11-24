@@ -11,7 +11,6 @@ from collections import OrderedDict
 from stat import S_ISLNK, S_ISREG
 from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import unquote
 from http import HTTPStatus
 
 from blackbull.connection import Connection
@@ -247,10 +246,10 @@ class StaticFiles:
                 return
             raw_path = raw_path[len(self._url_prefix):]
 
-        decoded = unquote(raw_path)
+        # conn.path is already percent-decoded once, at the request boundary.
         # Resolve symlinks before checking the root boundary.
         try:
-            target = os.path.realpath(os.path.join(self._root_str, decoded.lstrip('/')))
+            target = os.path.realpath(os.path.join(self._root_str, raw_path.lstrip('/')))
         except ValueError:  # an embedded NUL names no file
             target = ''
         if not self._inside_root(target):

@@ -43,6 +43,8 @@ metadata; reinstall an editable checkout after changing that version.
   while the validator still matches the file (strong ETag or a date not older
   than `Last-Modified`); otherwise the whole file is sent with 200, instead of
   a slice of the changed file (BLA-671).
+- `StaticFiles` no longer percent-decodes the request path a second time:
+  `/static/%2541.txt` serves the file named `%41.txt`, not `A.txt` (BLA-662).
 
 ### Docs
 
