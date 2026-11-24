@@ -26,6 +26,12 @@ FIELD_VALUE_ALLOWED_OCTETS = bytes(
 #: The same, for per-octet membership.
 FIELD_VALUE_ALLOWED_SET: frozenset[int] = frozenset(FIELD_VALUE_ALLOWED_OCTETS)
 
+#: RFC 6265 §4.1.1 cookie-octet: VCHAR except DQUOTE, ',', ';' and '\\'.
+COOKIE_OCTETS = bytes(c for c in range(0x21, 0x7F) if c not in b'",;\\')
+
+#: RFC 6265 §4.1.1 path-value: any CHAR except CTLs and ';'.
+COOKIE_PATH_OCTETS = bytes(c for c in range(0x20, 0x7F) if c != 0x3B)
+
 #: RFC 3986 §3.1 — URI scheme, also used in HTTP absolute-form targets.
 URI_SCHEME_RE = re.compile(rb'[A-Za-z][A-Za-z0-9+.-]*')
 

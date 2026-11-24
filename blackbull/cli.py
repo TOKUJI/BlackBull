@@ -87,6 +87,17 @@ def _load_config(path: str) -> dict[str, str]:
 _DEFAULT_BIND = '127.0.0.1:8000'
 
 
+_WILDCARD_HOSTS = ('', '0.0.0.0', '::')
+
+
+def _tcp_listeners(host: str, port: int):
+    """The listeners that bind only *host*, or None for every interface."""
+    if host in _WILDCARD_HOSTS:
+        return None
+    from .server.listener import Listener, Tcp  # noqa: PLC0415
+    return [Listener(Tcp(port, host=host))]
+
+
 def _split_bind(spec: str):
     """Parse a ``--bind`` value into a tagged address tuple.
 
@@ -201,8 +212,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         '--bind', default=_DEFAULT_BIND, metavar='SPEC',
-        help='Address to bind.  Either host:port (TCP — host is advisory '
-             'in v1, BlackBull binds dual-stack) or unix:/abs/path (AF_UNIX). '
+        help='Address to bind.  Either host:port (TCP; an empty, 0.0.0.0 or '
+             ':: host binds every interface) or unix:/abs/path (AF_UNIX). '
              'fd://N adopts an already-bound fd (systemd socket activation).',
     )
     p.add_argument(
@@ -336,15 +347,10 @@ def _serve_static(argv: list[str]) -> int:
         return 1
 
     port = 0
+    host = ''
     unix_path: str | None = None
     if addr[0] == 'tcp':
         _, host, port = addr
-        if host not in ('', '0.0.0.0', '::', '127.0.0.1', 'localhost'):
-            print(
-                f'blackbull: --bind host {host!r} is advisory in v1; '
-                f'binding dual-stack on port {port} for now.',
-                file=sys.stderr,
-            )
     elif addr[0] == 'unix':
         _, unix_path = addr
     else:  # fd:// makes no sense for the zero-code static server
@@ -363,17 +369,21 @@ def _serve_static(argv: list[str]) -> int:
         return 1
 
     scheme = 'https' if args.certfile else 'http'
-    where = unix_path if unix_path else f'{scheme}://127.0.0.1:{port}'
+    shown = host if host not in _WILDCARD_HOSTS else '0.0.0.0'
+    shown = f'[{shown}]' if ':' in shown else shown
+    where = unix_path if unix_path else f'{scheme}://{shown}:{port}'
     print(f'blackbull: serving {os.path.abspath(args.directory)} on {where}',
           file=sys.stderr)
 
+    listeners = _tcp_listeners(host, port) if addr[0] == 'tcp' else None
     try:
         _serve(
             app,
             certfile=args.certfile,
             keyfile=args.keyfile,
-            port=port,
+            port=0 if listeners else port,
             unix_path=unix_path,
+            listeners=listeners,
             workers=args.workers,
         )
     except RuntimeError as exc:
@@ -427,17 +437,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     port = 0
+    listeners = None
     unix_path: str | None = None
     inherited_fd: int | None = None
     if addr[0] == 'tcp':
         _, host, port = addr
-        if host not in ('', '0.0.0.0', '::', '127.0.0.1', 'localhost'):
-            # Warn when a bind host cannot restrict the dual-stack listener.
-            print(
-                f'blackbull: --bind host {host!r} is advisory in v1; '
-                f'binding dual-stack on port {port} for now.',
-                file=sys.stderr,
-            )
+        listeners = _tcp_listeners(host, port)
     elif addr[0] == 'unix':
         _, unix_path = addr
     elif addr[0] == 'fd':
@@ -457,9 +462,10 @@ def main(argv: list[str] | None = None) -> int:
             app,
             certfile=args.certfile,
             keyfile=args.keyfile,
-            port=port,
+            port=0 if listeners else port,
             unix_path=unix_path,
             inherited_fd=inherited_fd,
+            listeners=listeners,
             workers=args.workers,
             max_connections=args.max_connections,
             stream_queue_depth=args.stream_queue_depth,
