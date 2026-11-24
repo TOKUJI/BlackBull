@@ -57,6 +57,10 @@ blackbull myapp:app \
 blackbull myapp:app --bind 127.0.0.1:8000 --reload
 ```
 
+`--bind` with a named host (`127.0.0.1`, `localhost`, `[::1]`, an address)
+listens on that interface only; an empty host, `0.0.0.0` or `[::]` listens on
+every interface, IPv4 and IPv6.
+
 The CLI accepts any `module:attribute` import path; the
 attribute may be a `BlackBull` instance *or* a plain ASGI
 callable.  See `blackbull --help` for the full flag list and

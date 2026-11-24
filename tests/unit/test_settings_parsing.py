@@ -12,9 +12,9 @@ DEFAULTS = Settings()
 
 
 @pytest.mark.parametrize('env,raw,field,expected', [
-    # int with minimum 1
+    # worker count: 0 is os.cpu_count(), below 0 is invalid
     ('BB_WORKERS', '4', 'workers', 4),
-    ('BB_WORKERS', '0', 'workers', DEFAULTS.workers),
+    ('BB_WORKERS', '-1', 'workers', DEFAULTS.workers),
     ('BB_WORKERS', 'many', 'workers', DEFAULTS.workers),
     # int with minimum 0
     ('BB_SOCKET_SNDBUF', '0', 'socket_sndbuf', 0),
@@ -51,6 +51,15 @@ def test_a_setting_is_its_value_or_its_default(monkeypatch, env, raw, field, exp
     value = getattr(get_settings(), field)
     assert (value, type(value)) == (expected, type(expected))
     assert read_setting(field) == expected
+
+
+@pytest.mark.parametrize('cpus,expected', [(6, 6), (None, 1)])
+def test_zero_workers_is_the_cpu_count(monkeypatch, cpus, expected):
+    monkeypatch.setattr('os.cpu_count', lambda: cpus)
+    monkeypatch.setenv('BB_WORKERS', '0')
+    reset_settings_cache()
+    assert get_settings().workers == read_setting('workers') == expected
+    reset_settings_cache()
 
 
 def test_an_unset_environment_is_production(monkeypatch):
