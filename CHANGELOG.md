@@ -39,6 +39,10 @@ metadata; reinstall an editable checkout after changing that version.
   query param missing, a value that will not coerce) is refused with HTTP
   `400 Bad Request` naming the parameter, as on the HTTP path, instead of a
   close code 1008 sent before the handshake completed (BLA-604).
+- HTTP/2: a request that ends short of its declared `content-length` on its
+  head or on a trailer section is reset with `PROTOCOL_ERROR`, as a short DATA
+  body already was, instead of reaching the handler as an empty or short body
+  (RFC 9113 §8.1.1, BLA-669).
 - `StaticFiles` honours `If-Range` (RFC 9110 §13.1.5): a `Range` applies only
   while the validator still matches the file (strong ETag or a date not older
   than `Last-Modified`); otherwise the whole file is sent with 200, instead of
@@ -50,6 +54,10 @@ metadata; reinstall an editable checkout after changing that version.
   `RST_STREAM(INTERNAL_ERROR)` (RFC 9113 §8.1), as HTTP/1.1 already drops the
   second response. A stream that stalled on flow control still ends with
   `CANCEL` (BLA-591).
+- A gRPC server-streaming handler ends when its client drops the connection:
+  the failed send closes its generator (its `finally` runs) instead of
+  leaving the handler and two tasks running for the life of the process
+  (BLA-681).
 
 ### Docs
 
