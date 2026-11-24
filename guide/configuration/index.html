@@ -6319,10 +6319,11 @@ settings you change per environment); server-tuning knobs
 provenance of each non-default deploy setting is logged once at
 startup on the <code>blackbull.config</code> logger, e.g.
 <code>config: port=9000 (from $BLACKBULL_PORT)</code>.</p>
-<p>There is no <code>host</code> field / <code>BLACKBULL_HOST</code>: BlackBull's socket
-layer binds dual-stack on all interfaces, so a per-interface <code>host</code>
-would silently do nothing.  Use <code>unix_path</code> or <code>inherited_fd</code> for
-non-TCP binds.</p>
+<p>There is no <code>host</code> field / <code>BLACKBULL_HOST</code>: <code>port</code> binds every
+interface.  To listen on one interface, pass
+<code>listeners=[Listener(Tcp(port, host=...))]</code> (see
+<a href="../listeners/">Listeners</a>) or <code>blackbull --bind host:port</code>.  Use
+<code>unix_path</code> or <code>inherited_fd</code> for non-TCP binds.</p>
 <h4 id="env-files"><code>.env</code> files<a class="headerlink" href="#env-files" title="Permanent link">&para;</a></h4>
 <p>Install the optional extra to let <code>app.run()</code> (and the <code>blackbull</code>
 CLI) read <code>BLACKBULL_*</code> values from a <code>.env</code> file in the working
