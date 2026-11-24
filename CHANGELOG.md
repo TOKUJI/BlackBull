@@ -49,6 +49,11 @@ metadata; reinstall an editable checkout after changing that version.
   a slice of the changed file (BLA-671).
 - `StaticFiles` no longer percent-decodes the request path a second time:
   `/static/%2541.txt` serves the file named `%41.txt`, not `A.txt` (BLA-662).
+- HTTP/2: a handler that fails after its response head left no longer gets
+  a second `500` head on the same stream; the stream ends with
+  `RST_STREAM(INTERNAL_ERROR)` (RFC 9113 §8.1), as HTTP/1.1 already drops the
+  second response. A stream that stalled on flow control still ends with
+  `CANCEL` (BLA-591).
 - A gRPC server-streaming handler ends when its client drops the connection:
   the failed send closes its generator (its `finally` runs) instead of
   leaving the handler and two tasks running for the life of the process

@@ -1047,7 +1047,7 @@ class HTTP2Sender(BaseSender):
         '_buffered_status', '_buffered_headers', '_expect_trailers',
         '_buffered_body', '_buffered_trailers', '_auto_flush_task',
         '_head_mode', '_suppress_body', '_remaining', '_poisoned',
-        '_log_record', '_stalled',
+        '_log_record', '_final_head',
     )
 
     @property
@@ -1069,8 +1069,9 @@ class HTTP2Sender(BaseSender):
         # Set once content broke its length after HEADERS left and the
         # stream was reset for it.
         self._poisoned = False
-        # The FlowControlStalled this stream raised; a later final head re-raises it.
-        self._stalled: FlowControlStalled | None = None
+        # None until a final head leaves, then True; the FlowControlStalled
+        # once the stream stalled.  RFC 9113 §8.1 allows no second final head.
+        self._final_head: FlowControlStalled | bool | None = None
         self._factory = factory
         self._stream_id = stream_id
         self._push_callback = push_callback
@@ -1137,7 +1138,7 @@ class HTTP2Sender(BaseSender):
         self._poisoned = False
         self._log_record = None
         self._auto_flush_task = None
-        self._stalled = None
+        self._final_head = None
 
     def _stated_fields(self, status: HTTPStatus,
                        head: _MinimalResponseHeaders) -> _MinimalResponseHeaders:
@@ -1212,6 +1213,22 @@ class HTTP2Sender(BaseSender):
         self._buffered_trailers = None
         self.wake_window()
 
+    async def _refuse_second_head(self) -> bool:
+        """End a stream whose final head already left (RFC 9113 §8.1).
+
+        A stream that stalled on flow control re-raises its stall, which the
+        stream actor answers with CANCEL; otherwise the stream is reset with
+        INTERNAL_ERROR and the second head is dropped, as HTTP/1.1 drops it.
+        """
+        final_head = self._final_head
+        if final_head is not True:
+            raise final_head
+        self._poisoned = True
+        await self._write(self._factory.rst_stream(
+            self._stream_id, ErrorCodes.INTERNAL_ERROR).save())
+        self.retire_stream()
+        return True
+
     async def _write_response_start_and_body(
         self, body: bytes, end_stream: bool,
         status: HTTPStatus, headers: list[tuple[bytes, bytes]] | None,
@@ -1221,14 +1238,13 @@ class HTTP2Sender(BaseSender):
         """
         if self._closed:
             return
-        if self._stalled is not None:
-            # One final head per stream (RFC 9113 §8.1): the stream actor
-            # resets a stalled stream instead.
-            raise self._stalled
+        informational = is_informational(status)
+        if (self._final_head is not None and not informational
+                and await self._refuse_second_head()):
+            return
         headers = headers or []
         # END_STREAM rides the DATA frame below, never HEADERS — unless the
         # head was promised no content, when there is no DATA to ride on.
-        informational = is_informational(status)
         forbidden = self._head_mode or int(status) in NO_CONTENT_GENERATED_STATUSES
         self._suppress_body = forbidden
         h_bytes = build_response_headers(
@@ -1236,10 +1252,14 @@ class HTTP2Sender(BaseSender):
             end_stream=forbidden and not informational,
             max_frame_size=self.max_frame_size)
         if forbidden:
+            if not informational:
+                self._final_head = True
             await self._write(h_bytes)
             if not informational:
                 self._end_stream_sent = True
             return
+        # A 1xx is bodyless, so only a final head gets here.
+        self._final_head = True
 
         total = len(body)
         sid_bytes = self._stream_id.to_bytes(4, 'big')
@@ -1328,6 +1348,8 @@ class HTTP2Sender(BaseSender):
         await self._write(build_response_headers(
             self._factory.encoder, self._stream_id, status, headers,
             end_stream=False, max_frame_size=self.max_frame_size))
+        if self._final_head is None and not is_informational(status):
+            self._final_head = True
 
     async def _write(self, data: bytes):
         """Write a frame to the transport.
@@ -1398,10 +1420,10 @@ class HTTP2Sender(BaseSender):
                                 limit=self._flow_control_timeout,
                                 protocol='http2')
                     cap_env = f'BB_{self._flow_control_cap.upper()}'
-                    self._stalled = FlowControlStalled(
+                    self._final_head = FlowControlStalled(
                         f'stream {self._stream_id}: peer sent no WINDOW_UPDATE '
                         f'within {cap_env}={self._flow_control_timeout}s')
-                    raise self._stalled from exc
+                    raise self._final_head from exc
 
             chunk_size = min(
                 self._conn_window.size,
@@ -1556,26 +1578,29 @@ class HTTP2Sender(BaseSender):
         if self._remaining:
             await self._refuse_length('is shorter than')
 
-        if self._suppress_body and self._buffered_status is None:
+        status = self._buffered_status
+        if self._suppress_body and status is None:
             # RFC 9112 §6.3 rule 1: no trailer section either. The head
             # already carried END_STREAM, so there is nothing left to say.
             self._expect_trailers = False
             return
 
-        if self._buffered_status is not None:
+        if status is not None:
+            # This path ends or stalls the stream, so it records no final head.
+            if (self._final_head is not None and not is_informational(status)
+                    and await self._refuse_second_head()):
+                return
             self._suppress_body = (
-                self._head_mode
-                or self._buffered_status in NO_CONTENT_GENERATED_STATUSES)
+                self._head_mode or status in NO_CONTENT_GENERATED_STATUSES)
             buffered_body = self._buffered_body
             self._buffered_body = None
             if self._suppress_body:
                 # RFC 9112 §6.3 rule 1: such a response "cannot contain a
                 # message body or trailer section". The head terminates it.
-                head_status = self._buffered_status
-                informational = is_informational(head_status)
+                informational = is_informational(status)
                 await self._write(build_response_headers(
                     self._factory.encoder, self._stream_id,
-                    head_status, self._buffered_headers or [],
+                    status, self._buffered_headers or [],
                     end_stream=not informational, max_frame_size=self.max_frame_size))
                 self._buffered_status = None
                 self._buffered_headers = None
@@ -1584,7 +1609,7 @@ class HTTP2Sender(BaseSender):
                 return
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id,
-                self._buffered_status, self._buffered_headers or [],
+                status, self._buffered_headers or [],
                 end_stream=False, max_frame_size=self.max_frame_size)
             if buffered_body is not None:
                 # Buffering reserves no credit: another stream can spend it
