@@ -1251,13 +1251,15 @@ class HTTP2Sender(BaseSender):
             self._factory.encoder, self._stream_id, status, headers,
             end_stream=forbidden and not informational,
             max_frame_size=self.max_frame_size)
-        if not informational:
-            self._final_head = True
         if forbidden:
+            if not informational:
+                self._final_head = True
             await self._write(h_bytes)
             if not informational:
                 self._end_stream_sent = True
             return
+        # A 1xx is bodyless, so only a final head gets here.
+        self._final_head = True
 
         total = len(body)
         sid_bytes = self._stream_id.to_bytes(4, 'big')
