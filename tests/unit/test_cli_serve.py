@@ -110,7 +110,8 @@ def test_main_dispatches_serve_to_static(site, monkeypatch, env, status):
         monkeypatch.setenv('BLACKBULL_ENV', env)
     rc = cli.main(['serve', str(site), '--bind', '127.0.0.1:8123'])
     assert rc == 0
-    assert captured['port'] == 8123
+    [listener] = captured['listeners']
+    assert (listener.where.host, listener.where.port) == ('127.0.0.1', 8123)
     # The dispatched app is a BlackBull instance serving the directory.
     from blackbull import BlackBull
     assert isinstance(captured['app'], BlackBull)
