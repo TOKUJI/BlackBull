@@ -488,7 +488,11 @@ hdr = cookie_header('session', token, http_only=True)
 await send(JSONResponse({'ok': True}, headers=[hdr]))
 ```
 
-Signature: `cookie_header(name, value, path='/', http_only=True)`.
+Signature: `cookie_header(name, value, path='/', http_only=True)`.  It raises
+`ValueError` for a name that is not a token, a value outside RFC 6265
+cookie-octets (so no `;`, `,`, `"`, `\\`, whitespace or non-ASCII), or a
+path containing `;` or a control character.  Encode untrusted data, for
+example with `urllib.parse.quote`, before passing it as a value.
 
 
 

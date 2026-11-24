@@ -29,6 +29,10 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Security
 
+- `cookie_header` raises `ValueError` for a name that is not an RFC 9110
+  token, a value outside RFC 6265 cookie-octets, or a path containing `;` or a
+  control character, instead of emitting them: a `;` in the value used to add
+  cookie attributes such as `Domain` (BLA-605).
 - `blackbull --bind 127.0.0.1:PORT`, `localhost:PORT` and any other named
   host, in both the app runner and `blackbull serve`, listen on that interface
   only; they used to listen on every interface without a warning, and
