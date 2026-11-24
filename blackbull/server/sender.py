@@ -1238,13 +1238,13 @@ class HTTP2Sender(BaseSender):
         """
         if self._closed:
             return
-        if (self._final_head is not None and not is_informational(status)
+        informational = is_informational(status)
+        if (self._final_head is not None and not informational
                 and await self._refuse_second_head()):
             return
         headers = headers or []
         # END_STREAM rides the DATA frame below, never HEADERS — unless the
         # head was promised no content, when there is no DATA to ride on.
-        informational = is_informational(status)
         forbidden = self._head_mode or int(status) in NO_CONTENT_GENERATED_STATUSES
         self._suppress_body = forbidden
         h_bytes = build_response_headers(
@@ -1576,32 +1576,29 @@ class HTTP2Sender(BaseSender):
         if self._remaining:
             await self._refuse_length('is shorter than')
 
-        if self._suppress_body and self._buffered_status is None:
+        status = self._buffered_status
+        if self._suppress_body and status is None:
             # RFC 9112 §6.3 rule 1: no trailer section either. The head
             # already carried END_STREAM, so there is nothing left to say.
             self._expect_trailers = False
             return
 
-        if self._buffered_status is not None:
-            if (self._final_head is not None
-                    and not is_informational(self._buffered_status)
+        if status is not None:
+            # This path ends or stalls the stream, so it records no final head.
+            if (self._final_head is not None and not is_informational(status)
                     and await self._refuse_second_head()):
                 return
-            if not is_informational(self._buffered_status):
-                self._final_head = True
             self._suppress_body = (
-                self._head_mode
-                or self._buffered_status in NO_CONTENT_GENERATED_STATUSES)
+                self._head_mode or status in NO_CONTENT_GENERATED_STATUSES)
             buffered_body = self._buffered_body
             self._buffered_body = None
             if self._suppress_body:
                 # RFC 9112 §6.3 rule 1: such a response "cannot contain a
                 # message body or trailer section". The head terminates it.
-                head_status = self._buffered_status
-                informational = is_informational(head_status)
+                informational = is_informational(status)
                 await self._write(build_response_headers(
                     self._factory.encoder, self._stream_id,
-                    head_status, self._buffered_headers or [],
+                    status, self._buffered_headers or [],
                     end_stream=not informational, max_frame_size=self.max_frame_size))
                 self._buffered_status = None
                 self._buffered_headers = None
@@ -1610,7 +1607,7 @@ class HTTP2Sender(BaseSender):
                 return
             h_bytes = build_response_headers(
                 self._factory.encoder, self._stream_id,
-                self._buffered_status, self._buffered_headers or [],
+                status, self._buffered_headers or [],
                 end_stream=False, max_frame_size=self.max_frame_size)
             if buffered_body is not None:
                 # Buffering reserves no credit: another stream can spend it
