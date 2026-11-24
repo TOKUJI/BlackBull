@@ -6488,9 +6488,9 @@ every connection at runtime.</p>
 <p><strong>There is no body parameter.</strong> A WebSocket has no request body, so the HTTP
 <code>body</code> and dataclass-body forms have no WebSocket equivalent.</p>
 <p>When a declared parameter cannot be bound — a required query param missing, a
-value that will not coerce — the handshake is <strong>refused with close code 1008</strong>
-(policy violation) and the handler never runs. The HTTP path answers the same
-failure with <code>400</code>; a WebSocket has no response to put a status on.</p>
+value that will not coerce — the handshake is <strong>refused with <code>400 Bad Request</code></strong>,
+as on the HTTP path, and the handler never runs. The response body names the
+parameter; the client's connect fails with that status.</p>
 <h4 id="dependency-lifetime-read-this-before-injecting-a-database-handle">Dependency lifetime — read this before injecting a database handle<a class="headerlink" href="#dependency-lifetime-read-this-before-injecting-a-database-handle" title="Permanent link">&para;</a></h4>
 <p>A <code>Depends</code> on a WebSocket is resolved <strong>once per connection</strong> and released
 when the handler exits. That is the correct scope for values — an
