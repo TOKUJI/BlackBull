@@ -6165,7 +6165,9 @@ stream the peer reset or that ended, HEADERS is a connection
 refuses uppercase names and leading/trailing field whitespace. Validate
 pseudo-header order and uniqueness, method tokens, URI schemes, target and
 authority before dispatch. Normalize the scheme before host and ws/wss
-decisions; <code>:authority</code> becomes the application's host header.</p>
+decisions; <code>:authority</code> becomes the application's host header. <code>:path</code> is
+origin-form, or <code>*</code> for OPTIONS; absolute-form is HTTP/1.1 only, and HTTP/1.1
+answers any other target 400.</p>
 <p>Malformed trailers are malformed field sections, not successful request
 completion. Content-Length counts payload bytes, excluding padding.
 Response heads and trailers leave the send boundary with lowercase names. A
