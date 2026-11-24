@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Mapping
 from http import HTTPStatus
 
 from .headers import _as_response_fields
+from .protocol.field_grammar import COOKIE_OCTETS, COOKIE_PATH_OCTETS, TCHAR_OCTETS
 from .deprecations import _warn_deprecated
 from .native import NativeResponse, WarnedDict, _native_from_asgi
 
@@ -176,11 +177,26 @@ class RedirectResponse(Response):
 
 def cookie_header(name: str, value: str, path: str = '/',
                   http_only: bool = True) -> tuple[bytes, bytes]:
-    """Build a ``set-cookie`` header tuple for response headers; checked, like
-    any field, when the NativeResponse carrying it is built."""
+    """Build a ``set-cookie`` header tuple for response headers.
+
+    Raises ``ValueError`` for a *name* that is not a token, a *value* outside
+    RFC 6265 cookie-octets (optionally double-quoted), or a *path* with ';' or
+    a control character: each would rewrite or break the cookie.
+    """
+    if not _octets_within(name, TCHAR_OCTETS) or not name:
+        raise ValueError(f'cookie name {name!r} is not an RFC 9110 token')
+    bare = value[1:-1] if len(value) >= 2 and value[0] == value[-1] == '"' else value
+    if not _octets_within(bare, COOKIE_OCTETS):
+        raise ValueError(f'cookie value {value!r} is outside RFC 6265 cookie-octets')
+    if not _octets_within(path, COOKIE_PATH_OCTETS):
+        raise ValueError(f'cookie path {path!r} contains ";" or a control character')
     flags = '; HttpOnly' if http_only else ''
     return (b'set-cookie',
             f'{name}={value}; Path={path}{flags}; SameSite=Lax'.encode())
+
+
+def _octets_within(text: str, allowed: bytes) -> bool:
+    return text.isascii() and not text.encode().translate(None, allowed)
 
 
 async def _abandon(iterator) -> None:

@@ -103,6 +103,17 @@ def _environment(raw: str | None) -> 'Environment':
         return Environment.PRODUCTION
 
 
+def _workers(raw: str | None) -> int:
+    """``0`` is ``os.cpu_count()``; unset, negative or unparsable is 1."""
+    try:
+        value = 1 if raw is None else int(raw)
+    except ValueError:
+        return 1
+    if value < 0:
+        return 1
+    return value or os.cpu_count() or 1
+
+
 def setting(env: str, default: Any, *, section: str, doc: str,
             minimum: int | float | None = None,
             maximum: int | float | None = None,
@@ -137,7 +148,7 @@ class Settings:
         'BLACKBULL_ENV', Environment.PRODUCTION, parse=_environment, section=_section,
         doc='`production` | `development` | `test`; an unrecognised value is `production`, with a warning.  Set `development` for local development.  In `production`, `StaticFiles` declines to serve files (production should sit behind nginx/Caddy for static assets), and the default error handler returns a terse response without exception details; in `development` it shows them to a loopback peer without `Forwarded`/`X-Forwarded-For` only.')
     workers: int = setting(
-        'BB_WORKERS', 1, minimum=1, config=('server', 'workers'), section=_section,
+        'BB_WORKERS', 1, parse=_workers, config=('server', 'workers'), section=_section,
         doc='Pre-fork worker count.  `0` resolves to `os.cpu_count()`.  On Linux each worker gets its own listening socket by default (`BB_SOCKET_REUSEPORT`); a port-bound non-ASGI protocol keeps one listener.  See [Workers](../deployment/workers.md).')
     use_uvloop: bool = setting(
         'BB_UVLOOP', False, section=_section,
