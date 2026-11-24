@@ -323,18 +323,6 @@ serves `grpc.reflection.v1alpha` only — `v1` is a planned fast-follow, and
 grpcurl and most clients fall back to v1alpha automatically. See
 [`docs/guide/grpc.md`](https://github.com/TOKUJI/BlackBull/blob/master/docs/guide/grpc.md).
 
-### CLI `--bind` host is advisory
-
-The `blackbull` console script covers the ASGI-runner shape
-(`blackbull app:app --bind ...`), the zero-code static server
-(`blackbull serve ./dir`), `--version`, `--config`, `--reload`, and
-focused errors on a bad `module:attr`.  The one notable gap: the
-host portion of `--bind host:port` (and the absence of a `host`
-field on `AppConfig`) is advisory — the socket layer binds dual-stack
-on **all** interfaces, so `--bind 127.0.0.1:8000` still listens on
-every interface.  Use a `unix:` bind, `fd://` socket activation, or a
-fronting proxy when interface filtering matters.
-
 ### `NativeTestServer` is HTTP/1.1 and WebSocket, cleartext only
 
 [`blackbull/testing/native.py`](blackbull/testing/native.py)'s Tier 2
