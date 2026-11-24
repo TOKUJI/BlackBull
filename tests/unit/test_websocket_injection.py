@@ -61,7 +61,12 @@ def _kinds(plan) -> tuple[_ParamKind, ...]:
 
 
 def _closes(channel) -> list[dict]:
-    return [e for e in channel.sent if e['type'] == 'websocket.close']
+    return [e for e in channel.sent if isinstance(e, dict) and e['type'] == 'websocket.close']
+
+
+def _refusals(channel) -> list[int]:
+    """Statuses of the HTTP responses that refused the upgrade."""
+    return [e.status for e in channel.sent if not isinstance(e, dict)]
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +222,7 @@ async def test_missing_required_query_param_rejects_the_handshake():
     await adapted(_conn(), channel.receive, channel.send)
 
     assert not called, 'handler must not run when a declared param cannot bind'
-    assert [e['code'] for e in _closes(channel)] == [1008]
+    assert _refusals(channel) == [400] and not _closes(channel)
 
 
 @pytest.mark.asyncio
@@ -233,7 +238,7 @@ async def test_uncoercible_query_param_rejects_the_handshake():
     await adapted(_conn(query=b'since=soon'), channel.receive, channel.send)
 
     assert not called
-    assert [e['code'] for e in _closes(channel)] == [1008]
+    assert _refusals(channel) == [400] and not _closes(channel)
 
 
 @pytest.mark.asyncio
@@ -256,7 +261,7 @@ async def test_rejection_never_resolves_a_dependency():
     await adapted(_conn(), channel.receive, channel.send)
 
     assert log == []
-    assert [e['code'] for e in _closes(channel)] == [1008]
+    assert _refusals(channel) == [400] and not _closes(channel)
 
 
 # ---------------------------------------------------------------------------
