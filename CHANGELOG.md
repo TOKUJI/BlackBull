@@ -27,6 +27,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Fixed
+
+- A response field section holding `content-length` (as passed in
+  `http.response.start` headers) round-trips through `pickle`, which raised
+  `AttributeError`; it is rebuilt with the same fields and framing facts
+  (BLA-646).
 ### Docs
 
 - gRPC server reflection serves both `grpc.reflection.v1` and `v1alpha`
