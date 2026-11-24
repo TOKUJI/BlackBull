@@ -308,6 +308,17 @@ usual proxies).
 If you have a client that genuinely needs to post data alongside the
 handshake, send it as a first message after `accept()` instead.
 
+### CLI `--bind` host is advisory
+
+The `blackbull` console script covers the ASGI-runner shape
+(`blackbull app:app --bind ...`), the zero-code static server
+(`blackbull serve ./dir`), `--version`, `--config`, `--reload`, and
+focused errors on a bad `module:attr`.  The one notable gap: the
+host portion of `--bind host:port` (and the absence of a `host`
+field on `AppConfig`) is advisory — the socket layer binds dual-stack
+on **all** interfaces, so `--bind 127.0.0.1:8000` still listens on
+every interface.  Use a `unix:` bind, `fd://` socket activation, or a
+fronting proxy when interface filtering matters.
 ### gRPC: reflection is v1alpha-only
 
 All four gRPC RPC shapes — unary, server-streaming, client-streaming, and
