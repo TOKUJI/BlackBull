@@ -62,11 +62,6 @@ class _StreamRecipient(Protocol):
     def put_DATAFrame(self, frame) -> bool: pass
 
 
-def _req_headers(conn: Connection) -> Headers:
-    """The one source both header readers share, so they cannot drift apart."""
-    return conn.headers
-
-
 def _signal_recipients(recipients: dict[int, _StreamRecipient]) -> None:
     """Inject http.disconnect into every active stream recipient."""
     for recipient in recipients.values():
@@ -142,16 +137,6 @@ async def _run_when_stream_cap_admits(start_stream, cap):
     """
     async with cap:
         await start_stream()
-
-
-def _resolve_priority(stream: 'Stream', conn: Connection) -> dict[str, int | bool]:
-    if stream.priority_hint is not None:
-        return stream.priority_hint
-    raw = _req_headers(conn).get(b'priority', b'')
-    if raw:
-        from ..protocol.frame_types import parse_priority_field
-        return parse_priority_field(raw.decode('ascii', errors='replace'))
-    return dict(_DEFAULT_PRIORITY)
 
 
 class StreamActor(Actor):
@@ -906,7 +891,14 @@ class HTTP2Actor(Actor, HTTP2Connection):
         Writes to the native [`Connection`][] on every lane; the compat
         lane's scope picks the dict up by reference when it is derived.
         """
-        priority = _resolve_priority(stream, conn)
+        priority = stream.priority_hint
+        if priority is None:
+            raw = conn.headers.get(b'priority', b'')
+            if raw:
+                from ..protocol.frame_types import parse_priority_field
+                priority = parse_priority_field(raw.decode('ascii', errors='replace'))
+            else:
+                priority = dict(_DEFAULT_PRIORITY)
         conn.extensions = _build_h2_extensions(
             stream.stream_id, priority,
             self._peer_initial_window_size, self._conn_window.size,
