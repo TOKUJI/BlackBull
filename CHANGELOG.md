@@ -27,6 +27,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Fixed
+
+- A foreign ASGI app sees `http.response.trailers` in `scope['extensions']`
+  on HTTP/1.1 and HTTP/2, where trailers were already delivered but never
+  advertised; connectrpc refused its gRPC protocol for that (BLA-711).
+
 ## [0.83.1] — 2026-11-25
 
 ### Fixed

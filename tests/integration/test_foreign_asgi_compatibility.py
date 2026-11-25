@@ -6,7 +6,11 @@ import pytest
 from blackbull import ASGIApp, BlackBull
 from blackbull.client import HTTP1Client, HTTP2Client, WebSocketClient
 from blackbull.client.exceptions import HandshakeError
-from tests.harness import served
+from hpack import Decoder, Encoder
+
+from blackbull.protocol.frame_types import FrameTypes
+from tests.conformance.http2._harness import _make_h2_frame, h2_connect, h2_section
+from tests.harness import read_h2_frame, served
 from tests.integration.test_asgi_app import _listen, _misbehaving
 
 
@@ -84,6 +88,7 @@ async def test_scope_streaming_and_lifespan_across_transports(transport):
         extensions = scope['extensions']
         assert ('http.response.pathsend' in extensions) == (not tls and client_type is HTTP1Client)
         assert ('http.response.http2_stream' in extensions) == (client_type is HTTP2Client)
+        assert 'http.response.trailers' in extensions
         assert 'http.response.push' not in extensions  # Client disables push by default.
     assert app.requests[0]['state'] is not app.requests[1]['state']
 
@@ -209,3 +214,49 @@ async def test_class_middleware_keeps_actor_events_on_the_adapter():
             assert (await client.request('GET', '/')).body == b'ok'
     assert len(adapter_events['connection_accepted']) == 1
     assert inner_events['connection_accepted'] == []
+
+
+@pytest.mark.parametrize('tls', [False, True], ids=['h2c', 'h2tls'])
+async def test_full_duplex_stream_over_h2(tls):
+    """Each request chunk is answered before the next is sent, then trailers end the stream."""
+
+    async def bidi(scope, receive, send):
+        assert 'http.response.trailers' in scope['extensions']
+        await send({'type': 'http.response.start', 'status': 200, 'trailers': True,
+                    'headers': [(b'content-type', b'application/connect+proto')]})
+        while True:
+            event = await receive()
+            if event.get('body'):
+                await send({'type': 'http.response.body', 'body': event['body'].upper(),
+                            'more_body': True})
+            if not event.get('more_body', False):
+                break
+        await send({'type': 'http.response.body', 'body': b''})
+        await send({'type': 'http.response.trailers', 'headers': [(b'x-end', b'ok')]})
+
+    async def next_on_stream(wire, wanted):
+        while True:
+            kind, flags, stream, payload = await read_h2_frame(wire.reader)
+            if stream == 1 and kind in wanted:
+                return kind, flags, payload
+
+    app = ForeignApp(bidi)
+    encoder, decoder = Encoder(), Decoder()
+    async with served(ASGIApp(app), tls=tls) as server:
+        wire = await h2_connect(server, alpn=['h2'])
+        await wire.send(h2_section(encoder.encode([
+            (b':method', b'POST'), (b':scheme', b'https' if tls else b'http'),
+            (b':path', b'/svc/Bidi'), (b':authority', b'localhost'), (b'te', b'trailers'),
+        ]), end_stream=False))
+        for i, chunk in enumerate((b'one', b'two', b'three')):
+            await wire.send(_make_h2_frame(FrameTypes.DATA, 0, 1, chunk))
+            if i == 0:  # The head may wait for the first body chunk.
+                kind, _, payload = await next_on_stream(wire, {FrameTypes.HEADERS[0]})
+                assert (b':status', b'200') in decoder.decode(payload, raw=True)
+            kind, flags, payload = await next_on_stream(wire, {FrameTypes.DATA[0]})
+            assert (payload, flags & 1) == (chunk.upper(), 0)
+        await wire.send(_make_h2_frame(FrameTypes.DATA, 1, 1))
+        kind, flags, payload = await next_on_stream(wire, {FrameTypes.HEADERS[0]})
+        assert flags & 1
+        assert decoder.decode(payload, raw=True) == [(b'x-end', b'ok')]
+    assert app.phases == ['startup', 'shutdown']

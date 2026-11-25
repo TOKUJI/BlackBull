@@ -98,6 +98,7 @@ def _build_h2_extensions(
             'send_window_remaining': peer_initial_window,
             'connection_send_window_remaining': connection_window,
         },
+        'http.response.trailers': {},
     }
     if peer_push_permitted:
         extensions[ASGIEvent.HTTP_RESPONSE_PUSH] = {}
