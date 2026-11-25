@@ -316,6 +316,8 @@ class HTTP1Recipient(BaseRecipient):
     subsequent calls return http.disconnect.
     """
 
+    _head_fallback = True
+
     _reader: AbstractReader  # narrows BaseRecipient._reader from AbstractReader | None
 
     def __init__(self, reader: AbstractReader, conn: Connection,
@@ -656,6 +658,8 @@ class HTTP2Recipient(BaseRecipient):
     frame-count queue bound and credit at enqueue. END_STREAM on HEADERS requires
     mark_end_of_stream_on_headers so the first read delivers an empty final body.
     """
+
+    _head_fallback = True
 
     def __init__(self, frame: FrameBase | None = None,
                  queue_depth: int = _HTTP2_STREAM_QUEUE_DEPTH,

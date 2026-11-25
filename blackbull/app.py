@@ -16,13 +16,14 @@ import logging
 from .event import Event, EventDispatcher, EventHooks
 from .event_aggregator import emit_scope_end, handler_event, request_received_event
 from .utils import Scheme, is_client_error, is_server_error
+from .env import Environment, get_settings
 from .router import Router, RouteInfo, ErrorRouter, MethodNotApplicable, PathNotRegistered, ConfigurationError, HTTPException, has_middleware_param, _AllMethods, _HandledResponseError
 from .request import ClientDisconnected
 from .connection import (Connection, bind_receive_channel, disconnected, refuse_scope,
                          CONNECTION_STASH_KEY)
 from .protocol.field_grammar import FieldError, media_type
 from .native import DictReceive, NativeResponse, NativeSend, ReceiveChannel, asgi_send_boundary
-from .response import wrap_native_send
+from .response import _emit_response, wrap_native_send
 from .asgi import ASGIEvent, ASGISendCallable, _ASGIAppAdapter
 from .config import AppConfig
 from .logger import debug_gate  # noqa: E402
@@ -34,8 +35,7 @@ _DEBUG = debug_gate(logger)
 #: Value-to-member lookups without ``Enum.__call__``'s two Python frames; see
 #: ``_PSEUDO_BY_BYTES`` in ``blackbull/protocol/frame_types.py``.
 _METHOD_BY_VALUE: dict[str, HTTPMethod] = {m.value: m for m in HTTPMethod}
-
-
+_IMPLICIT_HEAD = (HTTPMethod.HEAD,)
 
 #: The events that end a request, and those plus the one that ends any scope.
 _REQUEST_END_EVENTS = frozenset({'request_completed', 'request_disconnected'})
@@ -110,6 +110,10 @@ class _HostBody:
     def peer_gone(self) -> bool:
         # A relayed native channel (BB_FORCE_ASGI_SCOPE) knows more than its dicts say.
         return self._left or getattr(self._receive, 'peer_gone', False) is True
+
+    @property
+    def _head_fallback(self) -> bool:
+        return getattr(self._receive, '_head_fallback', False) is True
 
     async def next_chunk(self) -> bytes | None:
         if self._done:
@@ -194,9 +198,6 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
     dev/prod matrix, and why a 4xx [`HTTPException`][] keeps its detail
     line but not its traceback, are in ``docs/guide/error-handling.md``.
     """
-    # Imported here to avoid a circular import at module load (env -> app).
-    from .env import get_settings, Environment
-
     state = conn.state
     status = state.get('error_status', HTTPStatus.INTERNAL_SERVER_ERROR)
     exc = state.get('error_exception')
@@ -208,7 +209,7 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
 
     headers = []
     if allowed:
-        headers.append((b'allow', ', '.join(m.upper() for m in allowed).encode()))
+        headers.append((b'allow', ', '.join(allowed).upper().encode()))
 
     tb_text = None
     if show_detail:
@@ -231,7 +232,6 @@ async def _default_error_handler(conn, receive, send):  # noqa: ARG001
         headers.append((b'content-type', b'text/plain; charset=utf-8'))
 
     headers.append((b'content-length', str(len(body)).encode()))
-    from .response import _emit_response
     await _emit_response(send, body, status, headers)
 
 
@@ -564,12 +564,16 @@ class BlackBull(EventHooks):
         try:
             function = self._router[(path, method, Scheme.http)]
         except MethodNotApplicable as e:
+            allowed = e.allowed_methods
+            if ('GET' in allowed and 'HEAD' not in allowed
+                    and getattr(conn._receive, '_head_fallback', False) is True):
+                allowed += _IMPLICIT_HEAD
             if _DEBUG:
                 self._logger.debug("%s: path=%r method=%r allowed=%r",
-                             HTTPStatus.METHOD_NOT_ALLOWED.phrase, path, method, e.allowed_methods)
+                             HTTPStatus.METHOD_NOT_ALLOWED.phrase, path, method, allowed)
             conn.state.update({
                 'error_status': HTTPStatus.METHOD_NOT_ALLOWED,
-                'allowed_methods': e.allowed_methods,
+                'allowed_methods': allowed,
             })
             handler = self._error_router[HTTPStatus.METHOD_NOT_ALLOWED]
             if handler is not None:
