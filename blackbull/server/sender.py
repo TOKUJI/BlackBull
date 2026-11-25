@@ -64,6 +64,13 @@ _VECTORED_JOIN_THRESHOLD = 32 * 1024
 
 _STATUS_BY_CODE: dict[int, HTTPStatus] = {s.value: s for s in HTTPStatus}
 
+
+def _unregistered_status(code: int) -> int:
+    """A status IANA has not registered is still sent (RFC 9110 §15)."""
+    if 100 <= code <= 599:
+        return code
+    raise ValueError(f'{code} is not an HTTP status code')
+
 _STATUS_LINES: dict[HTTPStatus, bytes] = {
     s: f'HTTP/1.1 {s} {s.phrase}'.encode() + _CRLF for s in HTTPStatus
 }
@@ -476,7 +483,7 @@ class BaseSender(ABC):
 
     @abstractmethod
     async def __call__(self, body: _SenderBody,
-                       status: HTTPStatus = HTTPStatus.OK,
+                       status: int = HTTPStatus.OK,
                        headers: HeaderList = []): pass
 
     async def _guarded_write(self, write_fn, arg) -> None:
@@ -560,7 +567,7 @@ class HTTP1Sender(BaseSender):
                  supports_interim: bool = True):
         super().__init__(writer)
         self.supports_interim = supports_interim
-        self._buffered_status: HTTPStatus | None = None
+        self._buffered_status: int | None = None
         self._buffered_headers: _MinimalResponseHeaders | None = None
         self._chunked: bool = False
         self._expect_trailers: bool = False
@@ -592,7 +599,7 @@ class HTTP1Sender(BaseSender):
         self._log_record = None
 
     async def __call__(self, body: _SenderBody,
-                       status: HTTPStatus = HTTPStatus.OK,
+                       status: int = HTTPStatus.OK,
                        headers: HeaderList = ()):
         """Dispatch supported native or ASGI response events and bytes.
 
@@ -640,7 +647,7 @@ class HTTP1Sender(BaseSender):
                     self._response_started = True
                     await self._settle_buffered_head()
                     self._buffered_status = (_STATUS_BY_CODE.get(body.status)
-                                             or HTTPStatus(body.status))
+                                             or _unregistered_status(body.status))
                     # Preserve the ASGI start `trailers: True` flag so a
                     # terminal body before the trailers event withholds the
                     # terminal chunk (lossless full-form compat).
@@ -753,7 +760,7 @@ class HTTP1Sender(BaseSender):
         self._head_mode = False
         self._log_record = None
 
-    def _ensure_framing_headers(self, status: HTTPStatus,
+    def _ensure_framing_headers(self, status: int,
                                 head: _MinimalResponseHeaders,
                                 body_len: int, more_body: bool
                                 ) -> tuple[list[tuple[bytes, bytes]], bytes]:
@@ -841,7 +848,7 @@ class HTTP1Sender(BaseSender):
         self._body_bytes = total
 
 
-    async def _flush(self, status: HTTPStatus, head: _MinimalResponseHeaders,
+    async def _flush(self, status: int, head: _MinimalResponseHeaders,
                      body: bytes, more_body: bool = False) -> None:
         fields, framing = self._ensure_framing_headers(
             status, head, len(body), more_body)
@@ -873,7 +880,7 @@ class HTTP1Sender(BaseSender):
         else:
             await self._write(head)
 
-    async def _send_interim(self, status: HTTPStatus,
+    async def _send_interim(self, status: int,
                             headers: HeaderList) -> None:
         """Settle a head that never got content, and leave the response
         open for its final one.  RFC 9110 §15.2 puts an interim response
@@ -897,7 +904,7 @@ class HTTP1Sender(BaseSender):
         # body event cannot end it. The next `start` recomputes this.
         self._suppress_body = True
 
-    def _render_start(self, status: HTTPStatus, headers: HeaderList,
+    def _render_start(self, status: int, headers: HeaderList,
                       framing: bytes = b'', date: bytes | None = None) -> bytes:
         """Build the status line, *headers*, the server's rendered *framing*
         lines and *date* (when given), and the blank line, as one bytes blob.
@@ -1089,7 +1096,7 @@ class HTTP2Sender(BaseSender):
         self._flow_control_timeout: float = flow_control_timeout
         self._flow_control_cap = flow_control_cap
         self._end_stream_sent: bool = False
-        self._buffered_status: HTTPStatus | None = None
+        self._buffered_status: int | None = None
         self._buffered_headers: list[tuple[bytes, bytes]] | None = None
         self._expect_trailers: bool = False
         # Holds the first single-frame body chunk when trailers are expected,
@@ -1140,7 +1147,7 @@ class HTTP2Sender(BaseSender):
         self._auto_flush_task = None
         self._final_head = None
 
-    def _stated_fields(self, status: HTTPStatus,
+    def _stated_fields(self, status: int,
                        head: _MinimalResponseHeaders) -> _MinimalResponseHeaders:
         """*head* with its length stated once, canonically, or not at all.
 
@@ -1231,7 +1238,7 @@ class HTTP2Sender(BaseSender):
 
     async def _write_response_start_and_body(
         self, body: bytes, end_stream: bool,
-        status: HTTPStatus, headers: list[tuple[bytes, bytes]] | None,
+        status: int, headers: list[tuple[bytes, bytes]] | None,
         expect_trailers: bool,
     ) -> None:
         """Write response headers and the first body chunk together.
@@ -1308,7 +1315,7 @@ class HTTP2Sender(BaseSender):
                 self._stream_id, exc, exc_info=exc)
 
     async def _do_auto_flush(
-        self, body: bytes | None, status: HTTPStatus | None,
+        self, body: bytes | None, status: int | None,
         headers: list[tuple[bytes, bytes]] | None, expect: bool,
     ) -> None:
         """Flush only if the snapshotted chunk is still pending.
@@ -1323,7 +1330,7 @@ class HTTP2Sender(BaseSender):
         self._buffered_headers = None
         await self._write_response_start_and_body(body, False, status, headers, expect)
 
-    async def _send_interim(self, status: HTTPStatus,
+    async def _send_interim(self, status: int,
                             headers: list[tuple[bytes, bytes]],
                             ) -> None:
         """Write an interim head now and leave the stream open for its final
@@ -1338,7 +1345,7 @@ class HTTP2Sender(BaseSender):
         self._suppress_body = True
 
     async def send_response_headers(
-        self, status: HTTPStatus, headers: list[tuple[bytes, bytes]],
+        self, status: int, headers: list[tuple[bytes, bytes]],
     ) -> None:
         """Send a complete field section immediately, leaving the stream open."""
         # Encoding mutates the connection-wide HPACK table.  A retired stream
@@ -1652,7 +1659,7 @@ class HTTP2Sender(BaseSender):
         self._end_stream_sent = True
 
     async def __call__(self, body: _SenderBody | FrameBase,
-                       status: HTTPStatus = HTTPStatus.OK,
+                       status: int = HTTPStatus.OK,
                        headers: HeaderList = []):
         if self._closed:
             if self._writer.peer_gone and self._raise_when_gone:
@@ -1707,7 +1714,8 @@ class HTTP2Sender(BaseSender):
                     logger.warning('push sent but no push handler registered')
                 return
             if body._header is not None:
-                status = HTTPStatus(body.status)
+                status = (_STATUS_BY_CODE.get(body.status)
+                          or _unregistered_status(body.status))
                 head = body._header
                 lengths = head.content_length
                 if not lengths:
@@ -1802,7 +1810,7 @@ class WebSocketSender(BaseSender):
                                        opcode=WSOpcode.CLOSE))
 
     async def __call__(self, body: _WSSenderEvent | NativeWSMessage,
-                       _status: HTTPStatus | None = None,
+                       _status: int | None = None,
                        _headers: HeaderList = []):
         if isinstance(body, dict):
             event_type = body.get('type', '')
