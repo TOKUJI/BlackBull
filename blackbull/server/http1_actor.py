@@ -49,9 +49,11 @@ _HTTPS_PORT = 443
 
 _MAX_KEEPALIVE_DRAIN = 64 * 1024
 
-# TLS connections do NOT advertise pathsend: ``loop.sendfile`` raises
+# Trailers are always deliverable (the sender switches to chunked).  TLS
+# connections do NOT advertise pathsend: ``loop.sendfile`` raises
 # NotImplementedError on SSL transports (the kernel can't see the plaintext).
-_H1_PATHSEND_EXTENSIONS = {'http.response.pathsend': {}}
+_H1_TLS_EXTENSIONS = {'http.response.trailers': {}}
+_H1_EXTENSIONS = {'http.response.pathsend': {}, **_H1_TLS_EXTENSIONS}
 
 from ..protocol.field_grammar import (
     METHOD_TEXT, URI_SCHEME_RE, VERSION_TEXT, FieldError, host_field_value,
@@ -569,7 +571,7 @@ class HTTP1Actor(Actor):
             headers=headers,
             client=None,
             server=None,
-            extensions=_H1_PATHSEND_EXTENSIONS if not self._ssl else {},
+            extensions=_H1_EXTENSIONS if not self._ssl else _H1_TLS_EXTENSIONS,
         )
 
         if asterisk_form:

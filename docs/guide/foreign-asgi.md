@@ -69,7 +69,7 @@ deploying it.
 | Capability | HTTP/1.1 | HTTP/1.1 + TLS | HTTP/2 prior knowledge | HTTP/2 + TLS/ALPN |
 |---|---|---|---|---|
 | HTTP requests and streamed responses | Yes | Yes | Yes | Yes |
-| Response trailers (`trailers=True`) | Chunked | Chunked | HEADERS | HEADERS |
+| Response trailers (`trailers=True`), `http.response.trailers` advertised | Chunked | Chunked | HEADERS | HEADERS |
 | `http.response.pathsend` advertised | Yes | No | No | No |
 | `http.response.push` advertised | No | No | Only if peer permits | Only if peer permits |
 | WebSockets and `websocket.http.response` | Yes | Yes | With Extended CONNECT enabled | With Extended CONNECT enabled |
