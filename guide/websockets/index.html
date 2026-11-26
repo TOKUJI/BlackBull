@@ -6704,10 +6704,12 @@ Browsers that negotiate HTTP/2 via ALPN normally still use
 HTTP/1.1 for WebSocket, so most apps do not need to enable
 RFC 8441.</p>
 <h2 id="subprotocol-negotiation">Subprotocol negotiation<a class="headerlink" href="#subprotocol-negotiation" title="Permanent link">&para;</a></h2>
+<p><code>ws.subprotocols</code> contains the client's offers from all
+<code>Sec-WebSocket-Protocol</code> field lines, in order.</p>
 <p>Register the protocols the server supports before starting:</p>
 <div class="highlight"><pre><span></span><code><span class="n">app</span><span class="o">.</span><span class="n">available_ws_protocols</span> <span class="o">=</span> <span class="p">[</span><span class="s1">'chat'</span><span class="p">,</span> <span class="s1">'superchat'</span><span class="p">]</span>
 </code></pre></div>
-<p>BlackBull picks the first protocol from the client's
+<p>On HTTP/1.1, BlackBull picks the first protocol from the client's
 <code>Sec-WebSocket-Protocol</code> offer that appears in this list and
 returns it in the 101 handshake response.  If there is no match,
 or if the client did not offer any protocol, no
