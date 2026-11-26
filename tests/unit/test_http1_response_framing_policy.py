@@ -3,6 +3,7 @@
 from http import HTTPStatus
 
 import pytest
+from beartype.roar import BeartypeCallHintViolation
 
 from blackbull.native import NativeResponse
 from blackbull.response import Response, StreamingResponse
@@ -390,7 +391,8 @@ async def test_a_code_outside_100_to_599_is_refused_on_both_lanes(lane, status):
 @pytest.mark.parametrize('status', [299.5, '299'])
 @pytest.mark.asyncio
 async def test_a_native_status_that_is_not_an_int_is_refused(status):
-    with pytest.raises(ValueError):
+    # Under --beartype-packages the constructor refuses it first.
+    with pytest.raises((ValueError, BeartypeCallHintViolation)):
         await _send_fixed('native', [], status=status)
 
 
