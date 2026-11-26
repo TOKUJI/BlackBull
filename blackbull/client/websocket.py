@@ -34,8 +34,7 @@ from .http1 import HTTP1RequestSender, HTTP1ResponseHeadReader
 # SHA-1, and base64-encoded to form Sec-WebSocket-Accept.
 _WEBSOCKET_GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 
-# RFC 6455 §4.1 — the only protocol version BlackBull's server accepts.
-_WEBSOCKET_VERSION = b'13'
+_WEBSOCKET_VERSION_HEADER = (b'sec-websocket-version', b'13')
 
 # Length in bytes of the random nonce used for Sec-WebSocket-Key.
 _NONCE_BYTES = 16
@@ -340,7 +339,7 @@ class WebSocketClient(_TransportOwner):
                 (b'upgrade', b'websocket'),
                 (b'connection', b'upgrade'),
                 (b'sec-websocket-key', key),
-                (b'sec-websocket-version', _WEBSOCKET_VERSION),
+                _WEBSOCKET_VERSION_HEADER,
             ])
             offered = list(subprotocols)
             if offered:

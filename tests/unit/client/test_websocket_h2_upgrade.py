@@ -42,7 +42,8 @@ async def test_unoffered_negotiation_resets_stream_and_keeps_connection(fields, 
                     request = Decoder().decode(payload, raw=True)
                     assert (b':method', b'CONNECT') in request
                     assert (b':protocol', b'websocket') in request
-                    assert not any(k.startswith(b'sec-websocket-') for k, _ in request)
+                    assert [(k, v) for k, v in request if not k.startswith(b':')] == [
+                        (b'sec-websocket-version', b'13')]
                     break
             response = _make_h2_frame(FrameTypes.HEADERS, 4, sid,
                 Encoder().encode([(b':status', b'200'), *fields]))
