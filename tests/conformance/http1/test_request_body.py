@@ -172,7 +172,7 @@ async def test_each_keep_alive_request_reads_its_own_framing():
     assert (first.body, second.body, third.body) == (b'first', b'wxyz', b'second!')
 
 
-@pytest.mark.parametrize('unread,reused', [(300, True), (70_000, False)])
+@pytest.mark.parametrize('unread,reused', [(300, True), (270_000, False)])
 async def test_an_unread_body_is_drained_within_a_bound(unread, reused):
     app = BlackBull()
 

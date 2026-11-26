@@ -40,6 +40,10 @@ class BufferReader(AbstractReader):
 
     __slots__ = ('_buf', '_proto', '_release_count', '_waiting', 'read_offer')
 
+    #: The connection is ending with a request body still arriving; the
+    #: HTTP/1.1 actor sets it, and the lingering close reads it.
+    body_unread = False
+
     def __init__(self, buf: ReadBuffer, proto: ConnectionProtocol) -> None:
         self._buf = buf
         self._proto = proto
@@ -478,8 +482,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
 
         Reads and discards up to *max_bytes* for at most *timeout* seconds,
         then closes.  A connection that wrote a response and may still have
-        unread bytes — resident, or nothing arrived and no EOF — lingers
-        once; otherwise its buffer and EOF decide.
+        unread bytes — resident, a request body still arriving, or nothing
+        arrived and no EOF — lingers once; otherwise its buffer and EOF decide.
         The Internals page explains why a rejection has to close this way and
         why both bounds are needed.  nginx calls it ``lingering_close``.
         """
@@ -490,7 +494,8 @@ class ConnectionProtocol(asyncio.BufferedProtocol):
             return
         self._linger_decided = True
         owed = (self._response_written
-                and (self._rb.available or not (self._arrived or self._eof)))
+                and (self._rb.available or not (self._arrived or self._eof)
+                     or self.reader.body_unread))
         if not owed and (self._eof or not self._rb.available):
             self.close()
             return

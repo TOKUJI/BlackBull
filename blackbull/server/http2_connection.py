@@ -63,6 +63,9 @@ class HTTP2Connection:
 
     #: 1 when the peer opens odd streams (the server's view), 0 otherwise.
     _PEER_PARITY = 1
+    #: The stream window we advertise; credit returns only on consumption, so
+    #: the peer never holds more on one stream.
+    _inbound_stream_window = DEFAULT_INITIAL_WINDOW_SIZE
 
     def _init_connection(self, factory, *, field_block_max: int,
                          field_block_cap: str) -> None:
@@ -75,6 +78,8 @@ class HTTP2Connection:
         # §5.1 late frames: stream id -> how it closed.  Bounded; an evicted
         # id stays CLOSED, as ended, through the high-water mark of its parity.
         self._closed_streams: dict[int, int] = {}
+        # DATA received on a stream after we reset it, by retained stream id.
+        self._late_data: dict[int, int] = {}
         self._closed_peer_high_water = 0
         self._closed_local_high_water = 0
         self._last_peer_stream_id = 0
@@ -152,7 +157,9 @@ class HTTP2Connection:
             elif stream_id > self._closed_local_high_water:
                 self._closed_local_high_water = stream_id
         if len(self._closed_streams) > _CLOSED_STREAMS_CAP:
-            del self._closed_streams[next(iter(self._closed_streams))]
+            evicted = next(iter(self._closed_streams))
+            del self._closed_streams[evicted]
+            self._late_data.pop(evicted, None)
 
     def _is_closed_stream(self, stream_id: int) -> tuple[bool, int | None]:
         """Closed membership, and how it closed when retained."""
@@ -345,6 +352,14 @@ class HTTP2Connection:
                 await self._open(frame, None)
             credit = self._flow_length(frame, frame_type)
             if credit:
+                # §6.9: no more than the window the peer held when we reset it.
+                late = self._late_data.get(frame.stream_id, 0) + credit
+                if late > max(self._inbound_stream_window, DEFAULT_INITIAL_WINDOW_SIZE):
+                    await self._connection_error(
+                        ErrorCodes.FLOW_CONTROL_ERROR,
+                        f'{late} bytes of DATA after resetting stream {frame.stream_id}')
+                    return SKIP
+                self._late_data[frame.stream_id] = late
                 await self._return_connection_credit(credit)
             return SKIP
         if frame_type is FrameTypes.HEADERS:
