@@ -13,7 +13,7 @@ from hpack import HPACKError
 
 from ..env import get_settings
 from ..protocol.frame_types import (DEFAULT_INITIAL_WINDOW_SIZE, DEFAULT_MAX_FRAME_SIZE,
-                                    ErrorCodes, FrameFormatError, FrameTypes,
+                                    DataFrameFlags, ErrorCodes, FrameFormatError, FrameTypes,
                                     HeaderFrameFlags, PingFrameFlags, SettingFrameFlags, peer_max_frame_size)
 from ..protocol.stream import Stream, StreamState
 from .cap_log import log_cap_hit
@@ -30,6 +30,11 @@ _ENDED, _RESET_SENT, _RESET_RECEIVED = 0, 1, 2
 
 _MAX_FLOW_WINDOW = 2**31 - 1        # §6.9.1, §6.5.2
 _CLOSED_STREAMS_CAP = 1024
+
+# CVE-2019-9518: empty frames are metered unless they carry the flag that ends
+# their stream or field block; those are bounded by the stream count.
+_EMPTY_FRAME_END_FLAG = {FrameTypes.DATA: int(DataFrameFlags.END_STREAM),
+                         FrameTypes.CONTINUATION: int(HeaderFrameFlags.END_HEADERS)}
 
 # §4.2: oversize is a connection error for these (and anything on stream 0).
 _FRAME_SIZE_CONNECTION_ERROR_TYPES = frozenset({
@@ -196,7 +201,8 @@ class HTTP2Connection:
                 return SKIP
         length = frame.length
         stream_id = frame.stream_id
-        if length == 0 and frame_type in (FrameTypes.CONTINUATION, FrameTypes.DATA):
+        if (length == 0 and frame_type in _EMPTY_FRAME_END_FLAG
+                and not frame.flags & _EMPTY_FRAME_END_FLAG[frame_type]):
             if await self._meter(self._empty_frame_meter, f'empty {frame_type.name}'):
                 return SKIP
         if length > DEFAULT_MAX_FRAME_SIZE:

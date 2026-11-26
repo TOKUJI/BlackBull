@@ -35,7 +35,12 @@ metadata; reinstall an editable checkout after changing that version.
   whose response had already ended (as Go and Connect clients do), was
   disconnected with `GOAWAY(ENHANCE_YOUR_CALM)` once its resets and
   BlackBull's own together passed 20 a second (BLA-715).
-
+- HTTP/2: an empty DATA frame that ends its stream (or an empty CONTINUATION
+  that ends its field block) no longer counts toward the empty-frame flood
+  limit (`BB_FRAME_RATE_LIMIT`). A client that streams its request bodies,
+  as Go and Connect clients do, was disconnected with
+  `GOAWAY(ENHANCE_YOUR_CALM)` past 20 requests a second on one connection
+  (BLA-713).
 - A foreign ASGI app sees `http.response.trailers` in `scope['extensions']`
   on HTTP/1.1 and HTTP/2, where trailers were already delivered but never
   advertised; connectrpc refused its gRPC protocol for that (BLA-711).
