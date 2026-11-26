@@ -6807,7 +6807,7 @@ or drop to <code>INFO</code> to surface the rate-limit summary records.</p>
 <tr>
 <td><code>BB_FRAME_RATE_LIMIT</code></td>
 <td><code>20</code></td>
-<td>Control frames per type, per connection, per rolling window. Meters H2 RST_STREAM (inbound and emitted; client-emitted only when answering a server frame), PING, SETTINGS, empty CONTINUATION/DATA that do not end their field block or stream, and WebSocket controls. Excess: H2 GOAWAY(ENHANCE_YOUR_CALM), WS close 1008, and frame_rate cap log. <code>0</code> disables.</td>
+<td>Control frames per type, per connection, per rolling window. Meters H2 RST_STREAM received on an open stream (excess ends the connection only while the peer reset at least half its recent streams) and, separately, emitted ones (client-emitted only when answering a server frame), PING, SETTINGS, empty CONTINUATION/DATA that do not end their field block or stream, and WebSocket controls. Excess: H2 GOAWAY(ENHANCE_YOUR_CALM), WS close 1008, and frame_rate cap log. <code>0</code> disables.</td>
 </tr>
 <tr>
 <td><code>BB_FRAME_RATE_WINDOW</code></td>
