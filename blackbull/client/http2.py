@@ -1061,6 +1061,7 @@ class HTTP2Client(HTTP2Connection):
 
     def _open_stream(self, stream_id: int) -> None:
         self.root_stream.add_child(stream_id).state = StreamState.OPEN
+        self._streams_opened += 1
 
     def _release_stream(self, stream_id: int, *, via_rst: bool = False,
                         by_peer: bool = False) -> None:

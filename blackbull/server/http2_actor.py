@@ -498,6 +498,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         # OPEN until the complete block can apply END_STREAM, so a refused
         # request stays distinct from a node a priority hint reserved.
         stream.state = StreamState.OPEN
+        self._streams_opened += 1
         return stream
 
     def _stream_sender(self, stream_id: int):
@@ -1298,6 +1299,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         # transport, including while our write waits for drain.
         push_stream = self.root_stream.add_child(push_stream_id)
         push_stream.state = StreamState.HALF_CLOSED_REMOTE
+        self._streams_opened += 1
         try:
             await self.send_frame(pp)
         except asyncio.CancelledError:
