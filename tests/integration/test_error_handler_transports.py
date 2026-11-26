@@ -112,7 +112,7 @@ async def test_error_handlers_across_transports(monkeypatch, force_asgi, http2, 
                 assert actual['status'] == status
                 assert actual['exception'] == exc
                 if status == 405:
-                    assert 'GET' in actual['allowed']
+                    assert sorted(actual['allowed']) == ['GET', 'HEAD']
                 assert actual['events'] == (['request_received'] if path in ('/missing', '/ok', '/guard')
                                            else ['request_received', 'before_handler', 'after_handler'])
                 recorded = await client.get(url + '/events', params={'target': path})

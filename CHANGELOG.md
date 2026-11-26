@@ -29,6 +29,12 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- HTTP/2: an empty DATA frame that ends its stream (or an empty CONTINUATION
+  that ends its field block) no longer counts toward the empty-frame flood
+  limit (`BB_FRAME_RATE_LIMIT`). A client that streams its request bodies,
+  as Go and Connect clients do, was disconnected with
+  `GOAWAY(ENHANCE_YOUR_CALM)` past 20 requests a second on one connection
+  (BLA-713).
 - A response status that is a valid code but not in `http.HTTPStatus` (such
   as 499, which the Connect protocol uses for `canceled`, or 599) is sent, on
   HTTP/1.1 with an empty reason phrase, instead of dropping the HTTP/1.1

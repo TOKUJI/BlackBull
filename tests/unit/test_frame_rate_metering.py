@@ -24,7 +24,7 @@ from tests.harness import fed
 from hpack import Encoder
 
 from blackbull.protocol.frame_types import (
-    ErrorCodes, FrameTypes, HeaderFrameFlags, PingFrameFlags,
+    DataFrameFlags, ErrorCodes, FrameTypes, HeaderFrameFlags, PingFrameFlags,
 )
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.recipient import (WebSocketRecipient)
@@ -146,6 +146,22 @@ class TestEmptyFrameFlood:
         frames += [_frame(FrameTypes.DATA, 0, 1, b'')] * (_LIMIT + 3)
         _, sent = await _drive(frames)
         assert ErrorCodes.ENHANCE_YOUR_CALM in _goaway_codes(sent)
+
+    async def test_zero_length_continuation_frames_are_counted(self):
+        frames = [_settings(), _headers(1, end_headers=False)]
+        frames += [_frame(FrameTypes.CONTINUATION, 0, 1, b'')] * (_LIMIT + 3)
+        _, sent = await _drive(frames)
+        assert ErrorCodes.ENHANCE_YOUR_CALM in _goaway_codes(sent)
+
+    async def test_an_empty_data_frame_that_ends_its_stream_is_not_counted(self):
+        """A streamed request body ends with an empty END_STREAM DATA frame
+        (Go net/http2 and Connect clients do), so each request carries one;
+        the stream count, not this meter, bounds them."""
+        frames = [_settings()]
+        for sid in range(1, 2 * (_LIMIT + 3), 2):
+            frames += [_headers(sid), _frame(FrameTypes.DATA, DataFrameFlags.END_STREAM, sid)]
+        _, sent = await _drive(frames)
+        assert ErrorCodes.ENHANCE_YOUR_CALM not in _goaway_codes(sent)
 
     async def test_a_frame_carrying_bytes_is_not_counted_as_empty(self):
         """The meter is for frames that cost work while paying nothing."""
