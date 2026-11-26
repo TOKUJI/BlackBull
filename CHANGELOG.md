@@ -42,6 +42,11 @@ metadata; reinstall an editable checkout after changing that version.
   as Go and Connect clients do, was disconnected with
   `GOAWAY(ENHANCE_YOUR_CALM)` past 20 requests a second on one connection
   (BLA-713).
+- A response status that is a valid code but not in `http.HTTPStatus` (such
+  as 499, which the Connect protocol uses for `canceled`, or 599) is sent, on
+  HTTP/1.1 with an empty reason phrase, instead of dropping the HTTP/1.1
+  connection or resetting the HTTP/2 stream. Codes outside 100–599 are still
+  refused (BLA-712).
 - A foreign ASGI app sees `http.response.trailers` in `scope['extensions']`
   on HTTP/1.1 and HTTP/2, where trailers were already delivered but never
   advertised; connectrpc refused its gRPC protocol for that (BLA-711).

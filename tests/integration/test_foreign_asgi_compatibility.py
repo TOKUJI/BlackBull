@@ -260,3 +260,19 @@ async def test_full_duplex_stream_over_h2(tls):
         assert flags & 1
         assert decoder.decode(payload, raw=True) == [(b'x-end', b'ok')]
     assert app.phases == ['startup', 'shutdown']
+
+
+@pytest.mark.parametrize('status', [499, 599])
+async def test_unregistered_status_is_sent(transport, status):
+    """RFC 9110 §15: any three-digit code is sent; Connect maps canceled to 499."""
+    client_type, tls, context = transport
+
+    async def response(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': status,
+                    'headers': [(b'content-type', b'application/json')]})
+        await send({'type': 'http.response.body', 'body': b'{"code":"canceled"}'})
+
+    async with served(ASGIApp(ForeignApp(response)), tls=tls) as server:
+        async with client_type('127.0.0.1', server.server.port, ssl=context) as client:
+            reply = await client.request('GET', '/')
+            assert (reply.status, reply.body) == (status, b'{"code":"canceled"}')
