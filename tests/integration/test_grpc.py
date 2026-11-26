@@ -391,6 +391,7 @@ class TestRestAndGrpcCoexistence:
             async with HTTP2Client('127.0.0.1', port) as c:
                 # Normal REST GET — works
                 rest = await c.request('GET', '/')
+                disallowed = await c.request('POST', '/')
                 # POST with application/grpc → gRPC path → UNIMPLEMENTED
                 res = await c.request(
                     'POST', '/',
@@ -399,7 +400,10 @@ class TestRestAndGrpcCoexistence:
 
         assert rest.status == 200
         assert rest.body == b'home'
+        assert disallowed.status == 405
+        assert disallowed.headers.get(b'allow') == b'GET, HEAD'
         assert res.status == 200
+        assert b'allow' not in res.headers
         assert _grpc_status(res) == str(int(GrpcStatus.UNIMPLEMENTED))
 
     def test_grpc_disabled_does_not_crash(self):

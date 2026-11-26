@@ -57,6 +57,10 @@ class _Exchange:
         self._body_done = False
         self._settled: asyncio.Event | None = None
 
+    @property
+    def _head_fallback(self) -> bool:
+        return getattr(raw_receive(self._receive), '_head_fallback', False) is True
+
     async def receive(self):
         """After the body, ``http.disconnect`` only once the client is gone or
         the response is complete: HTTP/1.1 answers such a read at once and
