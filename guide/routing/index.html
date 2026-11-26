@@ -6230,7 +6230,8 @@ multiple methods on the same handler:</p>
 <p>On BlackBull's own server, over HTTP/1.1 and HTTP/2 alike, a <code>HEAD</code>
 request is dispatched as <code>GET</code> (handlers see <code>conn.method == 'GET'</code>) and
 its response body is dropped, so a <code>GET</code> route answers <code>HEAD</code> without
-listing it.</p>
+listing it in the route declaration. A 405 response advertises both
+<code>GET</code> and <code>HEAD</code> in <code>Allow</code>.</p>
 <p>Any valid method token is accepted, as a string or an <code>HTTPMethod</code>
 member — extension methods (<code>PROPFIND</code>, vendor tokens) route the same
 way as the standard ones, and appear in the 405 <code>Allow</code> header when
