@@ -30,8 +30,8 @@ metadata; reinstall an editable checkout after changing that version.
 ### Fixed
 
 - HTTP/2: the `RST_STREAM` limit (`BB_FRAME_RATE_LIMIT`) counts only resets
-  received on a stream that is still open, ends the connection only while at
-  least half the streams opened on it were reset, and counts the resets
+  received on a stream that is still open, ends the connection only while the
+  peer reset at least half its recent streams, and counts the resets
   BlackBull emits in a separate budget. A client that cancels streams on
   deadline, or resets ones whose response had already ended (as Go and
   Connect clients do), was disconnected with `GOAWAY(ENHANCE_YOUR_CALM)` once

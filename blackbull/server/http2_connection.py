@@ -88,8 +88,6 @@ class HTTP2Connection:
         cfg = get_settings()
         rate, window = cfg.frame_rate_limit, cfg.frame_rate_window
         self._rst_meter = RateWindow(rate, window)          # CVE-2023-44487
-        self._streams_opened = 0    # by either side; the role increments it
-        self._live_resets = 0
         self._emitted_rst_meter = RateWindow(rate, window)  # resets the peer provokes
         self._ping_meter = RateWindow(rate, window)         # CVE-2019-9512
         self._settings_meter = RateWindow(rate, window)     # CVE-2019-9515
@@ -283,14 +281,19 @@ class HTTP2Connection:
                               additional_credit=self._flow_length(frame, frame_type))
             return SKIP
         # Only a reset that abandons a live stream is metered (one on a closed
-        # stream abandons nothing), and it ends the connection only while at
-        # least half the streams ever opened were reset.
-        if frame_type is FrameTypes.RST_STREAM:
-            self._live_resets += 1
-            if self._rst_meter.hit() and self._live_resets * 2 >= self._streams_opened:
-                await self._over_rate(self._rst_meter, 'RST_STREAM')
-                return SKIP
+        # stream abandons nothing), and it ends the connection only while the
+        # peer reset at least half the streams retained here.
+        if (frame_type is FrameTypes.RST_STREAM and self._rst_meter.hit()
+                and self._mostly_reset_by_peer()):
+            await self._over_rate(self._rst_meter, 'RST_STREAM')
+            return SKIP
         return stream
+
+    def _mostly_reset_by_peer(self) -> bool:
+        closed = self._closed_streams
+        live = sum(s.state is not StreamState.IDLE
+                   for s in self.root_stream.children.values())
+        return list(closed.values()).count(_RESET_RECEIVED) * 2 >= len(closed) + live
 
     async def _check_length(self, frame, frame_type) -> bool:
         """The payload lengths of §4.2, §6.3, §6.5, §6.8 and §6.9."""

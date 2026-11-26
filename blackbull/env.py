@@ -356,7 +356,7 @@ class Settings:
         doc='Advertise ENABLE_CONNECT_PROTOCOL=1 for RFC 8441 WebSocket. Review `BB_MAX_CONNECTIONS` and `BB_H2_WS_MAX_STREAMS_PER_CONNECTION` before exposing this path. A proxy forwarding HTTP/1.1 does not provide Extended CONNECT.')
     frame_rate_limit: int = setting(
         'BB_FRAME_RATE_LIMIT', 20, minimum=0, section=_section,
-        doc='Control frames per type, per connection, per rolling window. Meters H2 RST_STREAM received on an open stream (excess ends the connection only while at least half the streams opened were reset) and, separately, emitted ones (client-emitted only when answering a server frame), PING, SETTINGS, empty CONTINUATION/DATA that do not end their field block or stream, and WebSocket controls. Excess: H2 GOAWAY(ENHANCE_YOUR_CALM), WS close 1008, and frame_rate cap log. `0` disables.')
+        doc='Control frames per type, per connection, per rolling window. Meters H2 RST_STREAM received on an open stream (excess ends the connection only while the peer reset at least half its recent streams) and, separately, emitted ones (client-emitted only when answering a server frame), PING, SETTINGS, empty CONTINUATION/DATA that do not end their field block or stream, and WebSocket controls. Excess: H2 GOAWAY(ENHANCE_YOUR_CALM), WS close 1008, and frame_rate cap log. `0` disables.')
     frame_rate_window: float = setting(
         'BB_FRAME_RATE_WINDOW', 1.0, minimum=0, section=_section,
         doc='Width in seconds of the rolling window `BB_FRAME_RATE_LIMIT` counts within.')

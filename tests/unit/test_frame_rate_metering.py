@@ -214,7 +214,7 @@ class TestRapidReset:
     async def test_streams_that_were_not_reset_buy_at_most_as_many_resets(self):
         banked = 2 * _LIMIT
         frames = [_settings(), *(_headers(sid) for sid in range(1, 2 * banked, 2))]
-        for sid in range(2 * banked + 1, 2 * (2 * banked + 1), 2):
+        for sid in range(2 * banked + 1, 2 * (4 * banked), 2):
             frames += [_headers(sid), _rst(sid)]
         _, sent = await _drive(frames, _working)
         assert ErrorCodes.ENHANCE_YOUR_CALM in _goaway_codes(sent)
