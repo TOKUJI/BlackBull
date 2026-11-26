@@ -29,6 +29,13 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- HTTP/2: the `RST_STREAM` limit (`BB_FRAME_RATE_LIMIT`) counts only resets
+  received on a stream that is still open, ends the connection only while the
+  peer reset at least half its recent streams, and counts the resets
+  BlackBull emits in a separate budget. A client that cancels streams on
+  deadline, or resets ones whose response had already ended (as Go and
+  Connect clients do), was disconnected with `GOAWAY(ENHANCE_YOUR_CALM)` once
+  its resets and BlackBull's own together passed 20 a second (BLA-715).
 - HTTP/2: an empty DATA frame that ends its stream (or an empty CONTINUATION
   that ends its field block) no longer counts toward the empty-frame flood
   limit (`BB_FRAME_RATE_LIMIT`). A client that streams its request bodies,

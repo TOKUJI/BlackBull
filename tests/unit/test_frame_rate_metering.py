@@ -17,15 +17,17 @@ meter, because it fails a connection nobody can diagnose.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
 
-from tests.harness import fed
+from tests.harness import fed, peer, read_h2_frame
 from hpack import Encoder
 
 from blackbull.protocol.frame_types import (
     DataFrameFlags, ErrorCodes, FrameTypes, HeaderFrameFlags, PingFrameFlags,
 )
+from blackbull.client import HTTP2Client
 from blackbull.server.http2_actor import HTTP2Actor
 from blackbull.server.recipient import (WebSocketRecipient)
 from blackbull.server.sender import AsyncioWriter
@@ -71,14 +73,14 @@ def _headers(stream_id: int, *, end_headers: bool = True) -> bytes:
     return _frame(FrameTypes.HEADERS, flags, stream_id, Encoder().encode(fields))
 
 
-async def _drive(frames: list[bytes]):
+async def _drive(frames: list[bytes], app=None):
     """Run an actor over *frames*; return (actor, sent frames)."""
     writer = _Writer()
 
     async def _app(*a, **kw):
         pass
 
-    actor = HTTP2Actor(None, AsyncioWriter(writer), _app, aggregator=None)
+    actor = HTTP2Actor(None, AsyncioWriter(writer), app or _app, aggregator=None)
     queue = list(frames)
     sent: list = []
     real_send = actor.send_frame
@@ -117,6 +119,18 @@ class _Writer:
 
     async def wait_closed(self) -> None:
         pass
+
+
+def _rst(stream_id: int) -> bytes:
+    return _frame(FrameTypes.RST_STREAM, 0, stream_id, int(ErrorCodes.CANCEL).to_bytes(4, 'big'))
+
+
+async def _working(scope, receive, send):
+    await asyncio.Event().wait()
+
+
+async def _finishing(scope, receive, send):
+    await asyncio.sleep(0.2)
 
 
 def _goaway_codes(sent) -> list[int]:
@@ -171,6 +185,88 @@ class TestEmptyFrameFlood:
         assert ErrorCodes.ENHANCE_YOUR_CALM not in _goaway_codes(sent), (
             'DATA frames carrying real bytes were metered as empty frames; '
             'the body caps are what bound those')
+
+
+class TestRapidReset:
+    """CVE-2023-44487 — the cost is work a stream started and the peer abandoned."""
+
+    async def test_resets_of_open_streams_are_counted(self):
+        frames = [_settings()]
+        for sid in range(1, 2 * (_LIMIT + 1), 2):
+            frames += [_headers(sid), _rst(sid)]
+        _, sent = await _drive(frames, _working)
+        assert ErrorCodes.ENHANCE_YOUR_CALM in _goaway_codes(sent)
+
+    async def test_resets_of_a_closed_stream_are_not_counted(self):
+        """Go's client resets a stream whose response already ended; nothing is abandoned."""
+        frames = [_settings(), _headers(1)] + [_rst(1)] * (_LIMIT + 3)
+        _, sent = await _drive(frames, _working)
+        assert ErrorCodes.ENHANCE_YOUR_CALM not in _goaway_codes(sent)
+
+    async def test_cancelling_a_minority_of_streams_is_not_a_flood(self):
+        """Deadlines expiring on a busy connection; most streams still complete."""
+        opened = range(1, 2 * 3 * (_LIMIT + 1), 2)
+        frames = [_settings(), *(_headers(sid) for sid in opened)]
+        frames += [_rst(sid) for sid in opened[:_LIMIT + 1]]
+        _, sent = await _drive(frames, _finishing)
+        assert ErrorCodes.ENHANCE_YOUR_CALM not in _goaway_codes(sent)
+
+    async def test_streams_that_were_not_reset_buy_at_most_as_many_resets(self):
+        banked = 2 * _LIMIT
+        frames = [_settings(), *(_headers(sid) for sid in range(1, 2 * banked, 2))]
+        for sid in range(2 * banked + 1, 2 * (4 * banked), 2):
+            frames += [_headers(sid), _rst(sid)]
+        _, sent = await _drive(frames, _working)
+        assert ErrorCodes.ENHANCE_YOUR_CALM in _goaway_codes(sent)
+
+    async def test_received_and_emitted_resets_have_separate_budgets(self):
+        """The server's own resets are not charged to the peer's allowance."""
+        frames = [_settings()]
+        for sid in range(1, 2 * _LIMIT, 2):
+            frames += [_headers(sid), _rst(sid)]
+        frames += [_frame(FrameTypes.PRIORITY, 0, sid, b'\x00' * 4)
+                   for sid in range(101, 101 + 2 * _LIMIT, 2)]
+        _, sent = await _drive(frames, _working)
+        emitted = [f for f in sent if getattr(f, 'FrameType', None)
+                   and f.FrameType() == FrameTypes.RST_STREAM]
+        assert len(emitted) == _LIMIT
+        assert ErrorCodes.ENHANCE_YOUR_CALM not in _goaway_codes(sent)
+
+
+async def test_a_server_resetting_a_minority_of_requests_is_not_a_flood():
+    """The client meters resets on its own requests by the same rule."""
+    count = 3 * (_LIMIT + 1)
+    goaways: list[int] = []
+    answered = asyncio.Event()
+
+    async def origin(reader, writer):
+        await reader.readexactly(24)
+        writer.write(_settings())
+        opened = []
+        while len(opened) < count:
+            kind, _, sid, _ = await read_h2_frame(reader)
+            if kind == FrameTypes.HEADERS.value[0]:
+                opened.append(sid)
+        writer.write(b''.join(_rst(sid) for sid in opened[:_LIMIT + 1]) + _ping())
+        await writer.drain()
+        with contextlib.suppress(asyncio.IncompleteReadError, ConnectionError, TimeoutError):
+            while not answered.is_set():
+                kind, flags, _, payload = await read_h2_frame(reader)
+                if kind == FrameTypes.GOAWAY.value[0]:
+                    goaways.append(int.from_bytes(payload[4:8], 'big'))
+                    answered.set()
+                elif kind == FrameTypes.PING.value[0] and flags & PingFrameFlags.ACK:
+                    answered.set()
+
+    async with peer(origin) as port:
+        async with HTTP2Client('127.0.0.1', port) as client:
+            requests = [asyncio.ensure_future(client.request('GET', '/'))
+                        for _ in range(count)]
+            await asyncio.wait_for(answered.wait(), 3)
+            for request in requests:
+                request.cancel()
+            await asyncio.gather(*requests, return_exceptions=True)
+    assert goaways == []
 
 
 class TestEmittedResets:

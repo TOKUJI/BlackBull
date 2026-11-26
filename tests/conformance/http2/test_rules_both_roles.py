@@ -136,7 +136,7 @@ RULES: dict[str, tuple[tuple[bytes, ...], str]] = {
     'ping-within-the-budget': ((F(PING, 0, 0, b'\x00' * 8),) * 18, 'ignored'),
     'ping-flood': ((F(PING, 0, 0, b'\x00' * 8),) * 21, 'GOAWAY ENHANCE_YOUR_CALM'),
     'settings-flood': ((F(SETTINGS),) * 21, 'GOAWAY ENHANCE_YOUR_CALM'),
-    'rst-stream-flood': ((F(RST, 0, 1, u32(8)),) * 21, 'GOAWAY ENHANCE_YOUR_CALM'),
+    'rst-stream-repeated': ((F(RST, 0, 1, u32(8)),) * 21, 'ignored'),
     'empty-continuation-flood': ((OPEN_BLOCK, *[F(CONT, 0, 1, b'')] * 21),
                                  'GOAWAY ENHANCE_YOUR_CALM'),
     'frame-over-max-size': ((F(DATA, 0, 1, b'\x00' * 16385),), 'GOAWAY FRAME_SIZE_ERROR'),

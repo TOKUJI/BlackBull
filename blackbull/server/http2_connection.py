@@ -88,6 +88,7 @@ class HTTP2Connection:
         cfg = get_settings()
         rate, window = cfg.frame_rate_limit, cfg.frame_rate_window
         self._rst_meter = RateWindow(rate, window)          # CVE-2023-44487
+        self._emitted_rst_meter = RateWindow(rate, window)  # resets the peer provokes
         self._ping_meter = RateWindow(rate, window)         # CVE-2019-9512
         self._settings_meter = RateWindow(rate, window)     # CVE-2019-9515
         self._empty_frame_meter = RateWindow(rate, window)  # CVE-2019-9518
@@ -125,12 +126,15 @@ class HTTP2Connection:
         """Count one frame; True when its budget is spent and the connection ends."""
         if not window.hit():
             return False
+        await self._over_rate(window, what)
+        return True
+
+    async def _over_rate(self, window: RateWindow, what: str) -> None:
         log_cap_hit('frame_rate', requested=window.count, limit=window.limit,
                     protocol='http2')
         await self._connection_error(
             ErrorCodes.ENHANCE_YOUR_CALM,
             f'{what} rate limit exceeded ({window.count} in {window.window}s)')
-        return True
 
     # --- closed streams (§5.1) ----------------------------------------------
 
@@ -192,10 +196,7 @@ class HTTP2Connection:
             return SKIP
         if frame_type is None:
             return SKIP     # §5.5
-        if frame_type is FrameTypes.RST_STREAM:
-            if await self._meter(self._rst_meter, 'RST_STREAM'):
-                return SKIP
-        elif frame_type is FrameTypes.PING:
+        if frame_type is FrameTypes.PING:
             if await self._meter(self._ping_meter, 'PING'):
                 return SKIP
         elif frame_type is FrameTypes.SETTINGS:
@@ -279,7 +280,20 @@ class HTTP2Connection:
             await self._reset(stream_id, ErrorCodes.STREAM_CLOSED,
                               additional_credit=self._flow_length(frame, frame_type))
             return SKIP
+        # Only a reset that abandons a live stream is metered (one on a closed
+        # stream abandons nothing), and it ends the connection only while the
+        # peer reset at least half the streams retained here.
+        if (frame_type is FrameTypes.RST_STREAM and self._rst_meter.hit()
+                and self._mostly_reset_by_peer()):
+            await self._over_rate(self._rst_meter, 'RST_STREAM')
+            return SKIP
         return stream
+
+    def _mostly_reset_by_peer(self) -> bool:
+        closed = self._closed_streams
+        live = sum(s.state is not StreamState.IDLE
+                   for s in self.root_stream.children.values())
+        return list(closed.values()).count(_RESET_RECEIVED) * 2 >= len(closed) + live
 
     async def _check_length(self, frame, frame_type) -> bool:
         """The payload lengths of §4.2, §6.3, §6.5, §6.8 and §6.9."""
