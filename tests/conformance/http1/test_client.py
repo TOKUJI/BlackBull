@@ -478,12 +478,10 @@ class TestWebSocketClient:
     @pytest.mark.asyncio
     async def test_subprotocol_negotiation(self, server_port):
         # Set the available subprotocols on the running app via attribute.
-        # The server reads ``getattr(self.app, 'available_ws_protocols', [])``
-        # so attaching to the function works.
-        _echo_app.available_ws_protocols = [b'chat']  # type: ignore[attr-defined]
+        _echo_app.available_ws_protocols = [b'json', b'chat']  # type: ignore[attr-defined]
         try:
             async with WebSocketClient('127.0.0.1', server_port) as c:
-                ws = await c.connect('/ws', subprotocols=[b'chat', b'other'])
+                ws = await c.connect('/ws', subprotocols=[b'other', b'chat', b'json'])
                 await ws.close()
             assert ws.subprotocol == b'chat'
         finally:

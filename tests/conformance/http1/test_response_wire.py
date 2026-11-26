@@ -261,6 +261,15 @@ async def test_subprotocol_extension_and_headers_combine():
         assert want in lines
 
 
+async def test_accept_subprotocol_from_a_later_field():
+    lines = await _accept_head(
+        lambda: NativeWSMessage.accept('GraphQL'),
+        _upgrade(b'Sec-WebSocket-Protocol: chat, , json',
+                 b'Sec-WebSocket-Protocol: GraphQL'))
+    assert lines[0].startswith(b'HTTP/1.1 101 ')
+    assert b'sec-websocket-protocol: GraphQL' in lines
+
+
 @pytest.mark.parametrize('header', [[b'sec-websocket-accept', b'evil'],
                                     [b'x-review', b'ok\r\ninjected: 1']])
 async def test_an_accept_header_that_would_corrupt_the_101_is_refused(header):

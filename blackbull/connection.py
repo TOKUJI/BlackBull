@@ -281,12 +281,13 @@ class Connection:
 
     @property
     def subprotocols(self) -> list[str]:
-        """Return client-offered WebSocket subprotocols; empty for HTTP or no offer.
-        """
-        raw = self.headers.get(b'sec-websocket-protocol', b'')
-        if not raw:
-            return []
-        return [p.strip().decode('utf-8', errors='replace') for p in raw.split(b',')]
+        """Return the client's WebSocket subprotocol offers in order."""
+        return [
+            member.decode('utf-8', errors='replace')
+            for _, raw in self.headers.getlist(b'sec-websocket-protocol')
+            for part in raw.split(b',')
+            if (member := part.strip(b' \t'))
+        ]
 
     # ---- ASGI conversion — generated from _CONNECTION_FIELDS --------------
 
