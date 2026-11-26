@@ -88,7 +88,7 @@ class HTTP2Connection:
         cfg = get_settings()
         rate, window = cfg.frame_rate_limit, cfg.frame_rate_window
         self._rst_meter = RateWindow(rate, window)          # CVE-2023-44487
-        self._emitted_rst_meter = RateWindow(rate, window)  # resets the peer provokes
+        self._emitted_rst_meter = RateWindow(rate, window)  # CVE-2019-9514
         self._ping_meter = RateWindow(rate, window)         # CVE-2019-9512
         self._settings_meter = RateWindow(rate, window)     # CVE-2019-9515
         self._empty_frame_meter = RateWindow(rate, window)  # CVE-2019-9518
@@ -282,7 +282,8 @@ class HTTP2Connection:
             return SKIP
         # Only a reset that abandons a live stream is metered (one on a closed
         # stream abandons nothing), and it ends the connection only while the
-        # peer reset at least half the streams retained here.
+        # peer reset at least half its recent streams (the retained closed
+        # ones plus the live ones).
         if (frame_type is FrameTypes.RST_STREAM and self._rst_meter.hit()
                 and self._mostly_reset_by_peer()):
             await self._over_rate(self._rst_meter, 'RST_STREAM')
