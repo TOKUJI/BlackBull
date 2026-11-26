@@ -3,6 +3,7 @@
 from http import HTTPStatus
 
 import pytest
+from beartype.roar import BeartypeCallHintViolation
 
 from blackbull.native import NativeResponse
 from blackbull.response import Response, StreamingResponse
@@ -373,9 +374,26 @@ async def test_declared_trailers_remain_chunked_and_complete_on_trailers():
 
 @pytest.mark.parametrize('lane', ['dict', 'native'])
 @pytest.mark.asyncio
-async def test_a_status_outside_httpstatus_is_refused_on_both_lanes(lane):
+async def test_an_unregistered_status_is_sent_on_both_lanes(lane):
+    """RFC 9110 §15: any code from 100 to 599 is a status, registered or not."""
+    _, wire = await _send_fixed(lane, [], status=299)
+    assert wire.startswith(b'HTTP/1.1 299 \r\n')
+
+
+@pytest.mark.parametrize('lane', ['dict', 'native'])
+@pytest.mark.parametrize('status', [99, 600])
+@pytest.mark.asyncio
+async def test_a_code_outside_100_to_599_is_refused_on_both_lanes(lane, status):
     with pytest.raises(ValueError):
-        await _send_fixed(lane, [], status=299)
+        await _send_fixed(lane, [], status=status)
+
+
+@pytest.mark.parametrize('status', [299.5, '299'])
+@pytest.mark.asyncio
+async def test_a_native_status_that_is_not_an_int_is_refused(status):
+    # Under --beartype-packages the constructor refuses it first.
+    with pytest.raises((ValueError, BeartypeCallHintViolation)):
+        await _send_fixed('native', [], status=status)
 
 
 @pytest.mark.asyncio
