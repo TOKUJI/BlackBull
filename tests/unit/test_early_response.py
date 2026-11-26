@@ -274,27 +274,44 @@ async def test_h2_a_flow_controlled_response_is_not_cut_short():
         assert received == len(body)
 
 
-async def test_h2_a_client_bounds_data_after_its_reset_by_the_window():
-    """The same bound on the client role, which resets a stream in error."""
+_CLIENT_LATE = {
+    # What the origin sends after the client's reset, and the GOAWAY code.
+    'past-the-window': ([(DATA, 0, b'x' * 16 * _KIB)] * 5, FLOW_CONTROL_ERROR),
+    'past-the-end': ([(HEADERS, END_HEADERS | END_STREAM, [(b'x-t', b'1')]),
+                      (DATA, 0, b'x')], STREAM_CLOSED),
+    'heads-before-the-end': ([(HEADERS, END_HEADERS, [(b':status', b'103')]),
+                              (HEADERS, END_HEADERS, [(b':status', b'200')])], None),
+}
+
+
+@pytest.mark.parametrize('late', list(_CLIENT_LATE))
+async def test_h2_a_client_bounds_what_follows_its_reset(late):
+    """The same bounds on the client role, which resets a stream in error."""
+    frames, expected = _CLIENT_LATE[late]
     goaway: asyncio.Future = asyncio.get_running_loop().create_future()
+    encoder = Encoder()
 
     async def origin(reader, writer):
         await reader.readexactly(len(_PREFACE))
         writer.write(_frame(SETTINGS, 0, 0))
         while not goaway.done():
-            kind, _, sid, payload = await read_h2_frame(reader)
+            kind, flags, sid, payload = await read_h2_frame(reader)
             if kind == HEADERS:
                 writer.write(_frame(PRIORITY, 0, sid, b'\x00' * 4))   # §6.3: 5 octets
             elif kind == RST_STREAM:
-                writer.write(_frame(DATA, 0, sid, b'x' * 16 * _KIB) * 5)
+                writer.write(b''.join(
+                    _frame(k, f, sid, encoder.encode(p) if k == HEADERS else p)
+                    for k, f, p in frames) + _frame(PING, 0, 0, b'p' * 8))
             elif kind == GOAWAY:
                 goaway.set_result(int.from_bytes(payload[4:8], 'big'))
+            elif kind == PING and flags & ACK and expected is None:
+                goaway.set_result(None)
 
     async with peer(origin) as port:
         async with HTTP2Client('127.0.0.1', port) as client:
             request = asyncio.ensure_future(client.request('GET', '/'))
             try:
-                assert await asyncio.wait_for(goaway, 3) == FLOW_CONTROL_ERROR
+                assert await asyncio.wait_for(goaway, 3) == expected
             finally:
                 request.cancel()
                 await asyncio.gather(request, return_exceptions=True)

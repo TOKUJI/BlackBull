@@ -367,8 +367,9 @@ class HTTP2Connection:
     async def _late_message_frame(self, frame, frame_type):
         """What the peer had in flight when we reset its stream, and no more.
 
-        Up to the stream's end, and within its window (§6.9).  A requester's
-        only field section after its head is trailers, which end it.
+        Up to the stream's end, and within its window (§6.9).  Every stream
+        we reset had its head received, so a requester's only later field
+        section is trailers, which end it.
         """
         stream_id = frame.stream_id
         late = self._late_data.get(stream_id, 0)
