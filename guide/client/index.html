@@ -6382,8 +6382,8 @@ Non-101 responses are rejected without reading their bodies. An upgrade is
 rejected if it or a preceding interim response declares an HTTP body.
 Only one upgrade is allowed per connection. The returned WebSocket session
 closes the transport on <code>close()</code>; leaving the client context also closes it.
-HTTP/2 Extended CONNECT also rejects unoffered subprotocols or extensions,
-resetting the stream while keeping the connection open.</p>
+HTTP/2 Extended CONNECT sends <code>Sec-WebSocket-Version: 13</code>. It rejects unoffered
+subprotocols or extensions by resetting the stream while keeping the connection open.</p>
 <p>WebSocket sends raise <code>RuntimeError('session is closed')</code> once local closing
 starts or the reader detects peer closure. Concurrent <code>session.close()</code> calls
 wait for reader and transport/stream cleanup, including when cancelled.</p>
