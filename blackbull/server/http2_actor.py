@@ -139,6 +139,9 @@ async def _run_when_stream_cap_admits(start_stream, cap):
         await start_stream()
 
 
+_OPEN = StreamState.OPEN
+
+
 class StreamActor(Actor):
     """Run one HTTP/2 request through RequestActor with a native Connection.
 
@@ -175,9 +178,8 @@ class StreamActor(Actor):
                 self._app, self._aggregator,
             ).run()
             # The server never half-closes its side, so OPEN is "still sending".
-            stream = self._stream
-            if stream.state is StreamState.OPEN and self._send.answered:
-                actor = self._http2_actor
+            if self._stream.state is _OPEN and self._send.answered:
+                stream, actor = self._stream, self._http2_actor
                 if actor.root_stream.children.get(stream.stream_id) is stream:
                     await actor._end_request(stream.stream_id)
         except FlowControlStalled:
