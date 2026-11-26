@@ -318,13 +318,16 @@ RFC 8441.
 
 ## Subprotocol negotiation
 
+`ws.subprotocols` contains the client's offers from all
+`Sec-WebSocket-Protocol` field lines, in order.
+
 Register the protocols the server supports before starting:
 
 ```python
 app.available_ws_protocols = ['chat', 'superchat']
 ```
 
-BlackBull picks the first protocol from the client's
+On HTTP/1.1, BlackBull picks the first protocol from the client's
 `Sec-WebSocket-Protocol` offer that appears in this list and
 returns it in the 101 handshake response.  If there is no match,
 or if the client did not offer any protocol, no

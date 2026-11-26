@@ -681,9 +681,10 @@ class HTTP1Actor(Actor):
 
         # Used when the handler calls websocket.accept without a subprotocol.
         auto_subprotocol = None
-        if client_protos := conn.subprotocols:
+        if ((supported := getattr(self._app, 'available_ws_protocols', ()))
+                and (client_protos := conn.subprotocols)):
             available = {(p.decode('utf-8', errors='replace') if isinstance(p, bytes) else p)
-                         for p in getattr(self._app, 'available_ws_protocols', [])}
+                         for p in supported}
             auto_subprotocol = next((p for p in client_protos if p in available), None)
 
         # RFC 7692 permessage-deflate negotiation.  Cached on the Connection so

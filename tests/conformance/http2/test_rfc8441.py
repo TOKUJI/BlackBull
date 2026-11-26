@@ -49,7 +49,7 @@ def _make_extended_connect_frame(
     path: str = '/ws',
     scheme: str = 'https',
     stream_id: int = 1,
-    subprotocols: str = '',
+    subprotocols: str | tuple[str, ...] = (),
     extensions: str = '',
     end_stream: bool = False,
 ) -> bytes:
@@ -62,8 +62,9 @@ def _make_extended_connect_frame(
         (b':path', path.encode()),
         (b':authority', b'localhost'),
     ]
-    if subprotocols:
-        headers.append((b'sec-websocket-protocol', subprotocols.encode()))
+    if isinstance(subprotocols, str):
+        subprotocols = (subprotocols,) if subprotocols else ()
+    headers.extend((b'sec-websocket-protocol', value.encode()) for value in subprotocols)
     if extensions:
         headers.append((b'sec-websocket-extensions', extensions.encode()))
     block = encoder.encode(headers)
@@ -319,7 +320,8 @@ class TestExtendedConnectHandshake:
         await handler.run()
         assert captured['scheme'] == expected
 
-    async def test_scope_subprotocols_parsed(self):
+    @pytest.mark.parametrize('offer', ['chat, GraphQL, json', ('chat, , GraphQL', 'json')])
+    async def test_scope_subprotocols_parsed(self, offer):
         captured = {}
 
         async def app(conn, receive, send):
@@ -330,12 +332,11 @@ class TestExtendedConnectHandshake:
 
         handler, _, _ = _make_h2_actor(app)
         frames = [_client_settings(),
-                  _make_extended_connect_frame(subprotocols='chat, graphql'),
+                  _make_extended_connect_frame(subprotocols=offer),
                   None]
         handler.receive = AsyncMock(side_effect=frames)
         await handler.run()
-        assert 'chat' in captured['subprotocols']
-        assert 'graphql' in captured['subprotocols']
+        assert captured['subprotocols'] == ['chat', 'GraphQL', 'json']
 
     async def test_accept_sends_200_response(self):
         """websocket.accept must trigger a :status 200 HEADERS frame (not 101)."""
@@ -358,21 +359,18 @@ class TestExtendedConnectHandshake:
             'Expected :status 200 HEADERS frame on websocket.accept'
 
     async def test_subprotocol_included_in_200_headers(self):
-        """websocket.accept(subprotocol='chat') must include sec-websocket-protocol
-        in the 200 response headers."""
-
         writes = []
 
         async def app(conn, receive, send):
             await receive()
-            await send({'type': 'websocket.accept', 'subprotocol': 'chat'})
+            await send({'type': 'websocket.accept', 'subprotocol': conn.subprotocols[-1]})
             await receive()
 
         handler, _, writer = _make_h2_actor(app)
         writer.write = MagicMock(side_effect=lambda b: writes.append(b))
         writer.drain = AsyncMock()
         frames = [_client_settings(),
-                  _make_extended_connect_frame(subprotocols='chat'),
+                  _make_extended_connect_frame(subprotocols=('json', 'chat')),
                   None]
         handler.receive = AsyncMock(side_effect=frames)
         await handler.run()
