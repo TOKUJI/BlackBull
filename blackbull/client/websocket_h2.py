@@ -22,7 +22,7 @@ from .client import Client
 from .exceptions import HandshakeError
 from .http2 import HTTP2Client
 from .websocket import (_ClientWebSocketRecipient, _WebSocketSession,
-                        _validate_negotiation)
+                        _validate_negotiation, _WEBSOCKET_VERSION_HEADER)
 
 
 class WebSocketH2Session(_WebSocketSession):
@@ -222,6 +222,7 @@ class WebSocketH2Client:
         h_frame.pseudo_headers[PseudoHeaders.PATH] = path.encode('utf-8')
         h_frame.pseudo_headers[PseudoHeaders.AUTHORITY] = (
             f'{self._host}:{self._port}'.encode('utf-8'))
+        h_frame.headers.append(_WEBSOCKET_VERSION_HEADER)
 
         sender = client._make_sender(self._stream_id)
         await sender(h_frame)

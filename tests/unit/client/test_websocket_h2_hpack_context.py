@@ -141,7 +141,7 @@ def _sent_connect_block() -> dict:
         'pseudo': {'METHOD': b'CONNECT', 'PROTOCOL': b'websocket',
                    'SCHEME': b'http', 'PATH': _WS_PATH.encode(),
                    'AUTHORITY': _AUTHORITY.encode()},
-        'fields': [],
+        'fields': [('sec-websocket-version', '13')],
         'malformed': None,
     }
 
