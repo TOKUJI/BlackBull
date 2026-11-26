@@ -71,14 +71,14 @@ def _headers(stream_id: int, *, end_headers: bool = True) -> bytes:
     return _frame(FrameTypes.HEADERS, flags, stream_id, Encoder().encode(fields))
 
 
-async def _drive(frames: list[bytes]):
+async def _drive(frames: list[bytes], app=None):
     """Run an actor over *frames*; return (actor, sent frames)."""
     writer = _Writer()
 
     async def _app(*a, **kw):
         pass
 
-    actor = HTTP2Actor(None, AsyncioWriter(writer), _app, aggregator=None)
+    actor = HTTP2Actor(None, AsyncioWriter(writer), app or _app, aggregator=None)
     queue = list(frames)
     sent: list = []
     real_send = actor.send_frame
@@ -119,6 +119,14 @@ class _Writer:
         pass
 
 
+def _rst(stream_id: int) -> bytes:
+    return _frame(FrameTypes.RST_STREAM, 0, stream_id, int(ErrorCodes.CANCEL).to_bytes(4, 'big'))
+
+
+async def _working(scope, receive, send):
+    await asyncio.Event().wait()
+
+
 def _goaway_codes(sent) -> list[int]:
     return [f.error_code for f in sent
             if getattr(f, 'FrameType', None) and f.FrameType() == FrameTypes.GOAWAY]
@@ -155,6 +163,36 @@ class TestEmptyFrameFlood:
         assert ErrorCodes.ENHANCE_YOUR_CALM not in _goaway_codes(sent), (
             'DATA frames carrying real bytes were metered as empty frames; '
             'the body caps are what bound those')
+
+
+class TestRapidReset:
+    """CVE-2023-44487 — the cost is work a stream started and the peer abandoned."""
+
+    async def test_resets_of_open_streams_are_counted(self):
+        frames = [_settings()]
+        for sid in range(1, 2 * (_LIMIT + 1), 2):
+            frames += [_headers(sid), _rst(sid)]
+        _, sent = await _drive(frames, _working)
+        assert ErrorCodes.ENHANCE_YOUR_CALM in _goaway_codes(sent)
+
+    async def test_resets_of_a_closed_stream_are_not_counted(self):
+        """Go's client resets a stream whose response already ended; nothing is abandoned."""
+        frames = [_settings(), _headers(1)] + [_rst(1)] * (_LIMIT + 3)
+        _, sent = await _drive(frames, _working)
+        assert ErrorCodes.ENHANCE_YOUR_CALM not in _goaway_codes(sent)
+
+    async def test_received_and_emitted_resets_have_separate_budgets(self):
+        """The server's own resets are not charged to the peer's allowance."""
+        frames = [_settings()]
+        for sid in range(1, 2 * _LIMIT, 2):
+            frames += [_headers(sid), _rst(sid)]
+        frames += [_frame(FrameTypes.PRIORITY, 0, sid, b'\x00' * 4)
+                   for sid in range(101, 101 + 2 * _LIMIT, 2)]
+        _, sent = await _drive(frames, _working)
+        emitted = [f for f in sent if getattr(f, 'FrameType', None)
+                   and f.FrameType() == FrameTypes.RST_STREAM]
+        assert len(emitted) == _LIMIT
+        assert ErrorCodes.ENHANCE_YOUR_CALM not in _goaway_codes(sent)
 
 
 class TestEmittedResets:

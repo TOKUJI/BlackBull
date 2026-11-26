@@ -449,7 +449,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             self._retire_stream(frame.stream_id, via_rst=True)
         await self._control_sender(frame)
         if terminal_reset:
-            await self._meter(self._rst_meter, 'server-emitted RST_STREAM')
+            await self._meter(self._emitted_rst_meter, 'server-emitted RST_STREAM')
 
     # --- connection-core hooks ------------------------------------------
 

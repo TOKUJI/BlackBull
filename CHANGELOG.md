@@ -29,6 +29,13 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- HTTP/2: the `RST_STREAM` limit (`BB_FRAME_RATE_LIMIT`) counts only resets
+  received on a stream that is still open, and counts the resets BlackBull
+  emits in a separate budget. A client that cancels streams, or resets ones
+  whose response had already ended (as Go and Connect clients do), was
+  disconnected with `GOAWAY(ENHANCE_YOUR_CALM)` once its resets and
+  BlackBull's own together passed 20 a second (BLA-715).
+
 - A foreign ASGI app sees `http.response.trailers` in `scope['extensions']`
   on HTTP/1.1 and HTTP/2, where trailers were already delivered but never
   advertised; connectrpc refused its gRPC protocol for that (BLA-711).

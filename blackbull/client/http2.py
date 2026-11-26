@@ -1012,7 +1012,7 @@ class HTTP2Client(HTTP2Connection):
                      additional_credit: int = 0) -> None:
         # Only answers to a peer frame come here; local refusals bypass this
         # meter so a slow origin cannot end the client's connection.
-        if await self._meter(self._rst_meter, 'client-emitted RST_STREAM'):
+        if await self._meter(self._emitted_rst_meter, 'client-emitted RST_STREAM'):
             return
         await self._reject_stream(stream_id, code, f'stream error {code.name}')
         if additional_credit:

@@ -83,6 +83,7 @@ class HTTP2Connection:
         cfg = get_settings()
         rate, window = cfg.frame_rate_limit, cfg.frame_rate_window
         self._rst_meter = RateWindow(rate, window)          # CVE-2023-44487
+        self._emitted_rst_meter = RateWindow(rate, window)  # resets the peer provokes
         self._ping_meter = RateWindow(rate, window)         # CVE-2019-9512
         self._settings_meter = RateWindow(rate, window)     # CVE-2019-9515
         self._empty_frame_meter = RateWindow(rate, window)  # CVE-2019-9518
@@ -187,10 +188,7 @@ class HTTP2Connection:
             return SKIP
         if frame_type is None:
             return SKIP     # §5.5
-        if frame_type is FrameTypes.RST_STREAM:
-            if await self._meter(self._rst_meter, 'RST_STREAM'):
-                return SKIP
-        elif frame_type is FrameTypes.PING:
+        if frame_type is FrameTypes.PING:
             if await self._meter(self._ping_meter, 'PING'):
                 return SKIP
         elif frame_type is FrameTypes.SETTINGS:
@@ -272,6 +270,10 @@ class HTTP2Connection:
             # A field section is refused after its HPACK updates, by the role.
             await self._reset(stream_id, ErrorCodes.STREAM_CLOSED,
                               additional_credit=self._flow_length(frame, frame_type))
+            return SKIP
+        # Only a reset that abandons a live stream is metered; one on a closed
+        # stream abandons nothing.
+        if frame_type is FrameTypes.RST_STREAM and await self._meter(self._rst_meter, 'RST_STREAM'):
             return SKIP
         return stream
 
