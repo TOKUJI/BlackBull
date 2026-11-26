@@ -20,7 +20,7 @@ pytestmark = pytest.mark.asyncio
 
 DATA, HEADERS, PRIORITY, RST_STREAM, SETTINGS, PING, GOAWAY = 0, 1, 2, 3, 4, 6, 7
 END_STREAM, END_HEADERS, ACK = 0x1, 0x4, 0x1
-NO_ERROR, FLOW_CONTROL_ERROR = 0, 3
+NO_ERROR, FLOW_CONTROL_ERROR, STREAM_CLOSED = 0, 3, 5
 _PREFACE = b'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'
 _KIB = 1024
 
@@ -65,7 +65,8 @@ async def test_h1_a_client_still_uploading_past_the_bound_reads_the_response():
         upload = asyncio.create_task(w.send(_post(len(body)) + body))
         try:
             assert (await w.response()).status == 413
-            assert await w.closed()
+            # FIN, not a reset: a reset would discard the unread response.
+            assert await asyncio.wait_for(w.reader.read(1), 5) == b''
         finally:
             upload.cancel()
             await asyncio.gather(upload, return_exceptions=True)
@@ -116,8 +117,15 @@ class _H2:
         await self.wire.send(_frame(
             HEADERS, END_HEADERS | (END_STREAM if end_stream else 0), sid, block))
 
-    async def data(self, sid: int, size: int, *, frames: int = 1) -> None:
-        await self.wire.send(_frame(DATA, 0, sid, b'x' * size) * frames)
+    async def data(self, sid: int, size: int, *, frames: int = 1,
+                   end_stream: bool = False) -> None:
+        flags = END_STREAM if end_stream else 0
+        await self.wire.send(_frame(DATA, flags, sid, b'x' * size) * frames)
+
+    async def trailers(self, sid: int, *, end_stream: bool = True) -> None:
+        await self.wire.send(_frame(
+            HEADERS, END_HEADERS | (END_STREAM if end_stream else 0), sid,
+            self.encoder.encode([(b'x-t', b'1')])))
 
     async def until(self, kind: int, sid: int | None = None) -> list:
         """Frames read up to and including the first *kind* frame on *sid*."""
@@ -172,6 +180,41 @@ async def test_h2_data_in_flight_after_the_reset_is_ignored():
         assert [f[0] for f in frames if f[0] in (RST_STREAM, GOAWAY)] == []
         await h2.request(3, end_stream=True)
         await h2.until(HEADERS, 3)
+
+
+@pytest.mark.parametrize('ending', ['trailers', 'empty-data'])
+async def test_h2_the_end_of_a_request_in_flight_after_the_reset_is_ignored(ending):
+    async with served(_early) as s:
+        h2 = await _h2(s)
+        await h2.request(1)
+        await h2.until(RST_STREAM, 1)
+        if ending == 'trailers':
+            await h2.trailers(1)
+        else:
+            await h2.data(1, 0, end_stream=True)
+        await h2.wire.send(_frame(PING, 0, 0, b'p' * 8))
+        frames = await h2.until(PING)
+        assert [f[0] for f in frames if f[0] in (RST_STREAM, GOAWAY)] == []
+
+
+@pytest.mark.parametrize('late', ['headers-after-end', 'data-after-end',
+                                  'data-after-headers'])
+async def test_h2_frames_past_the_request_end_after_the_reset_close_the_connection(late):
+    async with served(_early) as s:
+        h2 = await _h2(s)
+        await h2.request(1)
+        await h2.until(RST_STREAM, 1)
+        if late == 'headers-after-end':
+            await h2.trailers(1)
+            await h2.trailers(1)
+        elif late == 'data-after-end':
+            await h2.data(1, 0, end_stream=True)
+            await h2.data(1, 0, end_stream=True)
+        else:                           # a second field section is never legal
+            await h2.trailers(1, end_stream=False)
+            await h2.data(1, 10)
+        frames = await h2.until(GOAWAY)
+        assert int.from_bytes(frames[-1][3][4:8], 'big') == STREAM_CLOSED
 
 
 async def test_h2_data_past_the_window_after_the_reset_is_a_flow_control_error():

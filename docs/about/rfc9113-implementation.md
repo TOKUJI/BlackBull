@@ -112,9 +112,10 @@ Unknown frame types are ignored only outside an open field block.
 A server whose handler has answered a request the peer is still sending
 ends it with RST_STREAM `NO_ERROR` (§8.1), outside the emitted-reset budget.
 A frame on a stream this endpoint reset is ignored (§5.1): DATA still
-returns its connection credit and a field block is still decoded, but more
-DATA than the stream window this endpoint advertises is a connection
-`FLOW_CONTROL_ERROR` (§6.9). On a
+returns its connection credit and a field block is still decoded. More DATA
+than the larger of 65,535 and the stream window this endpoint advertises is a
+connection `FLOW_CONTROL_ERROR` (§6.9), and a frame past the stream's end (on
+a server, past one late field section) is a connection `STREAM_CLOSED`. On a
 stream the peer reset or that ended, HEADERS is a connection
 `STREAM_CLOSED` error and other frames are answered with RST_STREAM
 `STREAM_CLOSED`, except WINDOW_UPDATE after an ordinary end.
