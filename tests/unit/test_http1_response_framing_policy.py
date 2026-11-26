@@ -387,6 +387,13 @@ async def test_a_code_outside_100_to_599_is_refused_on_both_lanes(lane, status):
         await _send_fixed(lane, [], status=status)
 
 
+@pytest.mark.parametrize('status', [299.5, '299'])
+@pytest.mark.asyncio
+async def test_a_native_status_that_is_not_an_int_is_refused(status):
+    with pytest.raises(ValueError):
+        await _send_fixed('native', [], status=status)
+
+
 @pytest.mark.asyncio
 async def test_the_applications_headers_object_is_not_modified():
     from blackbull.headers import Headers

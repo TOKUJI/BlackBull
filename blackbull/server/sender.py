@@ -67,7 +67,7 @@ _STATUS_BY_CODE: dict[int, HTTPStatus] = {s.value: s for s in HTTPStatus}
 
 def _unregistered_status(code: int) -> int:
     """A status IANA has not registered is still sent (RFC 9110 §15)."""
-    if 100 <= code <= 599:
+    if isinstance(code, int) and 100 <= code <= 599:
         return code
     raise ValueError(f'{code} is not an HTTP status code')
 
