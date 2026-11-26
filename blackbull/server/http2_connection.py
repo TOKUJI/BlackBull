@@ -31,11 +31,12 @@ _ENDED, _RESET_SENT, _RESET_RECEIVED = 0, 1, 2
 _MAX_FLOW_WINDOW = 2**31 - 1        # §6.9.1, §6.5.2
 _CLOSED_STREAMS_CAP = 1024
 
-# §4.2: oversize is a connection error for these (and anything on stream 0).
 # CVE-2019-9518: empty frames are metered unless they carry the flag that ends
 # their stream or field block; those are bounded by the stream count.
 _EMPTY_FRAME_END_FLAG = {FrameTypes.DATA: int(DataFrameFlags.END_STREAM),
                          FrameTypes.CONTINUATION: int(HeaderFrameFlags.END_HEADERS)}
+
+# §4.2: oversize is a connection error for these (and anything on stream 0).
 _FRAME_SIZE_CONNECTION_ERROR_TYPES = frozenset({
     FrameTypes.HEADERS, FrameTypes.CONTINUATION, FrameTypes.PUSH_PROMISE,
     FrameTypes.SETTINGS})
