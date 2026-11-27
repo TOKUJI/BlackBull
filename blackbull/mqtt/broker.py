@@ -10,7 +10,9 @@ import logging
 from collections import deque
 from collections.abc import Awaitable
 from dataclasses import dataclass, field, replace
+from math import ceil
 from random import getrandbits
+from time import monotonic as _message_clock
 from typing import Any
 from weakref import WeakSet
 
@@ -24,7 +26,7 @@ from .messages import (
     MQTTUnsubscribe, MQTTUnsuback, MQTTPingresp, MQTTAuth,
     ProtocolLevel, ReasonCode, SESSION_EXPIRY_NEVER,
     split_shared, topic_matches_filter, validate_topic_name, validate_topic_filter, encode_packet,
-    encode_short_ack,
+    encode_short_ack, _matches_filter,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +38,40 @@ _QOS2_IN_PUBREC_SENT = 'PUBREC_SENT'      # inbound: PUBREC sent, awaiting PUBRE
 
 _QOS2_OUT_PUBLISH_SENT = 'PUBLISH_SENT'   # outbound: PUBLISH sent, awaiting PUBREC
 _QOS2_OUT_PUBREL_SENT = 'PUBREL_SENT'     # outbound: PUBREL sent, awaiting PUBCOMP
+
+
+class _ExpiringProperties(dict[str, Any]):
+    def __init__(self, properties: dict[str, Any], deadline: float) -> None:
+        super().__init__(properties)
+        self.deadline = deadline
+
+    def remaining(self) -> int:
+        return max(0, ceil(self.deadline - _message_clock()))
+
+
+class _TimedPublish:
+    __slots__ = ('topic', 'payload', 'qos', 'retain', 'properties')
+
+    def __init__(self, packet: MQTTPublish, deadline: float) -> None:
+        self.topic = packet.topic
+        self.payload = packet.payload
+        self.qos = packet.qos
+        self.retain = packet.retain
+        self.properties = _ExpiringProperties(packet.properties, deadline)
+
+
+def _delivery_properties(properties, *, track_delivery=False, redrive=False):
+    if not properties:
+        return {}
+    if not isinstance(properties, _ExpiringProperties):
+        return dict(properties)
+    remaining = properties.remaining()
+    if not remaining and not redrive:
+        return None
+    outbound = (_ExpiringProperties(properties, properties.deadline)
+                if track_delivery else properties.copy())
+    outbound['message_expiry_interval'] = remaining
+    return outbound
 
 
 # -- Level A messages: connection actor -> broker ---------------------------
@@ -74,6 +110,12 @@ class ClientPublish(ActorMessage):
 
     publish: MQTTPublish | None = field(default=None, compare=False, repr=False)
     admitted: asyncio.Future[bool] | None = field(default=None, compare=False, repr=False)
+    deadline: float | None = field(init=False, default=None, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.publish is not None and self.publish.properties:
+            if (expiry := self.publish.properties.get('message_expiry_interval')) is not None:
+                self.deadline = _message_clock() + expiry
 
 
 @dataclass
@@ -323,6 +365,7 @@ class BrokerActor(Actor):
         self._window: dict[Actor, _Window] = {}
         self._sessions = {}         # client_id -> session dict
         self._retained = {}         # topic -> MQTTPublish
+        self._next_retained_expiry: float | None = None
         self._wills = {}            # client_id -> MQTTPublish (Will template)
         # Derive share-group membership from live subscriptions; retain only rotation position.
         self._share_rotation: dict[tuple[str, str], int] = {}
@@ -406,16 +449,16 @@ class BrokerActor(Actor):
         # Admission belongs to the broker's FIFO, not to the reader that
         # queued the packet. A CONNECT rejection or takeover may precede a
         # packet already in this inbox while the old writer is closing.
-        admitted = self._session_for(msg.sender) is not None
-        self._publish_admission(msg, admitted)
-        if not admitted:
+        session = self._session_for(msg.sender)
+        self._publish_admission(msg, session is not None)
+        if session is None:
             if msg.sender is not None and msg.sender not in self._seen_connections:
                 self._seen_connections.add(msg.sender)
                 await msg.sender.send(Close(reason_code=ReasonCode.PROTOCOL_ERROR))
             return
 
         if isinstance(msg, ClientPublish):
-            await self._on_publish(msg.sender, msg.publish)
+            await self._on_publish(msg.sender, msg.publish, msg.deadline, session)
         elif isinstance(msg, ClientSubscribe):
             await self._on_subscribe(msg.sender, msg.subscribe)
         elif isinstance(msg, ClientUnsubscribe):
@@ -538,7 +581,10 @@ class BrokerActor(Actor):
         its retained message is live.
         """
         # §3.3.2.3 — a zero-length retained payload deletes the retained message.
-        if publish.payload == b'':
+        properties = publish.properties
+        deadline = (properties.deadline
+                    if isinstance(properties, _ExpiringProperties) else None)
+        if publish.payload == b'' or (deadline is not None and deadline <= _message_clock()):
             self._retained.pop(publish.topic, None)
             return True
         # The cap counts *topics*, so it only binds a topic that is not already
@@ -549,14 +595,34 @@ class BrokerActor(Actor):
         if (self._max_retained
                 and publish.topic not in self._retained
                 and len(self._retained) >= self._max_retained):
-            log_cap_hit('mqtt_max_retained',
-                        requested=len(self._retained) + 1,
-                        limit=self._max_retained,
-                        scope_path=publish.topic,
-                        protocol='mqtt')
-            return False
+            self._reap_retained()
+            if len(self._retained) >= self._max_retained:
+                log_cap_hit('mqtt_max_retained',
+                            requested=len(self._retained) + 1,
+                            limit=self._max_retained,
+                            scope_path=publish.topic,
+                            protocol='mqtt')
+                return False
         self._retained[publish.topic] = publish
+        if deadline is not None and (self._next_retained_expiry is None
+                                     or deadline < self._next_retained_expiry):
+            self._next_retained_expiry = deadline
         return True
+
+    def _reap_retained(self) -> None:
+        deadline = self._next_retained_expiry
+        if deadline is None or (now := _message_clock()) < deadline:
+            return
+        next_expiry = None
+        for topic, retained in list(self._retained.items()):
+            properties = retained.properties
+            if isinstance(properties, _ExpiringProperties):
+                expires = properties.deadline
+                if expires <= now:
+                    del self._retained[topic]
+                elif next_expiry is None or expires < next_expiry:
+                    next_expiry = expires
+        self._next_retained_expiry = next_expiry
 
     @staticmethod
     def _book(session, window, packet_id) -> None:
@@ -811,6 +877,7 @@ class BrokerActor(Actor):
             packet_id=subscribe.packet_id, reason_codes=reason_codes))
 
     async def _deliver_retained(self, conn, session, topic_filter, qos) -> None:
+        self._reap_retained()
         for topic, retained in list(self._retained.items()):
             if topic_matches_filter(topic, topic_filter):
                 await self._deliver(conn, session, retained, qos, retain=True)
@@ -896,7 +963,7 @@ class BrokerActor(Actor):
                           else ReasonCode.TOPIC_FILTER_INVALID
                           for t in unsubscribe.topics]))
 
-    async def _on_publish(self, conn, publish) -> None:
+    async def _on_publish(self, conn, publish, deadline, session) -> None:
         # §3.3.1-4 — both QoS bits set is a Malformed Packet.  The codec
         # refuses it, so this only fires for a PUBLISH built in-process, but
         # the broker is the thing that would route it and the rule belongs
@@ -904,51 +971,47 @@ class BrokerActor(Actor):
         if publish.qos > 2:
             await self._disconnect(conn, ReasonCode.MALFORMED_PACKET)
             return
+        properties = publish.properties
+        if properties:
+            if 'subscription_identifier' in properties:
+                await self._disconnect(conn, ReasonCode.PROTOCOL_ERROR)
+                return
+            if 'topic_alias' in properties:
+                await self._disconnect(conn, ReasonCode.TOPIC_ALIAS_INVALID)
+                return
         # §3.3.2.1 — a Topic Name is literal: non-empty, no wildcards, no null.
         # An invalid one is rejected (TOPIC_NAME_INVALID) and neither routed
         # nor retained.
         if not validate_topic_name(publish.topic):
             await self._reject_publish(conn, publish, ReasonCode.TOPIC_NAME_INVALID)
             return
+        pending = None
+        if publish.qos == 2:
+            pending = session['pending_qos2_in']
+            if publish.packet_id in pending:
+                await self._reply(conn, MQTTPubrec(
+                    packet_id=publish.packet_id, reason_code=ReasonCode.SUCCESS))
+                return
         # Retain is decided *before* the acknowledgement, so the acknowledgement
         # can tell the truth.  Acknowledging SUCCESS and then silently declining
         # to store leaves the publisher believing its retained message is live —
         # the one failure mode a retained message cannot recover from, since
         # nobody re-publishes what they think already worked.
-        retain_refused = bool(publish.retain) and not self._store_retained(publish)
+        routed = publish if deadline is None else _TimedPublish(publish, deadline)
+        retain_refused = publish.retain and not self._store_retained(routed)
         ack = ReasonCode.QUOTA_EXCEEDED if retain_refused else ReasonCode.SUCCESS
 
         if publish.qos == 1:
             await self._reply(conn, MQTTPuback(
                 packet_id=publish.packet_id, reason_code=ack))
         elif publish.qos == 2:
-            # §4.3.3 — always acknowledge with PUBREC, but a DUP retransmit of an
-            # id we have already accepted must not be delivered a second time.
             await self._reply(conn, MQTTPubrec(
                 packet_id=publish.packet_id, reason_code=ack))
-            if not self._qos2_accept_inbound(conn, publish.packet_id, ack):
-                return  # duplicate — PUBREC re-sent above; skip retain + route
+            if pending is not None and not retain_refused:
+                pending[publish.packet_id] = _QOS2_IN_PUBREC_SENT
         # QoS 0 retain refusal has no acknowledgement: log it, keep live delivery,
         # and do not disconnect. Only retained storage is refused.
-        await self._route(publish, source_conn=conn)
-
-    def _qos2_accept_inbound(self, conn, packet_id, reason) -> bool:
-        """§4.3.3 — record a newly-received QoS 2 PUBLISH (PUBREC sent).
-
-        Returns ``False`` when *packet_id* was already accepted (a DUP
-        retransmit), so the caller re-sends PUBREC only and neither re-stores a
-        retained copy nor re-routes the message.  An error acknowledgement ends
-        the exchange instead (§2.2.1): nothing is recorded, so a later PUBLISH
-        reusing the identifier is a new message (MQTT-4.3.3-9).
-        """
-        session = self._session_for(conn)
-        if session is None:
-            return True
-        if packet_id in session['pending_qos2_in']:
-            return False
-        if not MQTTReasonCode(reason).is_error:
-            session['pending_qos2_in'][packet_id] = _QOS2_IN_PUBREC_SENT
-        return True
+        await self._route(routed, source_conn=conn)
 
     async def _reject_publish(self, conn, publish, reason) -> None:
         """Reject an invalid inbound PUBLISH — no routing, no retain (§3.3.2.1).
@@ -982,16 +1045,16 @@ class BrokerActor(Actor):
         subscriptions.
         """
         share_groups: dict[tuple[str, str], list] = {}
-        for client_id, conn in list(self._clients.items()):
+        for client_id, conn in self._clients.items():
             session = self._sessions.get(client_id)
             if session is None:
                 continue
             granted = None
             rap = False
             for topic_filter, qos, opts in session['subscriptions']:
-                if not topic_matches_filter(publish.topic, topic_filter):
-                    continue
                 share = split_shared(topic_filter)
+                if not _matches_filter(publish.topic, share[1] if share else topic_filter):
+                    continue
                 if share is not None:
                     # §4.8.2 — an independent delivery channel: collect the
                     # connected members; exactly-one delivery happens below.
@@ -1074,23 +1137,30 @@ class BrokerActor(Actor):
         peer_limit = self._peer_max_packet_size.get(conn)
         qos = min(publish.qos, granted_qos)
         if qos == 0:
+            properties = _delivery_properties(publish.properties)
+            if properties is None:
+                return True
             # Receive Maximum governs QoS>0 acknowledgements, not writer
             # capacity. QoS 0 uses the connection's separate mailbox budget.
             send = Send(packet=MQTTPublish(
                 topic=publish.topic, payload=publish.payload, qos=0,
-                retain=retain, properties=dict(publish.properties)))
+                retain=retain, properties=properties))
             if peer_limit is not None and not self._fits_peer(peer_limit, send):
                 return False
             await conn.send(send)
             return True
 
         if not self._window[conn].has_room() or not self._has_free_pid(session):
-            # Checked before queuing; any packet id encodes to the same size.
+            # Packet ID and Message Expiry Interval have fixed wire widths.
+            properties = publish.properties
+            if (properties and isinstance(properties, _ExpiringProperties)
+                    and properties.deadline <= _message_clock()):
+                return True
             if peer_limit is not None and not self._fits_peer(
                     peer_limit, Send(packet=MQTTPublish(
                         topic=publish.topic, payload=publish.payload, qos=qos,
                         packet_id=1, retain=retain,
-                        properties=dict(publish.properties)))):
+                        properties=properties))):
                 return False
             self._enqueue_outbound(session, publish, qos, retain)
             return True
@@ -1116,11 +1186,14 @@ class BrokerActor(Actor):
 
     async def _send_qos(self, conn, session, publish, qos, retain,
                         peer_limit) -> bool:
+        properties = _delivery_properties(publish.properties, track_delivery=True)
+        if properties is None:
+            return True
         cursor = session.get('_next_pid', 0) if peer_limit is not None else 0
         packet_id = self._alloc_pid(session)
         out = MQTTPublish(
             topic=publish.topic, payload=publish.payload, qos=qos,
-            packet_id=packet_id, retain=retain, properties=dict(publish.properties))
+            packet_id=packet_id, retain=retain, properties=properties)
         send = Send(packet=out)
         if peer_limit is not None and not self._fits_peer(peer_limit, send):
             # Dropped: restore the id cursor; nothing is booked.
@@ -1192,8 +1265,11 @@ class BrokerActor(Actor):
                 publish = entry.get('packet')
                 if publish is None:
                     continue
+            properties = publish.properties
+            if isinstance(properties, _ExpiringProperties):
+                properties = _delivery_properties(properties, redrive=True)
             return (bucket_name, packet_id,
-                    Send(packet=replace(publish, dup=True)))
+                    Send(packet=replace(publish, dup=True, properties=properties)))
         return None
 
     async def _on_pubrel(self, conn, packet_id) -> None:
@@ -1242,6 +1318,9 @@ class BrokerActor(Actor):
         # Route the Will on abnormal disconnect while subscribers are still live.
         will = self._wills.pop(client_id, None)
         if will is not None and not graceful:
+            expiry = will.properties.get('message_expiry_interval')
+            if expiry is not None:
+                will = _TimedPublish(will, _message_clock() + expiry)
             if will.retain:
                 # Return deliberately ignored: the client whose Will this is has
                 # already gone, so there is no acknowledgement left to carry a

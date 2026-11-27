@@ -14,7 +14,8 @@ from blackbull.mqtt.broker import (
     Detach, Send,
 )
 from blackbull.mqtt.messages import (
-    MQTTConnack, MQTTConnect, MQTTPublish, MQTTPubrel, MQTTSubscribe, ReasonCode,
+    MQTTConnack, MQTTConnect, MQTTDisconnect, MQTTPublish, MQTTPubrel, MQTTSubscribe,
+    ReasonCode,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -38,18 +39,18 @@ class RecordingConn(Actor):
 
 
 async def _attach(broker, conn, *, client_id='c1', clean_start=True,
-                  receive_maximum=None, expiry=3600):
+                  receive_maximum=None, expiry=3600, will_topic=None):
     props = {'session_expiry_interval': expiry}
     if receive_maximum is not None:
         props['receive_maximum'] = receive_maximum
     await broker._handle(Attach(
         connect=MQTTConnect(client_id=client_id, clean_start=clean_start,
-                            keep_alive=60, properties=props),
+                            keep_alive=60, properties=props, will_topic=will_topic),
         sender=conn))
 
 
-async def _detach(broker, conn):
-    await broker._handle(Detach(graceful=True, sender=conn))
+async def _detach(broker, conn, *, graceful=True):
+    await broker._handle(Detach(graceful=graceful, sender=conn))
 
 
 async def _subscribe(broker, conn, topic='t', qos=1):
@@ -59,11 +60,102 @@ async def _subscribe(broker, conn, topic='t', qos=1):
 
 
 async def _publish(broker, source, *, payload=b'x', qos=1, packet_id=1,
-                   topic='t'):
+                   topic='t', retain=False, dup=False, properties=None):
     await broker._handle(ClientPublish(
         publish=MQTTPublish(topic=topic, payload=payload, qos=qos,
-                            packet_id=packet_id),
+                            packet_id=packet_id, retain=retain, dup=dup,
+                            properties={} if properties is None else properties),
         sender=source))
+
+
+async def _ack(broker, conn, packet_id):
+    await broker._handle(ClientPuback(packet_id=packet_id, sender=conn))
+
+
+async def test_empty_will_topic_does_not_match_wildcard():
+    broker = BrokerActor()
+    sub, pub = RecordingConn(), RecordingConn()
+    await _attach(broker, sub)
+    await _subscribe(broker, sub, topic='#')
+    await _attach(broker, pub, client_id='pub', will_topic='')
+    await _detach(broker, pub, graceful=False)
+    assert not sub.publishes()
+
+
+@pytest.fixture
+def advance_message_clock(monkeypatch):
+    now = 100.0
+    monkeypatch.setattr('blackbull.mqtt.broker._message_clock', lambda: now)
+
+    def advance(seconds):
+        nonlocal now
+        now += seconds
+
+    return advance
+
+
+async def test_message_expiry_while_waiting_for_send_quota(advance_message_clock):
+    broker = BrokerActor()
+    sub, pub = RecordingConn(), RecordingConn()
+    await _attach(broker, sub, receive_maximum=1)
+    await _subscribe(broker, sub)
+    await _attach(broker, pub, client_id='pub')
+    await _publish(broker, pub, payload=b'occupy')
+    await _publish(broker, pub, payload=b'expired', packet_id=2,
+                   properties={'message_expiry_interval': 2})
+    await _publish(broker, pub, payload=b'live', packet_id=3,
+                   properties={'message_expiry_interval': 10, 'content_type': 'text/plain'})
+    advance_message_clock(4)
+    await _ack(broker, sub, sub.publishes()[0].packet_id)
+    assert [p.payload for p in sub.publishes()] == [b'occupy', b'live']
+    assert sub.publishes()[-1].properties == {
+        'message_expiry_interval': 6, 'content_type': 'text/plain'}
+
+
+async def test_retained_message_expiry(advance_message_clock):
+    broker = BrokerActor(max_retained=1)
+    pub, first, second = RecordingConn(), RecordingConn(), RecordingConn()
+    await _attach(broker, pub, client_id='pub')
+    await _publish(broker, pub, retain=True, properties={'message_expiry_interval': 3})
+    advance_message_clock(1)
+    await _attach(broker, first, client_id='first')
+    await _subscribe(broker, first)
+    assert first.publishes()[0].properties == {'message_expiry_interval': 2}
+
+    advance_message_clock(2)
+    await _publish(broker, pub, retain=True, topic='next')
+    await _attach(broker, second, client_id='second')
+    await _subscribe(broker, second, topic='#')
+    assert [p.topic for p in second.publishes()] == ['next']
+
+
+@pytest.mark.parametrize(('property_name', 'reason'), [
+    ('subscription_identifier', ReasonCode.PROTOCOL_ERROR),
+    ('topic_alias', ReasonCode.TOPIC_ALIAS_INVALID),
+])
+async def test_client_publish_rejects_properties_reserved_for_other_contexts(
+        property_name, reason):
+    broker = BrokerActor()
+    pub = RecordingConn()
+    await _attach(broker, pub, client_id='pub')
+    await _publish(broker, pub, properties={property_name: 1})
+    reply = pub.packets()[-1]
+    assert isinstance(reply, MQTTDisconnect)
+    assert reply.reason_code == reason
+
+
+async def test_qos2_retransmission_does_not_extend_retained_expiry(advance_message_clock):
+    broker = BrokerActor()
+    pub, sub = RecordingConn(), RecordingConn()
+    await _attach(broker, pub, client_id='pub')
+    props = {'message_expiry_interval': 3}
+    await _publish(broker, pub, retain=True, qos=2, properties=props)
+    advance_message_clock(2)
+    await _publish(broker, pub, retain=True, dup=True, qos=2, properties=props)
+    advance_message_clock(1)
+    await _attach(broker, sub)
+    await _subscribe(broker, sub)
+    assert not sub.publishes()
 
 
 async def _three_unacked(broker, *, receive_maximum=3):
@@ -168,10 +260,9 @@ class TestReplayAdvancesOnAck:
 
         for index, pid in enumerate(pids):
             if index:
-                await broker._handle(ClientPuback(packet_id=pids[index - 1],
-                                                  sender=conn))
+                await _ack(broker, conn, pids[index - 1])
             assert [p.packet_id for p in conn.publishes()] == pids[:index + 1]
-        await broker._handle(ClientPuback(packet_id=pids[-1], sender=conn))
+        await _ack(broker, conn, pids[-1])
         assert [p.packet_id for p in conn.publishes()] == pids
         assert all(p.dup for p in conn.publishes())
 

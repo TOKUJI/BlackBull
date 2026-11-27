@@ -117,6 +117,12 @@ messages are rechecked against the reconnecting client's limit. Retained and
 Will messages follow the same rule. For a Shared Subscription, the message
 goes to a member that can receive it and is dropped only if no member can.
 
+Client PUBLISH packets with a Subscription Identifier are rejected with
+`0x82` (Protocol Error). Because the broker does not support Topic Aliases,
+a nonzero alias is rejected with `0x94` (Topic Alias Invalid). The broker
+discards queued or retained messages whose Message Expiry Interval has elapsed
+and sends the remaining interval on messages delivered before expiry.
+
 Broker-initiated protocol-error closure retires admission before processing the
 next command. Client DISCONNECT and transport failures use the FIFO `Detach`
 boundary: commands ordered before it were admitted while the connection was
