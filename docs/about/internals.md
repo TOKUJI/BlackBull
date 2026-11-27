@@ -151,9 +151,10 @@ written refusal. `ConnectionProtocol.linger_close` discards remaining input
 within byte and time bounds. Keep both: one bounds work, the other prevents
 a refused peer from retaining the connection. Delivery stays best-effort
 when the peer does not read. A response sent before its request body ended
-first reads up to 256 KiB of that body within `BB_KEEP_ALIVE_TIMEOUT`, which
-keeps the connection; past that, the request still arriving makes the close
-linger even when nothing is buffered.
+is followed by reading up to 256 KiB of that body within
+`BB_KEEP_ALIVE_TIMEOUT`, which keeps the connection. A body that read cannot
+settle makes the response say `Connection: close`; the request still arriving
+then makes the close linger even when nothing is buffered.
 
 ### Accept admission
 
@@ -184,6 +185,12 @@ Before reusing an HTTP/1.1 connection, consume unread request content within
 the drain budget or close. Every answer path, including one bypassing
 routing, reaches this boundary. Never drain after a framing violation:
 the next bytes cannot be distinguished from a smuggled request.
+
+Decide at the response head, not after the response: a close decided later
+may meet the client's next request. A head whose request body the drain
+cannot settle (more than its budget left, an unfinished chunked body, a
+refused one) says `Connection: close`. After a complete response, a handler
+error or `BB_REQUEST_TIMEOUT` leaves the connection as a normal return would.
 
 A WebSocket upgrade leaves the request loop and cannot rely on its drain.
 Refuse handshakes declaring content before switching; `Content-Length: 0`

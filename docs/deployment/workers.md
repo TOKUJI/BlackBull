@@ -280,7 +280,7 @@ The defaults match Apache's `LimitRequestLine` /
 | Limit | Default | Behaviour |
 |---|---|---|
 | `BB_MAX_CONNECTIONS` | `auto` per worker | Connections beyond the cap are refused at accept time.  Combine with `BB_SOCKET_BACKLOG` for graceful overload.  `0` = unlimited. |
-| `BB_REQUEST_TIMEOUT` | `0` (off) | Handler deadline in seconds. HTTP/1.1 answers 408 and closes; HTTP/2 cancels the stream with `RST_STREAM CANCEL`. Set a positive budget compatible with long-lived requests. |
+| `BB_REQUEST_TIMEOUT` | `0` (off) | Handler deadline in seconds. HTTP/1.1 answers 408 and closes, unless the response was already complete; HTTP/2 cancels the stream with `RST_STREAM CANCEL`. Set a positive budget compatible with long-lived requests. |
 
 ## Shutdown
 

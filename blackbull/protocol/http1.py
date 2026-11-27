@@ -307,11 +307,15 @@ LENGTH = 'length'
 CHUNKED = 'chunked'
 CLOSE_DELIMITED = 'close'
 
+#: The framing of a request without a body, returned as this very object.
+BODYLESS: tuple[int | None, bool] = (None, False)
+
 
 def request_framing(headers) -> tuple[int | None, bool]:
     """``(Content-Length or None, chunked)`` of a request's ``Headers``.
 
-    RFC 9112 §6.1: a request has no close-delimited body, so a
+    A request declaring neither gets ``BODYLESS`` itself, so callers may test
+    it with ``is``.  RFC 9112 §6.1: a request has no close-delimited body, so a
     ``Transfer-Encoding`` other than exactly ``chunked`` cannot be read:
     chunked not alone at the end is [`MessageError`][], another coding or a
     parameter is [`Unimplemented`][].  §6.3: CL with TE is an error.
@@ -321,7 +325,7 @@ def request_framing(headers) -> tuple[int | None, bool]:
     cls = index.get(b'content-length')
     if not tes:
         if not cls:
-            return None, False
+            return BODYLESS
         try:
             return parse_content_length(cls), False
         except ValueError as exc:

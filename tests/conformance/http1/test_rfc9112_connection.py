@@ -203,23 +203,23 @@ class TestAsteriskFormKeepAlive:
         assert rest.status == 200, f'GET after OPTIONS * failed: {rest!r}'
         assert rest.body.startswith(b'ok')
 
-    @pytest.mark.parametrize('framing,body,hint', [
-        pytest.param(b'Content-Length: 4\r\n\r\n', b'body',
-                     'body was not drained — the next request was parsed out of '
-                     'the leftover bytes',
+    @pytest.mark.parametrize('framing,body,reused', [
+        pytest.param(b'Content-Length: 4\r\n\r\n', b'body', True,
                      id='content-length-drain'),
         pytest.param(b'Transfer-Encoding: chunked\r\n\r\n', b'4\r\nbody\r\n0\r\n\r\n',
-                     'chunked body was not drained through the terminal chunk',
-                     id='chunked-drain'),
+                     False, id='chunked-drain'),
     ])
-    def test_asterisk_with_body_drains_before_next_request(self, h1_app, framing, body, hint):
+    def test_asterisk_with_body_drains_before_next_request(self, h1_app, framing, body,
+                                                           reused):
         """RFC 9110 §9.3.7 permits content on OPTIONS, so the server-wide
         answer must still consume it — for either framing.
 
         Undrained, the body bytes become the start of the next request line;
         behind a connection-pooling reverse proxy that desync is the
-        request-smuggling shape, so the 200 below is the security-relevant
-        assertion, not just a keep-alive nicety.
+        request-smuggling shape.  A Content-Length body within the drain bound
+        is drained and the GET answered; a chunked one cannot be known to end
+        within it when the answer is written, so that answer says
+        ``Connection: close`` and the GET is never read as a request.
         """
         s = open_socket('127.0.0.1', h1_app.port, timeout=5)
         try:
@@ -234,11 +234,18 @@ class TestAsteriskFormKeepAlive:
             s.close()
 
         second = buf.find(b'HTTP/1.1 ', 8)
+        if not reused:
+            assert second < 0, f'the GET was read as a request; got {buf!r}'
+            first = parse_response(buf, closed=True)
+            assert (first.status, first.header(b'connection')) == (204, b'close')
+            return
         assert second > 0, f'no second response; got {buf!r}'
         first = parse_response(buf[:second])
         rest = parse_response(buf[second:], closed=True)
         assert first.status == 204
-        assert rest.status == 200, f'{hint}; got {rest.status}'
+        assert rest.status == 200, (
+            f'body was not drained — the next request was parsed out of the '
+            f'leftover bytes; got {rest.status}')
         assert rest.body.startswith(b'ok')
 
     def test_asterisk_with_large_body_within_bound_drains(self, h1_app):

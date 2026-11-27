@@ -15,6 +15,7 @@ from typing import NoReturn
 
 from ..protocol import hpack_fastpath
 from ..env import get_settings
+from ..protocol.field_grammar import list_members
 from ..protocol.framing import (_CRLF, _LENGTHLESS_STATUSES,
                                 NO_CONTENT_GENERATED_STATUSES,
                                 is_informational, stated_response_length)
@@ -50,6 +51,7 @@ _DEBUG = debug_gate(logger)
 
 
 _CHUNKED_LINE = b'transfer-encoding: chunked\r\n'
+_CONNECTION_CLOSE_LINE = b'connection: close\r\n'
 
 # Fallback chunk size when ``sendfile`` isn't supported by the transport
 # (TLS, mocked tests).  Matches the static middleware's ``_CHUNK`` so
@@ -559,7 +561,7 @@ class HTTP1Sender(BaseSender):
         '_expect_trailers', '_head_mode', '_log_record', '_started',
         '_completed', '_trailers_started', '_content_length',
         '_body_bytes', '_suppress_body', '_informational',
-        '_response_started', '_poisoned',
+        '_response_started', '_poisoned', 'request_body', 'close_announced',
     )
     _raise_when_gone = True
 
@@ -597,6 +599,13 @@ class HTTP1Sender(BaseSender):
         self._head_mode: bool = False
         # None disables per-request access capture.
         self._log_record = None
+        #: The recipient of the current request when it has a body; set by
+        #: HTTP1Actor.  Every head of the request asks it again, so a head
+        #: refused before the wire leaves its replacement the same answer.
+        self.request_body = None
+        #: The final head last written said ``connection: close``; the
+        #: connection then ends with that response, so no later request sees it.
+        self.close_announced = False
 
     async def __call__(self, body: _SenderBody,
                        status: int = HTTPStatus.OK,
@@ -759,6 +768,7 @@ class HTTP1Sender(BaseSender):
         self._poisoned = False
         self._head_mode = False
         self._log_record = None
+        self.request_body = None
 
     def _ensure_framing_headers(self, status: int,
                                 head: _MinimalResponseHeaders,
@@ -830,7 +840,24 @@ class HTTP1Sender(BaseSender):
             framing = _content_length_line(body_len)
             self._content_length = body_len
 
+        if self.request_body is not None and not self._informational:
+            framing += self._close_unless_settled(pairs)
         return pairs, framing
+
+    def _close_unless_settled(self, fields: HeaderList) -> bytes:
+        """``connection: close`` when the request body does not settle now.
+
+        Deciding after the response would close a connection the client may
+        already have reused (RFC 9112 §9.6).
+        """
+        # Per head, so it describes the head actually written.
+        self.close_announced = not self.request_body.drain_settles()
+        if not self.close_announced:
+            return b''
+        if any(name == b'connection' and b'close' in list_members(value)
+               for name, value in fields):
+            return b''
+        return _CONNECTION_CLOSE_LINE
 
     def _track_content_length(self, content_len: int, more_body: bool) -> None:
         """Reject a declared-length stream that crosses its wire boundary."""

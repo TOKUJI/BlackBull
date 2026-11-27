@@ -1,9 +1,11 @@
 """A response sent while the request body is still arriving reaches the client.
 
 The server may answer before it has read the whole request (an early error, a
-size limit).  On HTTP/1.1 it then reads the rest of the body, up to a bound, so
-the connection survives and the client's upload is never reset under the
-response.  On HTTP/2 it ends the request with RST_STREAM(NO_ERROR) once the
+size limit).  On HTTP/1.1 it reads the rest after the response, up to a bound,
+so the connection survives and the upload is never reset under the response;
+a response whose body that read cannot settle says ``Connection: close``, so
+the client never sends its next request into a closing connection.  On HTTP/2
+it ends the request with RST_STREAM(NO_ERROR) once the
 handler has finished (RFC 9113 §8.1), and ignores what the peer had in flight,
 up to the window it held.
 """
@@ -13,6 +15,7 @@ import time
 import pytest
 from hpack import Encoder
 
+from blackbull import BlackBull
 from blackbull.client import HTTP2Client
 from tests.harness import peer, read_h2_frame, served
 
@@ -53,9 +56,109 @@ async def test_h1_an_unread_body_within_the_bound_is_drained_and_the_connection_
     async with served(_early) as s:
         w = await s.wire()
         await w.send(_post(len(body)) + body[:16 * _KIB])
-        assert (await w.response()).status == 413
+        first = await w.response()
+        assert (first.status, first.header(b'connection')) == (413, None)
         await w.send(body[16 * _KIB:] + _post(0))
         assert (await w.response()).status == 413, 'the connection was not kept'
+
+
+@pytest.mark.parametrize('total,closes', [(600 * _KIB, True), (400 * _KIB, False)])
+async def test_h1_what_a_handler_left_unread_decides_the_close(total, closes):
+    async def partial(scope, receive, send):
+        read, more = 0, True
+        while more and read < 200 * _KIB:
+            event = await receive()
+            read, more = read + len(event['body']), event['more_body']
+        await _early(scope, receive, send)
+
+    async with served(partial) as s:
+        w = await s.wire()
+        upload = asyncio.create_task(w.send(_post(total) + b'x' * total))
+        try:
+            first = await w.response()
+            assert (first.status, first.header(b'connection')) == (
+                413, b'close' if closes else None)
+            if not closes:
+                await upload
+                await w.send(_post(0))
+                assert (await w.response()).status == 413, 'the connection was not kept'
+        finally:
+            upload.cancel()
+            await asyncio.gather(upload, return_exceptions=True)
+
+
+@pytest.mark.parametrize('reads_first,closes', [(False, True), (True, False)])
+async def test_h1_a_replacement_for_a_refused_head_decides_the_close_again(
+        reads_first, closes):
+    async def replaces(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-length', b'2')]})
+        try:
+            await send({'type': 'http.response.body', 'body': b'too long',
+                        'more_body': True})
+        except ValueError:
+            while reads_first and (await receive())['more_body']:
+                pass
+            await _early(scope, receive, send)
+
+    async with served(replaces) as s:
+        w = await s.wire()
+        await w.send(b'POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n'
+                     b'4\r\nwxyz\r\n' + (b'0\r\n\r\n' if reads_first else b''))
+        first = await w.response()
+        assert (first.status, first.header(b'connection')) == (
+            413, b'close' if closes else None)
+        if not closes:
+            await w.send(b'GET / HTTP/1.1\r\nHost: x\r\n\r\n')
+            assert (await w.response()).status == 413, 'the connection was not kept'
+
+
+async def test_h1_an_unread_chunked_body_announces_the_close():
+    async with served(_early) as s:
+        w = await s.wire()
+        await w.send(b'POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n'
+                     b'4\r\nwxyz\r\n')
+        first = await w.response()
+        assert (first.status, first.header(b'connection')) == (413, b'close')
+        await w.send(b'0\r\n\r\n')
+        assert await asyncio.wait_for(w.reader.read(1), 5) == b''
+
+
+async def test_h1_a_body_refused_for_size_announces_the_close(monkeypatch):
+    _settings(monkeypatch, BB_MAX_BODY_SIZE='1024')
+    app = BlackBull()
+
+    @app.route(path='/', methods=['POST'])
+    async def read(conn):
+        return await conn.body()
+
+    async with served(app) as s:
+        w = await s.wire()
+        await w.send(b'POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n'
+                     b'800\r\n' + b'x' * 2048 + b'\r\n')
+        first = await w.response()
+        assert (first.status, first.header(b'connection')) == (413, b'close')
+
+
+async def test_h1_a_handler_reading_after_its_response_starts_gets_the_whole_body():
+    async def late_reader(scope, receive, send):
+        await send({'type': 'http.response.start', 'status': 200, 'headers': []})
+        await send({'type': 'http.response.body', 'body': b'started ', 'more_body': True})
+        size, more = 0, True
+        while more:
+            event = await receive()
+            size, more = size + len(event['body']), event['more_body']
+        await send({'type': 'http.response.body', 'body': b'%d' % size})
+
+    body = b'x' * (64 * _KIB)
+    async with served(late_reader) as s:
+        w = await s.wire()
+        await w.send(_post(len(body)) + body[:_KIB])
+        assert b'\r\nconnection:' not in await w.recv_until(b'started ')
+        await w.send(body[_KIB:])
+        assert await w.recv_until(b'\r\n0\r\n\r\n') == b'\r\n5\r\n65536\r\n0\r\n\r\n'
+        await w.send(_post(0))
+        assert (await w.response()).status == 200, 'the connection was not kept'
 
 
 async def test_h1_a_client_still_uploading_past_the_bound_reads_the_response():
@@ -64,7 +167,8 @@ async def test_h1_a_client_still_uploading_past_the_bound_reads_the_response():
         w = await s.wire()
         upload = asyncio.create_task(w.send(_post(len(body)) + body))
         try:
-            assert (await w.response()).status == 413
+            first = await w.response()
+            assert (first.status, first.header(b'connection')) == (413, b'close')
             # FIN, not a reset: a reset would discard the unread response.
             assert await asyncio.wait_for(w.reader.read(1), 5) == b''
         finally:
