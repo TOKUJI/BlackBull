@@ -29,6 +29,17 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- A response sent before the request body has ended now reaches the client.
+  HTTP/1.1 reads up to 256 KiB (was 64 KiB) of the unread body within
+  `BB_KEEP_ALIVE_TIMEOUT` and keeps the connection; past that it sends FIN
+  and lingers before closing. HTTP/2 ends the request with
+  `RST_STREAM(NO_ERROR)` once the handler has finished (RFC 9113 §8.1),
+  outside the emitted-reset budget, instead of answering each DATA in flight
+  with `STREAM_CLOSED` until `GOAWAY(ENHANCE_YOUR_CALM)`. After any reset
+  BlackBull sends, DATA past the stream window is a `FLOW_CONTROL_ERROR` and
+  frames past the stream's end are `STREAM_CLOSED`. Go and Connect clients
+  saw timeouts or resets instead of errors such as `resource_exhausted`
+  (BLA-714).
 - HTTP/2: the `RST_STREAM` limit (`BB_FRAME_RATE_LIMIT`) counts only resets
   received on a stream that is still open, ends the connection only while the
   peer reset at least half its recent streams, and counts the resets

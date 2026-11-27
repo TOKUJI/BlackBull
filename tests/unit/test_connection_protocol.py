@@ -429,6 +429,24 @@ class TestLingerClose:
         await proto.linger_close(timeout=0.05)
         assert transport.eofs == 1, 'writelines left the window unarmed'
 
+    async def test_a_body_still_arriving_owes_the_window(self, wired):
+        """All that arrived was read, but the request body has not ended."""
+        proto, transport = wired
+        _deliver(proto, b'part of a body')
+        await proto.reader.read()
+        proto.reader.body_unread = True
+        proto.write(b'HTTP/1.1 413 Content Too Large\r\n\r\n')
+        await proto.linger_close(timeout=0.05)
+        assert transport.eofs == 1, 'closed under a peer still sending'
+
+    async def test_a_consumed_request_owes_nothing(self, wired):
+        proto, transport = wired
+        _deliver(proto, b'a whole request')
+        await proto.reader.read()
+        proto.write(b'HTTP/1.1 200 OK\r\n\r\n')
+        await proto.linger_close(timeout=0.05)
+        assert transport.eofs == 0
+
     async def test_an_empty_write_owes_nothing(self, wired):
         proto, transport = wired
         proto.write(b'')

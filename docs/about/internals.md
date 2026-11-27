@@ -150,7 +150,10 @@ Closing with unread socket bytes can reset the connection and discard a
 written refusal. `ConnectionProtocol.linger_close` discards remaining input
 within byte and time bounds. Keep both: one bounds work, the other prevents
 a refused peer from retaining the connection. Delivery stays best-effort
-when the peer does not read.
+when the peer does not read. A response sent before its request body ended
+first reads up to 256 KiB of that body within `BB_KEEP_ALIVE_TIMEOUT`, which
+keeps the connection; past that, the request still arriving makes the close
+linger even when nothing is buffered.
 
 ### Accept admission
 

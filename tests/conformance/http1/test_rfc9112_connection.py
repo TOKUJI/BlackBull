@@ -251,7 +251,7 @@ class TestAsteriskFormKeepAlive:
         connection dies here for a reason unrelated to the drain — the 200
         is what separates draining from merely surviving.
         """
-        body = b'x' * (64 * 1024)          # == _MAX_KEEPALIVE_DRAIN
+        body = b'x' * (256 * 1024)         # == _MAX_KEEPALIVE_DRAIN
         s = open_socket('127.0.0.1', h1_app.port, timeout=5)
         try:
             s.sendall(
@@ -288,7 +288,7 @@ class TestAsteriskFormKeepAlive:
         *before* the oversized body goes out, and the close is then observed
         on its own.  Sent as one blob, this test would race the reset.
         """
-        body = b'x' * (64 * 1024 + 4096)   # over _MAX_KEEPALIVE_DRAIN
+        body = b'x' * (256 * 1024 + 4096)  # over _MAX_KEEPALIVE_DRAIN
         s = open_socket('127.0.0.1', h1_app.port, timeout=5)
         try:
             # 1. Headers only — the server-wide answer needs nothing else.

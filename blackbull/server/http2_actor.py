@@ -139,6 +139,9 @@ async def _run_when_stream_cap_admits(start_stream, cap):
         await start_stream()
 
 
+_OPEN = StreamState.OPEN
+
+
 class StreamActor(Actor):
     """Run one HTTP/2 request through RequestActor with a native Connection.
 
@@ -147,7 +150,7 @@ class StreamActor(Actor):
 
     def __init__(
         self,
-        stream_id: int,
+        stream: Stream,
         conn: Connection,
         receive: ReceiveChannel,
         send: NativeSend,
@@ -159,7 +162,7 @@ class StreamActor(Actor):
         log_record,
     ) -> None:
         super().__init__()
-        self._stream_id = stream_id
+        self._stream = stream
         self._conn = conn
         self._receive = receive
         self._send = send
@@ -174,18 +177,23 @@ class StreamActor(Actor):
                 self._conn, self._receive, self._send,
                 self._app, self._aggregator,
             ).run()
+            # The server never half-closes its side, so OPEN is "still sending".
+            if self._stream.state is _OPEN and self._send.answered:
+                stream, actor = self._stream, self._http2_actor
+                if actor.root_stream.children.get(stream.stream_id) is stream:
+                    await actor._end_request(stream.stream_id)
         except FlowControlStalled:
             # CANCEL, not INTERNAL_ERROR: the peer's missing credit, not a
             # server fault, ended the stream (BB_WRITE_TIMEOUT, env-vars.md).
             await self._http2_actor.send_frame(
                 self._http2_actor.factory.rst_stream(
-                    self._stream_id, ErrorCodes.CANCEL)
+                    self._stream.stream_id, ErrorCodes.CANCEL)
             )
         except Exception:
             if not self._send._poisoned:    # the sender already reset it
                 await self._http2_actor.send_frame(
                     self._http2_actor.factory.rst_stream(
-                        self._stream_id, ErrorCodes.INTERNAL_ERROR)
+                        self._stream.stream_id, ErrorCodes.INTERNAL_ERROR)
                 )
         finally:
             # ``None`` on the baseline hot path; ``_close_record`` tolerates it.
@@ -815,7 +823,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
     def _spawn_stream_task(
         self,
         tg: asyncio.TaskGroup,
-        stream_id: int,
+        stream: Stream,
         conn: Connection,
         recipient,
         send,
@@ -833,10 +841,12 @@ class HTTP2Actor(Actor, HTTP2Connection):
         A ``BB_REQUEST_TIMEOUT`` expiry sends RST_STREAM CANCEL and lets the
         task complete normally, so it does not cancel the TaskGroup.
         """
+        stream_id = stream.stream_id
+
         # StreamActor failure resets with INTERNAL_ERROR instead of leaving a silent stream.
         def _start_stream():
             return StreamActor(
-                stream_id=stream_id,
+                stream=stream,
                 conn=conn,
                 receive=recipient,
                 send=send,
@@ -1036,7 +1046,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
             # Dispatched as GET, like HTTP/1.1; the record keeps HEAD.
             conn.state['_original_method'] = conn.method
             conn.method = 'GET'
-        self._spawn_stream_task(tg, stream.stream_id, conn, stream_recipient, send, log_record)
+        self._spawn_stream_task(tg, stream, conn, stream_recipient, send, log_record)
         return True
 
     async def _refuse_oversized_declared_body(self, stream, conn, send) -> bool:
@@ -1056,9 +1066,16 @@ class HTTP2Actor(Actor, HTTP2Connection):
         await send(b'413 Content Too Large',
                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
                    [(b'content-type', b'text/plain')])
-        await self.send_frame(
-            self.factory.rst_stream(stream.stream_id, ErrorCodes.NO_ERROR))
+        await self._end_request(stream.stream_id)
         return True
+
+    async def _end_request(self, stream_id: int) -> None:
+        """§8.1: after a complete response, stop the peer sending its request.
+
+        One per answered request, so it spends no reset budget.
+        """
+        self._retire_stream(stream_id, via_rst=True)
+        await self._control_sender(self.factory.rst_stream(stream_id, ErrorCodes.NO_ERROR))
 
     async def _on_data_frame(self, frame, stream: 'Stream') -> None:
         """Handle a DATA frame: state, content-length accounting, delivery.
@@ -1362,7 +1379,7 @@ class HTTP2Actor(Actor, HTTP2Connection):
         capturing_send = push_sender
 
         self._spawn_stream_task(
-            self._task_group, push_stream_id, pushed_conn,
+            self._task_group, push_stream, pushed_conn,
             push_recipient, capturing_send, log_record,
         )
 

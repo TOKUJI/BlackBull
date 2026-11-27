@@ -659,6 +659,7 @@ async def test_http2_access_log_emitted_per_stream(caplog):
     from unittest.mock import AsyncMock, MagicMock
 
     from blackbull.server.access_log import AccessLogRecord
+    from blackbull.protocol.stream import Stream
     from blackbull.server.http2_actor import HTTP2Actor, StreamActor
     from blackbull.server.sender import AsyncioWriter
 
@@ -690,7 +691,7 @@ async def test_http2_access_log_emitted_per_stream(caplog):
 
     with caplog.at_level(logging.INFO):
         await StreamActor(
-            stream_id=1, conn=conn, receive=fake_receive, send=noop_send,
+            stream=Stream(1, None, 1), conn=conn, receive=fake_receive, send=noop_send,
             app=app, aggregator=None, http2_actor=h2, log_record=record,
         ).run()
 

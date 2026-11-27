@@ -246,7 +246,7 @@ async def test_spawn_failure_releases_prepared_stream_without_creating_work():
     conn = Connection(
         method="GET", path="/", raw_path=b"/", headers=Headers([])
     )
-    actor._spawn_stream_task(task_group, 1, conn, recipient, sender, None)
+    actor._spawn_stream_task(task_group, stream, conn, recipient, sender, None)
 
     assert recipient.disconnected
     assert sender._closed
@@ -1428,7 +1428,7 @@ async def test_a_rejected_stream_spawn_closes_its_coroutine(with_semaphore):
     conn = Connection(method='GET', path='/', raw_path=b'/', headers=Headers([]))
 
     group = _RefusingTaskGroup()
-    actor._spawn_stream_task(group, 1, conn, recipient, sender, None)
+    actor._spawn_stream_task(group, stream, conn, recipient, sender, None)
 
     handed, = group.handed
     _assert_closed(handed, 'the stream coroutine the group refused')

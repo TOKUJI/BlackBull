@@ -83,11 +83,23 @@ def _make_actor():
     return actor, app, writer
 
 
-def _rst_codes(actor, stream_id: int = 1) -> list[int]:
-    return [c.args[0].error_code for c in actor.send_frame.call_args_list
-            if getattr(c.args[0], 'FrameType', None)
-            and c.args[0].FrameType() == FrameTypes.RST_STREAM
-            and c.args[0].stream_id == stream_id]
+def _rst_codes(actor, stream_id: int = 1, writer=None) -> list[int]:
+    """Resets sent as control frames and, given *writer*, written directly."""
+    codes = [c.args[0].error_code for c in actor.send_frame.call_args_list
+             if getattr(c.args[0], 'FrameType', None)
+             and c.args[0].FrameType() == FrameTypes.RST_STREAM
+             and c.args[0].stream_id == stream_id]
+    if writer is not None:
+        written = b''.join(c.args[0] for c in writer.write.call_args_list
+                           if c.args and isinstance(c.args[0], (bytes, bytearray)))
+        pos = 0
+        while pos + 9 <= len(written):
+            length = int.from_bytes(written[pos:pos + 3], 'big')
+            if (written[pos + 3] == FrameTypes.RST_STREAM[0]
+                    and int.from_bytes(written[pos + 5:pos + 9], 'big') == stream_id):
+                codes.append(int.from_bytes(written[pos + 9:pos + 13], 'big'))
+            pos += 9 + length
+    return codes
 
 
 def _response_statuses(writer) -> list[bytes]:
@@ -129,12 +141,12 @@ class TestADeclaredOverCapBodyIsRefusedAtTheHead:
         """RFC 9113 §8.1 — ``NO_ERROR``.  The request was not malformed; we
         simply answered it early, and the peer should stop sending the body
         rather than treat its request as broken."""
-        actor, _, _ = _make_actor()
+        actor, _, writer = _make_actor()
         actor.receive = AsyncMock(side_effect=[
             _settings(), _headers(_post(_CAP * 100)), None])
         await actor.run()
 
-        assert _rst_codes(actor) == [ErrorCodes.NO_ERROR]
+        assert _rst_codes(actor, writer=writer) == [ErrorCodes.NO_ERROR]
 
     async def test_a_declared_body_within_the_cap_is_dispatched(self):
         actor, app, _ = _make_actor()

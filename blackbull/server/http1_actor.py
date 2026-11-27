@@ -47,7 +47,9 @@ _SERVER_WIDE_ALLOW = b'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS'
 _HTTP_PORT  = 80
 _HTTPS_PORT = 443
 
-_MAX_KEEPALIVE_DRAIN = 64 * 1024
+#: Unread request body read after a response so the connection survives
+#: (net/http's ``maxPostHandlerReadBytes``); also bounded by keep_alive_timeout.
+_MAX_KEEPALIVE_DRAIN = 256 * 1024
 
 # Trailers are always deliverable (the sender switches to chunked).  TLS
 # connections do NOT advertise pathsend: ``loop.sendfile`` raises
@@ -174,6 +176,15 @@ class RequestActor(Actor):
 # ---------------------------------------------------------------------------
 # HTTP1Actor — keep-alive connection loop
 # ---------------------------------------------------------------------------
+
+async def _drain(inner_receive: HTTP1Recipient, limit: float) -> bool:
+    """Read the rest of an unread body, within *limit* seconds (0: unbounded)."""
+    try:
+        async with asyncio.timeout(limit or None):
+            return await inner_receive.drain(_MAX_KEEPALIVE_DRAIN)
+    except TimeoutError:
+        return False
+
 
 class HTTP1Actor(Actor):
     """Drives the HTTP/1.1 keep-alive loop for one connection.
@@ -420,14 +431,15 @@ class HTTP1Actor(Actor):
                 if verdict is CONNECTION_MUST_CLOSE:
                     break
                 if (verdict is CONNECTION_NEEDS_DRAIN
-                        and not await inner_receive.drain(_MAX_KEEPALIVE_DRAIN)):
+                        and not await _drain(inner_receive, cfg.keep_alive_timeout)):
                     break
+                # Cleared once its body is settled: the close below reads it.
+                self._request = b''
 
                 # RFC 9112 §9.1 — honour Connection: close.
                 if not self._persistent:
                     break
 
-                self._request = b''
                 keep_alive = True
                 # The sender is fresh for every request, error replies before
                 # dispatch included: __init__ for the first, this for the rest.
@@ -439,6 +451,10 @@ class HTTP1Actor(Actor):
             # server-written response after a write found the peer gone):
             # drop what is in flight rather than raise on a dead pipe.
             send.mark_client_gone()
+        finally:
+            if self._request and any(self._request_framing):
+                # The close must not reset a peer still sending this body.
+                self._reader.body_unread = True
 
     # ------------------------------------------------------------------
     # Private helpers
