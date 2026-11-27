@@ -69,6 +69,28 @@ async def test_a_raising_foreign_app_is_contained_and_ends_the_connection():
     assert calls == ['/first']
 
 
+def _answering_then(after):
+    async def app(conn, receive, send):
+        await send({'type': 'http.response.start', 'status': 200,
+                    'headers': [(b'content-length', b'2')]})
+        await send({'type': 'http.response.body', 'body': b'ok'})
+        await after()
+    return app
+
+
+async def test_a_handler_raising_after_its_complete_response_keeps_the_connection():
+    async def boom():
+        raise RuntimeError('after the response')
+
+    async with served(_answering_then(boom)) as s:
+        w = await s.wire()
+        await w.send(_get())
+        first = await w.response()
+        await w.send(_get())
+        assert (first.status, first.header(b'connection'),
+                (await w.response()).status) == (200, None, 200)
+
+
 async def test_a_body_is_read_through_the_connection_buffer():
     payload = b'x' * 5000
 
@@ -106,6 +128,25 @@ async def test_a_request_timeout_answers_408_and_is_counted(monkeypatch, caplog)
         reset_settings_cache()
     assert [(r.cap, r.protocol, r.scope_path) for r in caplog.records
             if r.name == 'blackbull.caps'] == [('request_timeout', 'http1', '/')]
+
+
+async def test_a_request_timeout_after_a_complete_response_keeps_the_connection(
+        monkeypatch, caplog):
+    monkeypatch.setenv('BB_REQUEST_TIMEOUT', '0.05')
+    reset_settings_cache()
+    caplog.set_level(logging.WARNING, logger='blackbull.caps')
+    try:
+        async with served(_answering_then(asyncio.Event().wait)) as s:
+            w = await s.wire()
+            await w.send(_get())
+            first = await w.response()
+            await w.send(_get())
+            assert (first.status, first.header(b'connection'),
+                    (await w.response()).status) == (200, None, 200)
+    finally:
+        reset_settings_cache()
+    assert [r.cap for r in caplog.records
+            if r.name == 'blackbull.caps'] == ['request_timeout'] * 2
 
 
 # -- access log -----------------------------------------------------------

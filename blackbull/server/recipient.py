@@ -45,6 +45,10 @@ CONNECTION_REUSABLE = 0
 CONNECTION_NEEDS_DRAIN = 1
 CONNECTION_MUST_CLOSE = 2
 
+#: Unread request body read after a response so the connection survives
+#: (net/http's ``maxPostHandlerReadBytes``); also bounded by keep_alive_timeout.
+_MAX_KEEPALIVE_DRAIN = 256 * 1024
+
 # Frame-COUNT total for a consume-credited stream queue, whose byte total is the
 # advertised inbound window.  A conformant peer may legally burst that window as
 # 1-byte frames, so the count sits far above it; what it refuses is the
@@ -441,6 +445,18 @@ class HTTP1Recipient(BaseRecipient):
             # declined, and re-raise the 413 on the way.
             return False
         return not self._done and (self._chunked or bool(self._content_length))
+
+    def drain_settles(self) -> bool:
+        """Whether the drain after the response can ready the connection for
+        another request: the body was read, there is none, or a Content-Length
+        body has at most ``_MAX_KEEPALIVE_DRAIN`` left.  An open chunked body,
+        whose size is unknown, a refused one and a broken one cannot."""
+        if self.must_close:
+            return False
+        if self._done or not (self._chunked or self._content_length):
+            return True
+        # ``_content_length`` counts down as the body is read: it is the rest.
+        return not self._chunked and self._content_length <= _MAX_KEEPALIVE_DRAIN
 
     def after_dispatch(self) -> int:
         """What the connection should do now the handler has answered.

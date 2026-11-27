@@ -29,6 +29,13 @@ metadata; reinstall an editable checkout after changing that version.
 
 ### Fixed
 
+- HTTP/1.1: a response the server will close the connection after now says
+  `Connection: close`, so a client no longer sends its next request into a
+  closing connection and gets an EOF. A response written while more than
+  256 KiB of a Content-Length body, an unfinished chunked body, or a refused
+  one is still unread says so; a smaller unread body is drained after the
+  response as before. A handler that raises, or reaches `BB_REQUEST_TIMEOUT`,
+  after its response is complete no longer closes the connection (BLA-716).
 - A response sent before the request body has ended now reaches the client.
   HTTP/1.1 reads up to 256 KiB (was 64 KiB) of the unread body within
   `BB_KEEP_ALIVE_TIMEOUT` and keeps the connection; past that it sends FIN

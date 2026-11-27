@@ -20,7 +20,7 @@ from ..connection import (
 from ..headers import Headers
 from ..request import ClientDisconnected
 from ..protocol.framing import _CRLF, _HEAD_END, method_is
-from ..protocol.http1 import (FieldsTooLarge, LineCache, MessageError,
+from ..protocol.http1 import (BODYLESS, FieldsTooLarge, LineCache, MessageError,
                               ReadLimitExceeded, Unimplemented, UnsupportedVersion,
                               connection_options, parse_head, persistent,
                               request_framing)
@@ -28,7 +28,7 @@ from .deadline import Guard
 from .request_target import TARGET_ALLOWED_OCTETS, split_path_query
 from .recipient import (CONNECTION_MUST_CLOSE, CONNECTION_NEEDS_DRAIN,
                         AbstractReader, HTTP1Recipient, IncompleteReadError,
-                        RecipientFactory, _WS_READ_INLINE)
+                        RecipientFactory, _MAX_KEEPALIVE_DRAIN, _WS_READ_INLINE)
 from .sender import AbstractWriter, SenderFactory
 from ..native import NativeSend, ReceiveChannel, warns_app_dicts
 from .access_log import (AccessLogRecord as _AccessLogRecord,
@@ -46,10 +46,6 @@ _WS_GUID = b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'  # RFC 6455 §1.3
 _SERVER_WIDE_ALLOW = b'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS'
 _HTTP_PORT  = 80
 _HTTPS_PORT = 443
-
-#: Unread request body read after a response so the connection survives
-#: (net/http's ``maxPostHandlerReadBytes``); also bounded by keep_alive_timeout.
-_MAX_KEEPALIVE_DRAIN = 256 * 1024
 
 # Trailers are always deliverable (the sender switches to chunked).  TLS
 # connections do NOT advertise pathsend: ``loop.sendfile`` raises
@@ -209,7 +205,7 @@ class HTTP1Actor(Actor):
     #: Body length the current request declares; 0 when it declares none.
     _declared_body_len: int = 0
     #: ``(content_length, chunked)`` of the request ``_parse`` validated last.
-    _request_framing: tuple[int | None, bool] = (None, False)
+    _request_framing: tuple[int | None, bool] = BODYLESS
     _expects_continue: bool = False
     _persistent: bool = False
 
@@ -391,48 +387,66 @@ class HTTP1Actor(Actor):
                         HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
                     return
 
+                # Reusable: reader, body timeout and deadline are all connection
+                # properties.  ``bind`` re-derives the framing from the new head.
+                if inner_receive is None:
+                    inner_receive = RecipientFactory.http1(
+                        self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl,
+                        framing=self._request_framing, writer=self._writer)
+                else:
+                    inner_receive.bind(conn, self._request_framing)
+                if self._request_framing is not BODYLESS:
+                    # Its head must say whether this body lets the connection go on.
+                    send.request_body = inner_receive
+
                 # BB_REQUEST_TIMEOUT, parity with ``HTTP2Actor``'s per-stream
-                # ``asyncio.wait_for``.  No keep-alive across a timed-out
-                # request.
+                # ``asyncio.wait_for``.  A timed-out request ends keep-alive
+                # unless its response was complete.
                 try:
                     if cfg.request_timeout > 0:
-                        ok, inner_receive = await asyncio.wait_for(
+                        ok = await asyncio.wait_for(
                             self._dispatch_request(
-                                conn, send, cfg, dl, inner_receive,
+                                conn, send, inner_receive,
                                 _loop_start_perf, _loop_start_cpu),
                             timeout=cfg.request_timeout,
                         )
                     else:
-                        ok, inner_receive = await self._dispatch_request(
-                            conn, send, cfg, dl, inner_receive,
+                        ok = await self._dispatch_request(
+                            conn, send, inner_receive,
                             _loop_start_perf, _loop_start_cpu)
                 except (asyncio.TimeoutError, TimeoutError):
-                    logger.warning(
-                        '408 Request Timeout — handler on %s %s exceeded '
-                        'BB_REQUEST_TIMEOUT=%.1fs; closing connection',
-                        conn.method, conn.path,
-                        cfg.request_timeout,
-                    )
                     log_cap_hit('request_timeout',
                                 requested=cfg.request_timeout,
                                 limit=cfg.request_timeout,
                                 peer=self._peername,
                                 scope_path=conn.path,
                                 protocol='http1')
-                    if not send._started:
-                        await self._send_error_and_close(
-                            send, b'408 Request Timeout', HTTPStatus.REQUEST_TIMEOUT)
-                    break
+                    # A chunked body the cancelled handler may have left
+                    # mid-decode was still open at its head, which therefore
+                    # announced the close; the drain only ends it.
+                    ok = send._completed
+                    if not ok:
+                        logger.warning(
+                            '408 Request Timeout — handler on %s %s exceeded '
+                            'BB_REQUEST_TIMEOUT=%.1fs; closing connection',
+                            conn.method, conn.path, cfg.request_timeout)
+                        if not send._started:
+                            await self._send_error_and_close(
+                                send, b'408 Request Timeout', HTTPStatus.REQUEST_TIMEOUT)
                 if not ok:
                     break  # unhandled error — close connection
 
-                # Every keep-alive exit uses the recipient drain verdict; see the drain invariant.
-                verdict = inner_receive.after_dispatch()
-                if verdict is CONNECTION_MUST_CLOSE:
-                    break
-                if (verdict is CONNECTION_NEEDS_DRAIN
-                        and not await _drain(inner_receive, cfg.keep_alive_timeout)):
-                    break
+                # A request with a body exits keep-alive through the recipient
+                # drain verdict; see the drain invariant.
+                if self._request_framing is not BODYLESS:
+                    verdict = inner_receive.after_dispatch()
+                    if verdict is CONNECTION_MUST_CLOSE:
+                        break
+                    if (verdict is CONNECTION_NEEDS_DRAIN
+                            and not await _drain(inner_receive, cfg.keep_alive_timeout)):
+                        break
+                    if send.close_announced:
+                        self._persistent = False
                 # Cleared once its body is settled: the close below reads it.
                 self._request = b''
 
@@ -735,13 +749,11 @@ class HTTP1Actor(Actor):
         self,
         conn: Connection,
         send,
-        cfg,
-        dl,
-        inner_receive: 'HTTP1Recipient | None',
+        inner_receive: 'HTTP1Recipient',
         loop_start_perf: float,
         loop_start_cpu: float,
-    ) -> tuple[bool, 'HTTP1Recipient']:
-        """Prepare and run a request; return (keep_alive, inner_receive).
+    ) -> bool:
+        """Prepare and run a request; return whether keep-alive may go on.
 
         Rewrite HEAD to GET before RequestActor snapshots the compatibility scope.
         Keep the original method for access logs and suppress the response body.
@@ -770,22 +782,12 @@ class HTTP1Actor(Actor):
             conn.state['_original_method'] = conn.method
             conn.method = 'GET'
 
-        # Reusable: reader, body timeout and deadline are all connection
-        # properties.  ``bind`` re-derives the framing from the new head.
-        first_request_on_connection = inner_receive is None
-        if first_request_on_connection:
-            inner_receive = RecipientFactory.http1(
-                self._reader, conn, body_timeout=cfg.body_timeout, deadline=dl,
-                framing=self._request_framing, writer=self._writer)
-        else:
-            inner_receive.bind(conn, self._request_framing)
-
         if conn._asterisk_form:
             # RFC 9112 §3.2.4 — ``OPTIONS *`` targets the origin, not a
             # resource, so it never routes.
             await send(b'', HTTPStatus.NO_CONTENT,
                        [(b'allow', _SERVER_WIDE_ALLOW)])
-            return True, inner_receive
+            return True
 
         request_actor = self._request_actor
         if request_actor is None:
@@ -803,7 +805,9 @@ class HTTP1Actor(Actor):
             # without the 408 synthesis.
             raise
         except Exception:
-            return False, inner_receive
+            # After a complete response the connection goes on as after a
+            # normal return: closing it now would be unannounced.
+            return send._completed
         finally:
             if log_record is not None:
                 log_record.mark('dispatch_done')
@@ -811,8 +815,8 @@ class HTTP1Actor(Actor):
         if send._response_started and not send._completed:
             # A response with an open body or trailer section has not reached
             # its declared wire boundary, so the next request cannot reuse it.
-            return False, inner_receive
-        return True, inner_receive
+            return False
+        return True
 
     async def _read_headers(self, max_total: int) -> None:
         """Read the next message head into ``self._request``.
