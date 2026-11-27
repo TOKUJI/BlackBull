@@ -1155,9 +1155,6 @@ def topic_matches_filter(topic: str, filter_str: str) -> bool:
     leading-character rule (§4.7.2), and ``$share/<group>/<filter>`` shared
     subscriptions (§4.8.2).
     """
-    if topic == '':
-        return False
-
     # §4.8.2 — a shared subscription matches by its filter portion.
     if filter_str.startswith('$share/'):
         shared = split_shared(filter_str)
@@ -1165,6 +1162,14 @@ def topic_matches_filter(topic: str, filter_str: str) -> bool:
             return False
         filter_str = shared[1]
 
+    return _matches_filter(topic, filter_str)
+
+
+def _matches_filter(topic: str, filter_str: str) -> bool:
+    if not topic:
+        return False
+    if '+' not in filter_str and '#' not in filter_str:
+        return topic == filter_str
     topic_levels = topic.split('/')
     filter_levels = filter_str.split('/')
 
