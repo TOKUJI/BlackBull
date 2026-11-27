@@ -6430,7 +6430,10 @@ a declared chunk size must not select an unbounded allocation.</p>
 written refusal. <code>ConnectionProtocol.linger_close</code> discards remaining input
 within byte and time bounds. Keep both: one bounds work, the other prevents
 a refused peer from retaining the connection. Delivery stays best-effort
-when the peer does not read.</p>
+when the peer does not read. A response sent before its request body ended
+first reads up to 256 KiB of that body within <code>BB_KEEP_ALIVE_TIMEOUT</code>, which
+keeps the connection; past that, the request still arriving makes the close
+linger even when nothing is buffered.</p>
 <h3 id="accept-admission">Accept admission<a class="headerlink" href="#accept-admission" title="Permanent link">&para;</a></h3>
 <p>New TCP listeners carry <code>IPPROTO_TCP</code> so asyncio enables <code>TCP_NODELAY</code>
 on accepted connections, as uvloop does.</p>

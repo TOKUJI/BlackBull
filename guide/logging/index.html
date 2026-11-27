@@ -6650,7 +6650,7 @@ record on <code>blackbull.caps</code> when it fires.  Coverage:</p>
 </tr>
 <tr>
 <td><code>BB_FRAME_RATE_LIMIT</code></td>
-<td>A metered control frame exceeded its per-type budget (H/2 <code>RST_STREAM</code> — received on an open stream while the peer reset at least half its recent streams, or emitted, each its own budget — <code>PING</code>, <code>SETTINGS</code>, zero-length frames; WebSocket control frames).  Logged as cap name <code>frame_rate</code>; <code>protocol</code> says which protocol</td>
+<td>A metered control frame exceeded its per-type budget (H/2 <code>RST_STREAM</code> — received on an open stream while the peer reset at least half its recent streams, or emitted other than the <code>NO_ERROR</code> that ends a request after its response, each its own budget — <code>PING</code>, <code>SETTINGS</code>, zero-length frames; WebSocket control frames).  Logged as cap name <code>frame_rate</code>; <code>protocol</code> says which protocol</td>
 </tr>
 <tr>
 <td><code>BB_MQTT_MAX_PACKET_SIZE</code></td>
