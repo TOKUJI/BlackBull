@@ -6415,7 +6415,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_REQUEST_TIMEOUT</code></td>
 <td><code>0.0</code></td>
-<td>Seconds allowed for HTTP/1.1 handler dispatch or an HTTP/2 stream handler. A breach cancels the handler; HTTP/1.1 answers 408 and closes, HTTP/2 sends RST_STREAM(CANCEL) while sibling streams survive. <code>0</code> disables. Choose a budget compatible with intentional long-lived requests.</td>
+<td>Seconds allowed for HTTP/1.1 handler dispatch or an HTTP/2 stream handler. A breach cancels the handler; HTTP/1.1 answers 408 and closes, or keeps the connection if the response was already complete; HTTP/2 sends RST_STREAM(CANCEL) while sibling streams survive. <code>0</code> disables. Choose a budget compatible with intentional long-lived requests.</td>
 </tr>
 <tr>
 <td><code>BB_HEADER_TIMEOUT</code></td>
@@ -6435,7 +6435,7 @@ first-hit-then-summary rate-limit model.</p>
 <tr>
 <td><code>BB_KEEP_ALIVE_TIMEOUT</code></td>
 <td><code>5.0</code></td>
-<td>Seconds an idle HTTP/1.1 keep-alive connection is held open after a complete response, and at most spent reading up to 256 KiB of request body a handler left unread; past either bound the connection closes.  Lower for high-fan-in deployments; higher for chatty clients on slow links.</td>
+<td>Seconds an idle HTTP/1.1 keep-alive connection is held open after a complete response, and at most spent reading up to 256 KiB of request body a handler left unread; past either bound the connection closes.  A response written with more of the body than that, or an unfinished chunked body, still unread says <code>Connection: close</code>.  Lower for high-fan-in deployments; higher for chatty clients on slow links.</td>
 </tr>
 <tr>
 <td><code>BB_TCP_USER_TIMEOUT_MS</code></td>

@@ -5072,6 +5072,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.drain_settles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drain_settles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP1Recipient.needs_drain" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6633,6 +6644,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#blackbull.server.recipient.HTTP1Recipient.drain_settles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drain_settles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#blackbull.server.recipient.HTTP1Recipient.needs_drain" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -7524,6 +7546,27 @@ cleanly.  Returns True if fully drained (or the peer disconnected),
 False if the unread body exceeded <em>max_bytes</em> or stalled past
 body_timeout — the caller should then close the connection rather than
 keep it alive.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="blackbull.server.recipient.HTTP1Recipient.drain_settles" class="doc doc-heading">
+            <code class="highlight language-python"><span class="n">drain_settles</span><span class="p">()</span></code>
+
+<a href="#blackbull.server.recipient.HTTP1Recipient.drain_settles" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Whether the drain after the response can ready the connection for
+another request: the body was read, there is none, or a Content-Length
+body has at most <code>_MAX_KEEPALIVE_DRAIN</code> left.  An open chunked body,
+whose size is unknown, a refused one and a broken one cannot.</p>
 
 
     </div>
