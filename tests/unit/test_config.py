@@ -176,6 +176,37 @@ def test_real_env_beats_dotenv(captured_serve, monkeypatch, tmp_path):
     assert captured_serve['port'] == 9200           # process env wins over .env
 
 
+@pytest.mark.parametrize('var, field, value', [
+    ('BLACKBULL_PORT', 'port', 8443),
+    ('BLACKBULL_CERT', 'certfile', 'c.pem'),
+    ('BLACKBULL_KEY', 'keyfile', 'k.pem'),
+    ('BLACKBULL_UNIX_PATH', 'unix_path', '/run/bb.sock'),
+    ('BLACKBULL_RELOAD', 'reload', True),
+])
+@pytest.mark.parametrize('where', ['environment', '.env'])
+def test_an_empty_variable_counts_as_unset(captured_serve, monkeypatch, tmp_path,
+                                           var, field, value, where):
+    """VAR= (as docker-compose writes ${X:-} for an unset X) must not override AppConfig."""
+    monkeypatch.chdir(tmp_path)
+    if where == 'environment':
+        monkeypatch.setenv(var, '')
+    else:
+        pytest.importorskip('dotenv')
+        monkeypatch.delenv(var, raising=False)
+        (tmp_path / '.env').write_text(f'{var}=\n')
+    BlackBull(config=AppConfig(**{field: value})).run()
+    assert captured_serve[field] == value
+
+
+def test_an_empty_variable_lets_dotenv_through(captured_serve, monkeypatch, tmp_path):
+    pytest.importorskip('dotenv')
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('BLACKBULL_PORT', '')
+    (tmp_path / '.env').write_text('BLACKBULL_PORT=9100\n')
+    BlackBull().run()
+    assert captured_serve['port'] == 9100
+
+
 # ---------------------------------------------------------------------------
 # resolve_run_config — source attribution
 # ---------------------------------------------------------------------------

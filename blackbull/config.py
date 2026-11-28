@@ -103,6 +103,19 @@ def _load_dotenv_values() -> dict[str, str]:
     return {k: v for k, v in dotenv_values('.env').items() if v is not None}
 
 
+def _from_environment(name: str, dotenv: dict[str, str]) -> tuple[Any, str] | None:
+    """*name*'s ``BLACKBULL_*`` value and its source, from the environment then *dotenv*.
+
+    An empty value is unset, so ``BLACKBULL_CERT=`` defers to the next source.
+    """
+    env_name = _ENV_VARS[name].metadata['env']
+    for raw, source in ((os.environ.get(env_name), f'${env_name}'),
+                        (dotenv.get(env_name), '.env')):
+        if raw:
+            return _ENV_VARS[name].metadata['parse'](raw), source
+    return None
+
+
 def resolve_run_config(
     explicit: dict[str, Any],
     config: AppConfig | None,
@@ -112,9 +125,9 @@ def resolve_run_config(
     Precedence, highest to lowest:
 
     1. an explicit ``run(...)`` keyword argument (anything not ``None``);
-    2. a ``BLACKBULL_*`` environment variable (for the deploy-time settings in
-       ``_ENV_VARS``);
-    3. a ``BLACKBULL_*`` entry in a ``.env`` file (``[dotenv]`` extra);
+    2. a non-empty ``BLACKBULL_*`` environment variable (for the deploy-time
+       settings in ``_ENV_VARS``);
+    3. a non-empty ``BLACKBULL_*`` entry in a ``.env`` file (``[dotenv]`` extra);
     4. the bound [`AppConfig`][] field, if declared (non-default);
     5. the built-in default.
 
@@ -133,16 +146,10 @@ def resolve_run_config(
             resolved[name], sources[name] = given, 'argument'
             continue
 
-        if name in _ENV_VARS:
-            env_name = _ENV_VARS[name].metadata['env']
-            coerce = _ENV_VARS[name].metadata['parse']
-            raw = os.environ.get(env_name)
-            if raw is not None:
-                resolved[name], sources[name] = coerce(raw), f'${env_name}'
-                continue
-            if env_name in dotenv:
-                resolved[name], sources[name] = coerce(dotenv[env_name]), '.env'
-                continue
+        found = _from_environment(name, dotenv) if name in _ENV_VARS else None
+        if found is not None:
+            resolved[name], sources[name] = found
+            continue
 
         if config is not None:
             cfg_val = getattr(config, name)

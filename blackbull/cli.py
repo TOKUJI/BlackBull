@@ -109,7 +109,7 @@ def _tls_pair(args, file_pair: dict, config):
     *file_pair* (the ``--config`` ``[tls]`` table), then *config* (the app's
     AppConfig). Half a pair, or one that does not load, raises ValueError.
     """
-    from .config import _ENV_VARS, _load_dotenv_values, log_config_sources  # noqa: PLC0415
+    from .config import _from_environment, _load_dotenv_values, log_config_sources  # noqa: PLC0415
     from .server.server import _http_tls_context  # noqa: PLC0415
     dotenv = _load_dotenv_values()
     resolved, sources = {}, {}
@@ -118,10 +118,8 @@ def _tls_pair(args, file_pair: dict, config):
         if flag is not None:  # even --certfile '', which opts out of the other sources
             resolved[name], sources[name] = flag, 'argument'
             continue
-        var = _ENV_VARS[name].metadata['env']
         candidates = (
-            (os.environ.get(var), f'${var}'),
-            (dotenv.get(var), '.env'),
+            _from_environment(name, dotenv) or (None, None),
             (file_pair.get(name), '--config [tls]'),
             (getattr(config, name, None), 'AppConfig'),
         )

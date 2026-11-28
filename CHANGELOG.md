@@ -45,6 +45,14 @@ metadata; reinstall an editable checkout after changing that version.
   `--bind`. `serve()` and `app.run()` with `certfile=` warn (`UserWarning`)
   about each stated HTTP listener that has no `tls=`, since it serves
   plaintext (BLA-731).
+- `app.run()`: an empty `BLACKBULL_*` variable, in the environment or
+  `.env`, now counts as unset instead of overriding `AppConfig`. An empty
+  `BLACKBULL_CERT` / `BLACKBULL_KEY` no longer turns an `AppConfig`
+  certificate into plaintext, and an empty `BLACKBULL_RELOAD` no longer turns
+  off `AppConfig(reload=True)`. An empty `BLACKBULL_PORT` or
+  `BLACKBULL_UNIX_PATH` falls back to `AppConfig` or the default — an
+  OS-chosen port on every interface — instead of failing at startup
+  (BLA-732).
 
 ### Fixed
 
