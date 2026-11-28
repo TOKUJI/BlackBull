@@ -98,9 +98,9 @@ kwargs = {name: value for name, value in overrides.items() if value is not None}
 app.use(Compression(**kwargs))
 ```
 
-The TLS keys (`[tls] cert`, `[tls] key`) are CLI-arg fallbacks
-applied to `--certfile` / `--keyfile` when those aren't
-specified on the command line.
+The TLS keys (`[tls] cert`, `[tls] key`) give the CLI a certificate when
+neither `--certfile` / `--keyfile` nor `BLACKBULL_CERT` / `BLACKBULL_KEY`
+does — see [the CLI's certificate order](#the-clis-certificate).
 
 ## CLI flags
 
@@ -221,6 +221,18 @@ provenance of each non-default deploy setting is logged once at
 startup on the `blackbull.config` logger, e.g.
 `config: port=9000 (from $BLACKBULL_PORT)`.
 
+#### The CLI's certificate
+
+The `blackbull` CLI resolves the certificate pair, and only that, from these
+sources: each of `--certfile` and `--keyfile` comes from the first that names
+it — the flag, `BLACKBULL_CERT` / `BLACKBULL_KEY`, the same key in `.env`,
+`[tls]` in `--config`, then the app's `AppConfig`.  An empty value counts as
+unset, except as a flag: `--certfile '' --keyfile ''` serves plaintext in
+spite of the others.  Half a pair is refused.
+`BLACKBULL_PORT`, `BLACKBULL_UNIX_PATH`, `BLACKBULL_RELOAD` and the other
+`AppConfig` fields apply to `app.run()` only; the CLI takes `--bind`,
+`--reload`, `--workers` and its other flags instead.
+
 There is no `host` field / `BLACKBULL_HOST`: `port` binds every
 interface.  To listen on one interface, pass
 `listeners=[Listener(Tcp(port, host=...))]` (see
@@ -229,9 +241,9 @@ interface.  To listen on one interface, pass
 
 #### `.env` files
 
-Install the optional extra to let `app.run()` (and the `blackbull`
-CLI) read `BLACKBULL_*` values from a `.env` file in the working
-directory:
+Install the optional extra to let `app.run()` read `BLACKBULL_*` values
+(and the `blackbull` CLI `BLACKBULL_CERT` / `BLACKBULL_KEY`) from a `.env`
+file in the working directory:
 
 ```bash
 pip install 'blackbull[dotenv]'

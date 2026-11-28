@@ -42,8 +42,8 @@ def _load_config(path: str) -> dict[str, str]:
 
     The special ``[tls] cert`` and ``[tls] key`` keys are returned under the
     synthetic names ``_certfile`` and ``_keyfile`` (leading underscore marks
-    them as CLI-arg fallbacks, not env-var overrides) so the caller can apply
-    them to ``args.certfile`` / ``args.keyfile`` when those args are ``None``.
+    them as certificate fallbacks, not env-var overrides); ``_tls_pair`` ranks
+    them below ``BLACKBULL_CERT`` / ``BLACKBULL_KEY``.
     """
     try:
         with open(path, 'rb') as fh:
@@ -90,31 +90,56 @@ _DEFAULT_BIND = '127.0.0.1:8000'
 _WILDCARD_HOSTS = ('', '0.0.0.0', '::')
 
 
-def _tcp_listeners(host: str, port: int, certfile: str | None, keyfile: str | None):
+def _tcp_listeners(host: str, port: int, tls):
     """The listeners that bind only *host*, or None for every interface.
 
     The server applies its certificate only to the listeners it builds, so a
-    listener stated here carries its own context. A pair that does not load
-    raises ValueError.
+    listener stated here carries *tls* itself.
     """
     if host in _WILDCARD_HOSTS:
         return None
     from .server.listener import Listener, Tcp  # noqa: PLC0415
-    from .server.server import _http_tls_context  # noqa: PLC0415
-    try:
-        tls = _http_tls_context(certfile, keyfile) if certfile else None
-    except OSError as exc:  # ssl.SSLError included
-        raise ValueError(f'cannot load {certfile} and {keyfile}: {exc}') from None
     return [Listener(Tcp(port, host=host), tls=tls)]
 
 
-def _half_tls_pair(args) -> bool:
-    """Report and refuse a certificate without its key, or a key without its certificate."""
-    if bool(args.certfile) == bool(args.keyfile):
-        return False
-    print('blackbull: --certfile and --keyfile go together; pass both or neither',
-          file=sys.stderr)
-    return True
+def _tls_pair(args, file_pair: dict, config):
+    """Resolve ``args.certfile``/``args.keyfile`` and return their HTTP context, or None.
+
+    Each falls back to ``BLACKBULL_CERT``/``BLACKBULL_KEY``, then ``.env``, then
+    *file_pair* (the ``--config`` ``[tls]`` table), then *config* (the app's
+    AppConfig). Half a pair, or one that does not load, raises ValueError.
+    """
+    from .config import _ENV_VARS, _load_dotenv_values, log_config_sources  # noqa: PLC0415
+    from .server.server import _http_tls_context  # noqa: PLC0415
+    dotenv = _load_dotenv_values()
+    resolved, sources = {}, {}
+    for name in ('certfile', 'keyfile'):
+        flag = getattr(args, name)
+        if flag is not None:  # even --certfile '', which opts out of the other sources
+            resolved[name], sources[name] = flag, 'argument'
+            continue
+        var = _ENV_VARS[name].metadata['env']
+        candidates = (
+            (os.environ.get(var), f'${var}'),
+            (dotenv.get(var), '.env'),
+            (file_pair.get(name), '--config [tls]'),
+            (getattr(config, name, None), 'AppConfig'),
+        )
+        # Empty is unset, as docker-compose writes ${CERT:-} for a missing CERT.
+        resolved[name], sources[name] = next(
+            ((value, source) for value, source in candidates if value), (None, 'default'))
+    log_config_sources(resolved, sources)
+    args.certfile, args.keyfile = resolved['certfile'], resolved['keyfile']
+    if bool(args.certfile) != bool(args.keyfile):
+        have, missing = ('certfile', 'keyfile') if args.certfile else ('keyfile', 'certfile')
+        where = f'--{have}' if sources[have] == 'argument' else sources[have]
+        raise ValueError(f'the {have} from {where} has no {missing}; give both or neither')
+    if not args.certfile:
+        return None
+    try:
+        return _http_tls_context(args.certfile, args.keyfile)
+    except OSError as exc:  # ssl.SSLError included
+        raise ValueError(f'cannot load {args.certfile} and {args.keyfile}: {exc}') from None
 
 
 def _split_bind(spec: str):
@@ -237,11 +262,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         '--certfile', default=None, metavar='PATH',
-        help='TLS certificate file.  Required for HTTPS / HTTP/2.',
+        help='TLS certificate file.  Required for HTTPS / HTTP/2.  Defaults to '
+             'BLACKBULL_CERT, .env, [tls] cert in --config, then the app\'s AppConfig.',
     )
     p.add_argument(
         '--keyfile', default=None, metavar='PATH',
-        help='TLS private key file.  Required for HTTPS / HTTP/2.',
+        help='TLS private key file.  Required for HTTPS / HTTP/2.  Defaults to '
+             'BLACKBULL_KEY, .env, [tls] key in --config, then the app\'s AppConfig.',
     )
     p.add_argument(
         '--workers', type=int, default=None, metavar='N',
@@ -305,11 +332,12 @@ def _build_serve_parser() -> argparse.ArgumentParser:
     p.add_argument(
         '--certfile', default=None, metavar='PATH',
         help='TLS certificate file.  Supplying --certfile and --keyfile '
-             'enables HTTPS and HTTP/2 (via ALPN).',
+             'enables HTTPS and HTTP/2 (via ALPN).  Defaults to BLACKBULL_CERT, then .env.',
     )
     p.add_argument(
         '--keyfile', default=None, metavar='PATH',
-        help='TLS private key file.  Required alongside --certfile.',
+        help='TLS private key file.  Required alongside --certfile.  Defaults to '
+             'BLACKBULL_KEY, then .env.',
     )
     p.add_argument(
         '--index', default='index.html', metavar='NAME',
@@ -358,13 +386,10 @@ def _build_static_app(directory: str, *, etag: bool, cache: bool,
 def _serve_static(argv: list[str]) -> int:
     parser = _build_serve_parser()
     args = parser.parse_args(argv)
-    if _half_tls_pair(args):
-        return 1
 
     try:
         addr = _split_bind(args.bind)
-        listeners = (_tcp_listeners(addr[1], addr[2], args.certfile, args.keyfile)
-                     if addr[0] == 'tcp' else None)
+        tls = _tls_pair(args, {}, None)
     except ValueError as exc:
         print(f'blackbull: {exc}', file=sys.stderr)
         return 1
@@ -372,8 +397,10 @@ def _serve_static(argv: list[str]) -> int:
     port = 0
     host = ''
     unix_path: str | None = None
+    listeners = None
     if addr[0] == 'tcp':
         _, host, port = addr
+        listeners = _tcp_listeners(host, port, tls)
     elif addr[0] == 'unix':
         _, unix_path = addr
     else:  # fd:// makes no sense for the zero-code static server
@@ -436,6 +463,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    file_pair: dict[str, str] = {}
     if args.config is not None:
         try:
             cfg = _load_config(args.config)
@@ -446,18 +474,11 @@ def main(argv: list[str] | None = None) -> int:
         for var, val in cfg.items():
             if not var.startswith('_'):
                 os.environ.setdefault(var, val)
-        # TLS paths: apply only when CLI did not specify them explicitly.
-        if args.certfile is None and '_certfile' in cfg:
-            args.certfile = cfg['_certfile']
-        if args.keyfile is None and '_keyfile' in cfg:
-            args.keyfile = cfg['_keyfile']
-    if _half_tls_pair(args):
-        return 1
+        file_pair = {name: cfg[f'_{name}'] for name in ('certfile', 'keyfile')
+                     if f'_{name}' in cfg}
 
     try:
         addr = _split_bind(args.bind)
-        listeners = (_tcp_listeners(addr[1], addr[2], args.certfile, args.keyfile)
-                     if addr[0] == 'tcp' else None)
     except ValueError as exc:
         print(f'blackbull: {exc}', file=sys.stderr)
         return 1
@@ -478,6 +499,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f'blackbull: {exc}', file=sys.stderr)
         return 1
     from . import ASGIApp, BlackBull  # noqa: PLC0415
+    try:
+        tls = _tls_pair(args, file_pair, app._config if isinstance(app, BlackBull) else None)
+    except ValueError as exc:
+        print(f'blackbull: {exc}', file=sys.stderr)
+        return 1
+    listeners = _tcp_listeners(addr[1], addr[2], tls) if addr[0] == 'tcp' else None
     if not isinstance(app, (BlackBull, ASGIApp)):
         app = ASGIApp(app)
 
