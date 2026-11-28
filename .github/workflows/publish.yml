@@ -24,47 +24,14 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build distributions
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-        with:
-          fetch-depth: 0   # so `python -m build` sees full git context if needed
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0   # v7.1.0
-        with:
-          # Deliberately pinned, not matrixed: BlackBull is pure Python and
-          # builds one `py3-none-any` wheel, so the building interpreter is
-          # not recorded in the artefact and a matrix here would produce
-          # identical files.  Runtime version coverage is test.yml's job.
-          python-version: '3.12'
-
-      - name: Install build tooling
-        run: python -m pip install --upgrade build 'griffelib>=2.4,<3'
-
-      - name: Refuse a tag that breaks the public API without raising MINOR
-        run: python -m tools.api_surface release "$GITHUB_REF_NAME"
-
-      - name: Build wheel + sdist
-        run: python -m build
-
-      - name: List build artefacts
-        run: ls -la dist/
-
-      - name: Upload artefacts for the publish job
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
-        with:
-          name: dist
-          path: dist/
-          retention-days: 7
+  distributions:
+    uses: ./.github/workflows/distributions.yml
+    with:
+      verify-release: true
 
   publish:
     name: Publish to PyPI via OIDC
-    needs: build
+    needs: distributions
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # Optional: bind to a deployment environment so review/approval
