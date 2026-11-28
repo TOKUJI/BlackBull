@@ -196,6 +196,8 @@ Resolution order in `run()` is, highest to lowest:
 4. the value declared on the bound `AppConfig`;
 5. `serve()`'s built-in default.
 
+An empty variable, such as `BLACKBULL_CERT=`, counts as unset in both tiers.
+
 !!! warning "The `BLACKBULL_*` names move to `BB_*`"
     These variables, and `BLACKBULL_ENV`, will be renamed to the `BB_` prefix
     ([BBD008](../reference/deprecations.md)). Until then only the
