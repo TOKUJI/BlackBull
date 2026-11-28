@@ -95,6 +95,18 @@ metadata; reinstall an editable checkout after changing that version.
 - A foreign ASGI app sees `http.response.trailers` in `scope['extensions']`
   on HTTP/1.1 and HTTP/2, where trailers were already delivered but never
   advertised; connectrpc refused its gRPC protocol for that (BLA-711).
+- Client: HTTP/2 Extended CONNECT for WebSocket sends
+  `Sec-WebSocket-Version: 13` (RFC 8441 §5), which it omitted (BLA-667).
+- WebSocket: `ws.subprotocols` holds the offers from every
+  `Sec-WebSocket-Protocol` field line, in order, not only the first line's
+  (BLA-660).
+- A 405 response's `Allow` lists `HEAD` beside `GET`, since a GET route
+  answers HEAD too (BLA-600).
+- MQTT: a client PUBLISH with a Subscription Identifier is refused with
+  `0x82` (Protocol Error) and one with a nonzero Topic Alias with `0x94`
+  (Topic Alias Invalid), instead of being forwarded as sent. A queued or
+  retained message whose Message Expiry Interval has elapsed is discarded,
+  and one delivered before then carries the remaining interval (BLA-597).
 
 ## [0.83.1] — 2026-11-25
 
