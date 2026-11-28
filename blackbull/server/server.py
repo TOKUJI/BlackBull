@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 
 
 def _tls_context(certfile, keyfile, alpn=()) -> ssl.SSLContext:
-    """A server context for *certfile* and *keyfile*: TLS 1.2 or later, no compression."""
     context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     if alpn:
         context.set_alpn_protocols(list(alpn))
@@ -52,7 +51,6 @@ def _tls_context(certfile, keyfile, alpn=()) -> ssl.SSLContext:
 
 
 def _http_tls_context(certfile, keyfile) -> ssl.SSLContext:
-    """The HTTP listener's context, which offers ``h2`` then ``http/1.1``."""
     return _tls_context(certfile, keyfile, ('h2', 'http/1.1'))
 
 
