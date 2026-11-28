@@ -125,7 +125,7 @@ def _tls_pair(args, file_pair: dict, config):
             (file_pair.get(name), '--config [tls]'),
             (getattr(config, name, None), 'AppConfig'),
         )
-        # Empty is unset, as docker-compose writes ${CERT:-} for a missing CERT.
+        # Below the flag, an empty value is unset.
         resolved[name], sources[name] = next(
             ((value, source) for value, source in candidates if value), (None, 'default'))
     log_config_sources(resolved, sources)
