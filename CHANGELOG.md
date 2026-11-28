@@ -27,6 +27,15 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+### Security
+
+- CLI: `--certfile` and `--keyfile` serve HTTPS again when `--bind` names a
+  host, including the default `127.0.0.1:8000`. Since 0.83.1 such a port
+  served plaintext HTTP, and `blackbull serve` printed an `https://` address
+  for it. A certificate without its key, or a key without its certificate, is
+  now refused — by the CLI with exit status 1, by `serve()`, `app.run()` and
+  `ASGIServer` with `TypeError` — instead of starting without TLS (BLA-728).
+
 ### Fixed
 
 - HTTP/1.1: a response the server will close the connection after now says

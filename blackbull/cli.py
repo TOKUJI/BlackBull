@@ -90,12 +90,31 @@ _DEFAULT_BIND = '127.0.0.1:8000'
 _WILDCARD_HOSTS = ('', '0.0.0.0', '::')
 
 
-def _tcp_listeners(host: str, port: int):
-    """The listeners that bind only *host*, or None for every interface."""
+def _tcp_listeners(host: str, port: int, certfile: str | None, keyfile: str | None):
+    """The listeners that bind only *host*, or None for every interface.
+
+    The server applies its certificate only to the listeners it builds, so a
+    listener stated here carries its own context. A pair that does not load
+    raises ValueError.
+    """
     if host in _WILDCARD_HOSTS:
         return None
     from .server.listener import Listener, Tcp  # noqa: PLC0415
-    return [Listener(Tcp(port, host=host))]
+    from .server.server import _http_tls_context  # noqa: PLC0415
+    try:
+        tls = _http_tls_context(certfile, keyfile) if certfile else None
+    except OSError as exc:  # ssl.SSLError included
+        raise ValueError(f'cannot load {certfile} and {keyfile}: {exc}') from None
+    return [Listener(Tcp(port, host=host), tls=tls)]
+
+
+def _half_tls_pair(args) -> bool:
+    """Report and refuse a certificate without its key, or a key without its certificate."""
+    if bool(args.certfile) == bool(args.keyfile):
+        return False
+    print('blackbull: --certfile and --keyfile go together; pass both or neither',
+          file=sys.stderr)
+    return True
 
 
 def _split_bind(spec: str):
@@ -339,9 +358,13 @@ def _build_static_app(directory: str, *, etag: bool, cache: bool,
 def _serve_static(argv: list[str]) -> int:
     parser = _build_serve_parser()
     args = parser.parse_args(argv)
+    if _half_tls_pair(args):
+        return 1
 
     try:
         addr = _split_bind(args.bind)
+        listeners = (_tcp_listeners(addr[1], addr[2], args.certfile, args.keyfile)
+                     if addr[0] == 'tcp' else None)
     except ValueError as exc:
         print(f'blackbull: {exc}', file=sys.stderr)
         return 1
@@ -375,7 +398,6 @@ def _serve_static(argv: list[str]) -> int:
     print(f'blackbull: serving {os.path.abspath(args.directory)} on {where}',
           file=sys.stderr)
 
-    listeners = _tcp_listeners(host, port) if addr[0] == 'tcp' else None
     try:
         _serve(
             app,
@@ -429,20 +451,22 @@ def main(argv: list[str] | None = None) -> int:
             args.certfile = cfg['_certfile']
         if args.keyfile is None and '_keyfile' in cfg:
             args.keyfile = cfg['_keyfile']
+    if _half_tls_pair(args):
+        return 1
 
     try:
         addr = _split_bind(args.bind)
+        listeners = (_tcp_listeners(addr[1], addr[2], args.certfile, args.keyfile)
+                     if addr[0] == 'tcp' else None)
     except ValueError as exc:
         print(f'blackbull: {exc}', file=sys.stderr)
         return 1
 
     port = 0
-    listeners = None
     unix_path: str | None = None
     inherited_fd: int | None = None
     if addr[0] == 'tcp':
-        _, host, port = addr
-        listeners = _tcp_listeners(host, port)
+        port = addr[2]
     elif addr[0] == 'unix':
         _, unix_path = addr
     elif addr[0] == 'fd':

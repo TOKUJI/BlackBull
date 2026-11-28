@@ -90,6 +90,13 @@ class TestASGIServerInit:
         with pytest.raises(FileNotFoundError):
             ASGIServer(_noop_app, certfile=cert_path, keyfile='/nonexistent/key.pem')
 
+    @pytest.mark.parametrize('half', ['certfile', 'keyfile'])
+    def test_half_a_pair_raises(self, half, cert_path, key_path, manage_cert_and_key):
+        """Half a pair would serve plaintext, so it is refused rather than deferred."""
+        path = cert_path if half == 'certfile' else key_path
+        with pytest.raises(TypeError, match='certfile and keyfile'):
+            ASGIServer(_noop_app, **{half: path})
+
     def test_ssl_context_and_certfile_together_raises(self, cert_path, key_path, manage_cert_and_key):
         ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         with pytest.raises(TypeError):
