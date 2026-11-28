@@ -6123,9 +6123,9 @@ explicit <code>run(...)</code> argument overrides them.</p>
 <p>Precedence, highest to lowest:</p>
 <ol>
 <li>an explicit <code>run(...)</code> keyword argument (anything not <code>None</code>);</li>
-<li>a <code>BLACKBULL_*</code> environment variable (for the deploy-time settings in
-   <code>_ENV_VARS</code>);</li>
-<li>a <code>BLACKBULL_*</code> entry in a <code>.env</code> file (<code>[dotenv]</code> extra);</li>
+<li>a non-empty <code>BLACKBULL_*</code> environment variable (for the deploy-time
+   settings in <code>_ENV_VARS</code>);</li>
+<li>a non-empty <code>BLACKBULL_*</code> entry in a <code>.env</code> file (<code>[dotenv]</code> extra);</li>
 <li>the bound <a class="autorefs autorefs-internal" title="AppConfig
 
 
