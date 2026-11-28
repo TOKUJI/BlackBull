@@ -10,6 +10,7 @@ from blackbull import BlackBull, Listener, Tcp
 
 tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 tls.load_cert_chain('cert.pem', 'key.pem')
+tls.set_alpn_protocols(['h2', 'http/1.1'])   # without it, every client gets HTTP/1.1
 
 app = BlackBull()
 
@@ -66,7 +67,9 @@ app.run(listeners=[
 ```
 
 `app.run(certfile=..., keyfile=...)` still means HTTPS: it builds the context
-that the one listener it constructs terminates.
+that the one listener it constructs terminates.  It never reaches a listener
+you state: alongside `listeners=`, such a listener without `tls=` serves
+plaintext, and the server warns (`UserWarning`) naming it.
 
 ## Who serves a listener
 

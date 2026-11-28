@@ -94,6 +94,8 @@ def _load_dotenv_values() -> dict[str, str]:
     file is present — ``BLACKBULL_*`` resolution from the real environment still
     works either way.
     """
+    if not os.path.isfile('.env'):  # spares importing python-dotenv
+        return {}
     try:
         from dotenv import dotenv_values  # noqa: PLC0415
     except ImportError:

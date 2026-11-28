@@ -35,6 +35,16 @@ metadata; reinstall an editable checkout after changing that version.
   for it. A certificate without its key, or a key without its certificate, is
   now refused — by the CLI with exit status 1, by `serve()`, `app.run()` and
   `ASGIServer` with `TypeError` — instead of starting without TLS (BLA-728).
+- CLI: a certificate from `BLACKBULL_CERT` / `BLACKBULL_KEY`, `.env` or the
+  app's `AppConfig` now serves HTTPS; the CLI ignored them and served
+  plaintext. Each of the pair comes from the flag, then the environment,
+  then `.env`, then `[tls]` in `--config`, then `AppConfig`, so a
+  `BLACKBULL_CERT` now outranks `[tls] cert`. An empty value counts as unset;
+  `--certfile '' --keyfile ''` keeps a port plaintext in spite of the others.
+  A pair that does not load is reported with exit status 1 for every
+  `--bind`. `serve()` and `app.run()` with `certfile=` warn (`UserWarning`)
+  about each stated HTTP listener that has no `tls=`, since it serves
+  plaintext (BLA-731).
 
 ### Fixed
 

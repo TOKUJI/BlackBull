@@ -867,6 +867,13 @@ class Server:
         self.keyfile = keyfile
         self.certfile = certfile
         self.make_ssl_context()
+        if certfile:
+            for listener in self._listeners or ():
+                if listener.speaks == HTTP and listener.tls is None:
+                    warnings.warn(
+                        f'{listener!r} serves plaintext: certfile reaches only the listeners '
+                        'the server builds; give this one tls= for HTTPS',
+                        UserWarning, stacklevel=2)
         self.socket = None
         self.raw_sockets: list = []
         self.port = None

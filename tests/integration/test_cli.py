@@ -147,11 +147,15 @@ def _get_tls(port: int, path: str) -> bytes | None:
 
 @pytest.mark.parametrize('workers', ['1', '2'])
 @pytest.mark.parametrize('form', ['app', 'serve'])
+@pytest.mark.parametrize('source', ['flags', 'environment'])
 @pytest.mark.timeout(60)
 def test_a_tls_pair_makes_a_named_host_speak_only_https(tmp_path: Path, child_env,
-                                                         form, workers):
-    """--certfile and --keyfile with a host in --bind: HTTPS there, no plaintext."""
+                                                         source, form, workers):
+    """A pair from the flags or BLACKBULL_CERT/KEY, a host in --bind: HTTPS there only."""
     port = _free_port()
+    cert, key = str(_CERTS / 'cert.pem'), str(_CERTS / 'key.pem')
+    pair = {'BLACKBULL_CERT': cert, 'BLACKBULL_KEY': key} if source == 'environment' else {}
+    flags = ['--certfile', cert, '--keyfile', key] if source == 'flags' else []
     (tmp_path / 'tls_app.py').write_text(textwrap.dedent('''
         from blackbull import BlackBull
         app = BlackBull()
@@ -160,13 +164,12 @@ def test_a_tls_pair_makes_a_named_host_speak_only_https(tmp_path: Path, child_en
             return b'tls-v1'
     ''').lstrip())
     (tmp_path / 'version.txt').write_bytes(b'tls-v1')
-    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'}, cwd=str(tmp_path))
+    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1', **pair}, cwd=str(tmp_path))
     blackbull = shutil.which('blackbull', path=env['PATH'])
     assert blackbull, 'the harness must provide the blackbull executable'
     target = ['tls_app:app'] if form == 'app' else ['serve', str(tmp_path)]
     proc = subprocess.Popen(
-        [blackbull, *target, '--bind', f'127.0.0.1:{port}', '--workers', workers,
-         '--certfile', str(_CERTS / 'cert.pem'), '--keyfile', str(_CERTS / 'key.pem')],
+        [blackbull, *target, '--bind', f'127.0.0.1:{port}', '--workers', workers, *flags],
         env=env, cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, start_new_session=True,
     )

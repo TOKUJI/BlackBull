@@ -6,11 +6,16 @@ bits — bind parsing, import resolution, and the argparse surface.
 """
 from __future__ import annotations
 
+import logging
+import ssl
 import sys
+from pathlib import Path
 
 import pytest
 
 from blackbull.cli import _build_parser, _import_app, _split_bind, _load_config
+
+_CERTS = Path(__file__).resolve().parents[1]
 
 
 # ---------------------------------------------------------------------------
@@ -178,14 +183,14 @@ def test_main_bad_app_returns_1(capsys, argv, err_frag):
     assert err_frag in err
 
 
-def _run_cli(monkeypatch, argv):
-    """Run ``cli.main`` with ``_serve`` replaced; return (rc, kwargs, stderr)."""
+def _run_cli(monkeypatch, argv, app=None):
+    """Run ``cli.main`` with ``_serve`` replaced; return (rc, kwargs)."""
     from blackbull import cli
     import sys as _sys, types
     called = {}
     monkeypatch.setattr(cli, '_serve', lambda app, **kwargs: called.update(kwargs))
     mod = types.ModuleType('dummy_cli_bind_app')
-    mod.app = object()
+    mod.app = object() if app is None else app
     monkeypatch.setitem(_sys.modules, 'dummy_cli_bind_app', mod)
     return cli.main(argv), called
 
@@ -226,7 +231,7 @@ def test_serve_prints_the_address_it_binds(capsys, monkeypatch):
 def test_half_a_tls_pair_is_refused(capsys, monkeypatch, form, half):
     rc, kwargs = _run_cli(monkeypatch, [*form, *half])
     assert rc == 1 and not kwargs
-    assert '--certfile and --keyfile' in capsys.readouterr().err
+    assert 'give both or neither' in capsys.readouterr().err
 
 
 def test_half_a_tls_pair_from_the_config_file_is_refused(tmp_path, capsys, monkeypatch):
@@ -234,17 +239,144 @@ def test_half_a_tls_pair_from_the_config_file_is_refused(tmp_path, capsys, monke
     cfg_file.write_text('[tls]\ncert = "tests/cert.pem"\n')
     rc, kwargs = _run_cli(monkeypatch, ['dummy_cli_bind_app:app', '--config', str(cfg_file)])
     assert rc == 1 and not kwargs
-    assert '--certfile and --keyfile' in capsys.readouterr().err
+    assert 'has no keyfile; give both or neither' in capsys.readouterr().err
 
 
 @pytest.mark.parametrize('form', [['dummy_cli_bind_app:app'], ['serve', '.']])
+@pytest.mark.parametrize('bind', ['127.0.0.1:8443', '0.0.0.0:8443', 'unix:bb.sock'])
 @pytest.mark.parametrize('pair', [('tests/missing.pem', 'tests/key.pem'),
                                   ('tests/cert.pem', 'tests/cert.pem')])
-def test_a_tls_pair_that_does_not_load_is_reported(capsys, monkeypatch, form, pair):
-    rc, kwargs = _run_cli(monkeypatch, [*form, '--bind', '127.0.0.1:8443',
+def test_a_tls_pair_that_does_not_load_is_reported(capsys, monkeypatch, form, bind, pair):
+    rc, kwargs = _run_cli(monkeypatch, [*form, '--bind', bind,
                                         '--certfile', pair[0], '--keyfile', pair[1]])
     assert rc == 1 and not kwargs
     assert f'blackbull: cannot load {pair[0]} and {pair[1]}' in capsys.readouterr().err
+
+
+@pytest.fixture
+def tls_pairs(tmp_path, monkeypatch):
+    """Two loadable pairs, in a working directory with no .env and no BLACKBULL_CERT/KEY."""
+    monkeypatch.chdir(tmp_path)
+    for var in ('BLACKBULL_CERT', 'BLACKBULL_KEY'):
+        monkeypatch.delenv(var, raising=False)
+    pairs = []
+    for name in ('a', 'b'):
+        pair = (tmp_path / f'{name}-cert.pem', tmp_path / f'{name}-key.pem')
+        pair[0].symlink_to(_CERTS / 'cert.pem')
+        pair[1].symlink_to(_CERTS / 'key.pem')
+        pairs.append(tuple(str(path) for path in pair))
+    return pairs
+
+
+@pytest.mark.parametrize('form', [['dummy_cli_bind_app:app'], ['serve', '.']])
+@pytest.mark.parametrize('bind', ['127.0.0.1:8443', '0.0.0.0:8443'])
+@pytest.mark.parametrize('where', ['environment', '.env'])
+def test_blackbull_cert_and_key_reach_the_cli(tls_pairs, monkeypatch, caplog, form, bind, where):
+    """BLACKBULL_CERT/KEY, from the environment or .env, serve the CLI's port over TLS."""
+    (cert, key), _ = tls_pairs
+    if where == 'environment':
+        monkeypatch.setenv('BLACKBULL_CERT', cert)
+        monkeypatch.setenv('BLACKBULL_KEY', key)
+    else:
+        pytest.importorskip('dotenv')
+        Path('.env').write_text(f'BLACKBULL_CERT={cert}\nBLACKBULL_KEY={key}\n')
+    caplog.set_level(logging.INFO, logger='blackbull.config')
+    rc, kwargs = _run_cli(monkeypatch, [*form, '--bind', bind])
+    assert rc == 0
+    assert (kwargs['certfile'], kwargs['keyfile']) == (cert, key)
+    if kwargs.get('listeners'):
+        [listener] = kwargs['listeners']
+        assert isinstance(listener.tls, ssl.SSLContext)
+    assert f'certfile={cert!r}' in caplog.text
+
+
+_TLS_SOURCES = ('flag', 'environment', '.env', 'config file', 'AppConfig')
+
+
+@pytest.mark.parametrize('winner', _TLS_SOURCES)
+def test_each_certificate_source_outranks_the_ones_after_it(tls_pairs, tmp_path, monkeypatch,
+                                                            winner):
+    from blackbull import AppConfig, BlackBull
+
+    if winner == '.env':
+        pytest.importorskip('dotenv')
+    a, b = tls_pairs
+    pair = {source: a if source == winner else b
+            for source in _TLS_SOURCES[_TLS_SOURCES.index(winner):]}
+    argv = ['dummy_cli_bind_app:app']
+    if 'flag' in pair:
+        argv += ['--certfile', pair['flag'][0], '--keyfile', pair['flag'][1]]
+    if 'environment' in pair:
+        monkeypatch.setenv('BLACKBULL_CERT', pair['environment'][0])
+        monkeypatch.setenv('BLACKBULL_KEY', pair['environment'][1])
+    if '.env' in pair:
+        Path('.env').write_text(f'BLACKBULL_CERT={pair[".env"][0]}\n'
+                                f'BLACKBULL_KEY={pair[".env"][1]}\n')
+    if 'config file' in pair:
+        cfg_file = tmp_path / 'bb.toml'
+        cfg_file.write_text(f'[tls]\ncert = "{pair["config file"][0]}"\n'
+                            f'key = "{pair["config file"][1]}"\n')
+        argv += ['--config', str(cfg_file)]
+    app = BlackBull(config=AppConfig(certfile=pair['AppConfig'][0],
+                                     keyfile=pair['AppConfig'][1]))
+    rc, kwargs = _run_cli(monkeypatch, argv, app=app)
+    assert rc == 0
+    assert (kwargs['certfile'], kwargs['keyfile']) == a
+
+
+@pytest.mark.parametrize('empty, below', [('environment', '.env'), ('environment', 'config file'),
+                                          ('.env', 'config file')])
+def test_an_empty_variable_counts_as_unset(tls_pairs, tmp_path, monkeypatch, empty, below):
+    """BLACKBULL_CERT= (as docker-compose ${CERT:-} writes it) must not shadow a pair."""
+    pytest.importorskip('dotenv')
+    (cert, key), _ = tls_pairs
+    if empty == 'environment':
+        monkeypatch.setenv('BLACKBULL_CERT', '')
+        monkeypatch.setenv('BLACKBULL_KEY', '')
+    argv = ['dummy_cli_bind_app:app']
+    if below == '.env':
+        Path('.env').write_text(f'BLACKBULL_CERT={cert}\nBLACKBULL_KEY={key}\n')
+    else:
+        if empty == '.env':
+            Path('.env').write_text('BLACKBULL_CERT=\nBLACKBULL_KEY=\n')
+        cfg_file = tmp_path / 'bb.toml'
+        cfg_file.write_text(f'[tls]\ncert = "{cert}"\nkey = "{key}"\n')
+        argv += ['--config', str(cfg_file)]
+    rc, kwargs = _run_cli(monkeypatch, argv)
+    assert rc == 0
+    [listener] = kwargs['listeners']
+    assert (kwargs['certfile'], kwargs['keyfile']) == (cert, key)
+    assert isinstance(listener.tls, ssl.SSLContext)
+
+
+def test_empty_flags_opt_out_of_a_configured_pair(tls_pairs, monkeypatch):
+    from blackbull import AppConfig, BlackBull
+
+    (cert, key), _ = tls_pairs
+    app = BlackBull(config=AppConfig(certfile=cert, keyfile=key))
+    rc, kwargs = _run_cli(monkeypatch, ['dummy_cli_bind_app:app', '--certfile', '',
+                                        '--keyfile', ''], app=app)
+    assert rc == 0
+    [listener] = kwargs['listeners']
+    assert not kwargs['certfile'] and listener.tls is None
+
+
+def test_a_pair_may_come_from_two_sources(tls_pairs, monkeypatch):
+    (cert, key), _ = tls_pairs
+    monkeypatch.setenv('BLACKBULL_KEY', key)
+    rc, kwargs = _run_cli(monkeypatch, ['dummy_cli_bind_app:app', '--certfile', cert])
+    assert rc == 0
+    assert (kwargs['certfile'], kwargs['keyfile']) == (cert, key)
+
+
+@pytest.mark.parametrize('form', [['dummy_cli_bind_app:app'], ['serve', '.']])
+def test_half_a_pair_from_the_environment_is_refused(tls_pairs, monkeypatch, capsys, form):
+    (cert, _key), _ = tls_pairs
+    monkeypatch.setenv('BLACKBULL_CERT', cert)
+    rc, kwargs = _run_cli(monkeypatch, form)
+    assert rc == 1 and not kwargs
+    assert ('the certfile from $BLACKBULL_CERT has no keyfile; give both or neither'
+            in capsys.readouterr().err)
 
 
 # ---------------------------------------------------------------------------

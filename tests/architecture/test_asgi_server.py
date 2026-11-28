@@ -31,6 +31,7 @@ import asyncio
 import pathlib
 import socket
 import ssl
+import warnings
 
 import pytest
 
@@ -96,6 +97,20 @@ class TestASGIServerInit:
         path = cert_path if half == 'certfile' else key_path
         with pytest.raises(TypeError, match='certfile and keyfile'):
             ASGIServer(_noop_app, **{half: path})
+
+    @pytest.mark.parametrize('stated_tls', [False, True])
+    def test_a_stated_listener_without_tls_is_warned_about(self, stated_tls, cert_path, key_path,
+                                                           manage_cert_and_key):
+        """certfile does not reach a stated listener, so leaving one plaintext is said aloud."""
+        from blackbull import Listener, Tcp
+        tls = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH) if stated_tls else None
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            ASGIServer(_noop_app, certfile=cert_path, keyfile=key_path,
+                       listeners=[Listener(Tcp(0, host='127.0.0.1'), tls=tls)])
+        plaintext = [w for w in caught if 'serves plaintext' in str(w.message)]
+        assert bool(plaintext) is not stated_tls
+        assert all(w.category is UserWarning for w in plaintext)
 
     def test_ssl_context_and_certfile_together_raises(self, cert_path, key_path, manage_cert_and_key):
         ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
