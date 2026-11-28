@@ -27,6 +27,8 @@ metadata; reinstall an editable checkout after changing that version.
 
 ## [Unreleased]
 
+## [0.83.2] — 2026-11-28
+
 ### Security
 
 - CLI: `--certfile` and `--keyfile` serve HTTPS again when `--bind` names a
