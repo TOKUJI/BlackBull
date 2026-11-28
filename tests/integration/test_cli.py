@@ -6,9 +6,9 @@ internals are covered by ``tests/unit/test_cli.py``; this file is the
 seam where the ``[project.scripts]`` entry, ``module:attr`` resolution,
 and the runtime are wired together.
 
-Plain HTTP (no TLS) for simplicity — the CLI handles ``--certfile``
-and ``--keyfile`` via :func:`blackbull.app.serve`, which is already
-covered by the multi-worker and reload integration tests.
+TLS is driven through the script too: the CLI builds the listener for a
+named ``--bind`` host itself, so it alone decides whether that port speaks
+TLS (BLA-728).
 """
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ import os
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import textwrap
@@ -111,6 +112,78 @@ def test_cli_serves_blackbull_app(tmp_path: Path, child_env):
         if log_path.exists() and log_path.stat().st_size > 0:
             print(f'--- subprocess log ({log_path.stat().st_size} bytes) ---')
             print(log_path.read_text()[-4000:])
+
+
+_CERTS = Path(__file__).resolve().parents[1]
+
+
+def _unverified_context() -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+def _alpn(port: int) -> str | None:
+    """The protocol the server selects when offered ``h2`` and ``http/1.1``."""
+    context = _unverified_context()
+    context.set_alpn_protocols(['h2', 'http/1.1'])
+    with socket.create_connection(('127.0.0.1', port), timeout=_REQ_TIMEOUT_SEC) as raw:
+        with context.wrap_socket(raw) as tls:
+            return tls.selected_alpn_protocol()
+
+
+def _get_tls(port: int, path: str) -> bytes | None:
+    try:
+        conn = http.client.HTTPSConnection('127.0.0.1', port, timeout=_REQ_TIMEOUT_SEC,
+                                           context=_unverified_context())
+        conn.request('GET', path)
+        body = conn.getresponse().read()
+        conn.close()
+        return body
+    except (OSError, http.client.HTTPException):
+        return None
+
+
+@pytest.mark.parametrize('workers', ['1', '2'])
+@pytest.mark.parametrize('form', ['app', 'serve'])
+@pytest.mark.timeout(60)
+def test_a_tls_pair_makes_a_named_host_speak_only_https(tmp_path: Path, child_env,
+                                                         form, workers):
+    """--certfile and --keyfile with a host in --bind: HTTPS there, no plaintext."""
+    port = _free_port()
+    (tmp_path / 'tls_app.py').write_text(textwrap.dedent('''
+        from blackbull import BlackBull
+        app = BlackBull()
+        @app.route(path='/version.txt')
+        async def version():
+            return b'tls-v1'
+    ''').lstrip())
+    (tmp_path / 'version.txt').write_bytes(b'tls-v1')
+    env = child_env({'BB_ACCESS_LOG': '0', 'PYTHONUNBUFFERED': '1'}, cwd=str(tmp_path))
+    blackbull = shutil.which('blackbull', path=env['PATH'])
+    assert blackbull, 'the harness must provide the blackbull executable'
+    target = ['tls_app:app'] if form == 'app' else ['serve', str(tmp_path)]
+    proc = subprocess.Popen(
+        [blackbull, *target, '--bind', f'127.0.0.1:{port}', '--workers', workers,
+         '--certfile', str(_CERTS / 'cert.pem'), '--keyfile', str(_CERTS / 'key.pem')],
+        env=env, cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, start_new_session=True,
+    )
+    try:
+        body = _wait_until(lambda: _get_tls(port, '/version.txt'),
+                           deadline=time.monotonic() + _STARTUP_DEADLINE_SEC)
+        assert body == b'tls-v1'
+        assert _alpn(port) == 'h2'
+        assert _get(port, '/version.txt') is None
+    finally:
+        os.killpg(proc.pid, signal.SIGTERM)
+        try:
+            output = proc.communicate(timeout=15)[0]
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            output = proc.communicate(timeout=5)[0]
+        print(output[-4000:])
 
 
 @pytest.mark.timeout(45)

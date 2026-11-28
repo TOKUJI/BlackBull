@@ -220,6 +220,33 @@ def test_serve_prints_the_address_it_binds(capsys, monkeypatch):
     assert 'on http://localhost:8443' in capsys.readouterr().err
 
 
+@pytest.mark.parametrize('form', [['dummy_cli_bind_app:app'], ['serve', '.']])
+@pytest.mark.parametrize('half', [['--certfile', 'tests/cert.pem'],
+                                  ['--keyfile', 'tests/key.pem']])
+def test_half_a_tls_pair_is_refused(capsys, monkeypatch, form, half):
+    rc, kwargs = _run_cli(monkeypatch, [*form, *half])
+    assert rc == 1 and not kwargs
+    assert '--certfile and --keyfile' in capsys.readouterr().err
+
+
+def test_half_a_tls_pair_from_the_config_file_is_refused(tmp_path, capsys, monkeypatch):
+    cfg_file = tmp_path / 'bb.toml'
+    cfg_file.write_text('[tls]\ncert = "tests/cert.pem"\n')
+    rc, kwargs = _run_cli(monkeypatch, ['dummy_cli_bind_app:app', '--config', str(cfg_file)])
+    assert rc == 1 and not kwargs
+    assert '--certfile and --keyfile' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('form', [['dummy_cli_bind_app:app'], ['serve', '.']])
+@pytest.mark.parametrize('pair', [('tests/missing.pem', 'tests/key.pem'),
+                                  ('tests/cert.pem', 'tests/cert.pem')])
+def test_a_tls_pair_that_does_not_load_is_reported(capsys, monkeypatch, form, pair):
+    rc, kwargs = _run_cli(monkeypatch, [*form, '--bind', '127.0.0.1:8443',
+                                        '--certfile', pair[0], '--keyfile', pair[1]])
+    assert rc == 1 and not kwargs
+    assert f'blackbull: cannot load {pair[0]} and {pair[1]}' in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------------------
 # _load_config
 # ---------------------------------------------------------------------------
@@ -397,8 +424,10 @@ def test_main_config_tls_fallback(tmp_path, monkeypatch):
     from blackbull import cli
     import types, sys as _sys
 
+    import pathlib
+    cert, key = (str(pathlib.Path(__file__).parents[1] / name) for name in ('cert.pem', 'key.pem'))
     cfg_file = tmp_path / 'bb.toml'
-    cfg_file.write_text('[tls]\ncert = "my.crt"\nkey = "my.key"\n')
+    cfg_file.write_text(f'[tls]\ncert = "{cert}"\nkey = "{key}"\n')
 
     called = {}
     def _fake_serve(app, **kwargs):
@@ -414,8 +443,7 @@ def test_main_config_tls_fallback(tmp_path, monkeypatch):
         del _sys.modules['dummy_tls_fallback_app']
 
     assert rc == 0
-    assert called['certfile'] == 'my.crt'
-    assert called['keyfile'] == 'my.key'
+    assert (called['certfile'], called['keyfile']) == (cert, key)
 
 
 def test_main_invalid_toml_returns_1(tmp_path, capsys):

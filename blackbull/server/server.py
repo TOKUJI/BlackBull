@@ -36,6 +36,26 @@ from ..utils import _EAGER_TASKS, create_eager_task
 logger = logging.getLogger(__name__)
 
 
+def _tls_context(certfile, keyfile, alpn=()) -> ssl.SSLContext:
+    """A server context for *certfile* and *keyfile*: TLS 1.2 or later, no compression."""
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    if alpn:
+        context.set_alpn_protocols(list(alpn))
+    context.load_cert_chain(certfile=certfile, keyfile=keyfile)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.options |= ssl.OP_NO_COMPRESSION
+    # Resumption without a full handshake, worth ~1 RTT — to TLS 1.2 only.
+    # TLS 1.3 tickets are independent of this flag.
+    if hasattr(ssl, 'SESS_CACHE_SERVER'):
+        context.set_session_cache_mode(ssl.SESS_CACHE_SERVER)  # type: ignore[attr-defined]
+    return context
+
+
+def _http_tls_context(certfile, keyfile) -> ssl.SSLContext:
+    """The HTTP listener's context, which offers ``h2`` then ``http/1.1``."""
+    return _tls_context(certfile, keyfile, ('h2', 'http/1.1'))
+
+
 def _listener_from_args(port, unix_path, inherited_fd, tls=None) -> Listener:
     """The old way of saying it — one port, one path, or one fd — as a listener."""
     if inherited_fd is not None:
@@ -842,6 +862,8 @@ class Server:
 
         if ssl_context and (certfile or keyfile):
             raise TypeError('SSLContext and certfile (or keyfile) must not be set at the same time')
+        if bool(certfile) != bool(keyfile):
+            raise TypeError('certfile and keyfile go together; pass both or neither.')
 
         self._ssl_context = ssl_context
         self.keyfile = keyfile
@@ -912,21 +934,7 @@ class Server:
             # ``__init__`` calls this before both properties are set; defer
             # rather than raise, so the half-configured state is not an error.
             return
-
-        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        context.set_alpn_protocols(['h2', 'http/1.1'])
-        context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.options |= ssl.OP_NO_COMPRESSION
-        # Resumption without a full handshake, worth ~1 RTT — to TLS 1.2 only.
-        # TLS 1.3 tickets are independent of this flag.
-        if hasattr(ssl, 'SESS_CACHE_SERVER'):
-            context.set_session_cache_mode(ssl.SESS_CACHE_SERVER)  # type: ignore[attr-defined]
-        self.ssl_context = context
-
-        if hasattr(self, 'raw_sockets'):
-            # Already-bound sockets need no rewrap; see ``open_socket``.
-            pass
+        self.ssl_context = _http_tls_context(self.certfile, self.keyfile)
 
     def configure_mtls(self, ca_cert: str) -> None:
         """Require a client certificate signed by *ca_cert*.
@@ -963,13 +971,7 @@ class Server:
         """
         if not (self.certfile and self.keyfile):
             return self.ssl_context
-        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.options |= ssl.OP_NO_COMPRESSION
-        if hasattr(ssl, 'SESS_CACHE_SERVER'):
-            context.set_session_cache_mode(ssl.SESS_CACHE_SERVER)  # type: ignore[attr-defined]
-        return context
+        return _tls_context(self.certfile, self.keyfile)
 
     async def _serve_connection(self, reader, writer, transport, *,
                                 admission: _Admission,
