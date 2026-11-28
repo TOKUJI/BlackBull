@@ -1130,6 +1130,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#the-clis-certificate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The CLI's certificate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#env-files" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6063,6 +6074,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#the-clis-certificate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The CLI's certificate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#env-files" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6219,9 +6241,9 @@ quality falls back to <code>4</code>.</p>
 <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">value</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">overrides</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">}</span>
 <span class="n">app</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="n">Compression</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">))</span>
 </code></pre></div>
-<p>The TLS keys (<code>[tls] cert</code>, <code>[tls] key</code>) are CLI-arg fallbacks
-applied to <code>--certfile</code> / <code>--keyfile</code> when those aren't
-specified on the command line.</p>
+<p>The TLS keys (<code>[tls] cert</code>, <code>[tls] key</code>) give the CLI a certificate when
+neither <code>--certfile</code> / <code>--keyfile</code> nor <code>BLACKBULL_CERT</code> / <code>BLACKBULL_KEY</code>
+does — see <a href="#the-clis-certificate">the CLI's certificate order</a>.</p>
 <h2 id="cli-flags">CLI flags<a class="headerlink" href="#cli-flags" title="Permanent link">&para;</a></h2>
 <p>The <code>blackbull</code> console script (and <code>app.run(...)</code> in code)
 both expose the most-touched knobs as direct flags:</p>
@@ -6319,15 +6341,25 @@ settings you change per environment); server-tuning knobs
 provenance of each non-default deploy setting is logged once at
 startup on the <code>blackbull.config</code> logger, e.g.
 <code>config: port=9000 (from $BLACKBULL_PORT)</code>.</p>
+<h4 id="the-clis-certificate">The CLI's certificate<a class="headerlink" href="#the-clis-certificate" title="Permanent link">&para;</a></h4>
+<p>The <code>blackbull</code> CLI resolves the certificate pair, and only that, from these
+sources: each of <code>--certfile</code> and <code>--keyfile</code> comes from the first that names
+it — the flag, <code>BLACKBULL_CERT</code> / <code>BLACKBULL_KEY</code>, the same key in <code>.env</code>,
+<code>[tls]</code> in <code>--config</code>, then the app's <code>AppConfig</code>.  An empty value counts as
+unset, except as a flag: <code>--certfile '' --keyfile ''</code> serves plaintext in
+spite of the others.  Half a pair is refused.
+<code>BLACKBULL_PORT</code>, <code>BLACKBULL_UNIX_PATH</code>, <code>BLACKBULL_RELOAD</code> and the other
+<code>AppConfig</code> fields apply to <code>app.run()</code> only; the CLI takes <code>--bind</code>,
+<code>--reload</code>, <code>--workers</code> and its other flags instead.</p>
 <p>There is no <code>host</code> field / <code>BLACKBULL_HOST</code>: <code>port</code> binds every
 interface.  To listen on one interface, pass
 <code>listeners=[Listener(Tcp(port, host=...))]</code> (see
 <a href="../listeners/">Listeners</a>) or <code>blackbull --bind host:port</code>.  Use
 <code>unix_path</code> or <code>inherited_fd</code> for non-TCP binds.</p>
 <h4 id="env-files"><code>.env</code> files<a class="headerlink" href="#env-files" title="Permanent link">&para;</a></h4>
-<p>Install the optional extra to let <code>app.run()</code> (and the <code>blackbull</code>
-CLI) read <code>BLACKBULL_*</code> values from a <code>.env</code> file in the working
-directory:</p>
+<p>Install the optional extra to let <code>app.run()</code> read <code>BLACKBULL_*</code> values
+(and the <code>blackbull</code> CLI <code>BLACKBULL_CERT</code> / <code>BLACKBULL_KEY</code>) from a <code>.env</code>
+file in the working directory:</p>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'blackbull[dotenv]'</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><span class="c1"># .env</span>

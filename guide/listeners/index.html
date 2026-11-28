@@ -6055,6 +6055,7 @@ admin port bound to loopback — you state them directly instead:</p>
 
 <span class="n">tls</span> <span class="o">=</span> <span class="n">ssl</span><span class="o">.</span><span class="n">SSLContext</span><span class="p">(</span><span class="n">ssl</span><span class="o">.</span><span class="n">PROTOCOL_TLS_SERVER</span><span class="p">)</span>
 <span class="n">tls</span><span class="o">.</span><span class="n">load_cert_chain</span><span class="p">(</span><span class="s1">'cert.pem'</span><span class="p">,</span> <span class="s1">'key.pem'</span><span class="p">)</span>
+<span class="n">tls</span><span class="o">.</span><span class="n">set_alpn_protocols</span><span class="p">([</span><span class="s1">'h2'</span><span class="p">,</span> <span class="s1">'http/1.1'</span><span class="p">])</span>   <span class="c1"># without it, every client gets HTTP/1.1</span>
 
 <span class="n">app</span> <span class="o">=</span> <span class="n">BlackBull</span><span class="p">()</span>
 
@@ -6117,7 +6118,9 @@ different ones — or one can be cleartext while its neighbour is not:</p>
 <span class="p">])</span>
 </code></pre></div>
 <p><code>app.run(certfile=..., keyfile=...)</code> still means HTTPS: it builds the context
-that the one listener it constructs terminates.</p>
+that the one listener it constructs terminates.  It never reaches a listener
+you state: alongside <code>listeners=</code>, such a listener without <code>tls=</code> serves
+plaintext, and the server warns (<code>UserWarning</code>) naming it.</p>
 <h2 id="who-serves-a-listener">Who serves a listener<a class="headerlink" href="#who-serves-a-listener" title="Permanent link">&para;</a></h2>
 <p><code>workers</code> says how many worker processes own a listener, and it is the only
 place that question is answered:</p>
